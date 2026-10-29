@@ -5,6 +5,7 @@
 
 namespace Qqq.PrintAgent.Windows;
 
-/// <summary>Most recent local observation for one job; no document bytes or customer title.</summary>
-public sealed record JobSnapshot(string JobId, string Status, string UpdatedAt, string? Message, string? SpoolerJobId);
+/// <summary>Most recent local observation and bounded operator metadata; no document bytes.</summary>
+public sealed record JobSnapshot(string JobId, string Status, string UpdatedAt, string? Message, string? SpoolerJobId,
+   string? PrinterId = null, string? PrinterName = null, string? Title = null, string? Format = null, bool FailureAcknowledged = false);
 

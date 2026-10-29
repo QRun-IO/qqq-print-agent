@@ -13,8 +13,26 @@ internal sealed partial class PrintService(ILogger<PrintService> logger) : Backg
    /// <summary>Keep the connector alive until Windows requests service shutdown.</summary>
    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
    {
-      using AgentRuntime runtime = new(AgentStore.DefaultDirectory, message => LogAgentStatus(logger, message));
-      await runtime.RunAsync(stoppingToken).ConfigureAwait(false);
+      try
+      {
+         IsolatedPrinterBackend printers = new(Environment.ProcessPath ?? throw new InvalidOperationException("Service executable path is unavailable."));
+         using AgentRuntime runtime = new(AgentStore.DefaultDirectory, message => LogAgentStatus(logger, message), printers);
+         await runtime.RunAsync(stoppingToken).ConfigureAwait(false);
+         if(!stoppingToken.IsCancellationRequested)
+         {
+            throw new InvalidOperationException("The print service runtime stopped unexpectedly.");
+         }
+      }
+      catch(OperationCanceledException) when(stoppingToken.IsCancellationRequested)
+      {
+         // An administrator stop, upgrade or Windows shutdown is a normal service exit.
+      }
+      catch(Exception exception)
+      {
+         AgentActivityLog.Create(AgentStore.DefaultDirectory).Error("[Service] Fatal runtime failure; Windows recovery may restart the service.", exception);
+         // BackgroundService normally stops the host cleanly, which does not trigger SCM recovery.
+         Environment.Exit(1);
+      }
    }
 
 

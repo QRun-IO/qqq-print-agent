@@ -17,7 +17,18 @@
 
    <ItemGroup>
       <ProjectReference Include="..\..\src\Qqq.PrintAgent.Cli\Qqq.PrintAgent.Cli.csproj" />
+      <ProjectReference Include="..\Qqq.PrintAgent.WorkerFixture\Qqq.PrintAgent.WorkerFixture.csproj" />
    </ItemGroup>
 
+   <Target Name="CopyWorkerFixtureRuntime" AfterTargets="Build">
+      <ItemGroup>
+         <WorkerFixtureAssembly Include="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)' == 'Qqq.PrintAgent.WorkerFixture' And '%(Extension)' == '.dll'" />
+         <WorkerFixtureRuntime Include="@(WorkerFixtureAssembly->'%(RootDir)%(Directory)%(Filename).exe')" />
+         <WorkerFixtureRuntime Include="@(WorkerFixtureAssembly->'%(RootDir)%(Directory)%(Filename).runtimeconfig.json')" />
+         <WorkerFixtureRuntime Include="@(WorkerFixtureAssembly->'%(RootDir)%(Directory)%(Filename).deps.json')" />
+      </ItemGroup>
+      <Error Condition="'@(WorkerFixtureAssembly)' == ''" Text="Worker fixture output was not resolved from the project reference." />
+      <Copy SourceFiles="@(WorkerFixtureRuntime)" DestinationFolder="$(OutDir)" />
+   </Target>
 </Project>
 

@@ -14,7 +14,9 @@ The native setup and status application uses the same [KofTwentyTwo AppKit](http
 ## What works
 
 - Discover Windows print queues and explicitly choose which ones to expose to QQQ.
-- See connection health in the system tray and inspect printer status, jobs and recent logs.
+- Use native Printers, Jobs, Logs and Settings navigation, persistent status, reconnect and a visible health tray icon.
+- Search job history, inspect events, confirm test/reprint/cancel actions and mark failures reviewed.
+- Start/restart the service and opt into tray startup at sign-in; service and companion share the AppKit log viewer.
 - Print packing slips and other PDFs through the installed Windows driver.
 - Send printer-ready ZPL to Zebra/ZDesigner queues.
 - Enroll once using a short-lived code from QQQ; the service stores its own protected device credential.
@@ -84,7 +86,7 @@ Set-Location qqq-print-agent
 
 ## Current limits
 
-This prerelease uses polling rather than WebSocket notifications. Custom PDF paper dimensions are rejected; use the Windows queue's default media. Cancellation/reprint administration, richer hardware telemetry, document/journal retention, renderer subprocess isolation, automatic upgrades and production signing are not complete. Review the [roadmap](docs/TODO.md) before a production rollout.
+This prerelease uses polling rather than WebSocket notifications. Custom PDF paper dimensions are rejected; use the Windows queue's default media. Operator actions, safe journal detail retention and bounded renderer subprocesses are implemented. Physical completion telemetry, custom media, automatic upgrades and production signing remain outside the initial deployment scope. Review the [roadmap](docs/TODO.md) before a production rollout.
 
 ## License and acknowledgments
 

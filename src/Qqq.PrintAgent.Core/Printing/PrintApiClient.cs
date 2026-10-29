@@ -13,6 +13,7 @@ public sealed class PrintApiClient : IDisposable
 {
    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
    private readonly HttpClient _http;
+   public static string AgentVersion => typeof(PrintApiClient).Assembly.GetName().Version?.ToString() ?? "unknown";
 
    public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null)
    {
@@ -52,7 +53,7 @@ public sealed class PrintApiClient : IDisposable
 
    public async Task HeartbeatAsync(CancellationToken token)
    {
-      using HttpResponseMessage response = await _http.PostAsJsonAsync("device/heartbeat", new { agentVersion = "0.1.0" }, JsonOptions, token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _http.PostAsJsonAsync("device/heartbeat", new { agentVersion = AgentVersion }, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
    }
 
@@ -101,6 +102,43 @@ public sealed class PrintApiClient : IDisposable
    }
 
    public void Dispose() => _http.Dispose();
+
+   public async Task<IReadOnlyList<PrintJob>> QueuedJobsAsync(CancellationToken token)
+   {
+      using HttpResponseMessage response = await _http.GetAsync("device/jobs/queued", token).ConfigureAwait(false);
+      if(response.StatusCode == System.Net.HttpStatusCode.NotFound)
+      { return []; }
+      response.EnsureSuccessStatusCode();
+      using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+      return result.RootElement.TryGetProperty("jobs", out JsonElement jobs) ? jobs.Deserialize<PrintJob[]>(JsonOptions) ?? [] : [];
+   }
+
+   /// <summary>Request an explicit operator action without retaining document bytes locally.</summary>
+   public async Task<string> OperatorActionAsync(string operation, string? jobId, string? printerId, string? format, bool confirmDuplicateRisk, CancellationToken token)
+   {
+      string path = operation switch
+      {
+         "test-print" => "device/test-print",
+         "retry-job" => $"device/jobs/{Uri.EscapeDataString(jobId ?? throw new ArgumentException("Job is required.", nameof(jobId)))}/retry",
+         "cancel-job" => $"device/jobs/{Uri.EscapeDataString(jobId ?? throw new ArgumentException("Job is required.", nameof(jobId)))}/cancel",
+         _ => throw new ArgumentException("Unsupported operator action.", nameof(operation)),
+      };
+      using HttpResponseMessage response = await _http.PostAsJsonAsync(path, new { printerId, format, confirmDuplicateRisk, requestId = Guid.NewGuid().ToString("N") }, JsonOptions, token).ConfigureAwait(false);
+      if(!response.IsSuccessStatusCode)
+      {
+         if(response.StatusCode == System.Net.HttpStatusCode.NotFound)
+         {
+            throw new InvalidOperationException("The job was not found or this QQQ server needs the printing operator-actions update.");
+         }
+         string message = "QQQ did not accept the action. Check printer approval, connection, and job state.";
+         using var error = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+         if(error.RootElement.TryGetProperty("message", out JsonElement value))
+         { message = value.GetString() ?? message; }
+         throw new InvalidOperationException(message);
+      }
+      using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
+      return result.RootElement.TryGetProperty("jobId", out JsonElement id) ? id.GetString() ?? "" : "";
+   }
 }
 
 

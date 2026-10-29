@@ -64,6 +64,11 @@
         "resolved": "2.1.11",
         "contentHash": "PK0GLFkfhZzLQeR3PJf71FmhtHox+U3vcY6ZtswoMjrefkB9k6ErNJEnwXqc5KgXDSjige2XXrezqS39gkpQKA=="
       },
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "uaFRda9NjtbJRkdx311eXlAA3n2em7223c1A8d1VWyl+4FL9vkG7y2lpPfBU9HYdj/9KgdRNdn1vFK8ZYCYT/A=="
+      },
       "xunit.abstractions": {
         "type": "Transitive",
         "resolved": "2.0.3",
@@ -107,8 +112,8 @@
       "qqq-print-agent": {
         "type": "Project",
         "dependencies": {
-          "Qqq.PrintAgent.Core": "[0.1.0-rc.1, )",
-          "Qqq.PrintAgent.Windows": "[0.1.0-rc.1, )"
+          "Qqq.PrintAgent.Core": "[0.1.1-rc.1, )",
+          "Qqq.PrintAgent.Windows": "[0.1.1-rc.1, )"
         }
       },
       "qqq.printagent.core": {
@@ -122,9 +127,16 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite.Core": "[10.0.0, )",
-          "Qqq.PrintAgent.Core": "[0.1.0-rc.1, )",
+          "Qqq.PrintAgent.Core": "[0.1.1-rc.1, )",
           "SQLitePCLRaw.provider.winsqlite3": "[2.1.11, )",
-          "System.Security.Cryptography.ProtectedData": "[10.0.0, )"
+          "System.Security.Cryptography.ProtectedData": "[10.0.0, )",
+          "System.ServiceProcess.ServiceController": "[10.0.0, )"
+        }
+      },
+      "qqq.printagent.workerfixture": {
+        "type": "Project",
+        "dependencies": {
+          "Qqq.PrintAgent.Windows": "[0.1.1-rc.1, )"
         }
       },
       "CommunityToolkit.Mvvm": {
@@ -162,8 +174,32 @@
         "requested": "[10.0.0, )",
         "resolved": "10.0.0",
         "contentHash": "qy6C3gQRTrfhFfuiIYU1jNwWfFdJpBVo1BARW7jgMm1zTEm3LRzLLyOLJGaAuKE+nZCGkEP71y4rj9NWjqLGdQ=="
+      },
+      "System.ServiceProcess.ServiceController": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.0, )",
+        "resolved": "10.0.0",
+        "contentHash": "PaFmFQXX/qL1vl0CfdJUMPMYT8TOEHlcdEiOZtd4LV2rcaS/WDQM4bpECcbRM4BrD+DWkWd/jtb6iPOqAX9TWA==",
+        "dependencies": {
+          "System.Diagnostics.EventLog": "10.0.0"
+        }
       }
     },
-    "net10.0-windows10.0.19041/win-x64": {}
+    "net10.0-windows10.0.19041/win-x64": {
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "uaFRda9NjtbJRkdx311eXlAA3n2em7223c1A8d1VWyl+4FL9vkG7y2lpPfBU9HYdj/9KgdRNdn1vFK8ZYCYT/A=="
+      },
+      "System.ServiceProcess.ServiceController": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.0, )",
+        "resolved": "10.0.0",
+        "contentHash": "PaFmFQXX/qL1vl0CfdJUMPMYT8TOEHlcdEiOZtd4LV2rcaS/WDQM4bpECcbRM4BrD+DWkWd/jtb6iPOqAX9TWA==",
+        "dependencies": {
+          "System.Diagnostics.EventLog": "10.0.0"
+        }
+      }
+    }
   }
 }

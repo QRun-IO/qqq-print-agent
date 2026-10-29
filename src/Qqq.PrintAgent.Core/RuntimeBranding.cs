@@ -37,7 +37,7 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
             && string.Equals(candidate.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
             && string.IsNullOrEmpty(candidate.UserInfo) ? candidate : null;
          string? color = ReadText(root, "accentColor", 7);
-         if(color is not { Length: 7 } || color[0] != '#' || !color.Skip(1).All(Uri.IsHexDigit))
+         if(!HasReadableWhiteText(color))
          {
             color = null;
          }
@@ -57,8 +57,24 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
       Tagline = CompanyName ?? defaults.Tagline,
       Description = CompanyName is null ? defaults.Description : $"Print connector provided by {CompanyName}. Connect local printers to QQQ.",
       Website = SupportUrl ?? defaults.Website,
-      Brand = AccentColor is null ? defaults.Brand : defaults.Brand with { GradientStart = AccentColor, GradientEnd = AccentColor },
+      Brand = !HasReadableWhiteText(AccentColor) ? defaults.Brand : defaults.Brand with { GradientStart = AccentColor!, GradientEnd = AccentColor! },
    };
+
+   private static bool HasReadableWhiteText(string? color)
+   {
+      if(color is not { Length: 7 } || color[0] != '#' || !color.Skip(1).All(Uri.IsHexDigit))
+      {
+         return false;
+      }
+      double luminance = 0.2126 * LinearChannel(color, 1) + 0.7152 * LinearChannel(color, 3) + 0.0722 * LinearChannel(color, 5);
+      return 1.05 / (luminance + 0.05) >= 4.5;
+   }
+
+   private static double LinearChannel(string color, int offset)
+   {
+      double value = int.Parse(color.AsSpan(offset, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture) / 255d;
+      return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
+   }
 
    private static string? ReadText(JsonElement root, string key, int maximum)
    {

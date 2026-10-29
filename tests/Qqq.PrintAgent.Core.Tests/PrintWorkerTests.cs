@@ -7,6 +7,26 @@ namespace Qqq.PrintAgent.Core.Tests;
 
 public sealed class PrintWorkerTests
 {
+   [Theory]
+   [InlineData("SPOOLED")]
+   [InlineData("SPOOLER_COMPLETED")]
+   [InlineData("FAILED")]
+   [InlineData("OUTCOME_UNKNOWN")]
+   public async Task RunOnce_RetainedTerminalStateNeverResubmits(string state)
+   {
+      PrintJob job = new("job1", "printer1", "Test", "ZPL", "00", 1, new PrintOptions(), "", "CLAIMED");
+      using FixtureHandler handler = new(job, [1]);
+      using PrintApiClient api = new("http://localhost", "test-device", handler);
+      MemoryJournal journal = new();
+      journal.Record("job1", new PrintEvent("previous", state));
+      journal.Acknowledge("previous");
+      FakePrinter printer = new();
+      await new PrintWorker(api, printer, journal).RunOnceAsync();
+      Assert.Equal(0, printer.PrintCount);
+      Assert.Empty(handler.Events);
+      Assert.Equal(state, journal.GetState("job1"));
+   }
+
    [Fact]
    public async Task RunOnce_SubmitsVerifiedContentAndDoesNotDuplicate()
    {
@@ -21,6 +41,8 @@ public sealed class PrintWorkerTests
       await worker.RunOnceAsync();
       Assert.Equal(1, printer.PrintCount);
       Assert.Equal("SPOOLED", journal.GetState("job1"));
+      Assert.Equal(job, journal.Jobs["job1"].Job);
+      Assert.Equal("Test", journal.Jobs["job1"].PrinterName);
       Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "SPOOLED" }, handler.Events, StringComparer.Ordinal);
    }
 
@@ -37,6 +59,40 @@ public sealed class PrintWorkerTests
       await new PrintWorker(api, printer, journal).RunOnceAsync();
       Assert.Equal(0, printer.PrintCount);
       Assert.Equal("OUTCOME_UNKNOWN", journal.GetState("job1"));
+   }
+
+   [Theory]
+   [InlineData("RECEIVED", "FAILED")]
+   [InlineData("SUBMITTING", "OUTCOME_UNKNOWN")]
+   public async Task RunOnce_RecoversAcknowledgedInterruptedStateWithoutClaim(string previous, string expected)
+   {
+      using FixtureHandler handler = new(null, []);
+      using PrintApiClient api = new("http://localhost", "test-device", handler);
+      MemoryJournal journal = new();
+      journal.Record("interrupted", new PrintEvent("before-stop", previous));
+      journal.Acknowledge("before-stop");
+      FakePrinter printer = new();
+      PrintWorker worker = new(api, printer, journal);
+      await worker.RunOnceAsync();
+      await worker.RunOnceAsync();
+      Assert.Equal(0, printer.PrintCount);
+      Assert.Equal(expected, journal.GetState("interrupted"));
+      Assert.Equal(new[] { expected }, handler.Events, StringComparer.Ordinal);
+      Assert.Empty(journal.Pending());
+   }
+
+   [Fact]
+   public async Task RunOnce_RecoversUnacknowledgedSubmissionInOriginalEventOrder()
+   {
+      using FixtureHandler handler = new(null, []);
+      using PrintApiClient api = new("http://localhost", "test-device", handler);
+      MemoryJournal journal = new();
+      journal.Record("interrupted", new PrintEvent("received", "RECEIVED"));
+      journal.Record("interrupted", new PrintEvent("submitting", "SUBMITTING"));
+      FakePrinter printer = new();
+      await new PrintWorker(api, printer, journal).RunOnceAsync();
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "OUTCOME_UNKNOWN" }, handler.Events, StringComparer.Ordinal);
+      Assert.Equal(0, printer.PrintCount);
    }
 
    [Fact]
@@ -58,7 +114,7 @@ public sealed class PrintWorkerTests
       Assert.Throws<ArgumentException>(() => new PrintApiClient("http://example.com"));
    }
 
-   private sealed class FixtureHandler(PrintJob job, byte[] content) : HttpMessageHandler
+   private sealed class FixtureHandler(PrintJob? job, byte[] content) : HttpMessageHandler
    {
       public List<string> Events { get; } = [];
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -88,12 +144,15 @@ public sealed class PrintWorkerTests
 
    private sealed class MemoryJournal : IJobJournal
    {
+      public Dictionary<string, (PrintJob Job, string? PrinterName)> Jobs { get; } = new(StringComparer.Ordinal);
+      public void TrackJob(PrintJob job, string? printerName) => Jobs[job.JobId] = (job, printerName);
       private readonly List<(string JobId, PrintEvent Event)> _events = [];
       private readonly HashSet<string> _acknowledged = new(StringComparer.Ordinal);
       public string? GetState(string jobId) => _events.LastOrDefault(e => string.Equals(e.JobId, jobId, StringComparison.Ordinal)).Event?.Status;
       public void Record(string jobId, PrintEvent printEvent) => _events.Add((jobId, printEvent));
       public IReadOnlyList<(string JobId, PrintEvent Event)> Pending() => _events.Where(e => !_acknowledged.Contains(e.Event.EventId)).ToList();
       public void Acknowledge(string eventId) => _acknowledged.Add(eventId);
+      public IReadOnlyList<(string JobId, string State)> Incomplete() => _events.GroupBy(e => e.JobId, StringComparer.Ordinal).Select(group => group.Last()).Where(e => e.Event.Status is "RECEIVED" or "SUBMITTING").Select(e => (e.JobId, e.Event.Status)).ToArray();
    }
 }
 

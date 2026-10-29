@@ -5,7 +5,8 @@
 
 namespace Qqq.PrintAgent.Windows;
 
-public sealed record PipeRequest(string Operation, string? ServerUrl = null, string? EnrollmentCode = null, string? PrinterId = null, bool? Exposed = null);
+public sealed record PipeRequest(string Operation, string? ServerUrl = null, string? EnrollmentCode = null, string? PrinterId = null, bool? Exposed = null,
+   string? JobId = null, string? Format = null, bool ConfirmDuplicateRisk = false);
 
 
 

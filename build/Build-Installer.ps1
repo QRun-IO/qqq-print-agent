@@ -4,6 +4,7 @@ param(
    [string] $ProductVersion = '0.1.1',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
    [string] $ReleaseVersion = '0.1.1-rc.1',
+   [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [string] $CertificateThumbprint,
    [string] $TimestampServer
@@ -11,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$payloadRoot = Join-Path $projectRoot 'artifacts\package'
+$payloadRoot = if($PayloadDirectory) { [IO.Path]::GetFullPath($PayloadDirectory) } else { Join-Path $projectRoot 'artifacts\package' }
 $installerProject = Join-Path $projectRoot 'installer\Qqq.PrintAgent.Installer.wixproj'
 $outputDirectory = Join-Path $projectRoot 'artifacts\installer'
 

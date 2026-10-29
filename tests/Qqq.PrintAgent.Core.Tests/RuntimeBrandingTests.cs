@@ -8,6 +8,26 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>Machine branding changes presentation without changing deployment identity.</summary>
 public sealed class RuntimeBrandingTests
 {
+   [Theory]
+   [InlineData("#FFFFFF", false)]
+   [InlineData("#FFFF00", false)]
+   [InlineData("#777777", false)]
+   [InlineData("#767676", true)]
+   [InlineData("#000000", true)]
+   [InlineData("#0F766E", true)]
+   public void AccentRequiresUnroundedFourPointFiveContrastWithWhite(string color, bool accepted)
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { accentColor = color, displayName = "Customer name" }));
+      var branding = RuntimeBranding.Load(path);
+      Assert.Equal(accepted ? color : null, branding.AccentColor);
+      Assert.Equal("Customer name", branding.DisplayName);
+      string expected = accepted ? color : AppIdentity.DefaultInfo.Brand.GradientStart;
+      Assert.Equal(expected, branding.Apply(AppIdentity.DefaultInfo).Brand.GradientStart);
+      Assert.Equal(expected, new RuntimeBranding(AccentColor: color).Apply(AppIdentity.DefaultInfo).Brand.GradientStart);
+   }
+
    [Fact]
    public void ValidBrandingPreservesIdentityAndAttribution()
    {

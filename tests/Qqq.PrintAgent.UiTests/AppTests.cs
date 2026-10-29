@@ -31,7 +31,8 @@ public class AppTests
    public void About_ShowsTheBuildVersion()
    {
       using var session = new AppSession();
-      session.InvokeMenuItem("Help", "AboutMenuItem");
+      session.ClickElement("NavigateSettings");
+      session.ClickElement("AboutMenuItem");
       AutomationElement version = session.WaitForElement("AboutVersionText");
       Assert.StartsWith("Version ", version.Name, StringComparison.Ordinal);
       session.ClickButton("Close");
@@ -40,22 +41,27 @@ public class AppTests
 
 
 
-   /// <summary>The setup screen exposes enrollment, status and inventory controls.</summary>
+   /// <summary>Native navigation separates printers, jobs and settings while status remains visible.</summary>
    [Fact]
    public void Setup_ShowsConnectionAndStatusControls()
    {
       using var session = new AppSession();
+      session.WaitForElement("PrinterInventory");
+      session.WaitForElement("FooterStatus");
+      session.WaitForElement("ViewServiceLogs");
+      session.ClickElement("NavigateJobs");
+      session.WaitForElement("RecentJobs");
+      session.WaitForElement("FooterStatus");
+      session.ClickElement("NavigateSettings");
       session.ClickElement("ConnectionSettings");
       session.WaitForElement("ServerAddress");
       session.WaitForElement("EnrollmentCode");
       Assert.Equal("Connect this device", session.WaitForElement("EnrollDevice").Name);
       session.ClickButton("Close");
       session.WaitForElement("ServiceStatus");
-      session.WaitForElement("AgentHealth");
       session.WaitForElement("FooterStatus");
-      session.WaitForElement("ViewServiceLogs");
+      session.ClickElement("NavigatePrinters");
       session.WaitForElement("PrinterInventory");
-      session.WaitForElement("RecentJobs");
       session.WaitForElement("RefreshStatus");
       Assert.False(session.App.HasExited);
    }
@@ -67,24 +73,65 @@ public class AppTests
    public void Close_HidesDetailsAndKeepsTrayAlive()
    {
       using var session = new AppSession();
-      session.WaitForElement("AgentHealth");
+      session.WaitForElement("FooterStatus");
       session.MainWindow.Close();
       session.WaitFor(() => session.MainWindow.IsOffscreen ? session.MainWindow : null, "details window to hide to the tray");
       Assert.False(session.App.HasExited);
    }
 
+   /// <summary>A second launch restores the hidden existing window and exits without another companion.</summary>
+   [Fact]
+   public async Task Relaunch_RestoresHiddenExistingCompanion()
+   {
+      using var session = new AppSession();
+      session.WaitForElement("FooterStatus");
+      int originalProcess = session.App.ProcessId;
+      session.MainWindow.Close();
+      session.WaitFor(() => session.MainWindow.IsOffscreen ? session.MainWindow : null, "original window to hide");
+      using System.Diagnostics.Process second = session.Relaunch();
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+      await second.WaitForExitAsync(timeout.Token);
+      Assert.Equal(0, second.ExitCode);
+      session.WaitFor(() => !session.MainWindow.IsOffscreen ? session.MainWindow : null, "original window to reappear");
+      Assert.False(session.App.HasExited);
+      Assert.Equal(originalProcess, session.App.ProcessId);
+      Assert.Single(session.TopLevelWindows(), window => string.Equals(window.Name, session.MainWindow.Name, StringComparison.Ordinal));
+   }
+
+   /// <summary>Search/filter remain read-only and lifecycle controls are discoverable without invoking them.</summary>
+   [Fact]
+   public void JobSearchAndLifecycleControls_AreUsableWithoutMutation()
+   {
+      using var session = new AppSession();
+      session.ClickElement("NavigateJobs");
+      session.EnterText("JobSearch", "no-match-" + Guid.NewGuid().ToString("N"));
+      session.WaitForElement("JobStatusFilter").AsComboBox().Select("Needs attention");
+      session.WaitFor(() => session.WaitForElement("JobsSummary").Name.StartsWith("0 of ", StringComparison.Ordinal) ? session.MainWindow : null, "empty filtered job result");
+      session.WaitForElement("FooterStatus");
+      session.ClickElement("NavigateSettings");
+      Assert.False(session.WaitForElement("StartService").IsOffscreen);
+      Assert.False(session.WaitForElement("RestartService").IsOffscreen);
+      session.WaitForElement("StartupAtSignIn");
+      session.WaitForElement("ConnectionSettings");
+      Assert.False(session.App.HasExited);
+   }
 
 
-   /// <summary>Activity log: opens a window showing the log.</summary>
+
+   /// <summary>Logs navigation and the footer reuse the same built-in AppKit viewer.</summary>
    [Fact]
    public void ActivityLog_OpensAWindowShowingTheLog()
    {
       using var session = new AppSession();
-      session.InvokeMenuItem("Help", "ActivityLogMenuItem");
+      session.ClickElement("NavigateLogs");
       string title = AppIdentity.Info.DisplayName + " — Activity log";
       session.WaitFor(
          () => session.TopLevelWindows().FirstOrDefault(window => string.Equals(window.Name, title, StringComparison.Ordinal)),
          "the activity log window");
+      session.WaitForElement("LogText");
+      session.MainWindow.SetForeground();
+      session.ClickElement("ViewServiceLogs");
+      Assert.Single(session.TopLevelWindows(), window => string.Equals(window.Name, title, StringComparison.Ordinal));
    }
 
 
@@ -94,7 +141,8 @@ public class AppTests
    public void ThemeChoice_IsSaved()
    {
       using var session = new AppSession();
-      session.InvokeMenuItem("View", "ThemeDark");
+      session.ClickElement("NavigateSettings");
+      session.WaitForElement("AppTheme").AsComboBox().Select("Dark");
       session.WaitFor(
          () => session.ReadSettings().Contains("\"Theme\": \"Dark\"", StringComparison.Ordinal) ? session.MainWindow : null,
          "settings.json to record the dark theme");
@@ -107,6 +155,7 @@ public class AppTests
    public void InvalidConnection_ShowsActionableValidation()
    {
       using var session = new AppSession();
+      session.ClickElement("NavigateSettings");
       session.ClickElement("ConnectionSettings");
       session.EnterText("ServerAddress", "not-a-server-address");
       session.WaitFor(

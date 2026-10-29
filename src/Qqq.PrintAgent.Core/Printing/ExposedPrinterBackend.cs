@@ -11,7 +11,7 @@ public sealed class ExposedPrinterBackend(IPrinterBackend inner, Func<IReadOnlyS
    public IReadOnlyList<PrinterInfo> Discover()
    {
       IReadOnlySet<string> exposed = exposedIds();
-      return inner.Discover().Where(printer => exposed.Contains(printer.PrinterId)).ToArray();
+      return inner.Discover().Where(printer => exposed.Contains(printer.PrinterId) && printer.Formats.Length > 0).ToArray();
    }
 
 

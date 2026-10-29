@@ -4,6 +4,7 @@
  */
 
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -11,6 +12,8 @@ using Qqq.PrintAgent.Core.Printing;
 using Windows.Data.Pdf;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
+
+[assembly: InternalsVisibleTo("Qqq.PrintAgent.Cli.Tests")]
 
 namespace Qqq.PrintAgent.Windows;
 
@@ -20,7 +23,8 @@ public sealed class WindowsPrinters : IPrinterBackend
    /// <summary>Enumerate installed queues visible to this Windows identity.</summary>
    public IReadOnlyList<PrinterInfo> Discover()
    {
-      Native.EnumPrinters(6, null, 2, IntPtr.Zero, 0, out uint needed, out _);
+      bool probeSucceeded = Native.EnumPrinters(6, null, 2, IntPtr.Zero, 0, out uint needed, out _);
+      ValidateDiscoveryProbe(probeSucceeded, Marshal.GetLastWin32Error(), needed);
       if(needed == 0)
       {
          return [];
@@ -37,13 +41,61 @@ public sealed class WindowsPrinters : IPrinterBackend
             string name = Marshal.PtrToStringUni(info.PrinterName) ?? "";
             string driver = Marshal.PtrToStringUni(info.DriverName) ?? "";
             bool zebra = (name + driver).Contains("Zebra", StringComparison.OrdinalIgnoreCase) || driver.Contains("ZDesigner", StringComparison.OrdinalIgnoreCase);
-            string status = (info.Status & 0x80) != 0 ? "OFFLINE" : (info.Status & 0x1) != 0 ? "PAUSED" : info.Status == 0 ? "READY" : "ERROR";
+            string status = MapStatus(info.Status);
+            string port = Marshal.PtrToStringUni(info.PortName) ?? "";
+            bool interactive = RequiresInteractiveOutput(port, driver);
             string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name))).ToLowerInvariant()[..24];
-            printers.Add(new PrinterInfo(id, name, driver, Marshal.PtrToStringUni(info.PortName) ?? "", status, zebra ? ["PDF", "ZPL"] : ["PDF"]));
+            printers.Add(new PrinterInfo(id, name, driver, port, interactive ? "UNKNOWN" : status, interactive ? [] : zebra ? ["PDF", "ZPL"] : ["PDF"]));
          }
          return printers;
       }
       finally { Marshal.FreeHGlobal(memory); }
+   }
+
+   /// <summary>Only an insufficient buffer is an expected unsuccessful sizing probe.</summary>
+   internal static void ValidateDiscoveryProbe(bool success, int error, uint needed)
+   {
+      if(!success && (error != 122 || needed == 0))
+      {
+         throw new Win32Exception(error);
+      }
+   }
+
+   /// <summary>Session-zero workers cannot answer file-save or application prompts.</summary>
+   internal static bool RequiresInteractiveOutput(string port, string driver) =>
+      port.Contains("PORTPROMPT", StringComparison.OrdinalIgnoreCase) || port.Contains("FILE:", StringComparison.OrdinalIgnoreCase)
+      || driver.Contains("Microsoft Print To PDF", StringComparison.OrdinalIgnoreCase) || driver.Contains("XPS", StringComparison.OrdinalIgnoreCase)
+      || driver.Contains("OneNote", StringComparison.OrdinalIgnoreCase) || driver.Contains("Fax", StringComparison.OrdinalIgnoreCase);
+
+   /// <summary>Collapse Winspool flags into protocol health without treating activity as failure.</summary>
+   internal static string MapStatus(uint status)
+   {
+      const uint offline = 0x00000080 | 0x02000000;
+      const uint paused = 0x00000001;
+      // Error, deleting, paper/feeding problems, full output, unavailable, no toner,
+      // failed page, intervention, memory, door open, or a required driver update.
+      const uint error = 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040
+         | 0x00000800 | 0x00001000 | 0x00040000 | 0x00080000 | 0x00100000 | 0x00200000 | 0x00400000 | 0x04000000;
+      const uint serverUnknown = 0x00800000;
+      const uint knownFlags = 0x07ffffff;
+      if((status & offline) != 0)
+      {
+         return "OFFLINE";
+      }
+      if((status & paused) != 0)
+      {
+         return "PAUSED";
+      }
+      if((status & error) != 0)
+      {
+         return "ERROR";
+      }
+      if((status & serverUnknown) != 0 || (status & ~knownFlags) != 0)
+      {
+         return "UNKNOWN";
+      }
+      // Busy, printing, I/O, waiting, warming, power-save and low toner are nonblocking.
+      return "READY";
    }
 
    /// <summary>Submit exactly one server job using its explicit queue and format.</summary>

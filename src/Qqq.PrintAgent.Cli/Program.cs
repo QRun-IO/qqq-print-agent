@@ -12,34 +12,47 @@ namespace Qqq.PrintAgent.Cli;
 /// <summary>Scriptable setup, printer selection and foreground diagnostics.</summary>
 public static class Program
 {
-   public static async Task<int> Main(string[] args)
+   public static Task<int> Main(string[] args) => args.Length == 1 && string.Equals(args[0], "--printer-worker", StringComparison.Ordinal)
+      ? PrinterWorkerHost.RunAsync()
+      : ExecuteAsync(() => DispatchAsync(args));
+
+   internal static async Task<int> ExecuteAsync(Func<Task<int>> command)
    {
       try
       {
-         string command = args.FirstOrDefault() ?? "help";
-         string directory = Option(args, "--data-dir") ?? AgentStore.DefaultDirectory;
-         switch(command)
-         {
-            case "printers":
-               Console.WriteLine(JsonSerializer.Serialize(new WindowsPrinters().Discover(), PrintApiClient.JsonOptions));
-               return 0;
-            case "service-status":
-            case "snapshot":
-               Console.WriteLine(await AgentPipeClient.SendAsync(new PipeRequest(command is "snapshot" ? "snapshot" : "status")));
-               return 0;
-            case "enroll":
-               return await EnrollAsync(args, directory);
-            case "expose":
-               return await SetExposureAsync(args, directory);
-            case "run":
-               return await RunAsync(args, directory);
-            default:
-               Console.WriteLine("printers | enroll --server URL [--data-dir PATH] [--service] | expose --printer ID --exposed true|false [--data-dir PATH] [--service] | run [--data-dir PATH] [--once] | service-status | snapshot\nEnrollment code is read from QQQ_PRINT_ENROLLMENT_CODE or an interactive prompt.");
-               return command is "help" ? 0 : 1;
-         }
+         return await command();
       }
-      catch(OperationCanceledException) { return 0; }
+      catch(OperationCanceledException)
+      {
+         Console.Error.WriteLine("The operation timed out or was canceled before completion.");
+         return 1;
+      }
       catch(Exception exception) { Console.Error.WriteLine(exception.Message); return 1; }
+   }
+
+   private static async Task<int> DispatchAsync(string[] args)
+   {
+      string command = args.FirstOrDefault() ?? "help";
+      string directory = ResolveDataDirectory(args);
+      switch(command)
+      {
+         case "printers":
+            Console.WriteLine(JsonSerializer.Serialize(CreatePrinterBackend().Discover(), PrintApiClient.JsonOptions));
+            return 0;
+         case "service-status":
+         case "snapshot":
+            Console.WriteLine(await AgentPipeClient.SendAsync(new PipeRequest(command is "snapshot" ? "snapshot" : "status")));
+            return 0;
+         case "enroll":
+            return await EnrollAsync(args, directory);
+         case "expose":
+            return await SetExposureAsync(args, directory);
+         case "run":
+            return await RunAsync(args, directory);
+         default:
+            Console.WriteLine("printers | enroll --server URL [--data-dir PATH] [--service] | expose --printer ID --exposed true|false [--data-dir PATH] [--service] | run [--data-dir PATH] [--once] | service-status | snapshot\nEnrollment code is read from QQQ_PRINT_ENROLLMENT_CODE or an interactive prompt.");
+            return command is "help" ? 0 : 1;
+      }
    }
 
 
@@ -50,28 +63,55 @@ public static class Program
       return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
    }
 
+   internal static string ResolveDataDirectory(string[] args)
+   {
+      if(args.Contains("--service", StringComparer.Ordinal))
+      {
+         return AgentStore.DefaultDirectory;
+      }
+      string directory = Path.GetFullPath(Option(args, "--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QqqPrintAgent"));
+      if(string.Equals(Path.TrimEndingDirectorySeparator(directory), Path.TrimEndingDirectorySeparator(AgentStore.DefaultDirectory), StringComparison.OrdinalIgnoreCase))
+      {
+         throw new InvalidOperationException("Use --service to manage the installed service. Foreground commands require a separate per-user data directory.");
+      }
+      return directory;
+   }
+
+   internal static FileStream AcquireWorkerLock(string directory)
+   {
+      Directory.CreateDirectory(directory);
+      return new FileStream(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+   }
+
+   private static IsolatedPrinterBackend CreatePrinterBackend() => new(Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate the printer helper executable."));
+
 
 
    private static async Task<int> RunAsync(string[] args, string directory)
    {
-      Directory.CreateDirectory(directory);
-      using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+      using FileStream instance = AcquireWorkerLock(directory);
       using AgentStore journal = new(directory);
       AgentConfiguration config = journal.LoadConfiguration() ?? throw new InvalidOperationException("Enroll this account first.");
       using PrintApiClient client = new(config.ServerUrl, config.DeviceToken);
-      ExposedPrinterBackend printers = new(new WindowsPrinters(), journal.GetExposedPrinterIds);
+      ExposedPrinterBackend printers = new(CreatePrinterBackend(), journal.GetExposedPrinterIds);
       PrintWorker worker = new(client, printers, journal, Console.WriteLine);
       using CancellationTokenSource stopping = new();
-      Console.CancelKeyPress += (_, e) => { e.Cancel = true; stopping.Cancel(); };
-      do
+      ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; stopping.Cancel(); };
+      Console.CancelKeyPress += cancelHandler;
+      try
       {
-         await worker.RunOnceAsync(stopping.Token);
-         if(args.Contains("--once", StringComparer.Ordinal))
+         do
          {
-            break;
-         }
-         await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, config.PollIntervalSeconds)), stopping.Token);
-      } while(!stopping.IsCancellationRequested);
+            await worker.RunOnceAsync(stopping.Token);
+            if(args.Contains("--once", StringComparer.Ordinal))
+            {
+               break;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, config.PollIntervalSeconds)), stopping.Token);
+         } while(!stopping.IsCancellationRequested);
+      }
+      catch(OperationCanceledException) when(stopping.IsCancellationRequested) { return 0; }
+      finally { Console.CancelKeyPress -= cancelHandler; }
       return 0;
    }
 
@@ -90,8 +130,9 @@ public static class Program
          Console.WriteLine(response);
          return response.StartsWith("Error:", StringComparison.Ordinal) ? 1 : 0;
       }
+      using FileStream instance = AcquireWorkerLock(directory);
       using AgentStore store = new(directory);
-      store.SetExposure(id, exposed, new WindowsPrinters().Discover());
+      store.SetExposure(id, exposed, CreatePrinterBackend().Discover());
       Console.WriteLine(exposed ? "Printer exposed to QQQ." : "Printer hidden from QQQ.");
       return 0;
    }
@@ -117,7 +158,8 @@ public static class Program
          Console.WriteLine(response);
          return response.StartsWith("Error:", StringComparison.Ordinal) ? 1 : 0;
       }
-      using AgentStore store = new(directory);
+      using FileStream instance = AcquireWorkerLock(directory);
+      using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
       using PrintApiClient api = new(server);
       EnrollmentResponse result = await api.EnrollAsync(new EnrollmentRequest(code, Environment.MachineName, "0.1.0"));
       store.SaveConfiguration(new AgentConfiguration(server, result.DeviceId, result.DeviceToken, result.PollIntervalSeconds));

@@ -23,14 +23,18 @@ public sealed partial class MainWindow : Window, IDisposable
    private readonly AppSettings _settings = AppIdentity.SettingsStore.Load();
    private bool _busy;
    private bool _refreshing;
+   private int _mutationVersion;
    private bool _exitRequested;
+   private readonly bool _initializing = true;
    private readonly TaskbarIcon _tray;
    private readonly MenuFlyoutItem _trayStatus;
    private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
    private string? _currentHealth;
-   private string[] _serviceLogLines = [];
-   private string? _printerSnapshot;
-   private string[] _jobLines = [];
+   private readonly Dictionary<string, PrinterRowView> _printerRows = new(StringComparer.Ordinal);
+   private IReadOnlyList<JobSnapshot> _jobs = [];
+   private bool _loadingLifecycle;
+   private readonly Dictionary<string, System.Drawing.Icon> _trayIcons = new(StringComparer.Ordinal);
+   private readonly RegisteredWaitHandle? _activationRegistration;
 
 
 
@@ -38,28 +42,16 @@ public sealed partial class MainWindow : Window, IDisposable
    public MainWindow()
    {
       InitializeComponent();
-      Title = AppIdentity.Info.DisplayName;
-      ProductHeading.Text = Title;
-      AboutMenuItem.Text = "About " + Title;
-      CompanyHeading.Text = AppIdentity.Branding.CompanyName ?? string.Empty;
-      CompanyHeading.Visibility = AppIdentity.Branding.CompanyName is null ? Visibility.Collapsed : Visibility.Visible;
-      SupportLink.NavigateUri = AppIdentity.Branding.SupportUrl;
-      SupportLink.Visibility = AppIdentity.Branding.SupportUrl is null ? Visibility.Collapsed : Visibility.Visible;
-      if(AppIdentity.Branding.AccentColor is string accent)
-      {
-         ProductHeading.Foreground = new SolidColorBrush(KofTwentyTwo.AppKit.ArgbColor.Parse(accent).ToColor());
-      }
-      if(AppIdentity.Branding.LogoPath is string logo)
-      {
-         CustomerLogo.ImageFailed += (_, _) => CustomerLogo.Visibility = Visibility.Collapsed;
-         CustomerLogo.Source = new BitmapImage(new Uri(logo));
-         CustomerLogo.Visibility = Visibility.Visible;
-      }
-      this.ResizeForDpi(960, 820);
-      this.SetMinimumSize(680, 600);
+      ApplyBranding();
+      this.ResizeForDpi(1100, 760);
+      this.SetMinimumSize(800, 560);
       this.SetAppIcon(AppIdentity.Info);
-      SplashToggle.IsChecked = _settings.ShowSplashScreen;
-      (_settings.ThemeKind switch { AppTheme.Light => ThemeLight, AppTheme.Dark => ThemeDark, _ => ThemeSystem }).IsChecked = true;
+      SplashToggle.IsOn = _settings.ShowSplashScreen;
+      ThemeChoice.SelectedIndex = _settings.ThemeKind switch { AppTheme.Light => 1, AppTheme.Dark => 2, _ => 0 };
+      Navigation.SelectedItem = PrintersNavigation;
+      Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId((DependencyObject)Navigation.SettingsItem, "NavigateSettings");
+      Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(ThemeChoice, "AppTheme");
+      _initializing = false;
       SplashOverlay.ShowOver(RootGrid, AppIdentity.Info, _settings);
       _trayStatus = new MenuFlyoutItem { Text = "Red — service not connected", Command = new RelayCommand(ShowDetails) };
       MenuFlyout trayMenu = new();
@@ -71,26 +63,54 @@ public sealed partial class MainWindow : Window, IDisposable
       _tray = new TaskbarIcon { ToolTipText = AppIdentity.Info.DisplayName + " — service not connected", ContextFlyout = trayMenu, LeftClickCommand = new RelayCommand(ShowDetails) };
       SetHealth("RED");
       _tray.ForceCreate(enablesEfficiencyMode: false);
+      App.Log.Info($"Tray icon created: {_tray.IsCreated}.");
       _refreshTimer.Tick += async (_, _) => await RefreshAsync();
       _refreshTimer.Start();
       AppWindow.Closing += (_, args) =>
       {
-         if(!_exitRequested)
+         if(!_exitRequested && _tray.IsCreated)
          {
             args.Cancel = true;
             AppWindow.Hide();
          }
       };
       Closed += (_, _) => Dispose();
+      if(Program.ActivationSignal is EventWaitHandle signal)
+      {
+         _activationRegistration = ThreadPool.RegisterWaitForSingleObject(signal, (_, _) => DispatcherQueue.TryEnqueue(ShowDetails), state: null, Timeout.Infinite, executeOnlyOnce: false);
+      }
    }
 
+
+
+   private void ApplyBranding()
+   {
+      Title = AppIdentity.Info.DisplayName;
+      ProductHeading.Text = Title;
+      AboutButton.Content = "About " + Title;
+      CompanyHeading.Text = AppIdentity.Branding.CompanyName ?? string.Empty;
+      CompanyHeading.Visibility = AppIdentity.Branding.CompanyName is null ? Visibility.Collapsed : Visibility.Visible;
+      SupportLink.NavigateUri = AppIdentity.Branding.SupportUrl;
+      SupportLink.Visibility = AppIdentity.Branding.SupportUrl is null ? Visibility.Collapsed : Visibility.Visible;
+      if(AppIdentity.Branding.LogoPath is string logo)
+      {
+         CustomerLogo.ImageFailed += (_, _) => CustomerLogo.Visibility = Visibility.Collapsed;
+         CustomerLogo.Source = new BitmapImage(new Uri(logo));
+         CustomerLogo.Visibility = Visibility.Visible;
+      }
+   }
 
 
    /// <summary>Release the tray icon and polling timer when the companion exits.</summary>
    public void Dispose()
    {
       _refreshTimer.Stop();
+      _activationRegistration?.Unregister(null);
       _tray.Dispose();
+      foreach(System.Drawing.Icon icon in _trayIcons.Values)
+      {
+         icon.Dispose();
+      }
       LogWindow.CloseCurrent();
       GC.SuppressFinalize(this);
    }
@@ -98,7 +118,48 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
    /// <summary>Read service status once the window has loaded.</summary>
-   private async void Root_Loaded(object sender, RoutedEventArgs e) => await RefreshAsync();
+   private async void Root_Loaded(object sender, RoutedEventArgs e)
+   {
+      await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync());
+   }
+
+   /// <summary>Apply tray-only startup after App has completed the initial Window.Activate call.</summary>
+   internal void ApplyStartupVisibility()
+   {
+      if(Environment.GetCommandLineArgs().Contains("--tray", StringComparer.Ordinal) && _tray.IsCreated)
+      {
+         AppWindow.Hide();
+      }
+   }
+
+   private async void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+   {
+      if(PageTitle is null)
+      {
+         return;
+      }
+      string page = args.IsSettingsSelected ? "Settings" : (args.SelectedItem as NavigationViewItem)?.Tag as string ?? "Printers";
+      PrintersPage.Visibility = string.Equals(page, "Printers", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      JobsPage.Visibility = string.Equals(page, "Jobs", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      LogsPage.Visibility = string.Equals(page, "Logs", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      SettingsPage.Visibility = string.Equals(page, "Settings", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      PageTitle.Text = page;
+      PageDescription.Text = page switch
+      {
+         "Jobs" => "Recent jobs received by this computer.",
+         "Logs" => "Activity and diagnostics in the AppKit log viewer.",
+         "Settings" => "Connection, appearance and application information.",
+         _ => "Choose which printers this computer shares with QQQ.",
+      };
+      if(string.Equals(page, "Logs", StringComparison.Ordinal))
+      {
+         LogWindow.ShowSingle(App.Log, AppIdentity.Info);
+      }
+      if(args.IsSettingsSelected && !_initializing)
+      {
+         await RefreshLifecycleAsync();
+      }
+   }
 
    private async void Connection_Click(object sender, RoutedEventArgs e) => await ShowConnectionAsync();
 
@@ -133,14 +194,18 @@ public sealed partial class MainWindow : Window, IDisposable
          string result = await AgentPipeClient.SendAsync(new PipeRequest("enroll", address.TrimEnd('/'), EnrollmentBox.Password.Trim()));
          if(!result.StartsWith("Enrolled device ", StringComparison.Ordinal))
          {
-            Feedback("Enrollment failed", result, InfoBarSeverity.Error);
+            Feedback("Enrollment failed", result + " If the code expired or was already used, generate a fresh code in QQQ. Your previous connection is retained unless enrollment completes.", InfoBarSeverity.Error);
             return;
          }
          Feedback("Device connected", result + ". Select which printers to expose here, then approve the discovered queues in QQQ.", InfoBarSeverity.Success);
          StatusText.Text = result;
          App.Log.Info("Print device enrollment completed.");
       }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
+      catch(OperationCanceledException)
+      {
+         Feedback("Enrollment could not be confirmed", "The request timed out. Check the device list in QQQ before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", InfoBarSeverity.Warning);
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
       {
          ServiceUnavailable();
       }
@@ -154,7 +219,30 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
    /// <summary>Refresh the local service and the queues visible under its identity.</summary>
-   private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
+   private async void Refresh_Click(object sender, RoutedEventArgs e) => await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync());
+
+   private async void Reconnect_Click(object sender, RoutedEventArgs e)
+   {
+      if(_busy)
+      {
+         return;
+      }
+      SetBusy(true);
+      try
+      {
+         string response = await AgentPipeClient.SendAsync(new PipeRequest("reconnect"));
+         Feedback("Reconnect requested", response, InfoBarSeverity.Informational);
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
+      {
+         ServiceUnavailable();
+      }
+      finally
+      {
+         SetBusy(false);
+      }
+      await RefreshAsync();
+   }
 
 
 
@@ -166,9 +254,21 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       _refreshing = true;
+      int mutationVersion = _mutationVersion;
       try
       {
          string response = await AgentPipeClient.SendAsync(new PipeRequest("snapshot"));
+         if(_busy || mutationVersion != _mutationVersion)
+         {
+            return;
+         }
+         if(response.StartsWith("Error: ", StringComparison.Ordinal))
+         {
+            SetHealth("RED");
+            StatusText.Text = "Local service needs attention";
+            Feedback("Service reported a problem", response[7..], InfoBarSeverity.Error);
+            return;
+         }
          AgentSnapshot snapshot = JsonSerializer.Deserialize<AgentSnapshot>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions)
             ?? throw new JsonException("Missing snapshot.");
          if(!_busy)
@@ -199,7 +299,7 @@ public sealed partial class MainWindow : Window, IDisposable
       SetHealth("RED");
       StatusText.Text = "Local print service unavailable";
       FooterContact.Text = "Local service unavailable · retrying automatically; shown data may be stale";
-      Feedback("Service unavailable", "Install and start the QQQ Print Agent Windows service, then refresh. This administration window needs administrator access.", InfoBarSeverity.Error);
+      Feedback("Service unavailable", (_serviceStatus?.Guidance ?? "The local service could not be reached.") + " Open Settings for service controls, Windows Services or the installer. This administration window needs administrator access.", InfoBarSeverity.Error);
    }
 
 
@@ -207,15 +307,17 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Prevent overlapping local administration requests.</summary>
    private void SetBusy(bool busy)
    {
+      if(busy)
+      {
+         _mutationVersion++;
+      }
       _busy = busy;
       EnrollButton.IsEnabled = !busy;
       RefreshButton.IsEnabled = !busy;
-      foreach(StackPanel row in PrintersList.Items.OfType<StackPanel>())
+      ReconnectButton.IsEnabled = !busy;
+      foreach(PrinterRowView row in _printerRows.Values)
       {
-         foreach(CheckBox checkbox in row.Children.OfType<CheckBox>())
-         {
-            checkbox.IsEnabled = !busy;
-         }
+         row.SetBusy(busy);
       }
    }
 
@@ -236,8 +338,8 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
-   /// <summary>Hide details while the tray continues monitoring.</summary>
-   private void Hide_Click(object sender, RoutedEventArgs e) => AppWindow.Hide();
+
+
 
 
 
@@ -259,6 +361,10 @@ public sealed partial class MainWindow : Window, IDisposable
    private void ShowDetails()
    {
       AppWindow.Show();
+      if(AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+      {
+         presenter.Restore();
+      }
       Activate();
    }
 
@@ -268,45 +374,19 @@ public sealed partial class MainWindow : Window, IDisposable
    private void RenderSnapshot(AgentSnapshot snapshot)
    {
       SetHealth(snapshot.Health);
-      ConnectionButton.Content = snapshot.Enrolled ? "Connection settings" : "Connect this device";
-      FooterContact.Text = $"Last QQQ contact: {snapshot.LastSuccessfulPoll ?? "not yet"} · refreshes every 5 seconds";
+      ConnectionButton.Content = snapshot.Enrolled ? "Sign in again" : "Connect this device";
+      ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to QQQ";
+      FooterContact.Text = $"Last QQQ contact: {FormatTime(snapshot.LastSuccessfulPoll)} · refreshes every 5 seconds";
       StatusText.Text = snapshot.Status;
       ConnectionText.Text = snapshot.Enrolled
-         ? $"Server: {snapshot.ServerUrl}\nDevice: {snapshot.DeviceId}\nLast successful poll: {snapshot.LastSuccessfulPoll ?? "Not yet"}"
+         ? $"Server: {snapshot.ServerUrl}\nDevice: {snapshot.DeviceId}\nLast successful poll: {FormatTime(snapshot.LastSuccessfulPoll)}"
          : "This device has not been enrolled. Open Connection settings to connect it to QQQ.";
       if(string.IsNullOrWhiteSpace(ServerBox.Text) && snapshot.ServerUrl is not null)
       {
          ServerBox.Text = snapshot.ServerUrl;
       }
-      string printerSnapshot = JsonSerializer.Serialize(snapshot.Printers, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions);
-      if(!string.Equals(_printerSnapshot, printerSnapshot, StringComparison.Ordinal))
-      {
-         _printerSnapshot = printerSnapshot;
-         PrintersList.Items.Clear();
-         foreach(PrinterSnapshot printer in snapshot.Printers)
-         {
-            CheckBox exposure = new() { Content = $"Expose {printer.Name} to QQQ", IsChecked = printer.Exposed, Tag = printer, IsEnabled = !_busy };
-            exposure.Click += Exposure_Click;
-            StackPanel row = new() { Spacing = 4, Margin = new Thickness(0, 6, 0, 6) };
-            row.Children.Add(exposure);
-            row.Children.Add(new TextBlock { Text = $"{printer.Status} · {string.Join(", ", printer.Formats)} · {(printer.Exposed ? "Exposed" : "Local only")}\nDriver: {printer.DriverName} · Port: {printer.PortName}\nPrinter ID: {printer.PrinterId}", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-            PrintersList.Items.Add(row);
-         }
-      }
-      PrintersSummary.Text = $"{snapshot.Printers.Count} printer(s) visible · {snapshot.Printers.Count(printer => printer.Exposed)} exposed to QQQ";
-      string[] jobLines = snapshot.Jobs.Select(job => $"{job.Status} · {job.UpdatedAt}\nJob: {job.JobId} · Spooler: {job.SpoolerJobId ?? "Not assigned"}\n{job.Message}").ToArray();
-      if(!_jobLines.SequenceEqual(jobLines, StringComparer.Ordinal))
-      {
-         _jobLines = jobLines;
-         JobsList.ItemsSource = _jobLines;
-      }
-      JobsSummary.Text = snapshot.Jobs.Count == 0 ? "No local print jobs yet." : $"{snapshot.Jobs.Count} recent job(s)";
-      string[] serviceLogLines = snapshot.Logs.Select(entry => $"{entry.Timestamp} [{entry.Level}] {entry.Message}").ToArray();
-      if(!_serviceLogLines.SequenceEqual(serviceLogLines, StringComparer.Ordinal))
-      {
-         _serviceLogLines = serviceLogLines;
-         ServiceLogsList.ItemsSource = _serviceLogLines;
-      }
+      UpdatePrinters(snapshot);
+      UpdateJobs(snapshot);
       if(FeedbackBar.Title is "Checking service" or "Service unavailable" or "Cannot read service response")
       {
          FeedbackBar.IsOpen = false;
@@ -315,24 +395,56 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
-   /// <summary>Persist local printer exposure through the protected service pipe.</summary>
-   private async void Exposure_Click(object sender, RoutedEventArgs e)
+   private void UpdatePrinters(AgentSnapshot snapshot)
    {
-      if(sender is not CheckBox { Tag: PrinterSnapshot printer } checkbox || _busy)
+      var present = snapshot.Printers.Select(printer => printer.PrinterId).ToHashSet(StringComparer.Ordinal);
+      foreach(string id in _printerRows.Keys.Where(id => !present.Contains(id)).ToArray())
+      {
+         PrinterRowView removed = _printerRows[id];
+         PrintersList.Items.Remove(removed);
+         _printerRows.Remove(id);
+      }
+      foreach(PrinterSnapshot printer in snapshot.Printers)
+      {
+         if(!_printerRows.TryGetValue(printer.PrinterId, out PrinterRowView? row))
+         {
+            row = new PrinterRowView(SetExposureAsync, TestPrintAsync, SecondaryBrush());
+            _printerRows.Add(printer.PrinterId, row);
+            PrintersList.Items.Add(row);
+         }
+         row.Update(printer, FriendlyState(printer.Status), _busy);
+      }
+      PrintersEmpty.Visibility = snapshot.Printers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+      PrintersEmptyText.Text = snapshot.Enrolled ? "Add a printer in Windows Settings, then refresh this list." : "Connect this device to QQQ, then choose the printers to share.";
+      PrintersSummary.Text = $"{snapshot.Printers.Count} printers · {snapshot.Printers.Count(printer => printer.Exposed)} shared with QQQ";
+   }
+
+   private void UpdateJobs(AgentSnapshot snapshot)
+   {
+      _jobs = snapshot.Jobs;
+      RefreshJobList();
+   }
+   /// <summary>Persist local printer exposure through the protected service pipe.</summary>
+   private async Task SetExposureAsync(PrinterSnapshot printer, bool exposed)
+   {
+      if(_busy)
       {
          return;
       }
       SetBusy(true);
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("set-exposure", PrinterId: printer.PrinterId, Exposed: checkbox.IsChecked == true));
+         string response = await AgentPipeClient.SendAsync(new PipeRequest("set-exposure", PrinterId: printer.PrinterId, Exposed: exposed));
          AgentSnapshot snapshot = JsonSerializer.Deserialize<AgentSnapshot>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions)
             ?? throw new JsonException("Missing snapshot.");
          RenderSnapshot(snapshot);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
       {
-         checkbox.IsChecked = printer.Exposed;
+         if(_printerRows.TryGetValue(printer.PrinterId, out PrinterRowView? row))
+         {
+            row.Exposure.IsChecked = printer.Exposed;
+         }
          Feedback("Printer setting not saved", "The service did not confirm this change. Refresh and try again.", InfoBarSeverity.Error);
       }
       finally
@@ -346,8 +458,7 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Pair tray color with a text status so color is never the only signal.</summary>
    private void SetHealth(string health)
    {
-      string label = health switch { "GREEN" => "Green — connected and ready", "ORANGE" => "Orange — connected, printers need attention", _ => "Red — disconnected or failed" };
-      HealthText.Text = label;
+      string label = health switch { "GREEN" => "Connected and ready", "ORANGE" => "Connected · printers need attention", _ => "Disconnected or needs attention" };
       FooterStatus.Text = label;
       _trayStatus.Text = label;
       _tray.ToolTipText = AppIdentity.Info.DisplayName + ": " + label;
@@ -356,20 +467,53 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       _currentHealth = health;
+      Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.FromElement(FooterStatus)?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
       global::Windows.UI.Color color = health switch { "GREEN" => Microsoft.UI.Colors.LimeGreen, "ORANGE" => Microsoft.UI.Colors.Orange, _ => Microsoft.UI.Colors.Red };
       SolidColorBrush brush = new(color);
-      HealthDot.Fill = brush;
       FooterDot.Fill = brush;
       string icon = health switch { "GREEN" => "green", "ORANGE" => "orange", _ => "red" };
-      _tray.IconSource = new BitmapImage(new Uri($"ms-appx:///Assets/Brand/tray-{icon}.png"));
+      if(!_trayIcons.TryGetValue(icon, out System.Drawing.Icon? trayIcon))
+      {
+         trayIcon = LoadTrayIcon(icon);
+         _trayIcons.Add(icon, trayIcon);
+      }
+      _tray.Icon = trayIcon;
+   }
+
+   /// <summary>Load the packaged status image synchronously before registering the tray icon.</summary>
+   private static System.Drawing.Icon LoadTrayIcon(string state)
+   {
+      byte[] png = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Assets", "Brand", $"tray-{state}.png"));
+      using var stream = new MemoryStream();
+      using(var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+      {
+         // One PNG-backed 64px ICO image; avoids asynchronous WinUI ImageSource decoding.
+         writer.Write((ushort)0);
+         writer.Write((ushort)1);
+         writer.Write((ushort)1);
+         writer.Write((byte)64);
+         writer.Write((byte)64);
+         writer.Write((ushort)0);
+         writer.Write((ushort)1);
+         writer.Write((ushort)32);
+         writer.Write(png.Length);
+         writer.Write(22);
+         writer.Write(png);
+      }
+      stream.Position = 0;
+      return new System.Drawing.Icon(stream);
    }
 
 
 
    /// <summary>Apply and save the AppKit theme.</summary>
-   private void Theme_Click(object sender, RoutedEventArgs e)
+   private void Theme_SelectionChanged(object sender, SelectionChangedEventArgs e)
    {
-      _settings.Theme = (string)((FrameworkElement)sender).Tag;
+      if(_initializing || ThemeChoice.SelectedItem is not ComboBoxItem item)
+      {
+         return;
+      }
+      _settings.Theme = (string)item.Tag;
       WinUIShell.ApplyTheme(RootGrid, _settings.ThemeKind);
       Save();
    }
@@ -377,9 +521,13 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
    /// <summary>Save the splash preference.</summary>
-   private void Splash_Click(object sender, RoutedEventArgs e)
+   private void Splash_Toggled(object sender, RoutedEventArgs e)
    {
-      _settings.ShowSplashScreen = SplashToggle.IsChecked;
+      if(_initializing)
+      {
+         return;
+      }
+      _settings.ShowSplashScreen = SplashToggle.IsOn;
       Save();
    }
 
@@ -408,29 +556,35 @@ public sealed partial class MainWindow : Window, IDisposable
       await DialogGuard.ShowAsync(dialog);
    }
 
-   /// <summary>Show the last bounded service log snapshot without navigating away from current settings.</summary>
-   private async void ServiceLogs_Click(object sender, RoutedEventArgs e)
+   /// <summary>Use the single AppKit log viewer from every logs entry point.</summary>
+   private void ServiceLogs_Click(object sender, RoutedEventArgs e)
    {
-      var dialog = new ContentDialog
-      {
-         Title = "Service logs",
-         CloseButtonText = "Close",
-         XamlRoot = Content.XamlRoot,
-         Content = new ScrollViewer
-         {
-            MaxHeight = 450,
-            Content = new TextBlock
-            {
-               Text = _serviceLogLines.Length == 0 ? "No service logs available. Confirm the Windows service is running, then refresh. Companion logs are available under Help → Activity log." : "Latest service snapshot (up to 100 entries). Close and reopen to refresh.\n\n" + string.Join("\n", _serviceLogLines),
-               IsTextSelectionEnabled = true,
-               TextWrapping = TextWrapping.Wrap,
-            },
-         },
-      };
-      await DialogGuard.ShowAsync(dialog);
+      Navigation.SelectedItem = LogsNavigation;
+      LogWindow.ShowSingle(App.Log, AppIdentity.Info);
    }
 
+   private static Brush SecondaryBrush() => (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
+   private static string FormatTime(string? timestamp)
+      => DateTimeOffset.TryParse(timestamp, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset time)
+         ? time.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture) : "Not yet";
+
+   private static string FriendlyState(string state) => state switch
+   {
+      "READY" => "Ready",
+      "OFFLINE" => "Offline",
+      "PAUSED" => "Paused",
+      "ERROR" => "Needs attention",
+      "QUEUED" => "Queued",
+      "CLAIMED" => "Assigned to this computer",
+      "RECEIVED" => "Received",
+      "SUBMITTING" => "Sending to printer",
+      "SPOOLED" => "Sent to printer",
+      "SPOOLER_COMPLETED" => "Windows completed the job",
+      "FAILED" => "Failed",
+      "OUTCOME_UNKNOWN" => "Check printer before retrying",
+      _ => "Status unavailable",
+   };
 
    /// <summary>Persist presentation preferences only.</summary>
    private void Save()

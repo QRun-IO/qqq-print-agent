@@ -2,6 +2,13 @@
 
 ## 0.1.1-rc.1 — 2026-10-29
 
+- Native Windows navigation, stable printer rows, searchable job identity/history, confirmed test/reprint/cancel actions and persistent failure review.
+- One shared AppKit activity log, synchronous tray icons, single-instance restoration, reconnect and explicit credential recovery.
+- Service start/restart controls, opt-in installed sign-in startup, bounded SCM recovery and narrowly scoped full-uninstall task cleanup.
+- Isolated native printer workers with timeout/orphan cleanup; interactive save-to-file queues excluded from unattended printing.
+- Connection-scoped outbox, interrupted job recovery, safe event-detail retention and per-user CLI/service identity separation.
+- Automated verification: 102 Windows tests, zero compiler/analyzer warnings. Installed acceptance is recorded separately.
+
 - Fix desktop startup by including the generated WinUI resource index and compiled window markup in the published app and MSI.
 - Fail installer packaging when required app resources are missing or empty.
 - Supersedes 0.1.0-rc.1, whose desktop companion failed before showing its window. The initial build and unit tests did not detect this packaging defect.

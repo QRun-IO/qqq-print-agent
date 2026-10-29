@@ -16,6 +16,7 @@ public sealed class PrinterExposureTests
          {
             Assert.Empty(store.GetExposedPrinterIds());
             Assert.Throws<InvalidOperationException>(() => store.SetExposure("missing", true, []));
+            Assert.Throws<InvalidOperationException>(() => store.SetExposure("interactive", true, [new PrinterInfo("interactive", "Print to File", "Driver", "FILE:", "UNKNOWN", [])]));
             store.SetExposure("p1", true, new FakePrinter().Discover());
          }
          using(AgentStore restored = new(directory))

@@ -19,6 +19,7 @@
     <Project Path="tests/Qqq.PrintAgent.Core.Tests/Qqq.PrintAgent.Core.Tests.csproj" />
     <Project Path="tests/Qqq.PrintAgent.Cli.Tests/Qqq.PrintAgent.Cli.Tests.csproj" />
     <Project Path="tests/Qqq.PrintAgent.UiTests/Qqq.PrintAgent.UiTests.csproj" />
+    <Project Path="tests/Qqq.PrintAgent.WorkerFixture/Qqq.PrintAgent.WorkerFixture.csproj" />
   </Folder>
 </Solution>
 

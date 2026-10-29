@@ -19,8 +19,9 @@ namespace Qqq.PrintAgent.UiTests;
 
 /// <summary>
 /// One launched app plus the UIA3 automation that drives it. Each session gets a fresh
-/// temp directory passed as the app's data-folder variable, so tests start with no
-/// settings or logs and never touch the real profile. Unless a test asks for the
+/// temp directory passed as the app's data-folder variable, so presentation settings
+/// are isolated. Activity logs intentionally use the shared protected machine directory.
+/// Unless a test asks for the
 /// splash, the session pre-writes settings that skip it. The companion requires an
 /// elevated interactive test runner to access its protected administration UI.
 /// </summary>
@@ -76,15 +77,12 @@ public sealed class AppSession : IDisposable
 
    public Window MainWindow { get; }
 
-
-
-   /// <summary>Text of every log file the app wrote so far.</summary>
-   public string ReadLogs()
+   /// <summary>Launches the same executable and presentation profile to exercise instance forwarding.</summary>
+   public Process Relaunch()
    {
-      string logs = Path.Combine(DataDirectory, "logs");
-      return Directory.Exists(logs)
-          ? string.Concat(Directory.GetFiles(logs, "*.log").Select(ReadShared))
-          : "";
+      var startInfo = new ProcessStartInfo(ExePath) { WorkingDirectory = Path.GetDirectoryName(ExePath) ?? "", UseShellExecute = false };
+      startInfo.Environment[AppIdentity.Info.DataDirectoryVariable] = DataDirectory;
+      return Process.Start(startInfo) ?? throw new InvalidOperationException("The second companion process could not be started.");
    }
 
 

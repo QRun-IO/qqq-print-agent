@@ -1,38 +1,43 @@
 # Using QQQ Print Agent
 
-## Setup and status
+## Connect and select printers
 
-Start **QQQ Print Agent** from the Start menu and accept the administrator prompt. Open **Connection settings** (or **Connect this device** on an unenrolled machine). Enter the full QQQ server origin, for example `https://warehouse.example.com`, and a fresh enrollment code from your QQQ administrator. Select **Connect**. The code is consumed once; later operation uses a device credential held by the background service.
+Open **QQQ Print Agent** from Start. In **Settings → QQQ connection**, choose **Connect this device**, enter your HTTPS QQQ server address and a fresh enrollment code, then connect. The Windows service holds the device credential; the companion never receives it. **Reconnect** immediately requests another connection attempt. **Sign in again** replaces the connection using a fresh code while preserving prior job evidence.
 
-The system tray shows green when connected and all exposed queues report ready, orange when connected but exposed printers need attention (including no printers selected), and red when disconnected or a recent job/runtime failure needs attention. Open the tray menu to show details. Closing the window hides the companion to the tray; exiting the companion still does not stop the service. If the service is not installed/running, the companion reports that it cannot reach the management pipe.
+If enrollment times out, check QQQ before trying again: the code may already have been consumed. Generate a fresh code and revoke an unused/orphaned device through your administrator. An unreadable saved credential can be repaired by explicit enrollment; the previous encrypted file and journal are preserved.
 
-In **Printers**, check **Expose to QQQ** for the queues this computer should share. New installations expose none. The selection is saved by the service and takes effect in its next cloud inventory. Unselecting a queue prevents new local submissions but cannot retract paper already printing. In QQQ, review the exposed queues and explicitly enable the correct one. Local exposure and server approval are separate controls. Submit a small PDF test before sending packing slips. For Zebra labels, check printer language, DPI and label dimensions before the first real job.
+In **Printers**, use **Share with QQQ** for each intended queue, then approve it in QQQ. Local sharing and server approval are separate. **Print test** asks for confirmation and PDF/ZPL format before sending one real test through QQQ. Virtual PDF, XPS, fax and save-to-file queues that need interaction are unavailable to the service. **Windows printer settings** opens the native queue setup page.
 
-## Job states
+## Jobs
 
-| State | Meaning and operator action |
+The Jobs page shows document title, printer, format, state and time. Search by document/printer/job, or filter to work needing attention, active work or spooler submissions. Unreviewed failures appear first so newer successes cannot hide them. Legacy jobs retain their IDs when their title was never recorded.
+
+- **Details** shows local events and whether each was reported to QQQ.
+- **Print again** creates a new server job after confirmation. Inspect output first, especially for uncertain or previously spooled work. The original job is never reset.
+- **Cancel job** asks Windows to remove the exact spooled document. Pages already sent can still print. A reused spooler number belonging to another document is refused. QQQ also offers cancellation before dispatch through its job record/table actions.
+- **Mark reviewed** clears a failed/uncertain job's attention indicator without changing its delivery outcome or printing again.
+
+A timeout on a print action is not proof of failure. Inspect QQQ Jobs and Logs before repeating it. The operator-action features require the updated printing QBit; an older server produces an update/not-found message.
+
+| State | Meaning |
 | --- | --- |
-| QUEUED | The cloud has accepted the document. |
-| CLAIMED | This connector has been assigned the job. |
-| RECEIVED | The connector has recorded receipt locally. |
-| SUBMITTING | It is entering the Windows print path. |
-| SPOOLED | Windows accepted the job; inspect the printer if no paper appears. |
-| FAILED | The connector reported a failure before it could safely complete the attempt. Read the message. |
-| OUTCOME_UNKNOWN | The attempt might have reached the printer. Inspect the printer/queue before submitting another copy. |
+| QUEUED | QQQ accepted the document; it has not yet been assigned. |
+| CLAIMED / RECEIVED | Assigned to the connector / recorded locally. |
+| SUBMITTING | Entering the Windows print path. |
+| SPOOLED | Windows accepted the job; this does not confirm paper output. |
+| FAILED | A definite failure or operator cancellation before dispatch; read its message. |
+| OUTCOME_UNKNOWN | Submission might have reached the printer; inspect before reprinting. |
 
-A ready queue or connected service does not guarantee that the printer has paper, ribbon or labels. This version reports Windows observations, not guaranteed hardware telemetry.
+Detailed delivered history is retained for 30 days or the latest 1,000 detailed jobs. Pending events and unreviewed failures are never pruned. Small final-state records remain to prevent duplicate printing. The visible history contains up to 50 local jobs, prioritizing those requiring review, plus up to 50 jobs still queued in QQQ. Queued jobs can be cancelled before dispatch; if QQQ has already claimed one, cancellation reports that state instead.
 
-## Safe everyday operation
+## Tray, logs and service
 
-Keep the Windows computer awake and connected to the facility network. Leave the Spooler and QQQ Print Agent services running. Fix paper-out/jam conditions locally. Do not repeatedly submit the same shipping label to work around a delay: it may already be in the Windows queue.
+The footer and tray use text plus color: green for connected/ready, orange for exposed printer issues or no shared queues, and red for disconnection, failures or unreviewed uncertain jobs. Printer status is a Windows observation, not guaranteed hardware telemetry.
 
-A physical reprint is a new printing action; follow your QQQ application's workflow and preserve its audit trail. Automatic reprint/cancel controls are not provided by this first companion release.
+**Logs**, **View logs**, and **Open activity log** all open the same built-in AppKit viewer. Service and companion activity are together, persisted under the protected machine data directory with 30-day log retention. Use **Follow**, **Errors only**, **Copy**, and **Open logs folder**. Credentials and document payloads must never be logged; local identifiers remain operational data.
 
-## Jobs and logs
+Settings shows actual Windows service state and provides **Start service**, **Restart service**, **Windows Services**, and an installer link. Restarting can interrupt a submission; wait for active work when possible. The service continues printing when the companion exits.
 
-The details window shows the latest 50 local job states and the latest 100 service log entries. Logs are kept in memory for the running service session. No device credential or document bytes are included. The latest failed/uncertain job keeps health red until a later job succeeds; inspect the job before retrying. A red tray icon may also mean the service cannot be reached, not only that the cloud is down.
+Closing the window hides it to the tray. Reopening from Start restores the existing instance. **Show the tray companion when I sign in** explicitly enables a task for the current administrator and the installed executable; it is off by default. Upgrades retain this preference, and full uninstall removes verified application tasks. See [installation and security details](INSTALLATION.md).
 
-
-The bottom status bar remains visible while scrolling. It shows the same health as the tray and the last successful QQQ contact; the companion refreshes its observation every five seconds, with longer waits possible during a timeout. **View service logs** opens a selectable diagnostic snapshot immediately. Close and reopen it to refresh. **Help → Companion activity log** opens the separate UI log. After a connection failure, previously shown printer/job/log details may be stale.
-
-Administrators can apply [customer branding](BRANDING.md) without rebuilding the app.
+Administrators can apply [customer branding](BRANDING.md) without rebuilding. Appearance follows Windows or your selected light/dark theme; unsafe light accents fall back for readable AppKit text.

@@ -22,6 +22,36 @@ Run the MSI as an administrator. Windows Installer deploys one coherent applicat
 
 There is no inbound firewall rule, local HTTP server, or desktop self-updater. Keep outbound HTTPS available to the QQQ server. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
 
+## Service recovery
+
+The MSI configures Windows Service Control Manager to restart `QqqPrintAgent` after its first and second unexpected process failures, waiting 30 seconds each time. On the third and subsequent failures it takes no action; the failure count resets after one failure-free day. An administrator stop, upgrade or Windows shutdown exits normally. Unexpected fatal runtime failures exit nonzero so Windows can apply this policy. Routine network failures remain inside the running service's reconnect loop.
+
+Recovery uses the supported [WiX Util ServiceConfig](https://docs.firegiant.com/wix/schema/util/serviceconfig/) extension, matching the existing WiX 6.0.2 toolset. It does not reboot Windows or run arbitrary recovery commands. After installation, inspect the applied policy with this read-only command:
+
+```powershell
+sc.exe qfailure QqqPrintAgent
+```
+
+Expected: reset period 86400 seconds, restart actions with 30000 ms delay, then no action. Installer compilation and installed recovery acceptance are separate checks; configuration in source alone does not prove Windows has applied it. Do not deliberately crash a service while print jobs are active. After retries are exhausted, inspect **Logs** and correct the underlying fault before restarting the service. Recovery preserves the journal; an uncertain submission is not automatically reprinted.
+
+The shared AppKit log lives in `%ProgramData%\QqqPrintAgent\logs`, with 30-day daily-file retention and the same restricted directory access. Service and companion events use source labels and retain severity for the viewer's **Errors only** filter. Credential-shaped values are redacted before persistence; callers must still never log tokens, enrollment payloads or document contents. Log files can contain local operational identifiers and should not be included in release artifacts.
+
+## Service controls and sign-in preference
+
+The companion's Settings page reads Windows Service Control Manager independently of the management pipe. **Start service** starts a stopped installation; **Restart service** is an explicit administrator action and can interrupt active submissions. Inspect uncertain jobs before retrying them. Each state transition has a 30-second wait limit, after which the app directs the operator to Windows Services and Logs. A missing installation links to the MSI release rather than pretending that a disconnected pipe can start a nonexistent service.
+
+Printing starts with Windows through the service. The companion tray is separate. **Start at sign-in** is off until an administrator explicitly enables it in the installed companion. This action registers a task for that administrator's SID, with an interactive token and highest available privileges. It saves no password and does not grant elevation to a standard user. The task starts only the fixed MSI-installed executable under Program Files, with `--tray`; development/portable executables and reparse-point substitutes are rejected. No task is registered merely by launching the app. Disable the preference to remove the current user's task.
+
+Enabling the preference is the administrator's authorization for future elevated launches at their sign-in. The task is not a general-purpose launcher: its executable and arguments are fixed. Users who do not need persistent tray status can leave it off and open the companion from the Start menu. Installed sign-in/task lifecycle acceptance remains separate from source and synthetic XML tests.
+
+Full uninstall removes only tasks whose name, current-user SID, interactive principal, logon trigger, installed command and `--tray` argument match this application's definition. Unknown or modified task definitions are left untouched. Major upgrades preserve these preferences; they replace the executable at the same installed path. Cleanup runs through the existing service executable as a deferred SYSTEM installer action before files are removed. This cleanup is not run during ordinary service startup.
+
+## Isolated native printer operations
+
+Discovery, submission and cancellation run in a short-lived child of the service or foreground CLI. The child receives its request through anonymous standard-input/output pipes; document bytes are not written to command arguments, activity logs or temporary files. Discovery and cancellation are limited to 20 seconds, and printing to 120 seconds. A timed-out child is terminated, with up to five seconds allowed for cleanup. A child also watches its parent and exits when the connector disappears.
+
+This bounds a blocked printer driver without stopping cloud connectivity permanently. It cannot retract bytes already accepted by a printer: timeout, crash or cancellation after submission begins is an uncertain outcome and requires inspection before reprinting. Existing spooler receipt cancellation verifies the exact QQQ document identity before requesting cancellation; it does not prove that no paper or label has already emerged. Synthetic subprocess tests use a fake backend and never access a printer.
+
 ## Prepare printers
 
 Install each printer and its appropriate vendor driver in Windows. Print a normal Windows test page, then discover the queues through QQQ Print Agent. The installed service must have access; a queue mapped only under a user's profile is insufficient. Use machine-installed USB/TCP/IP queues where possible. Network share authentication may require a deliberately configured service identity; that variant has not been qualified for this prerelease.
@@ -33,6 +63,8 @@ Set the queue's default paper/tray/orientation for PDF printing. The initial API
 Create a single-use enrollment code in QQQ. Open the companion, enter the QQQ server origin and code, then connect. Enrollment runs in the service so its credential is protected under the service identity. The desktop stores no device token.
 
 Do not enroll the development CLI under your user and copy its protected file into ProgramData: DPAPI credentials are bound to the account that created them. Use the companion or an elevated CLI `enroll --service` command.
+
+Foreground CLI commands use `%LocalAppData%\QqqPrintAgent` by default. An explicit `--data-dir` may select a separate development directory; directly using the service ProgramData directory is rejected. Use `--service` for installed-service enrollment/exposure. Foreground enrollment and exposure changes take the same exclusive worker lock as `run`, so stop that foreground worker before changing its connection or exposure. Both CLI and service dispatch native discovery/printing through a bounded child process.
 
 ## Upgrade and remove
 

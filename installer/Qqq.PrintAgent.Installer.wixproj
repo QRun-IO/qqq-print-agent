@@ -12,4 +12,7 @@
            Keep those signed vendor files unchanged; retain every other MSI ICE check. -->
       <SuppressIces>ICE03</SuppressIces>
    </PropertyGroup>
+   <ItemGroup>
+      <PackageReference Include="WixToolset.Util.wixext" />
+   </ItemGroup>
 </Project>

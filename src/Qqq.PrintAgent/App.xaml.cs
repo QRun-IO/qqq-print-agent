@@ -6,6 +6,7 @@
 using KofTwentyTwo.AppKit.Logging;
 using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
+using Qqq.PrintAgent.Windows;
 
 
 namespace Qqq.PrintAgent;
@@ -28,15 +29,18 @@ public partial class App : Application
 
 
    /// <summary>The app-wide activity log.</summary>
-   internal static IActivityLog Log { get; } = AppIdentity.CreateLog();
+   internal static IActivityLog Log { get; } = AgentActivityLog.Create(AgentStore.DefaultDirectory);
 
 
 
    /// <summary>Logs the start and opens the main window.</summary>
    protected override void OnLaunched(LaunchActivatedEventArgs args)
    {
-      Log.Info($"{AppIdentity.Info.DisplayName} started.");
-      _window = new MainWindow();
+      Log.Info($"[Companion] {AppIdentity.Info.DisplayName} started.");
+      // MainWindow disposes its tray and activation handles from its Closed event.
+      var mainWindow = new MainWindow();
+      _window = mainWindow;
       _window.Activate();
+      mainWindow.ApplyStartupVisibility();
    }
 }

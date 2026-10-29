@@ -3,6 +3,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Security.Principal;
+using System.Text;
 using Microsoft.UI.Dispatching;
 
 
@@ -13,16 +17,45 @@ namespace Qqq.PrintAgent;
 /// </summary>
 public static class Program
 {
+   /// <summary>A payload-free activation signal, scoped to this user's session and settings profile.</summary>
+   internal static EventWaitHandle? ActivationSignal { get; private set; }
+
    /// <summary>Initialize WinUI; machine installation and updates are handled by MSI.</summary>
    [STAThread]
    private static void Main()
    {
-      // The remainder mirrors the XAML-generated Main.
-      WinRT.ComWrappersSupport.InitializeComWrappers();
-      Microsoft.UI.Xaml.Application.Start(callbackParams =>
+      string key = InstanceKey();
+      using var signal = new EventWaitHandle(false, EventResetMode.AutoReset, key + ".activate");
+      using var instance = new Mutex(initiallyOwned: true, key, out bool firstInstance);
+      if(!firstInstance)
       {
-         SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
-         _ = new App();
-      });
+         signal.Set();
+         return;
+      }
+      ActivationSignal = signal;
+      try
+      {
+         // Native signal forwarding avoids blocking an STA on SDK async activation redirection.
+         WinRT.ComWrappersSupport.InitializeComWrappers();
+         Microsoft.UI.Xaml.Application.Start(callbackParams =>
+         {
+            SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
+            _ = new App();
+         });
+      }
+      finally
+      {
+         ActivationSignal = null;
+         instance.ReleaseMutex();
+      }
+   }
+
+   private static string InstanceKey()
+   {
+      using var identity = WindowsIdentity.GetCurrent();
+      using var process = Process.GetCurrentProcess();
+      string profile = Path.GetFullPath(AppIdentity.Paths.DataRoot).ToUpperInvariant();
+      string scope = $"{identity.User?.Value}|{process.SessionId}|{profile}";
+      return "Local\\QqqPrintAgent." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(scope)));
    }
 }
