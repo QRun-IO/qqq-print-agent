@@ -20,15 +20,20 @@ $svg = @"
 "@
 [IO.File]::WriteAllText((Join-Path $assetDirectory 'app-icon.svg'), $svg)
 
+<#
+.SYNOPSIS
+Renders the cloud-printer mark as one PNG byte array, with an optional health badge.
+#>
 function Get-MarkPng
 {
    [CmdletBinding()]
+   [OutputType([byte[]])]
    param([int] $Size, [string] $Status)
    $visual = [Windows.Media.DrawingVisual]::new()
    $drawing = $visual.RenderOpen()
    $drawing.PushTransform([Windows.Media.ScaleTransform]::new($Size / 512.0, $Size / 512.0))
-   $gradient = [Windows.Media.LinearGradientBrush]::new([Windows.Media.ColorConverter]::ConvertFromString('#0F766E'), [Windows.Media.ColorConverter]::ConvertFromString('#134E4A'), [Windows.Point]::new(0,0), [Windows.Point]::new(1,1))
-   $drawing.DrawRoundedRectangle($gradient, $null, [Windows.Rect]::new(48,48,416,416), 96, 96)
+   $gradient = [Windows.Media.LinearGradientBrush]::new([Windows.Media.ColorConverter]::ConvertFromString('#0F766E'), [Windows.Media.ColorConverter]::ConvertFromString('#134E4A'), [Windows.Point]::new(0, 0), [Windows.Point]::new(1, 1))
+   $drawing.DrawRoundedRectangle($gradient, $null, [Windows.Rect]::new(48, 48, 416, 416), 96, 96)
    $pen = [Windows.Media.Pen]::new([Windows.Media.Brushes]::White, 28)
    $pen.StartLineCap = $pen.EndLineCap = [Windows.Media.PenLineCap]::Round
    $pen.LineJoin = [Windows.Media.PenLineJoin]::Round
@@ -37,7 +42,7 @@ function Get-MarkPng
    {
       $color = switch($Status) { 'green' { '#16A34A' } 'orange' { '#F59E0B' } default { '#DC2626' } }
       $badge = [Windows.Media.SolidColorBrush]::new([Windows.Media.ColorConverter]::ConvertFromString($color))
-      $drawing.DrawEllipse($badge, [Windows.Media.Pen]::new([Windows.Media.Brushes]::White, 18), [Windows.Point]::new(408,408), 88, 88)
+      $drawing.DrawEllipse($badge, [Windows.Media.Pen]::new([Windows.Media.Brushes]::White, 18), [Windows.Point]::new(408, 408), 88, 88)
       $symbol = switch($Status) { 'green' { 'M 367 409 L 397 439 L 449 380' } 'orange' { 'M 408 363 V 414 M 408 445 V 449' } default { 'M 377 377 L 439 439 M 439 377 L 377 439' } }
       $drawing.DrawGeometry($null, $pen, [Windows.Media.Geometry]::Parse($symbol))
    }
@@ -47,11 +52,11 @@ function Get-MarkPng
    $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new()
    $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
    $stream = [IO.MemoryStream]::new()
-   try { $encoder.Save($stream); return ,$stream.ToArray() } finally { $stream.Dispose() }
+   try { $encoder.Save($stream); Write-Output -NoEnumerate -InputObject ($stream.ToArray()) } finally { $stream.Dispose() }
 }
 
-$sizes = @(16,20,24,32,40,48,64,128,256)
-$frames = @($sizes | ForEach-Object { ,(Get-MarkPng -Size $_) })
+$sizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256)
+$frames = @($sizes | ForEach-Object { , (Get-MarkPng -Size $_) })
 $writer = [IO.BinaryWriter]::new([IO.File]::Create((Join-Path $assetDirectory 'app.ico')))
 try
 {
@@ -69,7 +74,7 @@ try
 }
 finally { $writer.Dispose() }
 [IO.File]::WriteAllBytes((Join-Path $assetDirectory 'app-preview.png'), (Get-MarkPng -Size 256))
-foreach($status in @('green','orange','red'))
+foreach($status in @('green', 'orange', 'red'))
 {
    [IO.File]::WriteAllBytes((Join-Path $assetDirectory "tray-$status.png"), (Get-MarkPng -Size 64 -Status $status))
 }
