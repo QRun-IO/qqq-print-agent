@@ -1,0 +1,37 @@
+# Dependabot for a KofTwentyTwo repository: copy to .github/dependabot.yml and keep
+# the ecosystems the repository uses. Updates are grouped weekly. A 7-day cooldown
+# lets the community catch a compromised release before it reaches us; security
+# updates are not delayed by the cooldown.
+version: 2
+updates:
+  # Always: keeps SHA-pinned actions and reusable workflows current (K22-CI-11).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  # .NET: NuGet, including Directory.Packages.props and packages.lock.json.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+
+  # Other ecosystems (npm, pip/uv, cargo, gomod, swift, maven, gradle, terraform,
+  # docker): copy the block above and change package-ecosystem and directory.

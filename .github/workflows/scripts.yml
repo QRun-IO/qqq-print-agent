@@ -1,0 +1,42 @@
+# K22-CODE-SH: check repository tooling before merges and releases.
+name: scripts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  powershell:
+    name: powershell
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned analyzer and check scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+          Invoke-ScriptAnalyzer -Path build -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit
+      - name: Verify coverage gate rejection paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force
+          Import-Module Pester -RequiredVersion 5.7.1
+          $testConfiguration = New-PesterConfiguration
+          $testConfiguration.Run.Path = 'build/Assert-Coverage.Tests.ps1'
+          $testConfiguration.Run.Exit = $true
+          $testConfiguration.TestResult.Enabled = $true
+          $testConfiguration.TestResult.OutputPath = 'TestResults/coverage-gate.xml'
+          Invoke-Pester -Configuration $testConfiguration

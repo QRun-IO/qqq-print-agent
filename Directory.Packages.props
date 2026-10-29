@@ -1,0 +1,38 @@
+<Project>
+
+   <!-- Central package management (K22-CODE-CS-08): every version lives here, so
+        Dependabot bumps one line and all projects move together. Transitive pinning
+        lets a version here override a vulnerable transitive dependency. -->
+   <PropertyGroup>
+      <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+      <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+   </PropertyGroup>
+
+   <ItemGroup Label="Analyzers">
+      <PackageVersion Include="Meziantou.Analyzer" Version="3.0.296" />
+   </ItemGroup>
+
+   <ItemGroup Label="KofTwentyTwo AppKit">
+      <PackageVersion Include="KofTwentyTwo.AppKit" Version="0.1.0" />
+      <PackageVersion Include="KofTwentyTwo.AppKit.Updates" Version="0.1.0" />
+      <PackageVersion Include="KofTwentyTwo.AppKit.WinUI" Version="0.1.0" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+      <PackageVersion Include="H.NotifyIcon.WinUI" Version="2.4.1" />
+      <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+      <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+   </ItemGroup>
+
+   <ItemGroup Label="Tests">
+      <PackageVersion Include="coverlet.collector" Version="10.1.0" />
+      <PackageVersion Include="FlaUI.UIA3" Version="5.0.0" />
+      <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+      <PackageVersion Include="xunit" Version="2.9.3" />
+      <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+   </ItemGroup>
+
+<ItemGroup><PackageVersion Include="Microsoft.Data.Sqlite.Core" Version="10.0.0" /><PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" /><PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" /><PackageVersion Include="SQLitePCLRaw.provider.winsqlite3" Version="2.1.11" /></ItemGroup></Project>
+
+

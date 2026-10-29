@@ -1,0 +1,41 @@
+name: Bug report
+description: Something is broken
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Security problem? Do not file it here; use the private
+        [vulnerability report](https://github.com/QRun-IO/qqq-print-agent/security/advisories/new).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The exact version (Help, About, or `--version`).
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Include exact error messages.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and version, and anything else relevant.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines. Remove any tokens, passwords, or personal data first.
+      render: text
+

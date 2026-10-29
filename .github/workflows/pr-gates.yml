@@ -1,0 +1,20 @@
+# Pull request gates (K22-CI-01): Conventional Commit title, DCO sign-off, and
+# dependency review, from the shared KofTwentyTwo/standards workflow pinned by SHA
+# (K22-CI-11). Dependabot's github-actions ecosystem keeps the pin current.
+name: pr-gates
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: pr-gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr:
+    uses: KofTwentyTwo/standards/.github/workflows/pr.yml@fdf5ed029603c938615a32b1beca3628b8787945 # v0.1.2
+    permissions:
+      contents: read      # read the commits being merged
+      pull-requests: read # read the pull request title and dependency diff

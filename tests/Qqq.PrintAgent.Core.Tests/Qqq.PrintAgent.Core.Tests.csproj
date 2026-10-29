@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+   <PropertyGroup>
+      <TargetFramework>net10.0</TargetFramework>
+   </PropertyGroup>
+
+   <ItemGroup>
+      <PackageReference Include="coverlet.collector" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" />
+      <PackageReference Include="xunit" />
+      <PackageReference Include="xunit.runner.visualstudio" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <Using Include="Xunit" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <ProjectReference Include="..\..\src\Qqq.PrintAgent.Core\Qqq.PrintAgent.Core.csproj" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <!-- The app's own namespaces are global usings: their sort position against other
+           usings depends on the app's name, which the template replaces. -->
+      
+   </ItemGroup>
+
+<ItemGroup><Content Include="../../../qqq-print-protocol/fixtures/claim.response.json" Link="fixtures/claim.response.json" CopyToOutputDirectory="PreserveNewest" /><Content Include="../../../qqq-print-protocol/fixtures/enroll.response.json" Link="fixtures/enroll.response.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup></Project>
+
+

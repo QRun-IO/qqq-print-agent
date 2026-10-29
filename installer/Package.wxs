@@ -1,0 +1,59 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+   <Package Name="QQQ Print Agent" Manufacturer="QRun-IO" Version="$(ProductVersion)"
+            UpgradeCode="D761CD03-F616-4C98-9A94-9F590A36E449" Scope="perMachine" InstallerVersion="500">
+      <MajorUpgrade DowngradeErrorMessage="A newer QQQ Print Agent is already installed." />
+      <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+      <StandardDirectory Id="ProgramFiles64Folder">
+         <Directory Id="INSTALLFOLDER" Name="QQQ Print Agent">
+            <Directory Id="SERVICEDIR" Name="Service">
+               <Component Id="PrintService" Guid="8B5BA126-43F2-4F8D-91E5-8B9A5989D8BD" Bitness="always64">
+                  <File Id="ServiceExe" Source="$(PayloadRoot)\service\Qqq.PrintAgent.Service.exe" KeyPath="yes" />
+                  <ServiceInstall Id="InstallPrintService" Name="QqqPrintAgent" DisplayName="QQQ Print Agent"
+                                  Description="Connects outbound to QQQ and prints assigned documents using local Windows printer queues."
+                                  Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Vital="yes">
+                     <ServiceDependency Id="Spooler" />
+                  </ServiceInstall>
+                  <ServiceControl Id="ControlPrintService" Name="QqqPrintAgent" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+               </Component>
+               <Files Include="$(PayloadRoot)\service\**">
+                  <Exclude Files="$(PayloadRoot)\service\Qqq.PrintAgent.Service.exe" />
+                  <Exclude Files="$(PayloadRoot)\service\**.pdb" />
+               </Files>
+            </Directory>
+            <Directory Id="APPDIR" Name="App">
+               <Component Id="AgentCompanion" Guid="2FD52718-B33B-42AA-9E28-21B3B70FA4BB" Bitness="always64">
+                  <File Id="CompanionExe" Source="$(PayloadRoot)\app\Qqq.PrintAgent.exe" KeyPath="yes">
+                     <Shortcut Id="AgentStartMenu" Directory="AgentMenuDirectory" Name="QQQ Print Agent" Advertise="yes" WorkingDirectory="APPDIR" />
+                  </File>
+                  <RemoveFolder Id="RemoveAgentMenu" Directory="AgentMenuDirectory" On="uninstall" />
+               </Component>
+               <Files Include="$(PayloadRoot)\app\**">
+                  <Exclude Files="$(PayloadRoot)\app\Qqq.PrintAgent.exe" />
+                  <Exclude Files="$(PayloadRoot)\app\**.pdb" />
+               </Files>
+            </Directory>
+            <Directory Id="CLIDIR" Name="Cli">
+               <Files Include="$(PayloadRoot)\cli\**">
+                  <Exclude Files="$(PayloadRoot)\cli\**.pdb" />
+               </Files>
+            </Directory>
+         </Directory>
+      </StandardDirectory>
+
+      <StandardDirectory Id="CommonAppDataFolder">
+         <Directory Id="DATADIR" Name="QqqPrintAgent">
+            <!-- The journal must survive upgrades and uninstall/reinstall to avoid duplicate prints. -->
+            <Component Id="ProtectedAgentData" Guid="55147A95-1D16-452D-BF75-1F3834867D07" Permanent="yes" Bitness="always64">
+               <CreateFolder>
+                  <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+               </CreateFolder>
+            </Component>
+         </Directory>
+      </StandardDirectory>
+
+      <StandardDirectory Id="ProgramMenuFolder">
+         <Directory Id="AgentMenuDirectory" Name="QQQ Print Agent" />
+      </StandardDirectory>
+   </Package>
+</Wix>

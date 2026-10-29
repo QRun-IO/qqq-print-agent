@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+   <!-- The WinUI 3 shell: views, dialogs, and startup plumbing only; everything testable
+        lives in Qqq.PrintAgent.Core. The companion ships with the service in a machine MSI. -->
+   <PropertyGroup>
+      <OutputType>WinExe</OutputType>
+      <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+      <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+      <RootNamespace>Qqq.PrintAgent</RootNamespace>
+      <ApplicationManifest>app.manifest</ApplicationManifest>
+      <ApplicationIcon>Assets\Brand\app.ico</ApplicationIcon>
+      <Platforms>x86;x64;ARM64</Platforms>
+      <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+      <UseWinUI>true</UseWinUI>
+      <WindowsPackageType>None</WindowsPackageType>
+      <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+      <!-- The app supplies its WinUI startup entry point. -->
+      <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+   </PropertyGroup>
+
+   <ItemGroup>
+      <!-- The splash and About render the SVG; the window and taskbar use the .ico. Both must
+           reach the build and publish output, since the unpackaged app has no MSIX step. -->
+      <Content Include="Assets\Brand\app-icon.svg" CopyToOutputDirectory="PreserveNewest" />
+      <Content Include="Assets\Brand\app.ico" CopyToOutputDirectory="PreserveNewest" />
+      <Manifest Include="$(ApplicationManifest)" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <PackageReference Include="KofTwentyTwo.AppKit.WinUI" />
+      <PackageReference Include="H.NotifyIcon.WinUI" />
+      <PackageReference Include="Microsoft.WindowsAppSDK" />
+      <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <ProjectReference Include="..\Qqq.PrintAgent.Core\Qqq.PrintAgent.Core.csproj" />
+      <ProjectReference Include="..\Qqq.PrintAgent.Windows\Qqq.PrintAgent.Windows.csproj" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <!-- The app's own namespaces are global usings: their sort position against other
+           usings depends on the app's name, which the template replaces. -->
+      <Using Include="Qqq.PrintAgent.Core" />
+   </ItemGroup>
+
+</Project>

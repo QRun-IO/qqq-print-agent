@@ -1,0 +1,79 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      product-version:
+        type: string
+        default: '0.1.0'
+      release-version:
+        type: string
+        default: '0.1.0-rc.1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: qqq-print-agent
+    steps:
+      - name: Checkout agent
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qqq-print-agent
+          persist-credentials: false
+      - name: Checkout pinned protocol fixtures
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: QRun-IO/qqq-print-protocol
+          ref: f977bd01b62ceb7539190fd2861809537fcf504c
+          path: qqq-print-protocol
+          persist-credentials: false
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: qqq-print-agent/global.json
+      - name: Locked restore, build and test
+        run: ./build/Verify.ps1
+      - name: Build unsigned prerelease MSI
+        env:
+          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.0' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '0.1.0-rc.1' }}
+        run: |
+          ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Path artifacts/release -Force | Out-Null
+          $source = "artifacts/installer/QqqPrintAgent-$env:PRODUCT_VERSION-x64.msi"
+          $name = "QqqPrintAgent-v$env:RELEASE_VERSION-x64.msi"
+          Copy-Item -LiteralPath $source -Destination "artifacts/release/$name"
+          $hash = (Get-FileHash -LiteralPath "artifacts/release/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content artifacts/release/SHA256SUMS -Encoding ascii
+      - name: Upload unsigned installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x64-installer
+          path: qqq-print-agent/artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload tests and coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-test-results
+          path: qqq-print-agent/TestResults/**
+          if-no-files-found: warn
+          retention-days: 14
+

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+   <!-- Out-of-process UI tests: FlaUI drives the built app over UI Automation, so this
+        project references only Qqq.PrintAgent.Core (for the app's identity), never the WinUI
+        project. Build the solution first (dotnet build Qqq.PrintAgent.slnx -p:Platform=x64), or
+        point K22_UITEST_EXE at the exe to test. -->
+   <PropertyGroup>
+      <TargetFramework>net10.0-windows</TargetFramework>
+   </PropertyGroup>
+
+   <ItemGroup>
+      <PackageReference Include="FlaUI.UIA3" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" />
+      <PackageReference Include="xunit" />
+      <PackageReference Include="xunit.runner.visualstudio" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <Using Include="Xunit" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <ProjectReference Include="..\..\src\Qqq.PrintAgent.Core\Qqq.PrintAgent.Core.csproj" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <!-- The app's own namespaces are global usings: their sort position against other
+           usings depends on the app's name, which the template replaces. -->
+      <Using Include="Qqq.PrintAgent.Core" />
+   </ItemGroup>
+
+</Project>

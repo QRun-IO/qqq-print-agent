@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+   <!-- Everything that can be tested without a window lives here (architecture: "the
+        UI project contains views and framework plumbing only"). Held to 100% line
+        coverage by the CI gate. -->
+   <PropertyGroup>
+      <TargetFramework>net10.0</TargetFramework>
+   </PropertyGroup>
+
+   <ItemGroup>
+      <PackageReference Include="CommunityToolkit.Mvvm" />
+      <PackageReference Include="KofTwentyTwo.AppKit" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <InternalsVisibleTo Include="Qqq.PrintAgent.Core.Tests" />
+   </ItemGroup>
+
+</Project>

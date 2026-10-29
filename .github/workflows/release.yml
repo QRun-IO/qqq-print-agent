@@ -1,0 +1,70 @@
+name: prerelease
+
+on:
+  push:
+    tags: ['v*-rc.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prerelease-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      product: ${{ steps.validate.outputs.product }}
+      release: ${{ steps.validate.outputs.release }}
+    steps:
+      - name: Validate prerelease tag
+        id: validate
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [[ "$REF_TYPE" != tag || ! "$RELEASE_TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc\.([0-9]+)$ ]]; then
+            echo '::error::Run this workflow on an existing vX.Y.Z-rc.N tag.'
+            exit 1
+          fi
+          echo "product=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "release=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      product-version: ${{ needs.version.outputs.product }}
+      release-version: ${{ needs.version.outputs.release }}
+    permissions:
+      contents: read
+  publish:
+    needs: [version, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-x64-installer
+          path: release
+      - name: Publish unsigned prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          This is an unsigned Windows x64 prerelease of QQQ Print Agent for QQQ 4.1+.
+
+          Assets were built and tested by this workflow. Verify the MSI against SHA256SUMS before installing. No Authenticode signature or production qualification is claimed.
+
+          Features: AppKit setup and tray status, explicit printer exposure, outbound cloud polling, PDF and ZPL spool submission, durable local receipts and protected service credentials. Physical laser acceptance passed locally; Zebra hardware qualification remains pending.
+
+          See CHANGELOG.md, docs/INSTALLATION.md and docs/ACCEPTANCE.md in the tagged source for scope and limitations.
+          NOTES
+          gh release create "$RELEASE_TAG" release/* --verify-tag --prerelease --title "QQQ Print Agent $RELEASE_TAG" --notes-file release-notes.md

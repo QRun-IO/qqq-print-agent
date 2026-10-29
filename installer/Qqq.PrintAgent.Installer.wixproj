@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+   <PropertyGroup>
+      <OutputType>Package</OutputType>
+      <InstallerPlatform>x64</InstallerPlatform>
+      <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.0</ProductVersion>
+      <PayloadRoot Condition="'$(PayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package</PayloadRoot>
+      <OutputName>QqqPrintAgent-$(ProductVersion)-x64</OutputName>
+      <DefineConstants>ProductVersion=$(ProductVersion);PayloadRoot=$(PayloadRoot)</DefineConstants>
+      <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+      <!-- Bundled Microsoft WinUI DLLs contain multi-language version resources exceeding
+           ICE03's Language-column limit, and newer MUI LCIDs absent from its static list.
+           Keep those signed vendor files unchanged; retain every other MSI ICE check. -->
+      <SuppressIces>ICE03</SuppressIces>
+   </PropertyGroup>
+</Project>

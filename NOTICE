@@ -1,0 +1,16 @@
+QQQ Print Agent
+Copyright (c) 2026 James Maes
+
+This project was generated from the KofTwentyTwo Windows application template:
+https://github.com/KofTwentyTwo/windows-app-template
+and uses KofTwentyTwo.AppKit / KofTwentyTwo.AppKit.WinUI:
+https://github.com/KofTwentyTwo/AppKit
+Their MIT attribution is retained in LICENSE and source files.
+
+Other dependencies include .NET, Windows App SDK/WinUI, Microsoft.Data.Sqlite,
+SQLitePCLRaw, CommunityToolkit.Mvvm and WiX. These projects retain their own
+licenses and copyright notices. Windows OS printing/PDF components and bundled
+Microsoft runtime binaries remain subject to their corresponding terms.
+
+The QQQ framework, qbit-printing and qqq-print-protocol are separate repositories;
+this notice does not change their licensing.

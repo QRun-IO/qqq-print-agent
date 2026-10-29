@@ -1,0 +1,72 @@
+<Project>
+
+   <!-- KofTwentyTwo .NET quality gate (standards: K22-CODE-CS, from
+        KofTwentyTwo/standards configs/dotnet). Every rule fails `dotnet build` locally
+        exactly as it fails in CI. -->
+   <PropertyGroup>
+      <Nullable>enable</Nullable>
+      <ImplicitUsings>enable</ImplicitUsings>
+      <LangVersion>latest</LangVersion>
+      <RuntimeIdentifiers Condition="'$(MSBuildProjectExtension)' != '.wixproj'">win-x64</RuntimeIdentifiers>
+      <IsPackable>false</IsPackable>
+
+      <!-- Warnings are errors; analyzers and .editorconfig style run in every build. -->
+      <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+      <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>
+      <AnalysisLevel>latest-recommended</AnalysisLevel>
+      <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+      <!-- Required for IDE0005 (unused usings) to run during build. CS1591 (missing XML
+           doc) stays on for packable projects and is silenced for everything else below. -->
+      <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+      <!-- Reproducible builds with source-linked symbols. -->
+      <Deterministic>true</Deterministic>
+      <EmbedUntrackedSources>true</EmbedUntrackedSources>
+      <PublishRepositoryUrl>true</PublishRepositoryUrl>
+      <IncludeSymbols>true</IncludeSymbols>
+      <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+      <!-- Supply chain: audit direct AND transitive packages; pin the whole graph. -->
+      <NuGetAudit>true</NuGetAudit>
+      <NuGetAuditMode>all</NuGetAuditMode>
+      <NuGetAuditLevel>low</NuGetAuditLevel>
+      <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+      <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+   </PropertyGroup>
+
+   <!-- CI: normalized paths, and restore must match the committed lock files exactly. -->
+   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true' or '$(CI)' == 'true'">
+      <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+      <RestoreLockedMode>true</RestoreLockedMode>
+   </PropertyGroup>
+
+   <!-- Only shipped libraries must document their public API. -->
+   <PropertyGroup Condition="'$(IsPackable)' != 'true'">
+      <NoWarn>$(NoWarn);CS1591</NoWarn>
+   </PropertyGroup>
+
+   <ItemGroup>
+      <!-- Repository-wide analyzers; versions live in Directory.Packages.props. -->
+      <PackageReference Include="Meziantou.Analyzer" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+   </ItemGroup>
+
+   <!-- Single version source. Local builds are <prefix>-dev; the release workflow passes
+        -p:Version=<tag-version>, which overrides both parts. SourceLink appends the git
+        commit as "+<sha>" on AssemblyInformationalVersion, which the About dialog and the
+        CLI's version output show as a short hash. -->
+   <PropertyGroup>
+      <VersionPrefix>0.1.0</VersionPrefix>
+      <VersionSuffix>rc.1</VersionSuffix>
+   </PropertyGroup>
+
+   <!-- Product metadata stamped into every assembly. -->
+   <PropertyGroup>
+      <Authors>James Maes</Authors>
+      <Product>QQQ Print Agent</Product>
+      <Copyright>Copyright (c) 2026 James Maes</Copyright>
+      <RepositoryUrl>https://github.com/QRun-IO/qqq-print-agent</RepositoryUrl>
+      <RepositoryType>git</RepositoryType>
+   </PropertyGroup>
+
+</Project>
+

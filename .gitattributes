@@ -1,0 +1,6 @@
+# Text is stored and checked out as LF on every OS (K22-CODE-07, K22-REPO-03).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.cmd text eol=crlf
+*.bat text eol=crlf
