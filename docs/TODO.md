@@ -16,3 +16,6 @@
 
 - [x] Runtime customer branding with validated fallback and deployment documentation.
 - [x] Persistent connection footer, native connection settings and direct service-log access.
+- [x] Original multi-resolution app icon and green/orange/red symbolic tray icons.
+- [x] Public repository, CI/security checks and v0.1.0-rc.1 MSI prerelease.
+- [ ] Finish the elevated interactive checks and P2 follow-ups in UX-REVIEW.md.
