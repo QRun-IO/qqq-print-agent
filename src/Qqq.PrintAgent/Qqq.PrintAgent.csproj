@@ -23,6 +23,7 @@
            reach the build and publish output, since the unpackaged app has no MSIX step. -->
       <Content Include="Assets\Brand\app-icon.svg" CopyToOutputDirectory="PreserveNewest" />
       <Content Include="Assets\Brand\app.ico" CopyToOutputDirectory="PreserveNewest" />
+      <Content Include="Assets\Brand\tray-*.png" CopyToOutputDirectory="PreserveNewest" />
       <Manifest Include="$(ApplicationManifest)" />
    </ItemGroup>
 

@@ -78,7 +78,7 @@ Set-Location qqq-print-agent
 ./build/Build-Installer.ps1 -ProductVersion 0.1.0 -ReleaseVersion 0.1.0-rc.1
 ```
 
-[Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+[Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 ## Current limits
 
@@ -87,4 +87,3 @@ This prerelease uses polling rather than WebSocket notifications. Custom PDF pap
 ## License and acknowledgments
 
 [MIT](LICENSE). The original Windows template and AppKit copyright notices are preserved. See [NOTICE](NOTICE) for the foundation and bundled dependency acknowledgments. QQQ and the printing QBit are separate projects with their own licenses.
-

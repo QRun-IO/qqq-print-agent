@@ -29,3 +29,5 @@ Recent logs are an in-memory ring and recent jobs are bounded snapshot queries o
 ## Follow-up
 
 Qualify signed upgrades, renderer worker isolation, stricter bounded IPC reads, broad hardware/driver behavior, credential rotation/re-enrollment with pending work, cancellation and retention. Revisit this document when any network, privilege or persistence boundary changes.
+
+Runtime branding is presentation-only, loaded from the existing administrator-restricted ProgramData directory. JSON size, text length, color syntax, HTTPS support links, and local PNG file size/dimensions are validated. No remote logo fetch occurs; malformed settings fall back to defaults. Machine identity, credentials and authorization are unaffected.

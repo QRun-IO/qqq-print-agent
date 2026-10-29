@@ -4,7 +4,7 @@
    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
    <Window.SystemBackdrop><MicaBackdrop /></Window.SystemBackdrop>
    <Grid x:Name="RootGrid" Loaded="Root_Loaded">
-      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
       <MenuBar>
          <MenuBarItem Title="File"><MenuFlyoutItem Text="Hide to tray" Click="Hide_Click" /><MenuFlyoutItem Text="Exit companion" Click="Exit_Click" /></MenuBarItem>
          <MenuBarItem Title="View">
@@ -15,14 +15,17 @@
             <ToggleMenuFlyoutItem x:Name="SplashToggle" Text="Show splash at startup" Click="Splash_Click" />
          </MenuBarItem>
          <MenuBarItem Title="Help">
-            <MenuFlyoutItem Text="Activity log" Click="ActivityLog_Click" AutomationProperties.AutomationId="ActivityLogMenuItem" />
-            <MenuFlyoutItem Text="About QQQ Print Agent" Click="About_Click" AutomationProperties.AutomationId="AboutMenuItem" />
+            <MenuFlyoutItem Text="Companion activity log" Click="ActivityLog_Click" AutomationProperties.AutomationId="ActivityLogMenuItem" />
+            <MenuFlyoutItem x:Name="AboutMenuItem" Text="About QQQ Print Agent" Click="About_Click" AutomationProperties.AutomationId="AboutMenuItem" />
          </MenuBarItem>
       </MenuBar>
       <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
          <StackPanel Spacing="20" Padding="32" MaxWidth="900" HorizontalAlignment="Stretch">
             <StackPanel Spacing="6">
-               <TextBlock Text="QQQ Print Agent" Style="{ThemeResource TitleTextBlockStyle}" />
+               <Image x:Name="CustomerLogo" Visibility="Collapsed" Width="128" Height="64" Stretch="Uniform" HorizontalAlignment="Left" />
+               <TextBlock x:Name="ProductHeading" Text="QQQ Print Agent" Style="{ThemeResource TitleTextBlockStyle}" TextWrapping="Wrap" />
+               <TextBlock x:Name="CompanyHeading" Visibility="Collapsed" TextWrapping="Wrap" />
+               <HyperlinkButton x:Name="SupportLink" Content="Contact support" Visibility="Collapsed" Padding="0" />
                <TextBlock Text="Connect this facility’s printers to QQQ." TextWrapping="Wrap" />
                <TextBlock Text="Close this window to keep status in your system tray. Printing continues in the Windows service." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                <StackPanel Orientation="Horizontal" Spacing="10">
@@ -31,15 +34,7 @@
                </StackPanel>
             </StackPanel>
             <InfoBar x:Name="FeedbackBar" IsOpen="True" IsClosable="False" Severity="Informational" Title="Checking service" Message="Contacting the local print service…" />
-            <Expander Header="Connection settings" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-            <StackPanel Spacing="10">
-               <TextBlock Text="Connect to QQQ" Style="{ThemeResource SubtitleTextBlockStyle}" />
-               <TextBlock Text="In QQQ, open Printing → Print devices → Actions → Enroll a print device. Enter the server address and the single-use enrollment code below." TextWrapping="Wrap" />
-               <TextBox x:Name="ServerBox" Header="QQQ server address" PlaceholderText="https://qqq.example.com" AutomationProperties.AutomationId="ServerAddress" />
-               <PasswordBox x:Name="EnrollmentBox" Header="Enrollment code" PlaceholderText="Paste the code from QQQ" AutomationProperties.AutomationId="EnrollmentCode" />
-               <Button x:Name="EnrollButton" Content="Connect this device" Click="Enroll_Click" Style="{ThemeResource AccentButtonStyle}" AutomationProperties.AutomationId="EnrollDevice" />
-            </StackPanel>
-            </Expander>
+            <Button x:Name="ConnectionButton" Content="Connection settings" Click="Connection_Click" AutomationProperties.AutomationId="ConnectionSettings" />
             <StackPanel Spacing="10">
                <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -61,5 +56,25 @@
             <TextBlock Text="Install updates using your organization’s approved installer or software management. The companion and service update together." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
          </StackPanel>
       </ScrollViewer>
+      <Border Grid.Row="2" Padding="20,12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+         <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <Ellipse x:Name="FooterDot" Width="12" Height="12" Fill="Red" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Spacing="2">
+               <TextBlock x:Name="FooterStatus" Text="Checking local service…" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.AutomationId="FooterStatus" />
+               <TextBlock x:Name="FooterContact" Text="Status refreshes every 5 seconds" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="2" Content="View service logs" Click="ServiceLogs_Click" VerticalAlignment="Center" AutomationProperties.AutomationId="ViewServiceLogs" />
+         </Grid>
+      </Border>
+      <ContentDialog x:Name="ConnectionDialog" Title="Connection settings" CloseButtonText="Close">
+         <StackPanel Spacing="12">
+            <TextBlock Text="In QQQ, open Printing → Print devices → Actions → Enroll a print device. Enter the server address and the single-use enrollment code below." TextWrapping="Wrap" />
+            <TextBox x:Name="ServerBox" Header="QQQ server address" PlaceholderText="https://qqq.example.com" AutomationProperties.AutomationId="ServerAddress" />
+            <PasswordBox x:Name="EnrollmentBox" Header="Enrollment code" PlaceholderText="Paste the code from QQQ" AutomationProperties.AutomationId="EnrollmentCode" />
+            <Button x:Name="EnrollButton" Content="Connect this device" Click="Enroll_Click" Style="{ThemeResource AccentButtonStyle}" AutomationProperties.AutomationId="EnrollDevice" />
+            <InfoBar x:Name="ConnectionFeedback" IsOpen="False" IsClosable="False" />
+         </StackPanel>
+      </ContentDialog>
    </Grid>
 </Window>

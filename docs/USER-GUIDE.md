@@ -2,7 +2,7 @@
 
 ## Setup and status
 
-Start **QQQ Print Agent** from the Start menu and accept the administrator prompt. Enter the full QQQ server origin, for example `https://warehouse.example.com`, and a fresh enrollment code from your QQQ administrator. Select **Connect**. The code is consumed once; later operation uses a device credential held by the background service.
+Start **QQQ Print Agent** from the Start menu and accept the administrator prompt. Open **Connection settings** (or **Connect this device** on an unenrolled machine). Enter the full QQQ server origin, for example `https://warehouse.example.com`, and a fresh enrollment code from your QQQ administrator. Select **Connect**. The code is consumed once; later operation uses a device credential held by the background service.
 
 The system tray shows green when connected and all exposed queues report ready, orange when connected but exposed printers need attention (including no printers selected), and red when disconnected or a recent job/runtime failure needs attention. Open the tray menu to show details. Closing the window hides the companion to the tray; exiting the companion still does not stop the service. If the service is not installed/running, the companion reports that it cannot reach the management pipe.
 
@@ -32,3 +32,7 @@ A physical reprint is a new printing action; follow your QQQ application's workf
 
 The details window shows the latest 50 local job states and the latest 100 service log entries. Logs are kept in memory for the running service session. No device credential or document bytes are included. The latest failed/uncertain job keeps health red until a later job succeeds; inspect the job before retrying. A red tray icon may also mean the service cannot be reached, not only that the cloud is down.
 
+
+The bottom status bar remains visible while scrolling. It shows the same health as the tray and the last successful QQQ contact; the companion refreshes its observation every five seconds, with longer waits possible during a timeout. **View service logs** opens a selectable diagnostic snapshot immediately. Close and reopen it to refresh. **Help → Companion activity log** opens the separate UI log. After a connection failure, previously shown printer/job/log details may be stale.
+
+Administrators can apply [customer branding](BRANDING.md) without rebuilding the app.

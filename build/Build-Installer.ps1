@@ -66,7 +66,7 @@ if($CertificateThumbprint)
 }
 else
 {
-   Write-Warning 'Unsigned development MSI. Sign through the release workflow before distribution.'
+   Write-Warning 'Unsigned prerelease MSI. Production distribution requires your approved code-signing process.'
 }
 Get-FileHash -LiteralPath $msi -Algorithm SHA256
 

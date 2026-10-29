@@ -10,6 +10,7 @@ Initial public prerelease for QQQ 4.1+.
 - Single-use enrollment, protected service credentials and outbound HTTPS polling using printing protocol v1.
 - Windows queue discovery with persistent local printer exposure choices.
 - System-tray health and a details surface for connection, printer status, jobs and recent service logs.
+- Runtime customer branding, persistent connection footer and native connection/service-log dialogs.
 - PDF rendering through the Windows PDF/GDI path; RAW ZPL submission for Zebra-compatible queues.
 - Local SQLite receipt/event journal, payload integrity checks and duplicate/uncertain-submission handling.
 - CLI enrollment, printer selection, status/snapshot and foreground diagnostic worker.

@@ -1,0 +1,89 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
+namespace Qqq.PrintAgent.Core.Tests;
+
+/// <summary>Machine branding changes presentation without changing deployment identity.</summary>
+public sealed class RuntimeBrandingTests
+{
+   [Fact]
+   public void ValidBrandingPreservesIdentityAndAttribution()
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      File.WriteAllText(path, """{"displayName":"Acme Print","companyName":"Acme","supportUrl":"https://support.example.com","accentColor":"#123ABC"}""");
+      var branding = RuntimeBranding.Load(path);
+      KofTwentyTwo.AppKit.AppInfo info = branding.Apply(AppIdentity.DefaultInfo);
+      Assert.Equal("Acme Print", info.DisplayName);
+      Assert.Equal("Acme", info.Tagline);
+      Assert.Equal("#123ABC", info.Brand.GradientStart);
+      Assert.Equal(new Uri("https://support.example.com"), branding.SupportUrl);
+      Assert.Equal(AppIdentity.DefaultInfo.Id, info.Id);
+      Assert.Equal(AppIdentity.DefaultInfo.Copyright, info.Copyright);
+      Assert.Equal(AppIdentity.DefaultInfo.RepositoryUrl, info.RepositoryUrl);
+      Assert.Equal(AppIdentity.DefaultInfo.DataDirectoryVariable, info.DataDirectoryVariable);
+   }
+
+   [Theory]
+   [InlineData("not json")]
+   [InlineData("[]")]
+   [InlineData("null")]
+   [InlineData("{\"displayName\":42,\"companyName\":\"bad\\nname\",\"supportUrl\":\"http://example.com\",\"accentColor\":\"red\",\"logoPath\":\"https://example.com/a.png\"}")]
+   public void InvalidSettingsFallBack(string json)
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      File.WriteAllText(path, json);
+      Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
+   }
+
+   [Fact]
+   public void MissingAndOversizedFilesFallBack()
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
+      File.WriteAllText(path, new string(' ', 16 * 1024 + 1));
+      Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
+   }
+
+   [Theory]
+   [InlineData("https://user:password@example.com")]
+   [InlineData("file:///C:/support.html")]
+   [InlineData("javascript:alert(1)")]
+   public void UnsafeSupportLinksAreIgnored(string support)
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { supportUrl = support, displayName = "Valid name" }));
+      var branding = RuntimeBranding.Load(path);
+      Assert.Null(branding.SupportUrl);
+      Assert.Equal("Valid name", branding.DisplayName);
+   }
+
+   [Fact]
+   public void OnlyLocalBoundedPngLogoIsAccepted()
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      string logo = temp.File("logo.png");
+      File.WriteAllBytes(logo, Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII="));
+      File.WriteAllText(path, """{"logoPath":"logo.png"}""");
+      Assert.Equal(logo, RuntimeBranding.Load(path).LogoPath);
+      File.WriteAllText(logo, "invalid image");
+      Assert.Null(RuntimeBranding.Load(path).LogoPath);
+      File.WriteAllText(path, """{"logoPath":"\\\\server\\share\\logo.png"}""");
+      Assert.Null(RuntimeBranding.Load(path).LogoPath);
+   }
+
+   [Fact]
+   public void LongNamesAreIgnored()
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { displayName = new string('x', 61), companyName = new string('x', 101) }));
+      Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
+   }
+}

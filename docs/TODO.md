@@ -13,3 +13,6 @@
 - [ ] Add renderer worker-process isolation, cancellation, retention and richer printer status.
 
 
+
+- [x] Runtime customer branding with validated fallback and deployment documentation.
+- [x] Persistent connection footer, native connection settings and direct service-log access.

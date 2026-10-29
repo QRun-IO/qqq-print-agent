@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
    <!-- Everything that can be tested without a window lives here (architecture: "the
-        UI project contains views and framework plumbing only"). Held to 100% line
-        coverage by the CI gate. -->
+        UI project contains views and framework plumbing only"). Coverage is reported
+        under the initial-prerelease exception documented in ADR 0002. -->
    <PropertyGroup>
       <TargetFramework>net10.0</TargetFramework>
    </PropertyGroup>

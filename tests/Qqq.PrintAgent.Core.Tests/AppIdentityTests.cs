@@ -16,7 +16,7 @@ public class AppIdentityTests
    public void Info_IdentifiesTheApp()
    {
       Assert.Equal("qqq-print-agent", AppIdentity.Info.Id);
-      Assert.Equal("QQQ Print Agent", AppIdentity.Info.DisplayName);
+      Assert.Equal("QQQ Print Agent", AppIdentity.DefaultInfo.DisplayName);
       Assert.EndsWith("_DATA_DIR", AppIdentity.Info.DataDirectoryVariable, StringComparison.Ordinal);
       Assert.NotNull(AppIdentity.Info.RepositoryUrl);
       Assert.NotEmpty(AppIdentity.Info.Attributions);
@@ -71,4 +71,3 @@ public class AppSettingsTests
       Assert.Equal("Ada", store.Load().ServerUrl);
    }
 }
-

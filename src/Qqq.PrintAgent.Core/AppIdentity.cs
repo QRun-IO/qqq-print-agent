@@ -18,7 +18,7 @@ namespace Qqq.PrintAgent.Core;
 public static class AppIdentity
 {
    /// <summary>Who the app is: id, names, links, credits, and brand.</summary>
-   public static AppInfo Info { get; } = new()
+   public static AppInfo DefaultInfo { get; } = new()
    {
       Id = "qqq-print-agent",
       DisplayName = "QQQ Print Agent",
@@ -47,6 +47,9 @@ public static class AppIdentity
 
 
 
+   public static RuntimeBranding Branding { get; } = RuntimeBranding.Load(RuntimeBranding.DefaultPath);
+   public static AppInfo Info { get; } = Branding.Apply(DefaultInfo);
+
    /// <summary>Where the app keeps its per-user data; honors the data-folder override variable.</summary>
    public static AppPaths Paths { get; } = new(Info);
 
@@ -60,5 +63,3 @@ public static class AppIdentity
    /// <summary>Creates the app's daily activity log under <see cref="AppPaths.LogsDirectory"/>.</summary>
    public static IActivityLog CreateLog() => FileActivityLog.ForApp(Info, Paths);
 }
-
-

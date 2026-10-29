@@ -45,13 +45,17 @@ public class AppTests
    public void Setup_ShowsConnectionAndStatusControls()
    {
       using var session = new AppSession();
+      session.ClickElement("ConnectionSettings");
       session.WaitForElement("ServerAddress");
       session.WaitForElement("EnrollmentCode");
+      Assert.Equal("Connect this device", session.WaitForElement("EnrollDevice").Name);
+      session.ClickButton("Close");
       session.WaitForElement("ServiceStatus");
       session.WaitForElement("AgentHealth");
+      session.WaitForElement("FooterStatus");
+      session.WaitForElement("ViewServiceLogs");
       session.WaitForElement("PrinterInventory");
       session.WaitForElement("RecentJobs");
-      Assert.Equal("Connect this device", session.WaitForElement("EnrollDevice").Name);
       session.WaitForElement("RefreshStatus");
       Assert.False(session.App.HasExited);
    }
@@ -103,6 +107,7 @@ public class AppTests
    public void InvalidConnection_ShowsActionableValidation()
    {
       using var session = new AppSession();
+      session.ClickElement("ConnectionSettings");
       session.EnterText("ServerAddress", "not-a-server-address");
       session.WaitFor(
          () => session.FindInApp(cf => cf.ByAutomationId("EnrollDevice")) is { IsEnabled: true } button ? button : null,
