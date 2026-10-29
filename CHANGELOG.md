@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1-rc.1 — 2026-10-29
+
+- Fix desktop startup by including the generated WinUI resource index and compiled window markup in the published app and MSI.
+- Fail installer packaging when required app resources are missing or empty.
+- Supersedes 0.1.0-rc.1, whose desktop companion failed before showing its window. The initial build and unit tests did not detect this packaging defect.
+
 ## 0.1.0-rc.1 — 2026-10-29
 
 Initial public prerelease for QQQ 4.1+.

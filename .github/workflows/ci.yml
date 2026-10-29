@@ -9,10 +9,10 @@ on:
     inputs:
       product-version:
         type: string
-        default: '0.1.0'
+        default: '0.1.1'
       release-version:
         type: string
-        default: '0.1.0-rc.1'
+        default: '0.1.1-rc.1'
 
 permissions:
   contents: read
@@ -50,8 +50,8 @@ jobs:
         run: ./build/Verify.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.0' }}
-          RELEASE_VERSION: ${{ inputs.release-version || '0.1.0-rc.1' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.1' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '0.1.1-rc.1' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

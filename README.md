@@ -9,7 +9,7 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **v0.1.0-rc.1 is a prerelease.** The first release focuses on enrollment, printer discovery, PDF/ZPL jobs and submission status. The MSI and first-party executables are unsigned. Windows may display an unrecognized-publisher prompt. Production signing and broad printer qualification remain follow-up work.
+> **v0.1.1-rc.1 is a prerelease.** The first release focuses on enrollment, printer discovery, PDF/ZPL jobs and submission status. The MSI and first-party executables are unsigned. Windows may display an unrecognized-publisher prompt. Production signing and broad printer qualification remain follow-up work.
 
 ## What works
 
@@ -77,7 +77,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.1.0 -ReleaseVersion 0.1.0-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.1.1 -ReleaseVersion 0.1.1-rc.1
 ```
 
 [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

@@ -45,4 +45,22 @@
       <Using Include="Qqq.PrintAgent.Core" />
    </ItemGroup>
 
+   <!-- Unpackaged dotnet publish must carry the generated WinUI resource index and
+        compiled XAML. These build outputs are not included by this SDK's publish items. -->
+   <Target Name="PublishWinUIResources" AfterTargets="ComputeFilesToPublish">
+      <Error Condition="!Exists('$(TargetDir)$(AssemblyName).pri')" Text="The WinUI application resource index was not generated." />
+      <Error Condition="!Exists('$(TargetDir)MainWindow.xbf')" Text="The WinUI window markup was not generated." />
+      <ItemGroup>
+         <ResolvedFileToPublish Include="$(TargetDir)$(AssemblyName).pri">
+            <RelativePath>$(AssemblyName).pri</RelativePath>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+         </ResolvedFileToPublish>
+         <_WinUICompiledXaml Include="$(TargetDir)**\*.xbf" />
+         <ResolvedFileToPublish Include="@(_WinUICompiledXaml)">
+            <RelativePath>%(_WinUICompiledXaml.RecursiveDir)%(_WinUICompiledXaml.Filename)%(_WinUICompiledXaml.Extension)</RelativePath>
+            <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+         </ResolvedFileToPublish>
+      </ItemGroup>
+   </Target>
+
 </Project>

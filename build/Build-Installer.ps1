@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = '0.1.0',
+   [string] $ProductVersion = '0.1.1',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '0.1.0-rc.1',
+   [string] $ReleaseVersion = '0.1.1-rc.1',
    [switch] $SkipPublish,
    [string] $CertificateThumbprint,
    [string] $TimestampServer
@@ -38,6 +38,16 @@ $executables = @(
 foreach($executable in $executables)
 {
    if(-not (Test-Path -LiteralPath $executable)) { throw "Missing published executable: $executable" }
+}
+
+# A successful .NET publish does not guarantee a usable unpackaged WinUI application.
+foreach($resource in @('App.xbf', 'MainWindow.xbf', 'Qqq.PrintAgent.pri'))
+{
+   $resourcePath = Join-Path $payloadRoot "app\$resource"
+   if(-not (Test-Path -LiteralPath $resourcePath -PathType Leaf) -or (Get-Item -LiteralPath $resourcePath).Length -eq 0)
+   {
+      throw "Missing published WinUI resource: $resource"
+   }
 }
 
 # A supplied certificate opts into signing; unsigned local builds are clearly labelled.
