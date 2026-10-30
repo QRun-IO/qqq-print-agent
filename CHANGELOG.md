@@ -5,6 +5,7 @@
 - Bound and cancel local management frames and server responses; apply a deadline to streamed document bodies.
 - Drain successful queued jobs without an extra idle delay while retaining independent heartbeats and failure backoff.
 - Preserve valid long job/printer names, close failed SQLite initialization handles and guard late UI completions after exit.
+- Carry explicit operator duplicate-risk consent for failed jobs that may already have reached a printer.
 - Require release security/CodeQL/script gates and verified artifacts before publication; add build provenance attestations.
 - Package from fresh output directories with locked restores and matching source, MSI and component versions.
 - Fresh regression gate: 237 tests, zero build warnings/errors. Installed audit acceptance and hosted provenance verification remain pending.
