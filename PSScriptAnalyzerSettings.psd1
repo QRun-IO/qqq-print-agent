@@ -1,5 +1,5 @@
 # KofTwentyTwo PowerShell analysis (K22-CODE-SH-05). CI runs:
-#   Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit
+#   ./build/Analyze-Scripts.ps1 (serial rule execution avoids upstream metadata races)
 # and `Invoke-Formatter` with the same settings for layout. PowerShell supports the
 # Kingsrook layout fully: next-line (Allman) braces and 3-space indentation.
 @{
