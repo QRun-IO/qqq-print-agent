@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using KofTwentyTwo.AppKit.Logging;
 
@@ -19,7 +18,7 @@ public sealed partial class AgentActivityLog : IActivityLog
 
    private AgentActivityLog(string directory)
    {
-      _log = new FileActivityLog(Path.Combine(Path.GetFullPath(directory), "logs"), "qqq-print-agent");
+      _log = new FileActivityLog(Path.Combine(Path.GetFullPath(directory), "logs"), "qqq-print-agent", retentionDays: 0);
    }
 
 
@@ -34,14 +33,14 @@ public sealed partial class AgentActivityLog : IActivityLog
    public string CurrentLogFilePath => _log.CurrentLogFilePath;
 
    /// <inheritdoc/>
-   public void Info(string message) => Write(() => _log.Info(Redact(message)));
+   public void Info(string message) => Write(_log.Info, message);
 
    /// <inheritdoc/>
-   public void Warning(string message) => Write(() => _log.Warning(Redact(message)));
+   public void Warning(string message) => Write(_log.Warning, message);
 
    /// <inheritdoc/>
    public void Error(string message, Exception? exception = null)
-      => Write(() => _log.Error(Redact(exception is null ? message : message + Environment.NewLine + exception)));
+      => Write(text => _log.Error(text), exception is null ? message : message + Environment.NewLine + exception);
 
 
 
@@ -75,27 +74,22 @@ public sealed partial class AgentActivityLog : IActivityLog
 
 
    /// <summary>A shared exclusive file handle spans each append and retention pass, across processes and sessions.</summary>
-   private void Write(Action append)
+   private void Write(Action<string> append, string message)
    {
-      long started = Stopwatch.GetTimestamp();
-      while(true)
+      try
       {
-         try
+         using FileStream ownership = AcquireOwnership();
+         LogSettings settings = ReadSettings();
+         PruneOwnedLogs(settings.RetentionDays);
+         string redacted = Redact(message);
+         if(CanAppend(redacted, settings))
          {
-            Directory.CreateDirectory(LogDirectory);
-            using FileStream ownership = new(Path.Combine(LogDirectory, "activity.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            append();
-            return;
+            append(redacted);
          }
-         catch(IOException) when(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(1))
-         {
-            Thread.Sleep(10);
-         }
-         catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
-         {
-            // Activity logging must never stop printing or the companion when the disk is unavailable.
-            return;
-         }
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         // Logging failures and daily size limits must not stop printing or the companion.
       }
    }
 }

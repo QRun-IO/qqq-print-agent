@@ -1,11 +1,29 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
    <Package Name="QQQ Print Agent" Manufacturer="QRun-IO" Version="$(ProductVersion)"
             UpgradeCode="D761CD03-F616-4C98-9A94-9F590A36E449" Scope="perMachine" InstallerVersion="500">
-      <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer QQQ Print Agent is already installed." />
+      <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer print connector is already installed." />
       <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+      <Property Id="BRANDNAME" Secure="yes" />
+      <Property Id="BRANDCOMPANY" Secure="yes" />
+      <Property Id="STORED_BRAND_NAME">
+         <RegistrySearch Id="FindBrandName" Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="DisplayName" Type="raw" Bitness="always64" />
+      </Property>
+      <Property Id="STORED_BRAND_COMPANY">
+         <RegistrySearch Id="FindBrandCompany" Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="CompanyName" Type="raw" Bitness="always64" />
+      </Property>
+      <SetProperty Id="BRANDNAME" Action="UseStoredBrandName" Value="[STORED_BRAND_NAME]" After="AppSearch" Condition="NOT BRANDNAME AND STORED_BRAND_NAME" />
+      <SetProperty Id="BRANDNAME" Action="UseDefaultBrandName" Value="QQQ Print Agent" After="UseStoredBrandName" Condition="NOT BRANDNAME" />
+      <SetProperty Id="BRANDCOMPANY" Action="UseStoredBrandCompany" Value="[STORED_BRAND_COMPANY]" After="UseDefaultBrandName" Condition="NOT BRANDCOMPANY AND STORED_BRAND_COMPANY" />
+      <SetProperty Id="BRANDCOMPANY" Action="UseDefaultBrandCompany" Value="QRun-IO" After="UseStoredBrandCompany" Condition="NOT BRANDCOMPANY" />
+      <SetProperty Id="ProductName" Action="SetBrandedProductName" Value="[BRANDNAME]" After="UseDefaultBrandCompany" />
+      <SetProperty Id="Manufacturer" Action="SetBrandedManufacturer" Value="[BRANDCOMPANY]" After="SetBrandedProductName" />
       <CustomAction Id="RemoveStartupTasks" FileRef="ServiceExe" ExeCommand="--remove-startup-tasks" Execute="deferred" Impersonate="no" Return="check" />
+      <CustomAction Id="ApplyBranding" FileRef="ServiceExe" ExeCommand="--apply-branding" Execute="deferred" Impersonate="no" Return="check" />
+      <CustomAction Id="RemoveBrandingShortcut" FileRef="ServiceExe" ExeCommand="--remove-branding-shortcut" Execute="deferred" Impersonate="no" Return="check" />
       <InstallExecuteSequence>
          <Custom Action="RemoveStartupTasks" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+         <Custom Action="ApplyBranding" After="WriteRegistryValues" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+         <Custom Action="RemoveBrandingShortcut" Before="RemoveRegistryValues" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       </InstallExecuteSequence>
 
       <StandardDirectory Id="ProgramFiles64Folder">
@@ -13,8 +31,8 @@
             <Directory Id="SERVICEDIR" Name="Service">
                <Component Id="PrintService" Guid="8B5BA126-43F2-4F8D-91E5-8B9A5989D8BD" Bitness="always64">
                   <File Id="ServiceExe" Source="$(PayloadRoot)\service\Qqq.PrintAgent.Service.exe" KeyPath="yes" />
-                  <ServiceInstall Id="InstallPrintService" Name="QqqPrintAgent" DisplayName="QQQ Print Agent"
-                                  Description="Connects outbound to QQQ and prints assigned documents using local Windows printer queues."
+                  <ServiceInstall Id="InstallPrintService" Name="QqqPrintAgent" DisplayName="[BRANDNAME]"
+                                  Description="Connects outbound to the print server and prints assigned documents using local Windows printer queues."
                                   Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Vital="yes">
                      <ServiceDependency Id="Spooler" />
                      <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart"
@@ -29,10 +47,7 @@
             </Directory>
             <Directory Id="APPDIR" Name="App">
                <Component Id="AgentCompanion" Guid="2FD52718-B33B-42AA-9E28-21B3B70FA4BB" Bitness="always64">
-                  <File Id="CompanionExe" Source="$(PayloadRoot)\app\Qqq.PrintAgent.exe" KeyPath="yes">
-                     <Shortcut Id="AgentStartMenu" Directory="AgentMenuDirectory" Name="QQQ Print Agent" Advertise="yes" WorkingDirectory="APPDIR" />
-                  </File>
-                  <RemoveFolder Id="RemoveAgentMenu" Directory="AgentMenuDirectory" On="uninstall" />
+                  <File Id="CompanionExe" Source="$(PayloadRoot)\app\Qqq.PrintAgent.exe" KeyPath="yes" />
                </Component>
                <Files Include="$(PayloadRoot)\app\**">
                   <Exclude Files="$(PayloadRoot)\app\Qqq.PrintAgent.exe" />
@@ -54,12 +69,11 @@
                <CreateFolder>
                   <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
                </CreateFolder>
+               <RegistryValue Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="DisplayName" Type="string" Value="[BRANDNAME]" />
+               <RegistryValue Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="CompanyName" Type="string" Value="[BRANDCOMPANY]" />
             </Component>
          </Directory>
       </StandardDirectory>
 
-      <StandardDirectory Id="ProgramMenuFolder">
-         <Directory Id="AgentMenuDirectory" Name="QQQ Print Agent" />
-      </StandardDirectory>
    </Package>
 </Wix>

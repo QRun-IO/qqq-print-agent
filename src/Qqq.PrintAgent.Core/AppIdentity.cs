@@ -50,7 +50,7 @@ public static class AppIdentity
 
 
 
-   public static RuntimeBranding Branding { get; } = RuntimeBranding.Load(RuntimeBranding.DefaultPath);
+   public static RuntimeBranding Branding { get; } = RuntimeBranding.LoadMachine();
    public static AppInfo Info { get; } = Branding.Apply(DefaultInfo);
 
    /// <summary>Where the app keeps its per-user data; honors the data-folder override variable.</summary>

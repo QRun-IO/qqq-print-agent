@@ -28,7 +28,7 @@ public sealed class AgentRuntimeTests
          {
             if(message.Contains("simulated timeout", StringComparison.Ordinal))
             { failed.TrySetResult(); }
-            if(string.Equals(message, "Connected to QQQ.", StringComparison.Ordinal))
+            if(string.Equals(message, "Connected to the print server.", StringComparison.Ordinal))
             { recovered.TrySetResult(); }
          }, new NoPrinters(), configuration => new PrintApiClient(configuration.ServerUrl, configuration.DeviceToken, new Handler(() => Interlocked.Increment(ref requests))), pipeName, () => new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly));
          running = runtime.RunAsync(stop.Token);
@@ -76,7 +76,7 @@ public sealed class AgentRuntimeTests
       Assert.StartsWith("Job acknowledged", acknowledged, StringComparison.Ordinal);
       Assert.Equal("GREEN", runtime.GetSnapshot().Health);
       string queued = await SendAsync(pipeName, new PipeRequest("test-print", PrinterId: "test-printer", Format: "PDF"), token);
-      Assert.StartsWith("Queued in QQQ", queued, StringComparison.Ordinal);
+      Assert.StartsWith("Queued on the server", queued, StringComparison.Ordinal);
    }
 
    private static async Task<string> SendAsync(string name, PipeRequest request, CancellationToken token)

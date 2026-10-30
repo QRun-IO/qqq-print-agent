@@ -18,6 +18,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       }
       await FlushAsync(token).ConfigureAwait(false);
       await api.HeartbeatAsync(token).ConfigureAwait(false);
+      if(journal.Pending().Count > 0)
+      {
+         // Drain a bounded outbox batch before claiming more work after an outage.
+         return;
+      }
       IReadOnlyList<PrinterInfo> inventory = printers.Discover();
       await api.InventoryAsync(inventory, token).ConfigureAwait(false);
       PrintJob? job = await api.ClaimAsync(token).ConfigureAwait(false);

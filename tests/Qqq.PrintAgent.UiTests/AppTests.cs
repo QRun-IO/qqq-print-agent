@@ -72,6 +72,9 @@ public class AppTests
       session.WaitForElement("FooterStatus");
       session.WaitForElement("ViewServiceLogs");
       session.ClickElement("NavigateJobs");
+      session.WaitForElement("JobTableHeader");
+      session.WaitForElement("PreviousJobPage");
+      session.WaitForElement("NextJobPage");
       session.WaitForElement("RecentJobs");
       session.WaitForElement("FooterStatus");
       session.ClickElement("NavigateSettings");
@@ -85,6 +88,22 @@ public class AppTests
       session.ClickElement("NavigatePrinters");
       session.WaitForElement("PrinterInventory");
       session.WaitForElement("RefreshStatus");
+      Assert.False(session.App.HasExited);
+   }
+
+   /// <summary>The computer metadata dialog permits inspection and cancellation without changing the service.</summary>
+   [Fact]
+   public void MetadataEditor_CanBeOpenedAndCanceled()
+   {
+      using var session = new AppSession();
+      session.WaitForElement("PrinterTableHeader");
+      session.ClickElement("NavigateSettings");
+      session.ClickElement("EditDeviceProfile");
+      session.WaitForElement("MetadataName");
+      session.WaitForElement("MetadataLocation");
+      session.WaitForElement("MetadataDescription");
+      session.ClickButton("Cancel");
+      session.WaitForElementGone("MetadataName");
       Assert.False(session.App.HasExited);
    }
 

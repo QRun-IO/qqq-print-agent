@@ -99,11 +99,24 @@ public sealed class RuntimeBrandingTests
    }
 
    [Fact]
-   public void LongNamesAreIgnored()
+   public void LabelsBeyondInstallerLimitAreIgnored()
    {
       using var temp = new TempDirectory();
       string path = temp.File("branding.json");
-      File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { displayName = new string('x', 61), companyName = new string('x', 101) }));
+      File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { displayName = new string('x', 181), companyName = new string('x', 181) }));
       Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
+   }
+
+   [Fact]
+   public void LongCustomerNamesArePreservedAndGenericDescriptionIsUsed()
+   {
+      using var temp = new TempDirectory();
+      string path = temp.File("branding.json");
+      string name = new('x', 180);
+      File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new { displayName = name, companyName = name }));
+      var branding = RuntimeBranding.Load(path);
+      Assert.Equal(name, branding.DisplayName);
+      Assert.Equal(name, branding.CompanyName);
+      Assert.DoesNotContain("QQQ", branding.Apply(AppIdentity.DefaultInfo).Description, StringComparison.Ordinal);
    }
 }

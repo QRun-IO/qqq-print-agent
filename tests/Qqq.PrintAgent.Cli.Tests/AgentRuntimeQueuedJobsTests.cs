@@ -53,7 +53,7 @@ public sealed class AgentRuntimeQueuedJobsTests
          Assert.Equal("QUEUED", details.Job.Status);
          Assert.Empty(details.Events);
          string result = await SendAsync(pipeName, new PipeRequest("cancel-job", JobId: queued.JobId), stop.Token);
-         Assert.StartsWith("QQQ accepted the cancellation before dispatch.", result, StringComparison.Ordinal);
+         Assert.StartsWith("The server accepted the cancellation before dispatch.", result, StringComparison.Ordinal);
          Assert.Equal(1, Volatile.Read(ref server.Cancellations));
          Assert.Empty(runtime.GetSnapshot().Jobs);
          Assert.Equal(0, printers.PrintAttempts);

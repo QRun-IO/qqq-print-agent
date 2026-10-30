@@ -49,12 +49,19 @@ public sealed partial class MainWindow
          string response = await AgentPipeClient.SendAsync(request);
          if(!IsActionError(response))
          {
-            Feedback("Request completed", response, InfoBarSeverity.Success);
+            string message = request.Operation switch
+            {
+               "set-device-profile" => "Computer details saved. They will synchronize when the service next contacts the server.",
+               "set-printer-profile" => "Printer details saved. They will synchronize when the service next contacts the server.",
+               "set-log-settings" => "Diagnostic log settings saved for the service and companion.",
+               _ => response,
+            };
+            Feedback("Request completed", message, InfoBarSeverity.Success);
          }
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
       {
-         Feedback("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached QQQ or the printer.", InfoBarSeverity.Warning);
+         Feedback("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", InfoBarSeverity.Warning);
       }
       finally
       {
@@ -71,7 +78,7 @@ public sealed partial class MainWindow
       }
       ComboBox format = new() { Header = "Test format", ItemsSource = printer.Formats, SelectedIndex = 0, MinWidth = 220 };
       StackPanel content = new() { Spacing = 12 };
-      content.Children.Add(new TextBlock { Text = $"Send one test to {printer.Name} through QQQ? This uses real paper or a label. The printer must be shared here and approved in QQQ.", TextWrapping = TextWrapping.Wrap });
+      content.Children.Add(new TextBlock { Text = $"Send one test to {PrinterLabel(printer)} through the server? This uses real paper or a label. The printer must be shared here and approved on the server.", TextWrapping = TextWrapping.Wrap });
       content.Children.Add(format);
       var dialog = new ContentDialog { Title = "Print a test", Content = content, PrimaryButtonText = "Print one test", CloseButtonText = "Back", DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot };
       if(await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary && format.SelectedItem is string selectedFormat)

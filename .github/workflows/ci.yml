@@ -9,10 +9,10 @@ on:
     inputs:
       product-version:
         type: string
-        default: '0.1.4'
+        default: '0.1.5'
       release-version:
         type: string
-        default: '0.1.4-rc.1'
+        default: '0.1.5-rc.1'
 
 permissions:
   contents: read
@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: QRun-IO/qqq-print-protocol
-          ref: 633f220644a9b844b3ac4a548d12d8f5c9ebfaf1
+          ref: a0de93b00e602abde9be77c1ec9103b670bf3c09
           path: qqq-print-protocol
           persist-credentials: false
       - name: Set up .NET
@@ -48,10 +48,12 @@ jobs:
           global-json-file: qqq-print-agent/global.json
       - name: Locked restore, build and test
         run: ./build/Verify.ps1
+      - name: Validate branded installer dry run
+        run: ./build/Test-BrandedInstaller.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.4' }}
-          RELEASE_VERSION: ${{ inputs.release-version || '0.1.4-rc.1' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.5' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '0.1.5-rc.1' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -59,8 +61,14 @@ jobs:
           $source = "artifacts/installer/QqqPrintAgent-$env:PRODUCT_VERSION-x64.msi"
           $name = "QqqPrintAgent-v$env:RELEASE_VERSION-x64.msi"
           Copy-Item -LiteralPath $source -Destination "artifacts/release/$name"
+          Copy-Item -LiteralPath build/Install-Branded.ps1 -Destination artifacts/release/Install-Branded.ps1
+          Copy-Item -LiteralPath docs/branding.example.json -Destination artifacts/release/branding.example.json
           $hash = (Get-FileHash -LiteralPath "artifacts/release/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $name" | Set-Content artifacts/release/SHA256SUMS -Encoding ascii
+          foreach ($file in @('Install-Branded.ps1', 'branding.example.json')) {
+            $hash = (Get-FileHash -LiteralPath "artifacts/release/$file" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $file" | Add-Content artifacts/release/SHA256SUMS -Encoding ascii
+          }
       - name: Upload unsigned installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

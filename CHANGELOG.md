@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5-rc.1 — 2026-10-30
+
+- Compact printer/job tables, stable row selection, full-text details and bounded 50-row job pages with prefix search.
+- Client-managed computer/printer names, descriptions and locations synchronized to QQQ without changing physical queue identities.
+- Indexed history queries, 200-event recovery batches and bounded detail maintenance; synthetic 10,000/30,000-job regression coverage.
+- Shared AppKit daily diagnostic logs with configurable retention/size, visible cap state and explicit safe clearing.
+- Same-MSI customer branding for the companion, installed product/service labels and Start menu shortcut; optional customer PNG/ICO artwork.
+- User confirmed the 0.1.4 tray icon works. No physical print was sent for this scope.
+
 ## 0.1.4-rc.1 — 2026-10-30
 
 - Restore the native File and Help menu bar, including Settings, Close, Exit, activity logs, help links, Check for Updates and About. Update commands share the existing AppKit coordinator and busy state.

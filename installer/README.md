@@ -18,6 +18,16 @@ Signing needs `signtool.exe` on PATH. The script signs the first-party executabl
 
 Install the resulting MSI through an elevated Windows Installer session. It installs `QqqPrintAgent` as an automatic LocalSystem service, depends on the Windows Spooler, starts the service, and adds the companion to the Start menu. Configure and test printers accessible to LocalSystem; user-only network printer mappings are not sufficient. The current companion's management pipe requires local administrator access.
 
+Customer branding uses this same MSI without a rebuild. Validate a deployment with PowerShell 7.4 or newer:
+
+```powershell
+./build/Install-Branded.ps1 -MsiPath 'C:\Deployment\QqqPrintAgent.msi' -BrandingFile './docs/branding.example.json' -WhatIf
+```
+
+Remove `-WhatIf` in an elevated administrator PowerShell to install. Optional `-ExpectedSHA256` verifies an approved release checksum first. The wrapper validates bounded JSON, 180-character customer/company labels, HTTPS support links and optional local PNG/ICO assets; it stages them under protected ProgramData and restores the previous configuration if MSI installation fails. It launches the standard `/i /passive /norestart` machine installation. The sample JSON needs no image files. The dry-run fixture `./build/Test-BrandedInstaller.ps1` validates inputs without requesting an installation and runs in CI after Verify.
+
+`BRANDNAME` and `BRANDCOMPANY` public MSI properties set the service display name and installed-product labels. Their persisted HKLM values are reused by subsequent ordinary MSI upgrades, including updates installed from the companion. The installer creates a branded shortcut in the all-users **Print Connectors** Start menu folder; rename/full-uninstall cleanup verifies the exact owned target before deleting it. Optional ICO branding affects the AppKit application icon and this shortcut; embedded release binaries/icons remain shared. Internal service/AppId/MSI upgrade identity and paths stay fixed, and source/license attribution remains visible. See [Customer branding](../docs/BRANDING.md) for configuration precedence, rename/reset behavior and asset limits.
+
 The installer protects `%ProgramData%\QqqPrintAgent` for SYSTEM and Administrators and preserves the journal/enrollment through upgrades and uninstall. It replaces app/service/CLI together and stops the old service before removing files. Preserved credentials/data can be deliberately removed by an administrator after decommissioning; do not delete the journal while a device still has unresolved print jobs.
 
 No inbound firewall rule or persistent privileged update daemon is installed. The companion uses AppKit update prompts with a machine MSI adapter: manual or optional startup checks use the fixed GitHub release feed, and installation requires confirmation and administrator rights. Protected staging and a copied CLI helper update all components together; completed stages/logs are retained for administrator review. Same-feed SHA-256 checks do not replace publisher signing. See [Updates](../docs/INSTALLATION.md#updates). Production release qualification must include signed installation, service-account printing while logged out, upgrade/reboot, and uninstall/reinstall recovery. Building an MSI alone does not establish those checks.

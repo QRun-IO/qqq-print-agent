@@ -98,7 +98,8 @@ public sealed class AgentStoreTests
          Assert.Equal(0, store.PruneHistory(maxDetailedJobs: 1));
          store.AcknowledgeFailure("unreviewed");
          store.Acknowledge("undelivered-event");
-         Assert.Equal(2, store.PruneHistory(maxDetailedJobs: 1));
+         Assert.Equal(1, store.PruneHistory(maxDetailedJobs: 1));
+         Assert.Single(store.GetJobDetails("unreviewed")!.Events);
          Assert.Equal("OUTCOME_UNKNOWN", store.GetState("unreviewed"));
          Assert.Equal("FAILED", store.GetState("undelivered"));
          Assert.Single(store.Incomplete());
@@ -251,7 +252,7 @@ public sealed class AgentStoreTests
          {
             connection.Open();
             using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "ALTER TABLE events DROP COLUMN connection_id";
+            command.CommandText = "DROP INDEX IF EXISTS events_outbox; DROP INDEX IF EXISTS events_job; DROP TABLE local_jobs; ALTER TABLE events DROP COLUMN connection_id";
             command.ExecuteNonQuery();
          }
          using(AgentStore migrated = new(directory))

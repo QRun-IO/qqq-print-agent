@@ -11,7 +11,7 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
-public sealed class AgentStore : IJobJournal, IDisposable
+public sealed partial class AgentStore : IJobJournal, IDisposable
 {
    static AgentStore() => SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_winsqlite3());
    private readonly SqliteConnection _database;
@@ -63,8 +63,20 @@ public sealed class AgentStore : IJobJournal, IDisposable
          command.CommandText = "UPDATE events SET connection_id=$scope WHERE connection_id IS NULL";
          command.Parameters.AddWithValue("$scope", _connectionScope);
          command.ExecuteNonQuery();
-         command.CommandText = "CREATE TABLE IF NOT EXISTS local_jobs(connection_id TEXT NOT NULL, job_id TEXT NOT NULL, printer_id TEXT, printer_name TEXT, title TEXT, format TEXT, state TEXT, last_event_json TEXT, updated_at TEXT, failure_acknowledged INTEGER NOT NULL DEFAULT 0, history_pruned INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(connection_id,job_id)); INSERT OR IGNORE INTO local_jobs(connection_id,job_id,state,last_event_json,updated_at) SELECT connection_id,job_id,state,json,recorded_at FROM events WHERE sequence IN (SELECT MAX(sequence) FROM events GROUP BY connection_id,job_id);";
+         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='local_jobs'";
+         bool migrateJobs = Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0;
+         using SqliteTransaction migration = _database.BeginTransaction();
+         command.Transaction = migration;
+         command.CommandText = "CREATE TABLE IF NOT EXISTS local_jobs(connection_id TEXT NOT NULL, job_id TEXT NOT NULL, printer_id TEXT, printer_name TEXT, title TEXT, format TEXT, state TEXT, last_event_json TEXT, updated_at TEXT, failure_acknowledged INTEGER NOT NULL DEFAULT 0, history_pruned INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(connection_id,job_id));";
          command.ExecuteNonQuery();
+         if(migrateJobs)
+         {
+            command.CommandText = "INSERT OR IGNORE INTO local_jobs(connection_id,job_id,state,last_event_json,updated_at) SELECT connection_id,job_id,state,json,recorded_at FROM events WHERE sequence IN (SELECT MAX(sequence) FROM events GROUP BY connection_id,job_id);";
+            command.ExecuteNonQuery();
+         }
+         migration.Commit();
+         command.Transaction = null;
+         CreateJobIndexes();
       }
    }
 
@@ -149,7 +161,7 @@ public sealed class AgentStore : IJobJournal, IDisposable
    public IReadOnlyList<(string JobId, PrintEvent Event)> Pending()
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "SELECT job_id,json FROM events WHERE connection_id=$scope AND acknowledged=0 ORDER BY sequence";
+      command.CommandText = "SELECT job_id,json FROM events WHERE connection_id=$scope AND acknowledged=0 ORDER BY sequence LIMIT 200";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       using SqliteDataReader reader = command.ExecuteReader();
       List<(string, PrintEvent)> events = [];
@@ -209,7 +221,7 @@ public sealed class AgentStore : IJobJournal, IDisposable
    public IReadOnlyList<JobSnapshot> RecentJobs()
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "SELECT job_id,state,updated_at,last_event_json,printer_id,printer_name,title,format,failure_acknowledged,history_pruned FROM local_jobs WHERE connection_id=$scope ORDER BY CASE WHEN state IN ('FAILED','OUTCOME_UNKNOWN') AND failure_acknowledged=0 THEN 0 ELSE 1 END,updated_at DESC LIMIT 50";
+      command.CommandText = "SELECT job_id,state,updated_at,last_event_json,printer_id,printer_name,title,format,failure_acknowledged,history_pruned FROM local_jobs WHERE connection_id=$scope ORDER BY CASE WHEN state IN ('FAILED','OUTCOME_UNKNOWN') AND failure_acknowledged=0 THEN 0 ELSE 1 END,updated_at DESC,job_id DESC LIMIT 50";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       using SqliteDataReader reader = command.ExecuteReader();
       List<JobSnapshot> jobs = [];
@@ -237,7 +249,7 @@ public sealed class AgentStore : IJobJournal, IDisposable
          job = ReadJob(reader);
          pruned = reader.GetInt32(9) != 0;
       }
-      command.CommandText = "SELECT json,recorded_at,acknowledged FROM events WHERE connection_id=$scope AND job_id=$job ORDER BY sequence";
+      command.CommandText = "SELECT json,recorded_at,acknowledged FROM events WHERE connection_id=$scope AND job_id=$job ORDER BY sequence DESC LIMIT 200";
       using SqliteDataReader eventsReader = command.ExecuteReader();
       List<JobEventSnapshot> events = [];
       while(eventsReader.Read())
@@ -245,6 +257,7 @@ public sealed class AgentStore : IJobJournal, IDisposable
          PrintEvent item = JsonSerializer.Deserialize<PrintEvent>(eventsReader.GetString(0), PrintApiClient.JsonOptions)!;
          events.Add(new JobEventSnapshot(item.EventId, item.Status, eventsReader.IsDBNull(1) ? "Earlier session" : eventsReader.GetString(1), item.Message, item.SpoolerJobId, eventsReader.GetInt32(2) != 0));
       }
+      events.Reverse();
       return new JobDetailsSnapshot(job, events, pruned);
    }
 
@@ -269,37 +282,6 @@ public sealed class AgentStore : IJobJournal, IDisposable
       return Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
    }
 
-   /// <summary>Prune delivered, reviewed terminal event detail while retaining deduplication state.</summary>
-   public int PruneHistory(int retainDays = 30, int maxDetailedJobs = 1000)
-   {
-      ArgumentOutOfRangeException.ThrowIfLessThan(retainDays, 1);
-      ArgumentOutOfRangeException.ThrowIfLessThan(maxDetailedJobs, 1);
-      using SqliteTransaction transaction = _database.BeginTransaction();
-      using SqliteCommand command = _database.CreateCommand();
-      command.Transaction = transaction;
-      command.CommandText = "SELECT job_id FROM local_jobs j WHERE connection_id=$scope AND history_pruned=0 AND state IN ('SPOOLED','SPOOLER_COMPLETED','FAILED','OUTCOME_UNKNOWN') AND (state IN ('SPOOLED','SPOOLER_COMPLETED') OR failure_acknowledged=1) AND NOT EXISTS (SELECT 1 FROM events e WHERE e.connection_id=j.connection_id AND e.job_id=j.job_id AND acknowledged=0) AND (updated_at<$cutoff OR job_id IN (SELECT job_id FROM local_jobs WHERE connection_id=$scope AND history_pruned=0 ORDER BY updated_at DESC LIMIT -1 OFFSET $limit))";
-      command.Parameters.AddWithValue("$scope", _connectionScope);
-      command.Parameters.AddWithValue("$cutoff", DateTimeOffset.UtcNow.AddDays(-retainDays).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
-      command.Parameters.AddWithValue("$limit", maxDetailedJobs);
-      List<string> jobs = [];
-      using(SqliteDataReader reader = command.ExecuteReader())
-      {
-         while(reader.Read())
-         {
-            jobs.Add(reader.GetString(0));
-         }
-      }
-      foreach(string jobId in jobs)
-      {
-         command.CommandText = "DELETE FROM events WHERE connection_id=$scope AND job_id=$job; UPDATE local_jobs SET history_pruned=1 WHERE connection_id=$scope AND job_id=$job";
-         command.Parameters.AddWithValue("$job", jobId);
-         command.ExecuteNonQuery();
-         command.Parameters.RemoveAt("$job");
-      }
-      transaction.Commit();
-      return jobs.Count;
-   }
-
    private static JobSnapshot ReadJob(SqliteDataReader reader)
    {
       PrintEvent? item = reader.IsDBNull(3) ? null : JsonSerializer.Deserialize<PrintEvent>(reader.GetString(3), PrintApiClient.JsonOptions);
@@ -315,7 +297,7 @@ public sealed class AgentStore : IJobJournal, IDisposable
    public IReadOnlyList<(string JobId, string State)> Incomplete()
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "SELECT job_id,state FROM local_jobs WHERE connection_id=$scope AND state IN ('RECEIVED','SUBMITTING')";
+      command.CommandText = "SELECT job_id,state FROM local_jobs WHERE connection_id=$scope AND state IN ('RECEIVED','SUBMITTING') LIMIT 200";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       using SqliteDataReader reader = command.ExecuteReader();
       List<(string, string)> incomplete = [];

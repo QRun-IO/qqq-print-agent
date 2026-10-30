@@ -27,6 +27,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private int _pollIntervalSeconds = 5;
    private IReadOnlyList<JobSnapshot> _queuedJobs = [];
    private long _queueGeneration;
+   private DateTimeOffset _nextHistoryMaintenance;
 
    /// <summary>No persistent database handles are held by the runtime.</summary>
    public void Dispose()
@@ -42,7 +43,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    {
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-      WriteLog("INFO", "QQQ Print Agent service started.");
+      WriteLog("INFO", "Print service started.");
       using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
       Task poll = PollAsync(lifetime.Token);
       Task pipe = ServePipeAsync(lifetime.Token);
@@ -104,12 +105,16 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       {
          if(queueGeneration == _queueGeneration)
          {
-            _queuedJobs = queued.Select(job => new JobSnapshot(job.JobId, "QUEUED", job.CreatedAt, "Waiting in QQQ; not yet received by this device.", null, job.PrinterId, null, job.Title, job.Format)).ToArray();
+            _queuedJobs = queued.Select(job => new JobSnapshot(job.JobId, "QUEUED", job.CreatedAt, "Waiting on the server; not yet received by this device.", null, job.PrinterId, null, job.Title, job.Format)).ToArray();
          }
       }
-      ExposedPrinterBackend exposed = new(_printers, store.GetExposedPrinterIds);
+      ExposedPrinterBackend exposed = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
       await new PrintWorker(api, exposed, store, message => WriteLog("INFO", message)).RunOnceAsync(token).ConfigureAwait(false);
-      _ = store.PruneHistory();
+      if(DateTimeOffset.UtcNow >= _nextHistoryMaintenance)
+      {
+         _ = store.PruneHistory();
+         _nextHistoryMaintenance = DateTimeOffset.UtcNow.AddMinutes(1);
+      }
       bool recovered;
       lock(_stateLock)
       {
@@ -117,7 +122,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          _failure = null;
       }
       if(recovered)
-      { WriteLog("INFO", "Connected to QQQ."); }
+      { WriteLog("INFO", "Connected to the print server."); }
    }
 
    private PrintApiClient CreateApi(AgentConfiguration configuration) => apiFactory?.Invoke(configuration) ?? new PrintApiClient(configuration.ServerUrl, configuration.DeviceToken);
@@ -139,10 +144,11 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       using AgentStore store = new(directory);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
-      var printers = _printers.Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId))).ToList();
+      var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location)).ToList();
       foreach(string missing in exposed.Where(id => !printers.Any(printer => string.Equals(printer.PrinterId, id, StringComparison.Ordinal))))
       {
-         printers.Add(new PrinterSnapshot(missing, "Previously exposed printer is unavailable", "", "", "OFFLINE", [], true));
+         PrinterProfile profile = store.GetPrinterProfile(missing);
+         printers.Add(new PrinterSnapshot(missing, "Previously exposed printer is unavailable", "", "", "OFFLINE", [], true, profile.DisplayName, profile.Description, profile.Location));
       }
       IReadOnlyList<JobSnapshot> jobs = store.RecentJobs();
       int attentionCount = store.NeedsAttentionCount();
@@ -154,12 +160,12 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          bool printerIssue = !printers.Any(printer => printer.Exposed) || printers.Any(printer => printer.Exposed && !string.Equals(printer.Status, "READY", StringComparison.Ordinal));
          bool jobFailure = attentionCount > 0;
          string health = !connected || jobFailure ? "RED" : printerIssue ? "ORANGE" : "GREEN";
-         string status = configuration is null ? "Not enrolled" : _failure ?? _heartbeatFailure ?? (!connected ? "Waiting for QQQ connection" : jobFailure ? $"Connected; {attentionCount} job(s) need review" : printerIssue ? "Connected; exposed printers need attention" : "Connected; exposed printers ready");
+         string status = configuration is null ? "Not enrolled" : _failure ?? _heartbeatFailure ?? (!connected ? "Waiting for server connection" : jobFailure ? $"Connected; {attentionCount} job(s) need review" : printerIssue ? "Connected; exposed printers need attention" : "Connected; exposed printers ready");
          if(_updatePauseUntil > DateTimeOffset.UtcNow)
          {
             status = "Printing paused for application update. " + status;
          }
-         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray());
+         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile());
       }
    }
 
@@ -202,7 +208,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             string line = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false) ?? "";
-            if(line.Length > 8192)
+            if(line.Length > 65536)
             {
                throw new InvalidDataException("Command too large.");
             }
@@ -214,7 +220,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          {
             WriteLog("ERROR", "Local command failed: " + exception.Message);
             string message = exception is System.Security.Cryptography.CryptographicException
-               ? "The saved connection cannot be opened. Open Settings, choose Connect this device or Sign in again, and use a fresh QQQ enrollment code. Existing job history will be preserved."
+               ? "The saved connection cannot be opened. Open Settings, choose Connect this device or Sign in again, and use a fresh server enrollment code. Existing job history will be preserved."
                : AgentActivityLog.Redact(exception.Message);
             try
             { await writer.WriteLineAsync("Error: " + message).ConfigureAwait(false); }
@@ -235,6 +241,13 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    {
       switch(request.Operation)
       {
+         case "set-device-profile":
+         case "set-printer-profile":
+         case "get-device-profile":
+         case "get-log-settings":
+         case "set-log-settings":
+         case "clear-logs":
+            return HandleSettingsCommand(request);
          case "prepare-update":
             return await PrepareUpdateAsync(token).ConfigureAwait(false);
          case "resume-after-update":
@@ -255,7 +268,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
                store.SetExposure(request.PrinterId, request.Exposed.Value, _printers.Discover());
             }
             WakePoll();
-            WriteLog("INFO", request.Exposed.Value ? "A printer was exposed to QQQ." : "A printer was hidden from QQQ.");
+            WriteLog("INFO", request.Exposed.Value ? "A printer was shared with the server." : "A printer was hidden from the server.");
             return JsonSerializer.Serialize(GetSnapshot(), PrintApiClient.JsonOptions);
          case "enroll":
             await _connectionGate.WaitAsync(token).ConfigureAwait(false);
@@ -276,6 +289,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          case "cancel-job":
          case "acknowledge-job":
          case "job-details":
+         case "query-jobs":
             return await HandleJobCommandAsync(request, token).ConfigureAwait(false);
          default:
             throw new InvalidOperationException("Unknown command.");
@@ -295,7 +309,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       {
          _queuedJobs = [];
       }
-      WriteLog("INFO", "Device enrolled with QQQ.");
+      WriteLog("INFO", "Device enrolled with the print server.");
       WakePoll();
       return $"Enrolled device {response.DeviceId}";
    }

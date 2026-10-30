@@ -30,7 +30,6 @@ public sealed partial class MainWindow : Window, IDisposable
    private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
    private string? _currentHealth;
    private readonly Dictionary<string, PrinterRowView> _printerRows = new(StringComparer.Ordinal);
-   private IReadOnlyList<JobSnapshot> _jobs = [];
    private bool _loadingLifecycle;
    private readonly Dictionary<string, System.Drawing.Icon> _trayIcons = new(StringComparer.Ordinal);
    private readonly RegisteredWaitHandle? _activationRegistration;
@@ -57,7 +56,7 @@ public sealed partial class MainWindow : Window, IDisposable
       trayMenu.Items.Add(new MenuFlyoutItem { Text = "Refresh status", Command = new AsyncRelayCommand(RefreshAsync) });
       trayMenu.Items.Add(new MenuFlyoutSeparator());
       trayMenu.Items.Add(new MenuFlyoutItem { Text = "Exit companion (printing continues)", Command = new RelayCommand(ExitCompanion) });
-      _tray = new TaskbarIcon { ToolTipText = AppIdentity.Info.DisplayName + " — service not connected", ContextFlyout = trayMenu, LeftClickCommand = new RelayCommand(ShowDetails) };
+      _tray = new TaskbarIcon { ToolTipText = TrayTooltip("Service not connected"), ContextFlyout = trayMenu, LeftClickCommand = new RelayCommand(ShowDetails) };
       SetHealth("RED");
       _tray.ForceCreate(enablesEfficiencyMode: false);
       App.Log.Info($"Tray icon created: {_tray.IsCreated}.");
@@ -84,6 +83,7 @@ public sealed partial class MainWindow : Window, IDisposable
    {
       Title = AppIdentity.Info.DisplayName;
       ProductHeading.Text = Title;
+      ToolTipService.SetToolTip(ProductHeading, Title);
       AboutButton.Content = "About " + Title;
       CompanyHeading.Text = AppIdentity.Branding.CompanyName ?? string.Empty;
       CompanyHeading.Visibility = AppIdentity.Branding.CompanyName is null ? Visibility.Collapsed : Visibility.Visible;
@@ -161,7 +161,7 @@ public sealed partial class MainWindow : Window, IDisposable
          "Jobs" => "Recent jobs received by this computer.",
          "Logs" => "Activity and diagnostics in the AppKit log viewer.",
          "Settings" => "Connection, appearance and application information.",
-         _ => "Choose which printers this computer shares with QQQ.",
+         _ => "Choose which printers this computer shares with the server.",
       };
       if(string.Equals(page, "Logs", StringComparison.Ordinal))
       {
@@ -170,6 +170,10 @@ public sealed partial class MainWindow : Window, IDisposable
       if(args.IsSettingsSelected && !_initializing)
       {
          await RefreshLifecycleAsync();
+      }
+      if(string.Equals(page, "Jobs", StringComparison.Ordinal) && !_initializing)
+      {
+         await RefreshJobPageAsync();
       }
    }
 
@@ -196,26 +200,26 @@ public sealed partial class MainWindow : Window, IDisposable
          || !string.IsNullOrEmpty(server.UserInfo) || !string.IsNullOrEmpty(server.Query) || !string.IsNullOrEmpty(server.Fragment)
          || string.IsNullOrWhiteSpace(EnrollmentBox.Password))
       {
-         Feedback("Check the connection details", "Enter an HTTPS server address and the enrollment code from QQQ. Localhost HTTP is supported for development.", InfoBarSeverity.Warning);
+         Feedback("Check the connection details", "Enter an HTTPS server address and the enrollment code from the server. Localhost HTTP is supported for development.", InfoBarSeverity.Warning);
          return;
       }
       SetBusy(true);
       try
       {
-         Feedback("Connecting", "The service is enrolling this device with QQQ…", InfoBarSeverity.Informational);
+         Feedback("Connecting", "The service is enrolling this device with the server…", InfoBarSeverity.Informational);
          string result = await AgentPipeClient.SendAsync(new PipeRequest("enroll", address.TrimEnd('/'), EnrollmentBox.Password.Trim()));
          if(!result.StartsWith("Enrolled device ", StringComparison.Ordinal))
          {
-            Feedback("Enrollment failed", result + " If the code expired or was already used, generate a fresh code in QQQ. Your previous connection is retained unless enrollment completes.", InfoBarSeverity.Error);
+            Feedback("Enrollment failed", result + " If the code expired or was already used, generate a fresh code in the server. Your previous connection is retained unless enrollment completes.", InfoBarSeverity.Error);
             return;
          }
-         Feedback("Device connected", result + ". Select which printers to expose here, then approve the discovered queues in QQQ.", InfoBarSeverity.Success);
+         Feedback("Device connected", result + ". Select which printers to expose here, then approve the discovered queues in the server.", InfoBarSeverity.Success);
          StatusText.Text = result;
          App.Log.Info("Print device enrollment completed.");
       }
       catch(OperationCanceledException)
       {
-         Feedback("Enrollment could not be confirmed", "The request timed out. Check the device list in QQQ before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", InfoBarSeverity.Warning);
+         Feedback("Enrollment could not be confirmed", "The request timed out. Check the device list in the server before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", InfoBarSeverity.Warning);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
       {
@@ -295,7 +299,7 @@ public sealed partial class MainWindow : Window, IDisposable
       catch(Exception exception) when(exception is JsonException or InvalidOperationException or KeyNotFoundException)
       {
          SetHealth("RED");
-         Feedback("Cannot read service response", "Install matching versions of the QQQ Print Agent companion and service, then refresh.", InfoBarSeverity.Error);
+         Feedback("Cannot read service response", "Install matching versions of print agent companion and service, then refresh.", InfoBarSeverity.Error);
       }
       finally
       {
@@ -331,6 +335,8 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          row.SetBusy(busy);
       }
+      UpdateSelectedPrinter();
+      UpdateSelectedJob();
    }
 
 
@@ -387,18 +393,19 @@ public sealed partial class MainWindow : Window, IDisposable
    {
       SetHealth(snapshot.Health);
       ConnectionButton.Content = snapshot.Enrolled ? "Sign in again" : "Connect this device";
-      ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to QQQ";
-      FooterContact.Text = $"Last QQQ contact: {FormatTime(snapshot.LastSuccessfulPoll)} · refreshes every 5 seconds";
+      ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to the server";
+      FooterContact.Text = $"Last server contact: {FormatTime(snapshot.LastSuccessfulPoll)} · refreshes every 5 seconds";
       StatusText.Text = snapshot.Status;
       ConnectionText.Text = snapshot.Enrolled
          ? $"Server: {snapshot.ServerUrl}\nDevice: {snapshot.DeviceId}\nLast successful poll: {FormatTime(snapshot.LastSuccessfulPoll)}"
-         : "This device has not been enrolled. Open Connection settings to connect it to QQQ.";
+         : "This device has not been enrolled. Open Connection settings to connect it to the server.";
       if(string.IsNullOrWhiteSpace(ServerBox.Text) && snapshot.ServerUrl is not null)
       {
          ServerBox.Text = snapshot.ServerUrl;
       }
       UpdatePrinters(snapshot);
-      UpdateJobs(snapshot);
+      UpdateDeviceProfile(snapshot);
+      _ = RefreshJobPageAsync();
       if(FeedbackBar.Title is "Checking service" or "Service unavailable" or "Cannot read service response")
       {
          FeedbackBar.IsOpen = false;
@@ -420,22 +427,18 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          if(!_printerRows.TryGetValue(printer.PrinterId, out PrinterRowView? row))
          {
-            row = new PrinterRowView(SetExposureAsync, TestPrintAsync, SecondaryBrush());
+            row = new PrinterRowView(SetExposureAsync);
             _printerRows.Add(printer.PrinterId, row);
             PrintersList.Items.Add(row);
          }
          row.Update(printer, FriendlyState(printer.Status), _busy);
       }
       PrintersEmpty.Visibility = snapshot.Printers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-      PrintersEmptyText.Text = snapshot.Enrolled ? "Add a printer in Windows Settings, then refresh this list." : "Connect this device to QQQ, then choose the printers to share.";
-      PrintersSummary.Text = $"{snapshot.Printers.Count} printers · {snapshot.Printers.Count(printer => printer.Exposed)} shared with QQQ";
+      PrintersEmptyText.Text = snapshot.Enrolled ? "Add a printer in Windows Settings, then refresh this list." : "Connect this device to the server, then choose the printers to share.";
+      PrintersSummary.Text = $"{snapshot.Printers.Count} printers · {snapshot.Printers.Count(printer => printer.Exposed)} shared with the server";
+      UpdateSelectedPrinter();
    }
 
-   private void UpdateJobs(AgentSnapshot snapshot)
-   {
-      _jobs = snapshot.Jobs;
-      RefreshJobList();
-   }
    /// <summary>Persist local printer exposure through the protected service pipe.</summary>
    private async Task SetExposureAsync(PrinterSnapshot printer, bool exposed)
    {
@@ -473,7 +476,7 @@ public sealed partial class MainWindow : Window, IDisposable
       string label = health switch { "GREEN" => "Connected and ready", "ORANGE" => "Connected · printers need attention", _ => "Disconnected or needs attention" };
       FooterStatus.Text = label;
       _trayStatus.Text = label;
-      _tray.ToolTipText = AppIdentity.Info.DisplayName + ": " + label;
+      _tray.ToolTipText = TrayTooltip(label);
       if(string.Equals(_currentHealth, health, StringComparison.Ordinal))
       {
          return;
@@ -496,6 +499,18 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       _currentHealth = health;
+   }
+
+   private static string TrayTooltip(string status)
+   {
+      string text = status + " — " + AppIdentity.Info.DisplayName;
+      // Windows notification icons allow 127 UTF-16 characters plus the terminator.
+      if(text.Length <= 127)
+      {
+         return text;
+      }
+      int length = char.IsHighSurrogate(text[125]) ? 125 : 126;
+      return text[..length] + "…";
    }
 
    /// <summary>Load the packaged status image synchronously before registering the tray icon.</summary>
@@ -582,7 +597,6 @@ public sealed partial class MainWindow : Window, IDisposable
       LogWindow.ShowSingle(App.Log, AppIdentity.Info);
    }
 
-   private static Brush SecondaryBrush() => (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
    private static string FormatTime(string? timestamp)
       => DateTimeOffset.TryParse(timestamp, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset time)

@@ -10,9 +10,34 @@ using KofTwentyTwo.AppKit;
 namespace Qqq.PrintAgent.Core;
 
 /// <summary>Optional machine-deployed presentation settings, read once when the companion starts.</summary>
-public sealed record RuntimeBranding(string? DisplayName = null, string? CompanyName = null, Uri? SupportUrl = null, string? AccentColor = null, string? LogoPath = null)
+public sealed record RuntimeBranding(string? DisplayName = null, string? CompanyName = null, Uri? SupportUrl = null, string? AccentColor = null, string? LogoPath = null, string? IconPath = null)
 {
    public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "QqqPrintAgent", "branding.json");
+
+   /// <summary>The MSI persists labels so unattended upgrades keep the customer identity.</summary>
+   public static RuntimeBranding LoadMachine()
+   {
+      RuntimeBranding branding = Load(DefaultPath);
+      if(!OperatingSystem.IsWindows())
+      {
+         return branding;
+      }
+      try
+      {
+         using Microsoft.Win32.RegistryKey? key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\QRunIO\PrintAgent");
+         return branding with
+         {
+            DisplayName = branding.DisplayName ?? ValidMachineLabel(key?.GetValue("DisplayName") as string),
+            CompanyName = branding.CompanyName ?? ValidMachineLabel(key?.GetValue("CompanyName") as string),
+         };
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+      {
+         return branding;
+      }
+   }
+
+   private static string? ValidMachineLabel(string? value) => string.IsNullOrWhiteSpace(value) || value.Length > 180 || value.Any(char.IsControl) ? null : value.Trim();
 
    /// <summary>Missing, unreadable, oversized or malformed settings fall back to the built-in appearance.</summary>
    public static RuntimeBranding Load(string path)
@@ -30,8 +55,8 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
          {
             return new();
          }
-         string? name = ReadText(root, "displayName", 60);
-         string? company = ReadText(root, "companyName", 100);
+         string? name = ReadText(root, "displayName", 180);
+         string? company = ReadText(root, "companyName", 180);
          string? support = ReadText(root, "supportUrl", 2048);
          Uri? supportUri = Uri.TryCreate(support, UriKind.Absolute, out Uri? candidate)
             && string.Equals(candidate.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
@@ -42,7 +67,8 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
             color = null;
          }
          string? logo = ReadText(root, "logoPath", 260);
-         return new(name, company, supportUri, color, ValidateLogo(logo, Path.GetDirectoryName(Path.GetFullPath(path))!));
+         string directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
+         return new(name, company, supportUri, color, ValidateLogo(logo, directory), ValidateIcon(ReadText(root, "iconPath", 260), directory));
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
       {
@@ -54,11 +80,62 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
    public AppInfo Apply(AppInfo defaults) => defaults with
    {
       DisplayName = DisplayName ?? defaults.DisplayName,
-      Tagline = CompanyName ?? defaults.Tagline,
-      Description = CompanyName is null ? defaults.Description : $"Print connector provided by {CompanyName}. Connect local printers to QQQ.",
+      Tagline = CompanyName ?? (DisplayName is null ? defaults.Tagline : "Cloud printing"),
+      Description = DisplayName is null && CompanyName is null ? defaults.Description : "Connect local printers to your print server.",
       Website = SupportUrl ?? defaults.Website,
-      Brand = !HasReadableWhiteText(AccentColor) ? defaults.Brand : defaults.Brand with { GradientStart = AccentColor!, GradientEnd = AccentColor! },
+      Brand = defaults.Brand with
+      {
+         GradientStart = HasReadableWhiteText(AccentColor) ? AccentColor! : defaults.Brand.GradientStart,
+         GradientEnd = HasReadableWhiteText(AccentColor) ? AccentColor! : defaults.Brand.GradientEnd,
+         IconIcoPath = IconPath ?? defaults.Brand.IconIcoPath,
+      },
    };
+
+   private static string? ValidateIcon(string? value, string directory)
+   {
+      if(value is null)
+      {
+         return null;
+      }
+      string path = Path.GetFullPath(value, directory);
+      if(path.StartsWith("\\\\", StringComparison.Ordinal) || !string.Equals(Path.GetExtension(path), ".ico", StringComparison.OrdinalIgnoreCase))
+      {
+         return null;
+      }
+      try
+      {
+         using FileStream stream = File.OpenRead(path);
+         if(stream.Length is < 22 or > 2 * 1024 * 1024)
+         {
+            return null;
+         }
+         using BinaryReader reader = new(stream);
+         if(reader.ReadUInt16() != 0 || reader.ReadUInt16() != 1)
+         {
+            return null;
+         }
+         int count = reader.ReadUInt16();
+         if(count is < 1 or > 64 || stream.Length < 6 + count * 16)
+         {
+            return null;
+         }
+         for(int index = 0; index < count; index++)
+         {
+            stream.Position = 6 + index * 16 + 8;
+            uint length = reader.ReadUInt32();
+            uint offset = reader.ReadUInt32();
+            if(length == 0 || offset < 6 + count * 16 || (long)offset + length > stream.Length)
+            {
+               return null;
+            }
+         }
+         return path;
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         return null;
+      }
+   }
 
    private static bool HasReadableWhiteText(string? color)
    {

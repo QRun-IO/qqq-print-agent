@@ -8,16 +8,18 @@ public sealed partial class AgentRuntime
    private async Task<string> HandleJobCommandAsync(PipeRequest request, CancellationToken token)
    {
       using AgentStore store = new(directory);
-      if(string.Equals(request.Operation, "job-details", StringComparison.Ordinal))
+      if(string.Equals(request.Operation, "query-jobs", StringComparison.Ordinal))
       {
-         JobDetailsSnapshot? details = store.GetJobDetails(RequiredJob(request));
+         JobSnapshot[] queued;
          lock(_stateLock)
          {
-            JobSnapshot? queued = _queuedJobs.FirstOrDefault(job => string.Equals(job.JobId, request.JobId, StringComparison.Ordinal));
-            if(details is null && queued is not null)
-            { details = new JobDetailsSnapshot(queued, [], false); }
+            queued = _queuedJobs.Take(50).ToArray();
          }
-         return JsonSerializer.Serialize(details ?? throw new InvalidOperationException("Job not found in this connection."), PrintApiClient.JsonOptions);
+         return JsonSerializer.Serialize(QueryJobsWithQueue(store, request.JobQuery ?? new JobQuery(), queued), PrintApiClient.JsonOptions);
+      }
+      if(string.Equals(request.Operation, "job-details", StringComparison.Ordinal))
+      {
+         return SerializeJobDetails(store, request);
       }
       if(string.Equals(request.Operation, "acknowledge-job", StringComparison.Ordinal))
       {
@@ -47,7 +49,7 @@ public sealed partial class AgentRuntime
             ?? throw new InvalidOperationException("Select an available printer.");
          if(!store.GetExposedPrinterIds().Contains(printer.PrinterId) || !printer.Formats.Contains(request.Format ?? "", StringComparer.Ordinal))
          {
-            throw new InvalidOperationException("Share the printer and select a supported format first. QQQ must also approve the printer.");
+            throw new InvalidOperationException("Share the printer and select a supported format first. The server must also approve the printer.");
          }
       }
       using PrintApiClient api = CreateApi(configuration);
@@ -60,10 +62,57 @@ public sealed partial class AgentRuntime
             _queuedJobs = _queuedJobs.Where(job => !string.Equals(job.JobId, request.JobId, StringComparison.Ordinal)).ToArray();
          }
       }
-      WriteLog("INFO", "QQQ accepted operator action " + request.Operation + ".");
+      WriteLog("INFO", "Server accepted operator action " + request.Operation + ".");
       WakePoll();
-      return string.IsNullOrEmpty(queuedJob) ? "QQQ accepted the cancellation before dispatch." : "Queued in QQQ. The new job will appear here when this device receives it.";
+      return string.IsNullOrEmpty(queuedJob) ? "The server accepted the cancellation before dispatch." : "Queued on the server. The new job will appear here when this device receives it.";
+   }
+
+   private string SerializeJobDetails(AgentStore store, PipeRequest request)
+   {
+      JobDetailsSnapshot? details = store.GetJobDetails(RequiredJob(request));
+      lock(_stateLock)
+      {
+         JobSnapshot? queued = _queuedJobs.FirstOrDefault(job => string.Equals(job.JobId, request.JobId, StringComparison.Ordinal));
+         if(details is null && queued is not null)
+         { details = new JobDetailsSnapshot(queued, [], false); }
+      }
+      return JsonSerializer.Serialize(details ?? throw new InvalidOperationException("Job not found in this connection."), PrintApiClient.JsonOptions);
    }
 
    private static string RequiredJob(PipeRequest request) => !string.IsNullOrWhiteSpace(request.JobId) ? request.JobId : throw new InvalidOperationException("Select a job first.");
+
+   internal static JobPage QueryJobsWithQueue(AgentStore store, JobQuery query, IReadOnlyList<JobSnapshot> queued)
+   {
+      // Validate paging/filter bounds before using them against the bounded cached prefix.
+      JobPage local = store.QueryJobs(query);
+      JobSnapshot[] prefix = queued.Take(50).DistinctBy(job => job.JobId, StringComparer.Ordinal).Where(job => MatchesQuery(job, query) && !store.HasJob(job.JobId)).ToArray();
+      int localOffset = Math.Max(0, query.Offset - prefix.Length);
+      if(localOffset != query.Offset)
+      {
+         local = store.QueryJobs(query with { Offset = localOffset });
+      }
+      var page = prefix.Skip(query.Offset).Take(query.PageSize).ToList();
+      page.AddRange(local.Jobs.Take(query.PageSize - page.Count));
+      return new JobPage(page, local.TotalCount + prefix.Length, query.Offset, query.PageSize, queued.Count >= 50);
+   }
+
+   private static bool MatchesQuery(JobSnapshot job, JobQuery query)
+   {
+      if(!string.IsNullOrWhiteSpace(query.Status) && !string.Equals(job.Status, query.Status, StringComparison.Ordinal))
+      {
+         return false;
+      }
+      if(!string.IsNullOrWhiteSpace(query.PrinterId) && !string.Equals(job.PrinterId, query.PrinterId, StringComparison.Ordinal))
+      {
+         return false;
+      }
+      if(query.NeedsAttentionOnly && (job.Status is not ("FAILED" or "OUTCOME_UNKNOWN") || job.FailureAcknowledged))
+      {
+         return false;
+      }
+      string? search = query.Search?.Trim();
+      return string.IsNullOrEmpty(search) || job.JobId.StartsWith(search, StringComparison.OrdinalIgnoreCase)
+         || job.Title?.StartsWith(search, StringComparison.OrdinalIgnoreCase) == true
+         || job.PrinterName?.StartsWith(search, StringComparison.OrdinalIgnoreCase) == true;
+   }
 }

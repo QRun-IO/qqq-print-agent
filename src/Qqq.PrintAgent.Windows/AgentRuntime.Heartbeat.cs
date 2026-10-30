@@ -42,7 +42,7 @@ public sealed partial class AgentRuntime
             if(configuration is not null)
             {
                using PrintApiClient api = CreateApi(configuration);
-               await api.HeartbeatAsync(token).ConfigureAwait(false);
+               await api.HeartbeatAsync(store.GetDeviceProfile(), token).ConfigureAwait(false);
                lock(_stateLock)
                {
                   if(generation == _connectionGeneration)

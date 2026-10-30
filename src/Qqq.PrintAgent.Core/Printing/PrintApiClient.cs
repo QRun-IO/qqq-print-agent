@@ -51,9 +51,11 @@ public sealed class PrintApiClient : IDisposable
       response.EnsureSuccessStatusCode();
    }
 
-   public async Task HeartbeatAsync(CancellationToken token)
+   public Task HeartbeatAsync(CancellationToken token) => HeartbeatAsync(null, token);
+
+   public async Task HeartbeatAsync(DeviceProfile? profile, CancellationToken token)
    {
-      using HttpResponseMessage response = await _http.PostAsJsonAsync("device/heartbeat", new { agentVersion = AgentVersion }, JsonOptions, token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _http.PostAsJsonAsync("device/heartbeat", new { agentVersion = AgentVersion, profile }, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
    }
 
