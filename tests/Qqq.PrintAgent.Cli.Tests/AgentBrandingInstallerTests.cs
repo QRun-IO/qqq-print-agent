@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Security.AccessControl;
 using Qqq.PrintAgent.Windows;
 
 
@@ -10,6 +11,37 @@ namespace Qqq.PrintAgent.Cli.Tests;
 
 public sealed class AgentBrandingInstallerTests
 {
+   [Fact]
+   public void StartMenuDeleteOnlyRulesAreAllowedWithoutRelaxingUpdaterProtection()
+   {
+      DirectorySecurity security = new();
+      security.SetSecurityDescriptorSddlForm("O:SYG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;0x10040;;;S-1-5-21-100-200-300-1001)");
+      AgentBrandingInstaller.ValidateShortcutSecurity(security);
+      Assert.Throws<UnauthorizedAccessException>(() => MsiUpdateInstaller.ValidateTrustedAcl(security, "S-1-5-18"));
+   }
+
+   [Theory]
+   [InlineData("0x2")]
+   [InlineData("0x4")]
+   [InlineData("0x40000")]
+   [InlineData("0x80000")]
+   [InlineData("GW")]
+   [InlineData("GA")]
+   public void StartMenuUntrustedContentAndPermissionChangesRemainRejected(string rights)
+   {
+      DirectorySecurity security = new();
+      security.SetSecurityDescriptorSddlForm("O:SYG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;" + rights + ";;;S-1-5-21-100-200-300-1001)");
+      Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingInstaller.ValidateShortcutSecurity(security));
+   }
+
+   [Fact]
+   public void StartMenuCannotPassUntrustedWritePermissionsToItsShortcutFiles()
+   {
+      DirectorySecurity security = new();
+      security.SetSecurityDescriptorSddlForm("O:SYG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OIIO;GW;;;S-1-5-21-100-200-300-1001)");
+      Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingInstaller.ValidateShortcutSecurity(security));
+   }
+
    [Fact]
    public void FriendlyShortcutKeepsItsLabelAndLongNamesHaveStableDistinctSuffixes()
    {

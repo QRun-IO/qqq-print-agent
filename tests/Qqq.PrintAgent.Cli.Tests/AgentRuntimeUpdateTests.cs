@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net;
 using System.Text;
@@ -19,7 +20,7 @@ public sealed class AgentRuntimeUpdateTests
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-update-" + Guid.NewGuid().ToString("N"));
       string pipeName = "QqqUpdate-test-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(15));
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(45));
       ServerState server = new();
       using(AgentStore store = new(directory))
       {
@@ -39,15 +40,13 @@ public sealed class AgentRuntimeUpdateTests
          server.Release.TrySetResult();
          Assert.Equal("Ready for update.", await preparation);
          int claims = Volatile.Read(ref server.Claims);
-         int heartbeats = Volatile.Read(ref server.Heartbeats);
-         await Task.Delay(1200, stop.Token);
+         server.ObservePause();
+         await server.PausedHeartbeat.Task.WaitAsync(stop.Token);
          Assert.Equal(claims, Volatile.Read(ref server.Claims));
-         Assert.True(Volatile.Read(ref server.Heartbeats) > heartbeats);
+         server.ObserveResume();
          Assert.Equal("Printing resumed.", await SendAsync(pipeName, "resume-after-update", stop.Token));
-         while(Volatile.Read(ref server.Claims) == claims)
-         {
-            await Task.Delay(10, stop.Token);
-         }
+         await server.ResumedClaim.Task.WaitAsync(stop.Token);
+         Assert.Equal(0, Volatile.Read(ref server.UnexpectedClaims));
       }
       finally
       {
@@ -73,9 +72,50 @@ public sealed class AgentRuntimeUpdateTests
    private sealed class ServerState
    {
       public int Claims;
-      public int Heartbeats;
+      public int UnexpectedClaims;
+      private long _pauseStarted;
+      private int _observingPause;
+      private int _observingResume;
       public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+      public TaskCompletionSource PausedHeartbeat { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+      public TaskCompletionSource ResumedClaim { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+      public void ObservePause()
+      {
+         _pauseStarted = Stopwatch.GetTimestamp();
+         Volatile.Write(ref _observingPause, 1);
+      }
+
+      public void ObserveResume()
+      {
+         Volatile.Write(ref _observingPause, 0);
+         Volatile.Write(ref _observingResume, 1);
+      }
+
+      public void RecordClaim()
+      {
+         Interlocked.Increment(ref Claims);
+         if(Volatile.Read(ref _observingPause) != 0)
+         {
+            Interlocked.Increment(ref UnexpectedClaims);
+            PausedHeartbeat.TrySetException(new InvalidOperationException("A new job was claimed while update preparation had paused printing."));
+         }
+         if(Volatile.Read(ref _observingResume) != 0)
+         {
+            ResumedClaim.TrySetResult();
+         }
+      }
+
+      public void RecordHeartbeat()
+      {
+         // Observe actual HTTP traffic after the original pause window (longer than
+         // the one-second poll interval), without assuming CI schedules it on time.
+         if(Volatile.Read(ref _observingPause) != 0 && Stopwatch.GetElapsedTime(_pauseStarted) >= TimeSpan.FromMilliseconds(1200))
+         {
+            PausedHeartbeat.TrySetResult();
+         }
+      }
    }
 
    private sealed class Handler(ServerState state) : HttpMessageHandler
@@ -84,13 +124,13 @@ public sealed class AgentRuntimeUpdateTests
       {
          if(request.RequestUri!.AbsolutePath.EndsWith("/claim", StringComparison.Ordinal))
          {
-            Interlocked.Increment(ref state.Claims);
+            state.RecordClaim();
             state.Entered.TrySetResult();
             await state.Release.Task.WaitAsync(cancellationToken);
          }
          if(request.RequestUri!.AbsolutePath.EndsWith("/heartbeat", StringComparison.Ordinal))
          {
-            Interlocked.Increment(ref state.Heartbeats);
+            state.RecordHeartbeat();
          }
          return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
       }

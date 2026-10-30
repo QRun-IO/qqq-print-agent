@@ -15,6 +15,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $payloadRoot = if($PayloadDirectory) { [IO.Path]::GetFullPath($PayloadDirectory) } else { Join-Path $projectRoot 'artifacts\package' }
 $installerProject = Join-Path $projectRoot 'installer\Qqq.PrintAgent.Installer.wixproj'
 $outputDirectory = Join-Path $projectRoot 'artifacts\installer'
+$buildDirectory = Join-Path $outputDirectory $ProductVersion
 
 # Each process has its own complete runtime directory; upgrades replace one coherent MSI.
 if(-not $SkipPublish)
@@ -64,10 +65,13 @@ if($CertificateThumbprint)
 }
 
 # WiX incremental inputs do not reliably invalidate a changed version/payload path.
-& dotnet build $installerProject --configuration Release -t:Rebuild '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$outputDirectory\"
+& dotnet build $installerProject --configuration Release -t:Rebuild '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$buildDirectory\"
 if($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
+$builtMsi = Join-Path $buildDirectory "QqqPrintAgent-$ProductVersion-x64.msi"
+if(-not (Test-Path -LiteralPath $builtMsi)) { throw 'MSI output was not produced.' }
+# Keep earlier verified installers available for recovery when WiX cleans its build outputs.
 $msi = Join-Path $outputDirectory "QqqPrintAgent-$ProductVersion-x64.msi"
-if(-not (Test-Path -LiteralPath $msi)) { throw 'MSI output was not produced.' }
+Copy-Item -LiteralPath $builtMsi -Destination $msi -Force
 
 if($CertificateThumbprint)
 {

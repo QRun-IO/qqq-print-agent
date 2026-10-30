@@ -6,6 +6,7 @@
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
@@ -32,9 +33,9 @@ public static class AgentBrandingInstaller
          throw new FileNotFoundException("The installed companion is missing.");
       }
       MsiUpdateInstaller.ValidateNoReparseComponents(InstalledExecutable);
-      ValidateDirectory(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
-      Directory.CreateDirectory(ShortcutDirectory);
-      ValidateDirectory(ShortcutDirectory);
+      ValidateShortcutDirectory(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
+      CreateShortcutDirectory();
+      ValidateShortcutDirectory(ShortcutDirectory);
       var branding = RuntimeBranding.LoadMachine();
       string filename = ShortcutFileName(branding.DisplayName ?? AppIdentity.DefaultInfo.DisplayName);
       string destination = ShortcutPath(ShortcutDirectory, filename);
@@ -63,7 +64,7 @@ public static class AgentBrandingInstaller
       }
       if(Directory.Exists(ShortcutDirectory))
       {
-         ValidateDirectory(ShortcutDirectory);
+         ValidateShortcutDirectory(ShortcutDirectory);
          RemoveOwnedShortcut(ShortcutPath(ShortcutDirectory, filename));
       }
       key!.DeleteValue("LastShortcutName", throwOnMissingValue: false);
@@ -190,6 +191,52 @@ public static class AgentBrandingInstaller
       using var identity = WindowsIdentity.GetCurrent();
       MsiUpdateInstaller.ValidateTrustedAcl(new DirectoryInfo(directory).GetAccessControl(), identity.User?.Value);
    }
+
+   private static void CreateShortcutDirectory()
+   {
+      MsiUpdateInstaller.ValidateNoReparseComponents(ShortcutDirectory);
+      if(Directory.Exists(ShortcutDirectory))
+      {
+         return;
+      }
+      DirectorySecurity security = new();
+      security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+      security.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+      foreach(WellKnownSidType principal in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid, WellKnownSidType.BuiltinUsersSid })
+      {
+         FileSystemRights rights = principal == WellKnownSidType.BuiltinUsersSid ? FileSystemRights.ReadAndExecute : FileSystemRights.FullControl;
+         security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(principal, null), rights, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+      }
+      new DirectoryInfo(ShortcutDirectory).Create(security);
+   }
+
+   private static void ValidateShortcutDirectory(string directory)
+   {
+      MsiUpdateInstaller.ValidateNoReparseComponents(directory);
+      ValidateShortcutSecurity(new DirectoryInfo(directory).GetAccessControl());
+   }
+
+   /// <summary>Shared Start menu deletion rights do not permit replacing executable content or shortcut targets.</summary>
+   internal static void ValidateShortcutSecurity(FileSystemSecurity security)
+   {
+      var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
+      if(descriptor.DiscretionaryAcl is null || !TrustedShortcutPrincipal(security.GetOwner(typeof(SecurityIdentifier))?.Value ?? ""))
+      {
+         throw new UnauthorizedAccessException("The shortcut directory requires a trusted owner and explicit access-control list.");
+      }
+      const FileSystemRights unsafeMutation = FileSystemRights.Write | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership | (FileSystemRights)0x10000000 | (FileSystemRights)0x40000000;
+      foreach(FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
+      {
+         bool trustedCreator = rule.PropagationFlags.HasFlag(PropagationFlags.InheritOnly) && string.Equals(rule.IdentityReference.Value, "S-1-3-0", StringComparison.Ordinal);
+         if(rule.AccessControlType == AccessControlType.Allow && (rule.FileSystemRights & unsafeMutation) != default && !TrustedShortcutPrincipal(rule.IdentityReference.Value) && !trustedCreator)
+         {
+            throw new UnauthorizedAccessException("The shortcut directory permits untrusted content or permission changes.");
+         }
+      }
+   }
+
+   private static bool TrustedShortcutPrincipal(string sid)
+      => sid is "S-1-5-18" or "S-1-5-32-544" or "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
 
    private static void RequireAdministrator()
    {

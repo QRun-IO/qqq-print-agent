@@ -1,7 +1,7 @@
 # TODO
 
-- [x] 0.1.5 source gate:196tests, zero warnings/errors; branding script analysis/dry-run passed.
-- [ ] Package/install0.1.5 and run the updated native table/profile UI acceptance.
+- [x] 0.1.5 source gate:204tests, zero warnings/errors; branding script analysis/dry-run passed.
+- [ ] Restore0.1.4 after failed branding upgrade (normal UAC was canceled), then install the corrected0.1.5 and run native table/profile UI acceptance.
 
 ## Implemented
 
