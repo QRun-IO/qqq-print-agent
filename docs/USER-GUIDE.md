@@ -1,6 +1,6 @@
 # Using QQQ Print Agent
 
-This guide describes installed 0.1.6. Its source gate and all 15 installed UI checks have passing results across the recorded runs; broader accessibility, resize and long-text checks remain separate. The service is Running after an authorized restart, with cloud connectivity offline. See [Acceptance](ACCEPTANCE.md).
+This guide describes installed 0.1.7. Its 227-test source gate and all 16 installed UI checks passed. Laser PDF and Zebra ZPL/PDF output were confirmed; barcode scanning, measured alignment and broader accessibility remain separate. See [Acceptance](ACCEPTANCE.md).
 
 ## Menus
 
@@ -16,9 +16,15 @@ If enrollment times out, check QQQ before trying again: the code may already hav
 
 In **Printers**, use the **Shared** checkbox for each intended queue, then approve it in QQQ. Local sharing and server approval are separate. Select a printer to expand its information directly below that row. **Settings** and **Print test** appear at the top of the expansion; there is no fixed printer-details area below the list. The description preview is limited to three lines, and **Windows diagnostics** expands the driver, port and identifier.
 
-Double-click the compact printer row, or select it and choose **Settings**, to open a wider editor. Text selection, sharing checkboxes and controls inside the expansion retain their own behavior. Read or edit the full description in Settings. **Print test** asks for confirmation and PDF/ZPL format before sending one real test through QQQ. Virtual PDF, XPS, fax and save-to-file queues that need interaction are unavailable to the service. **Windows printer settings** opens the native queue setup page.
+Double-click the compact printer row, or select it and choose **Settings**, to open a wider editor. Text selection, sharing checkboxes and controls inside the expansion retain their own behavior. Read or edit the full description in Settings. **Print test** asks for confirmation, format and stock/resolution before sending one real test through QQQ. It offers Letter/A4/4 × 6-inch PDF and 4 × 6-inch ZPL at 203/300/600 dpi. Compatible label queues default to ZPL; the suggested DPI must be checked against the printer. Virtual PDF, XPS, fax and save-to-file queues that need interaction are unavailable to the service. **Windows printer settings** opens the native queue setup page.
 
 Printers initially sort by **Name ascending**. Click Name, Status, Location, Formats or Shared to sort that column; click it again to reverse direction. The active header shows an arrow and an accessible direction label. Long table values use ellipses and full tooltips; the expanded fields and editor expose the values separately from technical queue identity.
+
+## Set machine media defaults before printing labels
+
+PDF uses the Windows driver's machine defaults; choosing a diagnostic document size does not rewrite them. For a ribbonless direct-thermal printer loaded with 4 × 6-inch labels, open **Windows printer settings → your queue → Printer properties → Advanced → Printing Defaults**. Set width **4.00 inches**, height **6.00 inches**, and the printing method to **Thermal Direct** (driver wording may vary). Preserve unrelated settings. **Printing Preferences** for the signed-in user may not affect the LocalSystem service.
+
+Use the method appropriate to your actual printer and supplies; Thermal Transfer expects ribbon. Check the printer's own mode and pause/error state as well as Windows. After correcting a mismatch, inspect existing output/queue state before requesting one new test. A job marked **SPOOLED** can still fail to produce paper or a label. See [label troubleshooting](TROUBLESHOOTING.md#zpl-prints-but-pdf-does-not).
 
 ## Jobs
 

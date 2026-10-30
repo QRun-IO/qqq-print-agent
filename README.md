@@ -9,13 +9,13 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Prerelease software.** Published v0.1.6-rc.1 assets are verified. Installed 0.1.6 passed its 211-test source gate and all 15 UI checks across fourteen plus one runs. The paired local QQQ connection is restored and the service is Running. A Zebra ZT411 at 300 dpi with 4 × 6-inch stock accepted one ZPL shipping test and one PDF barcode/alignment test through the system; physical output and barcode scanning await user confirmation. This used the loopback QQQ server, not a remote cloud deployment. The MSI remains unsigned; the earlier unexplained clean service stop remains under investigation.
+> **Prerelease software.** Published v0.1.7-rc.1 assets are verified. Installed 0.1.7 passed 227 unit/regression tests and all 16 UI checks in one run. The user confirmed laser PDF, Zebra ZPL and Zebra PDF output; the PDF label required correcting machine printer defaults to 4 × 6-inch direct thermal. Barcode scanning and measured alignment remain unverified. The MSI remains unsigned.
 
 ## What works
 
 - Discover Windows print queues and explicitly choose which ones to expose to QQQ.
 - Use native Printers, Jobs, Logs and Settings navigation, persistent status, reconnect and a visible health tray icon.
-- Browse compact printer/job tables with full details and confirmed test/reprint/cancel actions. Version 0.1.6 expands printer information inside the selected row and opens printer settings or job details on double-click.
+- Browse compact printer/job tables with full details and confirmed test/reprint/cancel actions. Expand printer information inside the selected row and open printer settings or job details on double-click.
 - Sort table headers in either direction. Printers default to Name ascending; jobs default to immutable Created time descending. Job sorting applies across the matching result set before paging.
 - Page through local history in groups of 50, searching by job ID, document-title or printer-name prefix.
 - Edit computer/printer names, descriptions and locations locally and synchronize them to QQQ.
@@ -25,6 +25,7 @@ The native setup and status application uses the same [KofTwentyTwo AppKit](http
 - Set theme and splash duration, and open project/help/release links and dependency credits.
 - Print packing slips and other PDFs through the installed Windows driver.
 - Send printer-ready ZPL to Zebra/ZDesigner queues.
+- Generate one QQQ-branded warehouse diagnostic at a time: Letter, A4 or 4 × 6-inch PDF; 4 × 6-inch ZPL at 203, 300 or 600 dpi. Native choices prefer ZPL on compatible label queues, with a driver-name DPI suggestion that the operator verifies.
 - Enroll once using a short-lived code from QQQ; the service stores its own protected device credential.
 - Keep printing when the desktop app is closed or the user logs out.
 - Preserve job receipts and outgoing status events across service restarts.
@@ -72,15 +73,13 @@ A printer visible only in a signed-in user's profile may not be available to the
 
 ## Validation so far
 
-Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.
+Installed **0.1.7, source 93dd5fc**, completed with MSI exit 0 and no reboot, retaining credentials. Management, computer profile, paged history, log settings, branded shortcut and connected-state checks passed. The source gate passed **227 tests (57 Core + 170 Windows/CLI)** with zero warnings/errors; [exact-source CI 41139885687](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41139885687) passed. All **16 installed UI checks passed in one run**, including the diagnostic media/DPI dialog, which was closed without printing during the UI test.
 
-The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and the final check found it Running, with cloud connectivity offline. No new physical print or separate visual inspection was performed. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
+The initial laser PDF and Zebra ZPL diagnostics were physically confirmed. The first Zebra PDF was accepted by the spooler but did not print: machine driver defaults were 4.09 × 2-inch Thermal Transfer. After correcting them to 4 × 6-inch Thermal Direct and clearing the hardware pause, one fresh reviewed PDF printed fully and correctly, as confirmed by the user. Barcode scanning and measured alignment remain unverified. See [the configuration diagnosis](docs/ACCEPTANCE.md).
 
-Historically, 0.1.4 passed a zero-warning build and 163 unit/regression tests. Its initial interactive run passed ten of eleven checks, with a log-window discovery timeout; the user separately confirmed that its tray icon worked. Those earlier results do not qualify later changes.
+[Release workflow 41140882339](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41140882339) succeeded. [v0.1.7-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.1.7-rc.1) is published, and its MSI, SHA256SUMS and two branding assets were verified. The MSI remains unsigned. The earlier unexplained clean service stop remains unresolved. These checks used the paired loopback QQQ server and do not establish a remote-cloud deployment, broad driver qualification or every accessibility scenario.
 
-Earlier end-to-end local acceptance used the actual Java QQQ printing server, enrolled Windows connector, and a Canon laser queue. The user confirmed correct physical PDF output. The installed LocalSystem service path and MSI install/uninstall were also exercised; see [acceptance notes](docs/ACCEPTANCE.md).
-
-The Zebra adapter is implemented, but physical Zebra qualification is pending connection of the printer. Automated tests cover the protocol fixtures, content integrity, duplicate suppression, uncertain submission, durable SQLite events and protected credential round trips. Test counts and remaining limits are recorded in the acceptance notes.
+Earlier laser paper output was confirmed on prior builds; those confirmations and historical installed results remain in [acceptance notes](docs/ACCEPTANCE.md).
 
 ## Development
 
@@ -91,7 +90,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.1.4 -ReleaseVersion 0.1.4-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.1.7 -ReleaseVersion 0.1.7-rc.1
 ```
 
 [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

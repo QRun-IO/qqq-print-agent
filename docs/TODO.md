@@ -1,5 +1,12 @@
 # TODO
 
+- [x] Install 0.1.7 from 93dd5fc: MSI exit 0, no reboot, credentials retained; management/profile/history/log settings/branding/connected-state checks passed.
+- [x] Pass 227 unit/regression tests (57 Core + 170 Windows/CLI), zero warnings/errors and exact-source CI 41139885687.
+- [x] Pass all 16 installed UI checks in one run, including read-only diagnostic media/DPI choices.
+- [x] Submit one built-in PDF Letter laser job, one ZPL 4 × 6/300-dpi Zebra job and one PDF 4 × 6 Zebra job; all SPOOLED and content hashes match reviewed previews.
+- [x] User confirmed laser PDF and Zebra ZPL output. Diagnose the missing Zebra PDF as machine media/method settings, correct to 4 × 6-inch Thermal Direct and confirm one replacement PDF printed fully and correctly.
+- [ ] Verify barcode scanning and measured alignment; successful appearance/counter evidence does not establish these checks.
+- [x] Release workflow 41140882339 succeeded; verify published v0.1.7-rc.1 MSI, SHA256SUMS and both branding assets.
 - [x] 0.1.5 source gate: 204 tests, zero warnings/errors; branding script analysis/dry-run passed.
 - [x] Restore 0.1.4, then install corrected 0.1.5; all 12 native UI checks have passing results; 204 tests and exact-source CI passed.
 - [x] Verify and install 0.1.6: 211 tests, clean build, passing exact-source CI, successful MSI upgrade and all 15 native UI checks across 14+1 runs.
@@ -34,13 +41,13 @@
 - [x] Supersede the earlier 0.1.3/0.1.4 desktop and log-window rerun items with the later passing installed checks. Historical evidence remains in ACCEPTANCE.md.
 - [x] Connect a Zebra ZT411 at 300 dpi with confirmed 4 × 6-inch stock; expose locally and enable in QQQ.
 - [x] Submit exactly one ZPL shipping test and one PDF barcode/alignment test through the paired local QQQ server; both reached SPOOLED and the service remained Running.
-- [ ] Obtain user confirmation of both Zebra outputs, alignment and barcode scanning. Spool acceptance alone does not establish physical output.
+- [ ] Obtain user confirmation of the earlier 0.1.6 Zebra outputs, alignment and barcode scanning. Spool acceptance alone does not establish physical output.
 - [ ] Qualify real in-app update: consent, failed/canceled download or elevation, retained state, helper handoff, coherent versions, relaunch and restart-required reporting.
 - [ ] Review completed protected update stages/logs manually; no automatic completed-stage retention policy is implemented.
 - [ ] Qualify remaining input-dependent selection/focus, long-value and metadata synchronization scenarios; passing UI checks do not cover every interaction.
 - [ ] Qualify installed credential recovery, queued/retry/cancel job controls, stale service state and bounded SCM recovery.
 - [ ] Qualify task enable/disable, sign-in, reboot and upgrade with retained credentials/journal.
-- [ ] Send a fresh explicitly authorized laser acceptance job through the final installed package; earlier laser confirmations belong to earlier builds.
+- [x] Send the authorized built-in PDF Letter laser diagnostic through installed 0.1.7; spool acceptance and user-confirmed physical output are recorded above.
 - [ ] Complete signing and distribution qualification; do not describe unsigned builds as signed.
 
 ## Broader qualification

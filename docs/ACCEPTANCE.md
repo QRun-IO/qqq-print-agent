@@ -1,5 +1,27 @@
 # Acceptance evidence
 
+## Zebra PDF configuration correction and confirmed output — 2026-10-30
+
+The user confirmed the laser PDF and Zebra ZPL output. The original Zebra PDF reached SPOOLED but produced no label. Windows machine **Printer properties → Advanced → Printing Defaults** was configured for **4.09 × 2 inches / Thermal Transfer**, while the installed stock is **4 × 6 inches and direct thermal, without ribbon**. The defaults were changed to **4.00 × 6.00 inches / Thermal Direct**, preserving other options; the saved machine DEVMODE dimensions were verified as 1016 × 1524 tenths of a millimeter. The printer was also returned to direct-thermal mode and unpaused without producing output during that correction.
+
+One fresh reviewed PDF was then submitted through QQQ and the installed service. It reached spool receipt 9, the hardware counter advanced from 492 to 493, and the printer remained direct thermal and unpaused. **The user confirmed the replacement PDF label printed fully and correctly.** No application-code fix was needed. Barcode scanning and measured alignment remain unverified; the earlier spool-only result is not retroactively counted as successful physical output.
+
+[Release workflow 41140882339](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41140882339) succeeded. [v0.1.7-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.1.7-rc.1) is published, and its MSI, SHA256SUMS and two branding assets were verified. The MSI remains unsigned. This new evidence supersedes the physical-confirmation and release-pending statements in the initial 0.1.7 checkpoint below. It does not qualify unrelated printer drivers or a remote cloud deployment.
+
+## Initial installed 0.1.7 and built-in diagnostic checkpoint — 2026-10-30
+
+Installed **0.1.7, source 93dd5fc**, completed with MSI exit 0 and no reboot, retaining credentials. Management, computer profile, paged history, log settings, branded shortcut and connected-state checks passed. The source gate passed **227 tests (57 Core + 170 Windows/CLI)** with zero warnings/errors; [exact-source CI 41139885687](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41139885687) passed. All **16 installed UI checks passed in one run**, including the diagnostic media/DPI dialog, which was closed without printing during the UI test.
+
+| Authorized built-in test | Generator profile | Recorded result |
+| --- | --- | --- |
+| Local Canon laser, one PDF | LETTER | SPOOLED; hash matches reviewed preview |
+| Zebra, one ZPL label | LABEL_4X6_300 | SPOOLED; hash matches reviewed preview |
+| Zebra, one PDF label | LABEL_4X6_300 | SPOOLED; hash matches reviewed preview |
+
+These requests used the installed management pipe, QQQ generator and installed Windows service. **Physical paper/label output, alignment and barcode/scanner confirmation remain pending.** The UI suite separately inspected the native format/media choices and canceled without submitting a job. No extra job or output is inferred from UI success. QQQ branding, embedded warehouse-readable characters and bounded ZPL graphic fields were reviewed in generated previews before these submissions.
+
+The local paired server was connected; this is loopback integration evidence, not remote-cloud deployment qualification. The v0.1.7-rc.1 tag is pushed and release automation is running; publication and release asset verification are still pending at this checkpoint. Earlier physical confirmations and historical failures below retain their original scope.
+
 ## Zebra submission checkpoint — 2026-10-30
 
 Published Windows v0.1.6-rc.1 assets are verified. The existing paired QQQ database was restarted on loopback port 18081 with credentials preserved. Read-only inspection found no pending jobs before startup, and the connection became healthy. The locally exposed and server-enabled Zebra ZT411 reported READY at 300 dpi with user-confirmed 4 × 6-inch stock.
