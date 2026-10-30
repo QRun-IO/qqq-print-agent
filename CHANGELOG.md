@@ -1,13 +1,14 @@
 # Changelog
 
-## 0.1.6-rc.1 — source changes, validation pending
+## 0.1.6-rc.1 — 2026-10-30
 
 - Expand selected printer information within its row, with actions first, labeled fields, a bounded description preview and expandable Windows diagnostics.
 - Open printer settings and job details by double-click, while preserving checkbox/button actions and text selection. Equivalent Settings and Details buttons remain available.
 - Use wider, window-responsive native dialogs for profile editing and structured job summary/event history.
 - Add sortable headers with printer Name ascending and job Created descending defaults. Creation time is preserved independently of status updates; missing historical creation times remain explicit.
 - Apply job ordering across the matching local history and bounded cloud queue preview before paging, using displayed labels and stable identifier tie-breaks. Sort indicators update only after a successful query.
-- Source verification and installed 0.1.6 acceptance are pending; no physical print is claimed for this UI work.
+- Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.
+- The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and the final check found it Running, with cloud connectivity offline. No new physical print or separate visual inspection was performed. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
 
 ## 0.1.5-rc.1 — 2026-10-30
 

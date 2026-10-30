@@ -2,7 +2,9 @@
 
 - [x] 0.1.5 source gate: 204 tests, zero warnings/errors; branding script analysis/dry-run passed.
 - [x] Restore 0.1.4, then install corrected 0.1.5; all 12 native UI checks have passing results; 204 tests and exact-source CI passed.
-- [ ] Verify and install 0.1.6 row expansion, double-click dialogs and full-history sorting (implementation complete).
+- [x] Verify and install 0.1.6: 211 tests, clean build, passing exact-source CI, successful MSI upgrade and all 15 native UI checks across 14+1 runs.
+- [ ] Diagnose the later clean service stop; normal-UAC restart restored Running, but the cause is unconfirmed.
+- [ ] Verify live cloud reconnection; the installed connection is offline.
 
 ## Implemented
 

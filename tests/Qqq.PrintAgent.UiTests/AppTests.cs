@@ -131,9 +131,15 @@ public class AppTests
       Assert.False(settings.IsOffscreen);
       Assert.True(settings.BoundingRectangle.Top >= row.BoundingRectangle.Top);
       Assert.True(settings.BoundingRectangle.Bottom <= row.BoundingRectangle.Bottom);
-      AutomationElement name = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByControlType(ControlType.Text)), "printer row text");
       session.MainWindow.SetForeground();
-      name.DoubleClick();
+      session.WaitFor(() => settings.IsEnabled ? settings : null, "printer settings to become available");
+      AutomationElement name = session.WaitFor(() => row.FindAllDescendants(cf => cf.ByControlType(ControlType.Text))
+         .Where(element => !element.IsOffscreen && element.BoundingRectangle.Width > 0 && element.BoundingRectangle.Height > 0
+            && element.BoundingRectangle.Top >= row.BoundingRectangle.Top && element.BoundingRectangle.Bottom <= settings.BoundingRectangle.Top)
+         .OrderBy(element => element.BoundingRectangle.Top).ThenBy(element => element.BoundingRectangle.Left).FirstOrDefault(), "visible compact printer header text above its inline actions");
+      System.Drawing.Rectangle header = name.BoundingRectangle;
+      Assert.True(header.Bottom <= settings.BoundingRectangle.Top, "The double-click target must be in the compact header, not selectable expanded details.");
+      FlaUI.Core.Input.Mouse.DoubleClick(new System.Drawing.Point(header.Left + header.Width / 2, header.Top + header.Height / 2));
       AutomationElement nameBox = session.WaitForElement("MetadataName");
       Assert.True(nameBox.BoundingRectangle.Width > 600, "The responsive printer settings editor should use the wide dialog layout.");
       session.WaitForElement("MetadataLocation");

@@ -2,7 +2,9 @@
 
 ## Scope and evidence
 
-This review separates current source behavior from installed acceptance. Installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. The subsequent 0.1.6 source changes below have not yet completed their source gate or installed acceptance. No new physical print was performed for this review.
+Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.
+
+The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and the final check found it Running, with cloud connectivity offline. No new physical print or separate visual inspection was performed. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
 
 The independent 0.1.6 source review inspected inline printer selection, double-click actions, dialog layout and lifetime, sortable headers, displayed sort keys and full-result paging. Reference patterns remain native WinUI NavigationView and menus, GCLO/MarkdownViewr settings, and the single built-in AppKit LogWindow. Source inspection does not establish Narrator, keyboard or resize behavior on an installed application.
 
@@ -31,7 +33,7 @@ The independent 0.1.6 source review inspected inline printer selection, double-c
 - Reused the displayed printer status for sorting. Job ordering uses human-readable status labels and the same title/printer fallbacks shown in rows.
 - Committed job sort arrows and accessible direction labels only after a successful query, avoiding old rows under a new order indicator when the service fails.
 
-These corrections were confirmed by source review. Their build, automated regressions and installed interaction checks are pending for 0.1.6.
+These corrections were confirmed by source review and the recorded source/installed UI gates. The additional scenarios listed below remain unqualified; no blanket visual or accessibility acceptance is claimed.
 
 ## Next installed checks
 
@@ -47,4 +49,4 @@ These corrections were confirmed by source review. Their build, automated regres
 
 The early build had a long scrolling setup page, duplicated log viewers, an expanded enrollment form and refresh that rebuilt controls. Later reviews identified missing service controls, actions, startup preference and accent constraints. These observations explain completed changes and are not descriptions of the current source.
 
-Historically, installed 0.1.4 had a zero-warning source gate and 163 unit/regression tests. Its interactive suite passed ten of eleven checks; log-window discovery timed out and the focused rerun did not execute. The user confirmed its tray icon worked. The later 0.1.5 installed results above supersede that interactive checkpoint for the checks actually rerun, but neither version qualifies the new 0.1.6 interactions.
+Historically, installed 0.1.4 had a zero-warning source gate and 163 unit/regression tests. Its interactive suite passed ten of eleven checks; log-window discovery timed out and the focused rerun did not execute. The user confirmed its tray icon worked. Installed 0.1.5 later passed twelve checks across ten plus two runs. Current 0.1.6 evidence is recorded above; prior version results remain historical.

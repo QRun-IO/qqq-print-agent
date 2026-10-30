@@ -1,6 +1,6 @@
 # Using QQQ Print Agent
 
-This guide describes the current 0.1.6 source. Its new sorting and inline-detail behavior is awaiting source and installed validation. Installed 0.1.5 has separate acceptance evidence; see [Acceptance](ACCEPTANCE.md).
+This guide describes installed 0.1.6. Its source gate and all 15 installed UI checks have passing results across the recorded runs; broader accessibility, resize and long-text checks remain separate. The service is Running after an authorized restart, with cloud connectivity offline. See [Acceptance](ACCEPTANCE.md).
 
 ## Menus
 

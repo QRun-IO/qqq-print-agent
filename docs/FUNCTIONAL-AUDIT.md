@@ -2,11 +2,13 @@
 
 Audit date: 2026-10-29. Scope: Windows service, AppKit companion, administrator management pipe, enrollment, SQLite journal, printer adapter, runtime branding, installer and regression coverage.
 
-## Current 0.1.6 follow-up — validation pending
+## Current 0.1.6 follow-up — recorded gates passed
 
-Installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. Current 0.1.6 source adds printer selection that expands information inline, double-click printer settings/job details, wider responsive native dialogs and sortable headers. Printers default to Name ascending; jobs default to immutable Created descending. Job ordering applies across the matching result set before paging, including the bounded cloud queue preview. Status updates retain creation time, and missing historical values remain explicit.
+Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.
 
-Read-only review confirmed bounded printer-description preview, actions before details, selectable-text/checkbox exclusions from double-click, scoped dialog sizing with open-window resize handling, displayed sort keys and applied indicators that update only after successful queries. The 0.1.6 source gate and installed checks are pending. See [UX review](UX-REVIEW.md) for the precise remaining interactions. No new physical print was performed for this follow-up.
+The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and the final check found it Running, with cloud connectivity offline. No new physical print or separate visual inspection was performed. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
+
+Read-only review confirmed bounded printer-description preview, actions before details, selectable-text/checkbox exclusions from double-click, scoped dialog sizing with open-window resize handling, displayed sort keys and applied indicators that update only after successful queries. The recorded 0.1.6 source gate and all fifteen installed UI checks now have passing results. See [UX review](UX-REVIEW.md) for the precise remaining interactions. No new physical print was performed for this follow-up.
 
 The remainder of this document preserves the original 0.1.1/0.1.2-era audit and its evidence. Test counts, pending approvals and package hashes below are historical, not the current release state. The original 1,000-job detail limit was later raised; use [History and log limits](SCALABILITY.md) for the current policy.
 

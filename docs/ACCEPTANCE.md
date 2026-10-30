@@ -1,10 +1,14 @@
 # Acceptance evidence
 
-## Current 0.1.6 source — validation pending
+## Installed 0.1.6 checkpoint — 2026-10-30
 
 Current source adds inline expansion of selected printer rows, double-click printer settings/job details, wider responsive native dialogs and sortable table headers. Printers default to Name ascending. Jobs default to immutable Created descending, with whole-result ordering before paging and explicit missing historical creation times. Status updates do not redefine a job's creation time.
 
-Independent source review confirmed the correction of unbounded expanded descriptions, text-selection conflicts, fixed dialog width after resize, mismatched visible sort keys and premature sort indicators. This is source-review evidence only. The 0.1.6 source gate and installed acceptance have not yet been recorded. Pending checks include keyboard selection and action buttons, checkbox and selectable-text double-click behavior, resizing open dialogs, long text, both sort directions across pages and service-query failure feedback. No physical print was sent for this UI review.
+Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.
+
+The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and the final check found it Running, with cloud connectivity offline. No new physical print or separate visual inspection was performed. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
+
+Source review also confirmed bounded expanded descriptions, text-selection guards, dialog resize handling, displayed sort keys and applied indicators. Additional checkbox/text-selection and service-query-failure scenarios remain to qualify; the recorded UI suite does not establish all possible interactions.
 
 ## Installed 0.1.5 checkpoint — 2026-10-30
 

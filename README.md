@@ -9,13 +9,13 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Prerelease software.** Installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. Current 0.1.6 source adds inline printer information, wider settings/details dialogs and sortable tables; its verification and installed acceptance are pending. The MSI and first-party executables are unsigned. Production signing and broad printer qualification remain follow-up work.
+> **Prerelease software.** Installed 0.1.6 passed its 211-test source gate and all 15 UI checks across fourteen plus one runs. The service required an authorized restart after an unexplained clean stop and is Running with cloud connectivity offline. The MSI remains unsigned; physical printing and broader qualification are separate.
 
 ## What works
 
 - Discover Windows print queues and explicitly choose which ones to expose to QQQ.
 - Use native Printers, Jobs, Logs and Settings navigation, persistent status, reconnect and a visible health tray icon.
-- Browse compact printer/job tables with full details and confirmed test/reprint/cancel actions. Current 0.1.6 source expands printer information inside the selected row and opens printer settings or job details on double-click.
+- Browse compact printer/job tables with full details and confirmed test/reprint/cancel actions. Version 0.1.6 expands printer information inside the selected row and opens printer settings or job details on double-click.
 - Sort table headers in either direction. Printers default to Name ascending; jobs default to immutable Created time descending. Job sorting applies across the matching result set before paging.
 - Page through local history in groups of 50, searching by job ID, document-title or printer-name prefix.
 - Edit computer/printer names, descriptions and locations locally and synchronize them to QQQ.
@@ -72,7 +72,9 @@ A printer visible only in a signed-in user's profile may not be available to the
 
 ## Validation so far
 
-Installed 0.1.5 passed **12 interactive checks across runs of ten and two tests**. The subsequent 0.1.6 source review covers inline printer expansion, double-click actions, wider responsive dialogs and whole-result sorting, but its source gate and installed acceptance are still pending. See [acceptance notes](docs/ACCEPTANCE.md), [session state](docs/SESSION-STATE.md) and [UX review](docs/UX-REVIEW.md) for evidence tied to each version.
+Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.
+
+The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and the final check found it Running, with cloud connectivity offline. No new physical print or separate visual inspection was performed. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
 
 Historically, 0.1.4 passed a zero-warning build and 163 unit/regression tests. Its initial interactive run passed ten of eleven checks, with a log-window discovery timeout; the user separately confirmed that its tray icon worked. Those earlier results do not qualify later changes.
 
