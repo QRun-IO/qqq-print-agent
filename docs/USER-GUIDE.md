@@ -1,5 +1,11 @@
 # Using QQQ Print Agent
 
+## Menus
+
+**File** provides **Settings**, **Close window** (hide to the tray), and **Exit companion**. Exiting the companion leaves the print service running. **Help** provides the shared **Activity log**, user guide, support, releases, project links, **Check for updates**, and **About**.
+
+**Help → Check for updates** and the Settings update button use the same AppKit update flow. Installation always requires confirmation and updates the companion, service and CLI together. Settings also controls optional startup update checks, theme and splash duration. Ctrl+Shift+S opens Settings; Ctrl+Shift+L opens Logs.
+
 ## Connect and select printers
 
 Open **QQQ Print Agent** from Start. In **Settings → QQQ connection**, choose **Connect this device**, enter your HTTPS QQQ server address and a fresh enrollment code, then connect. The Windows service holds the device credential; the companion never receives it. **Reconnect** immediately requests another connection attempt. **Sign in again** replaces the connection using a fresh code while preserving prior job evidence.

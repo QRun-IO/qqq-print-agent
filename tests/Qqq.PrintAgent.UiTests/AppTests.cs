@@ -17,6 +17,26 @@ namespace Qqq.PrintAgent.UiTests;
 [Collection("Desktop")]
 public class AppTests
 {
+   /// <summary>File and Help expose the same native settings/About flows without starting updates.</summary>
+   [Fact]
+   public void MenuBar_ProvidesStandardAppKitCommands()
+   {
+      using var session = new AppSession();
+      session.WaitForElement("AppMenuBar");
+      session.InvokeMenuItem("File", "SettingsMenuItem");
+      session.WaitForElement("ServiceStatus");
+      AutomationElement updates = session.OpenMenuAndFindItem("Help", "CheckUpdatesMenuItem");
+      Assert.Equal("Check for updates", updates.Name);
+      session.WaitForElement("ActivityLogHelpMenuItem");
+      session.WaitForElement("UserGuideMenuItem");
+      session.WaitForElement("SupportMenuItem");
+      session.WaitForElement("ReleaseNotesMenuItem");
+      session.ClickElement("AboutHelpMenuItem");
+      Assert.StartsWith("Version ", session.WaitForElement("AboutVersionText").Name, StringComparison.Ordinal);
+      session.ClickButton("Close");
+      session.WaitForElementGone("AboutVersionText");
+   }
+
    /// <summary>Splash: shows, then dismisses itself.</summary>
    [Fact]
    public void Splash_ShowsThenDismissesItself()

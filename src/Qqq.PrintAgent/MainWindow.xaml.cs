@@ -478,7 +478,6 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          return;
       }
-      _currentHealth = health;
       Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.FromElement(FooterStatus)?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
       global::Windows.UI.Color color = health switch { "GREEN" => Microsoft.UI.Colors.LimeGreen, "ORANGE" => Microsoft.UI.Colors.Orange, _ => Microsoft.UI.Colors.Red };
       SolidColorBrush brush = new(color);
@@ -489,7 +488,14 @@ public sealed partial class MainWindow : Window, IDisposable
          trayIcon = LoadTrayIcon(icon);
          _trayIcons.Add(icon, trayIcon);
       }
-      _tray.Icon = trayIcon;
+      // H.NotifyIcon owns and disposes values assigned to Icon. These cached icons
+      // remain ours; UpdateIcon sends their native handle without transferring ownership.
+      if(!_tray.UpdateIcon(trayIcon) || _tray.TrayIcon.Icon != trayIcon.Handle)
+      {
+         App.Log.Warning("[Companion] Windows did not accept the tray status icon; the next refresh will retry.");
+         return;
+      }
+      _currentHealth = health;
    }
 
    /// <summary>Load the packaged status image synchronously before registering the tray icon.</summary>

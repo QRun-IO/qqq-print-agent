@@ -162,6 +162,10 @@ public sealed class AppSession : IDisposable
    /// until the item appears.
    /// </summary>
    public void InvokeMenuItem(string menuName, string itemAutomationId)
+      => Invoke(OpenMenuAndFindItem(menuName, itemAutomationId));
+
+   /// <summary>Opens a native menu and returns an item without invoking its action.</summary>
+   public AutomationElement OpenMenuAndFindItem(string menuName, string itemAutomationId)
    {
       AutomationElement menu = WaitFor(
           () => MainWindow.FindFirstDescendant(cf => cf.ByControlType(ControlType.MenuItem).And(cf.ByName(menuName))),
@@ -180,7 +184,7 @@ public sealed class AppSession : IDisposable
          Wait.UntilInputIsProcessed();
          item = Retry.WhileNull(() => FindInApp(cf => cf.ByAutomationId(itemAutomationId)), timeout: TimeSpan.FromSeconds(3), interval: s_pollInterval, ignoreException: true).Result;
       }
-      Invoke(item ?? throw new TimeoutException($"Menu item '{itemAutomationId}' never appeared under '{menuName}'. (app exited: {App.HasExited})"));
+      return item ?? throw new TimeoutException($"Menu item '{itemAutomationId}' never appeared under '{menuName}'. (app exited: {App.HasExited})");
    }
 
 

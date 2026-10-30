@@ -44,6 +44,7 @@ public sealed partial class MainWindow
          ? "Updates install the companion and print service together. You choose when to install."
          : "Install the machine MSI to enable in-app updates. Release downloads remain available below.";
       CheckUpdatesButton.IsEnabled = _updateService.IsSupported;
+      CheckUpdatesMenuItem.IsEnabled = _updateService.IsSupported;
       string? outcome = MsiUpdateInstaller.ReadLastOutcomeMessage();
       LastUpdateOutcomeText.Text = outcome ?? string.Empty;
       LastUpdateOutcomeText.Visibility = string.IsNullOrWhiteSpace(outcome) ? Visibility.Collapsed : Visibility.Visible;
@@ -105,6 +106,7 @@ public sealed partial class MainWindow
       }
       _checkingUpdates = true;
       CheckUpdatesButton.IsEnabled = false;
+      CheckUpdatesMenuItem.IsEnabled = false;
       UpdateStatusText.Text = "Checking for updates…";
       try
       {
@@ -135,6 +137,7 @@ public sealed partial class MainWindow
          if(!_updatesClosed)
          {
             CheckUpdatesButton.IsEnabled = _updateService?.IsSupported == true;
+            CheckUpdatesMenuItem.IsEnabled = _updateService?.IsSupported == true;
             UpdateStatusText.Text = "Update check finished. Installation always requires your confirmation. See Logs for check details.";
          }
       }

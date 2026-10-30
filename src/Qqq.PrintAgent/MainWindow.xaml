@@ -9,8 +9,29 @@
       <Grid.Resources>
          <Style x:Key="FullWidthListItem" TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="8,0" /></Style>
       </Grid.Resources>
-      <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-      <NavigationView x:Name="Navigation" PaneDisplayMode="Left" IsBackButtonVisible="Collapsed" IsSettingsVisible="True" OpenPaneLength="210" CompactPaneLength="48" SelectionChanged="Navigation_SelectionChanged">
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+      <MenuBar AutomationProperties.AutomationId="AppMenuBar">
+         <MenuBarItem Title="File" AccessKey="F" AutomationProperties.AutomationId="FileMenu">
+            <MenuFlyoutItem Text="Settings" Click="SettingsMenu_Click" AutomationProperties.AutomationId="SettingsMenuItem" KeyboardAcceleratorTextOverride="Ctrl+Shift+S" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Text="Close window" Click="CloseDetailsMenu_Click" AutomationProperties.AutomationId="CloseWindowMenuItem" ToolTipService.ToolTip="Hide details in the system tray; printing continues">
+               <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Key="W" Modifiers="Control" /></MenuFlyoutItem.KeyboardAccelerators>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem Text="Exit companion" Click="Exit_Click" AutomationProperties.AutomationId="ExitMenuItem" />
+         </MenuBarItem>
+         <MenuBarItem Title="Help" AccessKey="H" AutomationProperties.AutomationId="HelpMenu">
+            <MenuFlyoutItem Text="Activity log" Click="ActivityLog_Click" AutomationProperties.AutomationId="ActivityLogHelpMenuItem" KeyboardAcceleratorTextOverride="Ctrl+Shift+L" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem Text="User guide" Tag="https://github.com/QRun-IO/qqq-print-agent/blob/main/docs/USER-GUIDE.md" Click="HelpLinkMenu_Click" AutomationProperties.AutomationId="UserGuideMenuItem" />
+            <MenuFlyoutItem Text="Contact support" Click="SupportMenu_Click" AutomationProperties.AutomationId="SupportMenuItem" />
+            <MenuFlyoutItem Text="Release notes and downloads" Tag="https://github.com/QRun-IO/qqq-print-agent/releases" Click="HelpLinkMenu_Click" AutomationProperties.AutomationId="ReleaseNotesMenuItem" />
+            <MenuFlyoutItem Text="Project on GitHub" Tag="https://github.com/QRun-IO/qqq-print-agent" Click="HelpLinkMenu_Click" AutomationProperties.AutomationId="ProjectMenuItem" />
+            <MenuFlyoutSeparator />
+            <MenuFlyoutItem x:Name="CheckUpdatesMenuItem" Text="Check for updates" Click="CheckUpdates_Click" AutomationProperties.AutomationId="CheckUpdatesMenuItem" IsEnabled="False" />
+            <MenuFlyoutItem Text="About" Click="About_Click" AutomationProperties.AutomationId="AboutHelpMenuItem" />
+         </MenuBarItem>
+      </MenuBar>
+      <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Left" IsBackButtonVisible="Collapsed" IsSettingsVisible="True" OpenPaneLength="210" CompactPaneLength="48" SelectionChanged="Navigation_SelectionChanged">
          <NavigationView.PaneHeader><TextBlock x:Name="ProductHeading" Text="QQQ Print Agent" FontSize="16" FontWeight="SemiBold" Margin="16,8,12,16" TextWrapping="Wrap" /></NavigationView.PaneHeader>
          <NavigationView.MenuItems>
             <NavigationViewItem x:Name="PrintersNavigation" Content="Printers" Tag="Printers" AccessKey="P" AutomationProperties.AutomationId="NavigatePrinters"><NavigationViewItem.Icon><SymbolIcon Symbol="Print" /></NavigationViewItem.Icon></NavigationViewItem>
@@ -73,7 +94,7 @@
             </Grid>
          </Grid>
       </NavigationView>
-      <Border Grid.Row="1" Padding="20,10" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+      <Border Grid.Row="2" Padding="20,10" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
          <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><Ellipse x:Name="FooterDot" Width="10" Height="10" Fill="Red" VerticalAlignment="Center" /><StackPanel Grid.Column="1" Spacing="2"><TextBlock x:Name="FooterStatus" Text="Checking local service…" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.AutomationId="FooterStatus" AutomationProperties.LiveSetting="Polite" /><TextBlock x:Name="FooterContact" Text="Status refreshes every 5 seconds" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"><Button x:Name="ReconnectButton" Content="Reconnect" Click="Reconnect_Click" AutomationProperties.AutomationId="ReconnectDevice" /><Button Content="View logs" Click="ServiceLogs_Click" AutomationProperties.AutomationId="ViewServiceLogs" /></StackPanel></Grid>
       </Border>
       <ContentDialog x:Name="ConnectionDialog" Title="Connection settings" CloseButtonText="Close">
