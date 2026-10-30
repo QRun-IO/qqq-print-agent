@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   codeql:
-    uses: KofTwentyTwo/standards/.github/workflows/codeql.yml@fdf5ed029603c938615a32b1beca3628b8787945 # v0.1.2
+    uses: KofTwentyTwo/standards/.github/workflows/codeql.yml@70b555bd5658273090769991bfc4c9b6681dde18 # v1.2.1
     permissions:
       contents: read         # check out the code
       security-events: write # upload CodeQL results to code scanning
