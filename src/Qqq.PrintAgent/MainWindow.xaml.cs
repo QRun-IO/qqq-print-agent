@@ -6,7 +6,6 @@
 using System.Text.Json;
 using CommunityToolkit.Mvvm.Input;
 using H.NotifyIcon;
-using KofTwentyTwo.AppKit.Settings;
 using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -46,11 +45,9 @@ public sealed partial class MainWindow : Window, IDisposable
       this.ResizeForDpi(1100, 760);
       this.SetMinimumSize(800, 560);
       this.SetAppIcon(AppIdentity.Info);
-      SplashToggle.IsOn = _settings.ShowSplashScreen;
-      ThemeChoice.SelectedIndex = _settings.ThemeKind switch { AppTheme.Light => 1, AppTheme.Dark => 2, _ => 0 };
+      InitializeAppKitSettings();
       Navigation.SelectedItem = PrintersNavigation;
       Navigation.Loaded += Navigation_Loaded;
-      Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(ThemeChoice, "AppTheme");
       _initializing = false;
       SplashOverlay.ShowOver(RootGrid, AppIdentity.Info, _settings);
       _trayStatus = new MenuFlyoutItem { Text = "Red — service not connected", Command = new RelayCommand(ShowDetails) };
@@ -90,8 +87,8 @@ public sealed partial class MainWindow : Window, IDisposable
       AboutButton.Content = "About " + Title;
       CompanyHeading.Text = AppIdentity.Branding.CompanyName ?? string.Empty;
       CompanyHeading.Visibility = AppIdentity.Branding.CompanyName is null ? Visibility.Collapsed : Visibility.Visible;
-      SupportLink.NavigateUri = AppIdentity.Branding.SupportUrl;
-      SupportLink.Visibility = AppIdentity.Branding.SupportUrl is null ? Visibility.Collapsed : Visibility.Visible;
+      SupportLink.NavigateUri = AppIdentity.Branding.SupportUrl ?? new Uri("https://github.com/QRun-IO/qqq-print-agent/issues");
+      SupportLink.Visibility = Visibility.Visible;
       if(AppIdentity.Branding.LogoPath is string logo)
       {
          CustomerLogo.ImageFailed += (_, _) => CustomerLogo.Visibility = Visibility.Collapsed;
@@ -104,6 +101,7 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Release the tray icon and polling timer when the companion exits.</summary>
    public void Dispose()
    {
+      DisposeUpdates();
       _refreshTimer.Stop();
       _activationRegistration?.Unregister(null);
       _tray.Dispose();
@@ -120,7 +118,7 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Read service status once the window has loaded.</summary>
    private async void Root_Loaded(object sender, RoutedEventArgs e)
    {
-      await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync());
+      await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync(), CheckUpdatesAfterStartupAsync());
    }
 
    private void Navigation_Loaded(object sender, RoutedEventArgs e)
@@ -129,6 +127,11 @@ public sealed partial class MainWindow : Window, IDisposable
       if(Navigation.SettingsItem is DependencyObject settingsItem)
       {
          Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(settingsItem, "NavigateSettings");
+         if(settingsItem is Control control)
+         {
+            control.AccessKey = "S";
+            ToolTipService.SetToolTip(control, "Settings (Ctrl+Shift+S)");
+         }
       }
    }
 
@@ -537,6 +540,7 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       _settings.ShowSplashScreen = SplashToggle.IsOn;
+      SplashDuration.IsEnabled = _settings.ShowSplashScreen;
       Save();
    }
 

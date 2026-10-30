@@ -9,7 +9,7 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **v0.1.1-rc.1 is a prerelease.** The first release focuses on enrollment, printer discovery, PDF/ZPL jobs and submission status. The MSI and first-party executables are unsigned. Windows may display an unrecognized-publisher prompt. Production signing and broad printer qualification remain follow-up work.
+> **v0.1.3-rc.1 is the current prerelease target.** Source verification passed 163 tests; installed startup, interactive UI and actual in-app upgrade acceptance remain pending. The MSI and first-party executables are unsigned. Windows may display an unrecognized-publisher prompt. Production signing and broad printer qualification remain follow-up work.
 
 ## What works
 
@@ -17,6 +17,8 @@ The native setup and status application uses the same [KofTwentyTwo AppKit](http
 - Use native Printers, Jobs, Logs and Settings navigation, persistent status, reconnect and a visible health tray icon.
 - Search job history, inspect events, confirm test/reprint/cancel actions and mark failures reviewed.
 - Start/restart the service and opt into tray startup at sign-in; service and companion share the AppKit log viewer.
+- Check for updates manually or at startup using AppKit; confirm a machine MSI upgrade of the service, companion and CLI together.
+- Set theme and splash duration, and open project/help/release links and dependency credits.
 - Print packing slips and other PDFs through the installed Windows driver.
 - Send printer-ready ZPL to Zebra/ZDesigner queues.
 - Enroll once using a short-lived code from QQQ; the service stores its own protected device credential.
@@ -66,7 +68,9 @@ A printer visible only in a signed-in user's profile may not be available to the
 
 ## Validation so far
 
-The end-to-end local acceptance used the actual Java QQQ printing server, enrolled Windows connector, and a Canon laser queue. The user confirmed correct physical PDF output. The installed LocalSystem service path and MSI install/uninstall were also exercised; see [acceptance notes](docs/ACCEPTANCE.md).
+The current tree passed locked restore and a zero-warning build with **36 Core + 127 Windows/CLI tests (163 total)**. UI tests compile but have not passed installed acceptance for this version. The installed 0.1.1 companion has a known startup failure; the correction is included in the 0.1.3 target. See [AppKit parity](docs/APPKIT-PARITY.md) for current source and acceptance status.
+
+Earlier end-to-end local acceptance used the actual Java QQQ printing server, enrolled Windows connector, and a Canon laser queue. The user confirmed correct physical PDF output. The installed LocalSystem service path and MSI install/uninstall were also exercised; see [acceptance notes](docs/ACCEPTANCE.md).
 
 The Zebra adapter is implemented, but physical Zebra qualification is pending connection of the printer. Automated tests cover the protocol fixtures, content integrity, duplicate suppression, uncertain submission, durable SQLite events and protected credential round trips. Test counts and remaining limits are recorded in the acceptance notes.
 
@@ -79,14 +83,14 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.1.1 -ReleaseVersion 0.1.1-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.1.3 -ReleaseVersion 0.1.3-rc.1
 ```
 
 [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 ## Current limits
 
-This prerelease uses polling rather than WebSocket notifications. Custom PDF paper dimensions are rejected; use the Windows queue's default media. Operator actions, safe journal detail retention and bounded renderer subprocesses are implemented. Physical completion telemetry, custom media, automatic upgrades and production signing remain outside the initial deployment scope. Review the [roadmap](docs/TODO.md) before a production rollout.
+This prerelease uses polling rather than WebSocket notifications. Custom PDF paper dimensions are rejected; use the Windows queue's default media. Operator actions, safe journal detail retention and bounded renderer subprocesses are implemented. Physical completion telemetry, custom media and production signing remain outside the initial deployment scope. Update checks are implemented; installation requires operator confirmation and administrator rights. Review the [roadmap](docs/TODO.md) before a production rollout.
 
 ## License and acknowledgments
 

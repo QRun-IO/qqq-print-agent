@@ -37,8 +37,11 @@ public static class AppIdentity
       },
       Attributions =
       [
-         new("KofTwentyTwo.AppKit", "MIT License"),
+         new("KofTwentyTwo.AppKit / AppKit.WinUI / AppKit.Updates", "MIT License"),
          new("CommunityToolkit.Mvvm", "MIT License"),
+         new("H.NotifyIcon", "MIT License"),
+         new("Microsoft.Data.Sqlite", "MIT License"),
+         new("SQLitePCLRaw", "Apache License 2.0"),
          new("Velopack", "MIT License"),
          new("Windows App SDK / WinUI 3", "MIT License, with Microsoft binary components"),
          new(".NET Runtime", "MIT License"),

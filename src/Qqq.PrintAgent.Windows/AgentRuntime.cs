@@ -84,6 +84,10 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
    private async Task PollOnceAsync(CancellationToken token)
    {
+      if(UpdatePaused)
+      {
+         return;
+      }
       using AgentStore store = new(directory);
       AgentConfiguration? configuration = store.LoadConfiguration();
       if(configuration is null)
@@ -151,6 +155,10 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          bool jobFailure = attentionCount > 0;
          string health = !connected || jobFailure ? "RED" : printerIssue ? "ORANGE" : "GREEN";
          string status = configuration is null ? "Not enrolled" : _failure ?? _heartbeatFailure ?? (!connected ? "Waiting for QQQ connection" : jobFailure ? $"Connected; {attentionCount} job(s) need review" : printerIssue ? "Connected; exposed printers need attention" : "Connected; exposed printers ready");
+         if(_updatePauseUntil > DateTimeOffset.UtcNow)
+         {
+            status = "Printing paused for application update. " + status;
+         }
          return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray());
       }
    }
@@ -227,6 +235,10 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    {
       switch(request.Operation)
       {
+         case "prepare-update":
+            return await PrepareUpdateAsync(token).ConfigureAwait(false);
+         case "resume-after-update":
+            return ResumeAfterUpdate();
          case "status":
             return GetSnapshot().Status;
          case "snapshot":

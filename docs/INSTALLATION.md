@@ -5,7 +5,7 @@
 Download the x64 MSI and `SHA256SUMS` from the same [GitHub release](https://github.com/QRun-IO/qqq-print-agent/releases). Check the file locally:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.1.0-rc.1-x64.msi
+Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.1.3-rc.1-x64.msi
 Get-Content .\SHA256SUMS
 ```
 
@@ -20,7 +20,7 @@ Run the MSI as an administrator. Windows Installer deploys one coherent applicat
 - The `qqq-print-agent.exe` diagnostic CLI.
 - A restricted `%ProgramData%\QqqPrintAgent` directory for enrollment and the job journal.
 
-There is no inbound firewall rule, local HTTP server, or desktop self-updater. Keep outbound HTTPS available to the QQQ server. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
+There is no inbound firewall rule or local HTTP server. Keep outbound HTTPS available to the QQQ server and, for update checks/downloads, GitHub release services. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
 
 ## Service recovery
 
@@ -68,7 +68,15 @@ Foreground CLI commands use `%LocalAppData%\QqqPrintAgent` by default. An explic
 
 ## Updates
 
-This service-based app does not currently check for, download, or apply updates automatically. Its AppKit shell does not activate the Velopack updater used by GCLO and MarkdownViewr. Updates use the machine MSI so the service, companion and CLI remain one version. There is no Check for updates button or background updater in this release.
+In the MSI-installed companion, open Settings and select **Check for updates**. The **Check for updates on startup** preference enables a quiet check after startup; it does not authorize installation. AppKit's `UpdateCoordinator` and native prompts handle offers and confirmation. Development/portable copies cannot apply machine updates. The elevated companion and apply helper require local administrator rights; there is no persistent privileged update daemon or UAC bypass.
+
+The feed is fixed to [QRun-IO/qqq-print-agent releases](https://github.com/QRun-IO/qqq-print-agent/releases), independently of customer branding or the QQQ server. Stable builds accept newer stable versions; prerelease builds may accept newer RC or stable versions. Offers below core version 0.1.3 are rejected. Downloads require the expected versioned MSI and same-release `SHA256SUMS`. SHA-256 checks establish consistency with that release, not independent publisher identity or signing; the prerelease remains unsigned.
+
+After confirmation, the adapter downloads into a protected unique folder under `%ProgramData%\QqqPrintAgent\updates`, verifies size/hash and prepares a copied CLI helper. The service finishes its current poll/print operation before pausing new claims; heartbeats continue. The helper waits for the companion to exit, rechecks the package, then runs one MSI for service, companion and CLI. It preserves enrollment and journal evidence. Windows Installer is not forcibly terminated. A failed or abandoned handoff does not leave claims paused permanently.
+
+The helper records a dated result in `updates\last-result.json`, retains a private installation log and attempts to reopen the companion. Settings displays the last result. Exit 3010 means a Windows restart is required, not that the new app is fully ready. On failure, inspect Settings/Logs and the installed version before retrying. Completed update folders, helper copies and install logs are retained for administrator review; there is no automatic cleanup policy for completed stages. Remove an old stage only after confirming its installer/helper has exited and its evidence is no longer needed; never remove enrollment or journal files.
+
+The 0.1.3-rc.1 source gate passed 163 tests and a zero-warning build. Actual installed UI, coherent in-app upgrade, canceled elevation and reboot-required acceptance remain pending. The previously installed 0.1.1 companion has a known startup defect; use the reviewed corrective MSI directly to bootstrap a working companion rather than relying on that broken app's update UI.
 
 ## Upgrade and remove
 

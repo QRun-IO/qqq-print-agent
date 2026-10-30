@@ -47,7 +47,7 @@ public sealed class AppSession : IDisposable
       Directory.CreateDirectory(DataDirectory);
       File.WriteAllText(
           Path.Combine(DataDirectory, "settings.json"),
-          $$"""{ "ShowSplashScreen": {{(showSplash ? "true" : "false")}} }""");
+          $$"""{ "ShowSplashScreen": {{(showSplash ? "true" : "false")}}, "CheckForUpdatesOnStartup": false }""");
 
       var startInfo = new ProcessStartInfo(ExePath) { WorkingDirectory = Path.GetDirectoryName(ExePath) ?? "" };
       startInfo.Environment[AppIdentity.Info.DataDirectoryVariable] = DataDirectory;

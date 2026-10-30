@@ -17,13 +17,18 @@
 - [x] Public repository/CI/security and original v0.1.0-rc.1 publication; warning records its WinUI packaging defect.
 - [x] Earlier development and temporary installed LocalSystem laser output confirmed by the user; original install/start/uninstall acceptance recorded separately.
 
+- [x] AppKit update coordinator/prompts, manual/startup checks, fixed GitHub version/channel policy, verified protected download and coherent machine MSI helper.
+- [x] Persisted splash duration, shared help/release/project/support links, dependency credits and version/channel display.
+
 ## Current verification and release
 
-- [x] Final Windows gate: 102 tests (36 Core + 66 Windows/CLI), zero build warnings/errors.
+- [x] Current 0.1.3-rc.1 Windows gate: 163 tests (36 Core + 127 Windows/CLI), zero build warnings/errors and locked restore. UI tests compile only.
 - [x] QQQ 0.1.1-rc.1 gate: 19 tests, zero Checkstyle violations.
-- [x] Final MSI rebuilt from verified sources, zero warnings/errors; unsigned status and checksum recorded in FUNCTIONAL-AUDIT.md.
+- [ ] Package and record the final 0.1.3-rc.1 MSI/checksum from the verified source; older MSI hashes are historical evidence.
 - [x] Install 0.1.1 with retained encrypted credentials and successful service restart.
-- [ ] Install corrective 0.1.2 and pass desktop acceptance after fixing the NavigationView SettingsItem startup crash discovered on 0.1.1.
+- [ ] Install corrective 0.1.3 and pass desktop acceptance after fixing the NavigationView SettingsItem startup crash discovered on 0.1.1.
+- [ ] Qualify real in-app update: consent, failed/canceled download or elevation, retained state, helper handoff, coherent versions, relaunch and restart-required reporting.
+- [ ] Review completed protected update stages/logs manually; no automatic completed-stage retention policy is implemented.
 - [ ] Verify tray/duplicate launch/close/exit, reconnect, stale service state, unified logs, job controls and keyboard/focus on the installed app.
 - [ ] Qualify installed credential recovery, exposure/history persistence, service start/restart and bounded recovery.
 - [ ] Qualify task enable/disable, sign-in, reboot and upgrade with retained credentials/journal.

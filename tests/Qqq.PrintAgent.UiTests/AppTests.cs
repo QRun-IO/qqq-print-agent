@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json;
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
 
 
 namespace Qqq.PrintAgent.UiTests;
@@ -146,6 +148,34 @@ public class AppTests
       session.WaitFor(
          () => session.ReadSettings().Contains("\"Theme\": \"Dark\"", StringComparison.Ordinal) ? session.MainWindow : null,
          "settings.json to record the dark theme");
+   }
+
+   /// <summary>Shared shell preferences persist without checking the network or changing machine startup.</summary>
+   [Fact]
+   public void AppKitPreferences_PersistAndExposeHelp()
+   {
+      using var session = new AppSession();
+      session.ClickElement("NavigateSettings");
+      Assert.StartsWith("Version ", session.WaitForElement("InstalledVersion").Name, StringComparison.Ordinal);
+      Assert.StartsWith("Update channel: ", session.WaitForElement("UpdateChannel").Name, StringComparison.Ordinal);
+      session.WaitForElement("CheckForUpdates");
+      session.WaitForElement("ReleaseNotes");
+      session.WaitForElement("UserGuide");
+      session.WaitForElement("ReportIssue");
+      session.WaitForElement("ProjectLink");
+      AutomationElement updates = session.WaitForElement("CheckUpdatesAtStartup");
+      Assert.Equal(ToggleState.Off, updates.Patterns.Toggle.Pattern.ToggleState.Value);
+      AutomationElement duration = session.WaitForElement("SplashDuration");
+      Assert.False(duration.IsEnabled);
+      session.WaitForElement("SplashAtStartup").Patterns.Toggle.Pattern.Toggle();
+      session.WaitFor(() => duration.IsEnabled ? duration : null, "splash duration to enable");
+      duration.Patterns.RangeValue.Pattern.SetValue(1250);
+      updates.Patterns.Toggle.Pattern.Toggle();
+      using var saved = JsonDocument.Parse(session.ReadSettings());
+      Assert.True(saved.RootElement.GetProperty("CheckForUpdatesOnStartup").GetBoolean());
+      Assert.True(saved.RootElement.GetProperty("ShowSplashScreen").GetBoolean());
+      Assert.Equal(1250, saved.RootElement.GetProperty("SplashMilliseconds").GetInt32());
+      Assert.False(session.App.HasExited);
    }
 
 

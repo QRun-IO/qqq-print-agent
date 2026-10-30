@@ -49,7 +49,15 @@ The worker persists receipt and SUBMITTING before invoking Windows. It records S
 ## Packaging
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 0.1.0 -ReleaseVersion 0.1.0-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.1.3 -ReleaseVersion 0.1.3-rc.1
 ```
 
 MSI ProductVersion is numeric; assembly/package informational version may contain the prerelease suffix. Service, companion and CLI are published into separate self-contained runtime directories and shipped in one machine MSI. Do not reintroduce the template's per-user Velopack updater.
+
+## Machine update integration
+
+`MainWindow.Updates` wires AppKit `UpdateCoordinator`/`ContentDialogPrompter` to Windows `MsiUpdateService : IUpdateService`. The persisted startup-check preference, version/channel display, splash duration and help/credits use the shared shell. The UI serializes manual/startup checks; confirmation is required before apply.
+
+`GitHubMsiReleaseClient` reads the fixed QRun-IO release feed, applies strict version/channel/minimum policy and validates bounded release assets and SHA-256. `MsiUpdateInstaller` validates protected staging, ACLs and reparse boundaries, copies the installed self-contained CLI for handoff, rechecks the MSI and uses Windows Installer for all components. The runtime's `prepare-update`/`resume-after-update` operations coordinate a bounded claim pause while preserving heartbeats. No server-supplied executable, per-user replacement package or persistent privileged updater is involved. See the [threat model](security/threat-model.md) for trust and failure boundaries.
+
+Current 0.1.3-rc.1 verification: locked restore, zero-warning Release build, **36 Core + 127 Windows/CLI tests (163 total)**. Synthetic release/download/hash/request/ACL/version/maintenance tests do not install an MSI. UI tests compile only; installed shell and actual upgrade acceptance remain separate gates. Completed protected update stages are retained for manual administrator review.

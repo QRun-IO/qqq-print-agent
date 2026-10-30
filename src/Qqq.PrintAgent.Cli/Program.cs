@@ -12,9 +12,12 @@ namespace Qqq.PrintAgent.Cli;
 /// <summary>Scriptable setup, printer selection and foreground diagnostics.</summary>
 public static class Program
 {
-   public static Task<int> Main(string[] args) => args.Length == 1 && string.Equals(args[0], "--printer-worker", StringComparison.Ordinal)
-      ? PrinterWorkerHost.RunAsync()
-      : ExecuteAsync(() => DispatchAsync(args));
+   public static Task<int> Main(string[] args) => args switch
+   {
+      ["--printer-worker"] => PrinterWorkerHost.RunAsync(),
+      ["--apply-update", string request] => ExecuteAsync(() => MsiUpdateInstaller.ApplyAsync(request)),
+      _ => ExecuteAsync(() => DispatchAsync(args)),
+   };
 
    internal static async Task<int> ExecuteAsync(Func<Task<int>> command)
    {
