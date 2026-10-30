@@ -2,7 +2,7 @@
 
 User approved Windows elevation. The 0.1.1 MSI installed successfully, preserved the exact encrypted credential bytes, and restarted the service. Nine installed desktop tests then exposed a startup access violation in MainWindow: the built-in NavigationView SettingsItem was passed to AutomationProperties before its template created it. Windows Application events identify that native call; this is a product startup defect, not merely a test failure.
 
-The correction assigns the identifier only after Navigation.Loaded and guards the item. FlaUI test launch detection now preserves the original process handle so startup failures report the native exit code. The corrected 0.1.2-rc.1 tree passed 102 tests and a zero-warning Release build; corrective MSI packaging and installed desktop verification are in progress. Do not publish the 0.1.1 package as a working companion release.
+The correction assigns the identifier only after Navigation.Loaded and guards the item. FlaUI test launch detection now preserves the original process handle so startup failures report the native exit code. The corrected 0.1.2-rc.1 tree passed 102 tests and a zero-warning Release build; the corrective unsigned MSI is built, but Windows canceled its elevation request and installed desktop verification remains pending. Do not publish the 0.1.1 package as a working companion release.
 
 Auto-update is not enabled. GCLO/MarkdownViewr use Velopack; this machine-service variant follows AppKit ADR-0002 and uses a coherent MSI for service, companion and CLI. No update check/download/install UI is present. User asked whether it exists; no separate updater implementation has been requested or claimed.
 # Session state — 2026-10-29

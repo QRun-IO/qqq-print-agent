@@ -4,7 +4,7 @@
 
 The authorized 0.1.1 MSI upgrade completed with installer exit 0. Saved encrypted credential bytes were unchanged, and the Windows service restarted successfully. SCM inspection confirmed the two 30-second recovery restarts. Nine installed desktop tests then exposed a native startup failure: the constructor passed an uncreated NavigationView SettingsItem to AutomationProperties. This failed result supersedes prior compile-only UI evidence.
 
-The 0.1.2 correction waits for Navigation.Loaded and checks the item before assigning its accessibility identifier. All 102 non-interactive regressions and the zero-warning build passed. The rebuilt unsigned MSI has SHA-256 `ADD29C41742440EC497903DCB87A3FC4A6DECE3D774CC4F8C78A74E3F097ACCA`. Corrective installation and desktop retest are awaiting the new Windows elevation prompt. No new physical print was sent.
+The 0.1.2 correction waits for Navigation.Loaded and checks the item before assigning its accessibility identifier. All 102 non-interactive regressions and the zero-warning build passed. The rebuilt unsigned MSI has SHA-256 `ADD29C41742440EC497903DCB87A3FC4A6DECE3D774CC4F8C78A74E3F097ACCA`. Windows canceled the second elevation request; the corrective 0.1.2 package is not installed and desktop retesting has not run. No new physical print was sent.
 
 The sections below are historical checkpoints.
 
