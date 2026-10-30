@@ -105,7 +105,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       {
          if(queueGeneration == _queueGeneration)
          {
-            _queuedJobs = queued.Select(job => new JobSnapshot(job.JobId, "QUEUED", job.CreatedAt, "Waiting on the server; not yet received by this device.", null, job.PrinterId, null, job.Title, job.Format)).ToArray();
+            _queuedJobs = queued.Select(job => new JobSnapshot(job.JobId, "QUEUED", job.CreatedAt, "Waiting on the server; not yet received by this device.", null, job.PrinterId, _queuedJobs.FirstOrDefault(previous => string.Equals(previous.PrinterId, job.PrinterId, StringComparison.Ordinal))?.PrinterName, job.Title, job.Format, CreatedAt: JobSorting.NormalizeCreatedAt(job.CreatedAt))).ToArray();
          }
       }
       ExposedPrinterBackend exposed = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
@@ -154,6 +154,11 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       int attentionCount = store.NeedsAttentionCount();
       lock(_stateLock)
       {
+         _queuedJobs = _queuedJobs.Select(job =>
+         {
+            PrinterSnapshot? printer = printers.FirstOrDefault(item => string.Equals(item.PrinterId, job.PrinterId, StringComparison.Ordinal));
+            return printer is null ? job : job with { PrinterName = string.IsNullOrWhiteSpace(printer.DisplayName) ? printer.Name : printer.DisplayName };
+         }).ToArray();
          jobs = jobs.Concat(_queuedJobs.Where(queued => !jobs.Any(local => string.Equals(local.JobId, queued.JobId, StringComparison.Ordinal))))
             .Select(job => job.PrinterName is null ? job with { PrinterName = printers.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal))?.Name } : job).ToArray();
          bool connected = configuration is not null && _failure is null && _heartbeatFailure is null && _lastSuccessfulPoll is not null && DateTimeOffset.UtcNow - _lastSuccessfulPoll.Value < TimeSpan.FromSeconds(30);

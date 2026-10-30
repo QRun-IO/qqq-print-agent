@@ -44,7 +44,7 @@ public sealed partial class MainWindow
       string filter = (JobStatusFilter.SelectedItem as ComboBoxItem)?.Tag as string ?? "ALL";
       int mutationVersion = _mutationVersion;
       var query = new JobQuery(Search: JobSearch.Text.Trim(), Status: filter is "ALL" or "ATTENTION" ? null : filter,
-         NeedsAttentionOnly: string.Equals(filter, "ATTENTION", StringComparison.Ordinal), Offset: _jobOffset, PageSize: JobPageSize);
+         NeedsAttentionOnly: string.Equals(filter, "ATTENTION", StringComparison.Ordinal), Offset: _jobOffset, PageSize: JobPageSize, SortBy: _jobSortBy, Descending: _jobSortDescending);
       JobsPrevious.IsEnabled = false;
       JobsNext.IsEnabled = false;
       try
@@ -63,6 +63,7 @@ public sealed partial class MainWindow
          _jobOffset = page.Offset;
          _jobTotal = page.TotalCount;
          RenderJobPage(page);
+         UpdateJobSortHeaders(query.SortBy, query.Descending);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
       {
@@ -99,7 +100,7 @@ public sealed partial class MainWindow
             _jobRows.Add(job.JobId, row);
             JobsList.Items.Insert(index, row);
          }
-         row.Update(job, FriendlyState(job.Status), FormatTime(job.UpdatedAt));
+         row.Update(job, FriendlyState(job.Status), job.CreatedAt is null ? "Not recorded" : FormatTime(job.CreatedAt));
          if(JobsList.Items.IndexOf(row) != index)
          {
             JobsList.Items.Remove(row);
@@ -209,14 +210,7 @@ public sealed partial class MainWindow
 
    private async Task ShowJobDetailsAsync(JobDetailsSnapshot details)
    {
-      JobSnapshot job = details.Job;
-      string history = string.Join("\n\n", details.Events.Select(entry => $"{FormatTime(entry.RecordedAt)} · {FriendlyState(entry.Status)}\n{entry.Message}\n{(entry.Delivered ? "Reported to the server" : "Waiting to report to the server")}"));
-      string text = $"Document: {job.Title ?? "Not recorded"}\nPrinter: {job.PrinterName ?? job.PrinterId ?? "Not recorded"}\nFormat: {job.Format ?? "Not recorded"}\nJob ID: {job.JobId}\nWindows job: {job.SpoolerJobId ?? "Not assigned"}\n\nHistory\n{history}";
-      if(details.HistoryPruned)
-      {
-         text += "\n\nOlder history has been removed by the retention policy.";
-      }
-      var dialog = new ContentDialog { Title = "Print job details", CloseButtonText = "Close", XamlRoot = Content.XamlRoot, Content = new ScrollViewer { MaxHeight = 480, Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } } };
+      ContentDialog dialog = CreateWideDialog("Print job details", new JobDetailsView(details, FriendlyState, FormatTime));
       await KofTwentyTwo.AppKit.WinUI.DialogGuard.ShowAsync(dialog);
    }
 

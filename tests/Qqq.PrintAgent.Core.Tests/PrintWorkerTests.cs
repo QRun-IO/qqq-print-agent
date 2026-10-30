@@ -46,6 +46,24 @@ public sealed class PrintWorkerTests
       Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "SPOOLED" }, handler.Events, StringComparer.Ordinal);
    }
 
+   [Theory]
+   [InlineData("Dispatch labels", "Dispatch labels")]
+   [InlineData("", "Test")]
+   [InlineData(null, "Test")]
+   public async Task ReceiptCapturesFriendlyNameWithoutChangingDispatchIdentity(string? displayName, string expected)
+   {
+      byte[] content = [1];
+      PrintJob job = new("named-job", "printer1", "Test", "ZPL", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), 1, new PrintOptions(), "2026-01-01T00:00:00Z", "CLAIMED");
+      using FixtureHandler handler = new(job, content);
+      using PrintApiClient api = new("http://localhost", "test-device", handler);
+      MemoryJournal journal = new();
+      FakePrinter printer = new(displayName);
+      await new PrintWorker(api, printer, journal).RunOnceAsync();
+      Assert.Equal(expected, journal.Jobs[job.JobId].PrinterName);
+      Assert.Equal("printer1", journal.Jobs[job.JobId].Job.PrinterId);
+      Assert.Equal(1, printer.PrintCount);
+   }
+
    [Fact]
    public async Task RunOnce_PriorSubmittingMarksUnknownWithoutPrinting()
    {
@@ -135,10 +153,10 @@ public sealed class PrintWorkerTests
       }
    }
 
-   private sealed class FakePrinter : IPrinterBackend
+   private sealed class FakePrinter(string? displayName = null) : IPrinterBackend
    {
       public int PrintCount { get; private set; }
-      public IReadOnlyList<PrinterInfo> Discover() => [new("printer1", "Test", "Zebra", "USB", "READY", ["ZPL"])];
+      public IReadOnlyList<PrinterInfo> Discover() => [new("printer1", "Test", "Zebra", "USB", "READY", ["ZPL"], DisplayName: displayName)];
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) { PrintCount++; return Task.FromResult("123"); }
    }
 

@@ -30,6 +30,7 @@ public sealed class AgentRuntimeQueuedJobsTests
          using(AgentStore store = new(directory))
          {
             store.SaveConfiguration(new AgentConfiguration("https://example.invalid", "device", "synthetic-token"));
+            store.SavePrinterProfile("printer", new PrinterProfile("Dispatch labels"));
          }
          runtime = new AgentRuntime(directory, _ => { }, printers,
             configuration => new PrintApiClient(configuration.ServerUrl, configuration.DeviceToken, new Handler(server)),
@@ -43,15 +44,13 @@ public sealed class AgentRuntimeQueuedJobsTests
          Assert.Equal("queued-job", queued.JobId);
          Assert.Equal("QUEUED", queued.Status);
          Assert.Equal("Synthetic queued document", queued.Title);
-         Assert.Equal("Synthetic printer", queued.PrinterName);
+         Assert.Equal("Dispatch labels", queued.PrinterName);
+         await VerifyPagedPrinterNameAsync(pipeName, stop.Token);
          using(AgentStore store = new(directory))
          {
             Assert.Null(store.GetJobDetails(queued.JobId));
          }
-         string detailsText = await SendAsync(pipeName, new PipeRequest("job-details", JobId: queued.JobId), stop.Token);
-         JobDetailsSnapshot details = JsonSerializer.Deserialize<JobDetailsSnapshot>(detailsText, PrintApiClient.JsonOptions)!;
-         Assert.Equal("QUEUED", details.Job.Status);
-         Assert.Empty(details.Events);
+         await VerifyQueuedDetailsAsync(pipeName, queued.JobId, stop.Token);
          string result = await SendAsync(pipeName, new PipeRequest("cancel-job", JobId: queued.JobId), stop.Token);
          Assert.StartsWith("The server accepted the cancellation before dispatch.", result, StringComparison.Ordinal);
          Assert.Equal(1, Volatile.Read(ref server.Cancellations));
@@ -75,6 +74,21 @@ public sealed class AgentRuntimeQueuedJobsTests
          Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
          Directory.Delete(directory, recursive: true);
       }
+   }
+
+   private static async Task VerifyQueuedDetailsAsync(string pipeName, string jobId, CancellationToken token)
+   {
+      string text = await SendAsync(pipeName, new PipeRequest("job-details", JobId: jobId), token);
+      JobDetailsSnapshot details = JsonSerializer.Deserialize<JobDetailsSnapshot>(text, PrintApiClient.JsonOptions)!;
+      Assert.Equal("QUEUED", details.Job.Status);
+      Assert.Empty(details.Events);
+   }
+
+   private static async Task VerifyPagedPrinterNameAsync(string pipeName, CancellationToken token)
+   {
+      string text = await SendAsync(pipeName, new PipeRequest("query-jobs", JobQuery: new JobQuery(SortBy: "printerName", Descending: false)), token);
+      JobPage page = JsonSerializer.Deserialize<JobPage>(text, PrintApiClient.JsonOptions)!;
+      Assert.Equal("Dispatch labels", Assert.Single(page.Jobs).PrinterName);
    }
 
    private static async Task<string> SendAsync(string name, PipeRequest request, CancellationToken token)

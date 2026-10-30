@@ -2,7 +2,9 @@
 
 Reviewed 2026-10-30 against the local AppKit repository, GCLO and MarkdownViewr.Windows. Scope is shared desktop behavior, not Markdown editing, account sync or other app-specific features. AppKit packages pinned by this project are **0.1.0**; unreleased AppKit 0.2 structured-logging work is not assumed available.
 
-**Current checkpoint:** 0.1.4-rc.1 is installed from source 80e253f. Local verification passed 163 tests with zero warnings/errors, and exact-source GitHub CI passed. The installed desktop suite passed 10 of 11 tests, including standard File/Help menus, About, settings, splash, close-to-tray and relaunch. The log-window test timed out; Windows canceled elevation for the focused rerun; the installed update remains in place. A native WinUI probe reproduced and fixed the cached-icon ownership failure; user confirmation of the visible tray image is pending. Credentials were retained, the service is running, and four queues were detected. Cloud connectivity and actual in-app update apply are not newly qualified.
+**Current checkpoint:** installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. Current 0.1.6 source adds inline printer information, sortable tables, immutable Created time and wider responsive native dialogs. Its source verification and installed acceptance are pending. These are connector workflow changes using the existing AppKit shell, not replacements for AppKit logs, settings, About or dialog coordination.
+
+**Historical 0.1.4 checkpoint:** source 80e253f passed 163 tests, zero warnings/errors and exact-source GitHub CI. Its first installed suite passed ten of eleven tests, with a log-window discovery timeout; the focused rerun did not execute. The user subsequently confirmed tray visibility. Those results remain version-specific and do not establish 0.1.6 or actual in-app updater acceptance.
 
 ## Reference evidence
 
@@ -15,7 +17,7 @@ Reviewed 2026-10-30 against the local AppKit repository, GCLO and MarkdownViewr.
 
 | Shared behavior | Connector source at review | Source status / remaining qualification | Tests and acceptance |
 | --- | --- | --- | --- |
-| Standard File/Help menu bar | Restored in0.1.4 with Settings, Close/Exit, activity log, help/support/releases, Check for Updates and About. | Uses existing AppKit actions and the same update busy state as Settings. | Installed menu/settings/About command test passed; actual update apply remains separate. |
+| Standard File/Help menu bar | Restored in 0.1.4 with Settings, Close/Exit, activity log, help/support/releases, Check for Updates and About. | Uses existing AppKit actions and the same update busy state as Settings. | Installed menu/settings/About command test passed; actual update apply remains separate. |
 | Stable app identity, version, paths and environment override | `AppIdentity`, AppKit `AppPaths`, settings context and branded assets are wired. | No identity-framework gap. Machine ProgramData is deliberately separate from per-user preferences. | Identity/path tests exist; installed version/About must match MSI payload. |
 | Atomic persisted settings and sanitization | `AppSettings : ShellSettings`, `SettingsStore`, `Sanitize` and save-failure feedback are used. | No replacement settings system needed. New parity preferences must use this store. | Save/load and invalid-value tests exist; restart acceptance remains. |
 | System/light/dark theme | Startup and live `WinUIShell.ApplyTheme` calls; native theme resources. | No source gap. | Live high-contrast, theme, multi-monitor and scaling acceptance outstanding. |
@@ -24,7 +26,7 @@ Reviewed 2026-10-30 against the local AppKit repository, GCLO and MarkdownViewr.
 | Useful project, issue and support entry points | About links to the project; optional customer support link exists. | Source includes direct help/release/project/support entry points; customer support must not replace fixed update authority. | Validate target URLs and opening failures; do not imply a GitHub Discussions destination exists without verification. |
 | Live logs, Follow, Errors only, Copy, Open folder | Every log action calls AppKit `LogWindow.ShowSingle`; shared service/companion log with redaction/retention. | No separate custom viewer required. | Log tests pass; actual shared viewer reuse and error visibility remain installed acceptance. |
 | UI crash net | `WinUIShell.InstallCrashNet` installed in `App`. | No wiring gap. A crash net does not cure startup resource/native faults. | Installed startup and About checks passed on 0.1.4; full visual acceptance remains separate. |
-| Serialized dialogs and native prompts | `DialogGuard` used for connection, About, job details and confirmations. | Update UI uses AppKit `ContentDialogPrompter` and `UpdateCoordinator`; manual/startup checks are serialized. | Test concurrent clicks/reentry and modal cancellation in the real shell. |
+| Serialized dialogs and native prompts | `DialogGuard` used for connection, About, job details and confirmations. Current 0.1.6 profile/job dialogs scope their width resources and resize content with the window. | Update UI retains AppKit `ContentDialogPrompter` and `UpdateCoordinator`; manual/startup checks are serialized. | Current dialog changes are source-reviewed only; test resize, text selection, reentry and modal cancellation on the installed version. |
 | DPI-aware size, minimum size and app icon | AppKit window helpers plus native brand/tray assets. | No baseline sizing gap. AppKit 0.1 does not promise persisted window placement; absence is not invented parity debt. | Verify actual taskbar/tray shell behavior, small work areas and DPI transitions. |
 | Secret storage | Service uses CurrentUser DPAPI under LocalSystem plus restricted ProgramData; UI receives no token. | Deliberate service-specific equivalent to AppKit CredentialManagerVault, not a missing secret-store feature. | Credential round-trip/recovery tests; inspect installed ACL and service identity. |
 | Single instance, tray and explicit Exit | User/session/profile activation, close-to-tray, explicit Exit and service-independent printing implemented. | Extra requirements of this app; not missing generic AppKit APIs. | Actual duplicate activation, hide/reopen and shell restart remain acceptance items. |
@@ -35,7 +37,7 @@ Reviewed 2026-10-30 against the local AppKit repository, GCLO and MarkdownViewr.
 | Download, consent, error handling and coherent apply | Fixed-feed `GitHubMsiReleaseClient`, `MsiUpdateService` and copied `MsiUpdateInstaller` helper are present in source. | Source implements release checksum, protected staging, copied CLI helper and one service/UI/CLI MSI; tests/build passed; real apply still requires acceptance. Per-user Velopack replacement would violate machine package coherence. | Synthetic download/hash/request/ACL/version tests passed; real helper/MSI apply remains pending. Same-feed checksum is not publisher signing. |
 | Supply-chain/privilege boundaries | Existing MSI installs protected binaries/state; first prerelease unsigned. | Documented update design in [threat model](security/threat-model.md); do not claim signing or attestation before available. | Real UAC cancel, file locks, Windows Installer reboot-required result and retained journal must be qualified. |
 
-## Release gate for parity
+## Historical 0.1.3 parity gate
 
 1. Source and locked build/tests are complete: 163 tests, zero warnings/errors; UI tests compile only.
 2. Package and validate a newly staged coherent 0.1.3-rc.1 MSI; installed acceptance is not established by the source gate.
@@ -44,3 +46,7 @@ Reviewed 2026-10-30 against the local AppKit repository, GCLO and MarkdownViewr.
 5. Test one actual coherent upgrade with safe job-state handling, retained enrollment/journal, explicit failure/cancel feedback and correct restart behavior. Reboot-required outcomes must be reported honestly.
 
 Document reading and source comparison performed no builds, installs, update downloads, physical printing or publication. Zebra, reboot qualification and publisher signing remain separate acceptance items.
+
+## Current 0.1.6 gate
+
+Run the current source gate, then qualify the installed tables, both sort directions across pages, keyboard alternatives to double-click, selectable inline text, checkbox behavior and responsive dialog sizing. Preserve the existing single AppKit viewer and coordinator behavior. Installed 0.1.5's 12 interactive checks are prior evidence, not a substitute for these changed interactions.

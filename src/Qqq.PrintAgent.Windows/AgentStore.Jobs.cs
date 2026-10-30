@@ -5,7 +5,7 @@ namespace Qqq.PrintAgent.Windows;
 
 public sealed partial class AgentStore
 {
-   private const string JobColumns = "job_id,state,updated_at,last_event_json,printer_id,printer_name,title,format,failure_acknowledged,history_pruned";
+   private const string JobColumns = "job_id,state,updated_at,last_event_json,printer_id,printer_name,title,format,failure_acknowledged,history_pruned,created_at";
 
    public bool HasJob(string jobId)
    {
@@ -36,14 +36,7 @@ public sealed partial class AgentStore
 
    public JobPage QueryJobs(JobQuery query)
    {
-      ArgumentNullException.ThrowIfNull(query);
-      ArgumentOutOfRangeException.ThrowIfNegative(query.Offset, nameof(query));
-      ArgumentOutOfRangeException.ThrowIfLessThan(query.PageSize, 1, nameof(query));
-      ArgumentOutOfRangeException.ThrowIfGreaterThan(query.PageSize, 100, nameof(query));
-      if(query.Search?.Length > 256 || query.Status?.Length > 32 || query.PrinterId?.Length > 256)
-      {
-         throw new ArgumentException("Job filter is too long.", nameof(query));
-      }
+      string order = ValidateJobQuery(query);
       using SqliteTransaction transaction = _database.BeginTransaction(deferred: true);
       using SqliteCommand command = _database.CreateCommand();
       command.Transaction = transaction;
@@ -76,7 +69,7 @@ public sealed partial class AgentStore
       }
       command.CommandText = "SELECT COUNT(*) FROM local_jobs WHERE " + where;
       int count = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-      command.CommandText = "SELECT " + JobColumns + " FROM local_jobs WHERE " + where + " ORDER BY updated_at DESC,job_id DESC LIMIT $limit OFFSET $offset";
+      command.CommandText = "SELECT " + JobColumns + " FROM local_jobs WHERE " + where + " ORDER BY " + order + " LIMIT $limit OFFSET $offset";
       command.Parameters.AddWithValue("$limit", query.PageSize);
       command.Parameters.AddWithValue("$offset", query.Offset);
       List<JobSnapshot> jobs = [];
@@ -89,6 +82,19 @@ public sealed partial class AgentStore
       }
       transaction.Commit();
       return new JobPage(jobs, count, query.Offset, query.PageSize);
+   }
+
+   internal static string ValidateJobQuery(JobQuery query)
+   {
+      ArgumentNullException.ThrowIfNull(query);
+      ArgumentOutOfRangeException.ThrowIfNegative(query.Offset, nameof(query));
+      ArgumentOutOfRangeException.ThrowIfLessThan(query.PageSize, 1, nameof(query));
+      ArgumentOutOfRangeException.ThrowIfGreaterThan(query.PageSize, 100, nameof(query));
+      if(query.Search?.Length > 256 || query.Status?.Length > 32 || query.PrinterId?.Length > 256)
+      {
+         throw new ArgumentException("Job filter is too long.", nameof(query));
+      }
+      return JobSorting.SqlOrder(query);
    }
 
    /// <summary>One bounded maintenance batch; only delivered, reviewed terminal detail is removed.</summary>

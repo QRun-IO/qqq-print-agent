@@ -63,7 +63,7 @@ jobs:
 
           Assets were built and tested by this workflow. Verify the MSI against SHA256SUMS before installing. No Authenticode signature or production qualification is claimed.
 
-          Features: native Windows navigation, AppKit logs/settings/update prompts, verified machine-wide MSI updates, tray status, explicit printer exposure, reconnect and service controls, searchable job history with test/retry/cancel/review actions, bounded printer workers, outbound cloud polling, PDF and ZPL spool submission, durable receipts and protected service credentials. Laser output was confirmed on earlier development builds; current installed acceptance is recorded in docs/FUNCTIONAL-AUDIT.md and docs/APPKIT-PARITY.md. Zebra qualification remains pending.
+          Features: sortable printer and job tables, inline printer details, double-click settings and job dialogs, bounded history pages with creation-time ordering, synchronized computer/printer profiles, daily log limits and clearing, same-installer customer branding, native Windows navigation, AppKit logs/settings/update prompts, verified machine-wide MSI updates, tray status, explicit printer exposure, reconnect and service controls, searchable job history with test/retry/cancel/review actions, bounded printer workers, outbound cloud polling, PDF and ZPL spool submission, durable receipts and protected service credentials. Laser output was confirmed on earlier development builds; current installed acceptance is recorded in docs/FUNCTIONAL-AUDIT.md and docs/APPKIT-PARITY.md. Zebra qualification remains pending.
 
           See CHANGELOG.md, docs/INSTALLATION.md and docs/ACCEPTANCE.md in the tagged source for scope and limitations.
           NOTES

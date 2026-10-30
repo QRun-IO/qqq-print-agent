@@ -2,9 +2,17 @@
 
 Audit date: 2026-10-29. Scope: Windows service, AppKit companion, administrator management pipe, enrollment, SQLite journal, printer adapter, runtime branding, installer and regression coverage.
 
-## Verdict
+## Current 0.1.6 follow-up — validation pending
 
-**Source corrections are implemented; installed acceptance is still required before rollout.** The final Windows gate passed **36 Core + 66 Windows/CLI tests (102 total)** with zero build warnings/errors. Installed UI, upgrade and hardware acceptance remain separate.
+Installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. Current 0.1.6 source adds printer selection that expands information inline, double-click printer settings/job details, wider responsive native dialogs and sortable headers. Printers default to Name ascending; jobs default to immutable Created descending. Job ordering applies across the matching result set before paging, including the bounded cloud queue preview. Status updates retain creation time, and missing historical values remain explicit.
+
+Read-only review confirmed bounded printer-description preview, actions before details, selectable-text/checkbox exclusions from double-click, scoped dialog sizing with open-window resize handling, displayed sort keys and applied indicators that update only after successful queries. The 0.1.6 source gate and installed checks are pending. See [UX review](UX-REVIEW.md) for the precise remaining interactions. No new physical print was performed for this follow-up.
+
+The remainder of this document preserves the original 0.1.1/0.1.2-era audit and its evidence. Test counts, pending approvals and package hashes below are historical, not the current release state. The original 1,000-job detail limit was later raised; use [History and log limits](SCALABILITY.md) for the current policy.
+
+## Historical audit verdict
+
+**At this historical checkpoint, source corrections were implemented and installed acceptance remained required.** That Windows gate passed **36 Core + 66 Windows/CLI tests (102 total)** with zero build warnings/errors. Installed UI, upgrade and hardware acceptance were recorded separately.
 
 The audit originally found backend liveness defects and missing day-to-day controls. Their corrections are mapped below so source completion is not confused with hardware or installed UX acceptance.
 
@@ -45,7 +53,7 @@ The audit originally found backend liveness defects and missing day-to-day contr
 - User-confirmed laser evidence from the previous development/temporary installed-service tests remains valid for those tested builds. It does not qualify every new source change. Zebra remains deferred until connected and explicitly tested.
 - Publisher signing, custom media dimensions, broad driver/multi-node qualification and physical-output confirmation remain separately tracked production work. Renderer isolation and safe detail retention are now implemented, not deferred features.
 
-## Remaining acceptance before rollout
+## Historical remaining acceptance checklist
 
 1. The coherent service/companion/CLI MSI is built; its checksum and unsigned status are recorded below. Installed acceptance is still required.
 2. Complete the pending user UAC approval before actual elevated upgrade/UI acceptance. On the elevated interactive desktop, exercise unconfigured, disconnected and stopped/missing-service states; enrollment/invalid code/recovery, reconnect, exposure persistence, meaningful history/details/review, safe retry/cancel and unified logs.
@@ -53,7 +61,7 @@ The audit originally found backend liveness defects and missing day-to-day contr
 4. Verify opt-in task enable/disable and sign-in behavior, service recovery, upgrade while companion is open, reboot with retained journal/credentials and uninstall retaining evidence. Do not silently print during lifecycle checks.
 5. Perform a separately authorized single laser acceptance job through the final installed path. Test Zebra with the intended stock/DPI when available. Record synthetic versus physical evidence distinctly.
 
-## Verification record
+## Historical verification record
 
 - Final Windows `Verify.ps1`: **36 Core + 66 Windows/CLI tests passed (102 total)**, zero build warnings/errors. This supersedes the earlier checkpoints.
 - Final regressions include real heartbeats during blocked submission, cloud-queued visibility/details/cancellation before local receipt, and stale-response protection.

@@ -9,13 +9,14 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Prerelease software.** Version 0.1.4 was installed successfully and the user confirmed the tray icon works. Current source adds table views, paged history, metadata editors and diagnostic limits; its new verification and installed acceptance are pending. The MSI and first-party executables are unsigned. Production signing and broad printer qualification remain follow-up work.
+> **Prerelease software.** Installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. Current 0.1.6 source adds inline printer information, wider settings/details dialogs and sortable tables; its verification and installed acceptance are pending. The MSI and first-party executables are unsigned. Production signing and broad printer qualification remain follow-up work.
 
 ## What works
 
 - Discover Windows print queues and explicitly choose which ones to expose to QQQ.
 - Use native Printers, Jobs, Logs and Settings navigation, persistent status, reconnect and a visible health tray icon.
-- Browse compact printer/job tables with full details and confirmed test/reprint/cancel actions.
+- Browse compact printer/job tables with full details and confirmed test/reprint/cancel actions. Current 0.1.6 source expands printer information inside the selected row and opens printer settings or job details on double-click.
+- Sort table headers in either direction. Printers default to Name ascending; jobs default to immutable Created time descending. Job sorting applies across the matching result set before paging.
 - Page through local history in groups of 50, searching by job ID, document-title or printer-name prefix.
 - Edit computer/printer names, descriptions and locations locally and synchronize them to QQQ.
 - Configure daily log retention/size limits, inspect usage and explicitly clear diagnostic logs.
@@ -43,7 +44,7 @@ The companion projects are [qbit-printing](https://github.com/QRun-IO/qbit-print
 ## Install and connect
 
 1. Download the x64 MSI and `SHA256SUMS` from [Releases](https://github.com/QRun-IO/qqq-print-agent/releases). Verify the checksum before installing.
-2. Install the MSI with administrator rights. It installs the service and adds **QQQ Print Agent** to the Start menu.
+2. Install the MSI with administrator rights. It installs the service and adds **QQQ Print Agent**, or your configured customer label, under **Print Connectors** in the Start menu.
 3. In your QQQ printing administration, create an enrollment code for this facility/device.
 4. Open **QQQ Print Agent**, accept the administrator prompt, enter the QQQ server URL and enrollment code, and select **Connect**.
 5. In **Printers**, select which queues to expose to QQQ. Then enable the intended discovered queue in QQQ and submit a test document.
@@ -71,7 +72,9 @@ A printer visible only in a signed-in user's profile may not be available to the
 
 ## Validation so far
 
-The installed 0.1.4 source passed locked restore, a zero-warning build and **163 unit/regression tests**. Its interactive suite passed **10 of 11 checks**; log-window discovery timed out and the focused rerun did not execute. The user separately confirmed the tray icon works. These results apply to that installed version, not the subsequent table, metadata and scalability changes. See [session state](docs/SESSION-STATE.md) and [UX review](docs/UX-REVIEW.md).
+Installed 0.1.5 passed **12 interactive checks across runs of ten and two tests**. The subsequent 0.1.6 source review covers inline printer expansion, double-click actions, wider responsive dialogs and whole-result sorting, but its source gate and installed acceptance are still pending. See [acceptance notes](docs/ACCEPTANCE.md), [session state](docs/SESSION-STATE.md) and [UX review](docs/UX-REVIEW.md) for evidence tied to each version.
+
+Historically, 0.1.4 passed a zero-warning build and 163 unit/regression tests. Its initial interactive run passed ten of eleven checks, with a log-window discovery timeout; the user separately confirmed that its tray icon worked. Those earlier results do not qualify later changes.
 
 Earlier end-to-end local acceptance used the actual Java QQQ printing server, enrolled Windows connector, and a Canon laser queue. The user confirmed correct physical PDF output. The installed LocalSystem service path and MSI install/uninstall were also exercised; see [acceptance notes](docs/ACCEPTANCE.md).
 

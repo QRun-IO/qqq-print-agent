@@ -33,7 +33,10 @@ public sealed partial class MainWindow
       {
          return false;
       }
-      var dialog = new ContentDialog { Title = title, Content = new ScrollViewer { Content = editor, MaxHeight = 420 }, PrimaryButtonText = "Save", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
+      ContentDialog dialog = CreateWideDialog(title, editor);
+      dialog.PrimaryButtonText = "Save";
+      dialog.CloseButtonText = "Cancel";
+      dialog.DefaultButton = ContentDialogButton.Primary;
       return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
    }
 
@@ -41,45 +44,23 @@ public sealed partial class MainWindow
 
    private void UpdateSelectedPrinter()
    {
-      PrinterSnapshot? printer = (PrintersList.SelectedItem as PrinterRowView)?.Snapshot;
-      PrinterDetailsButton.IsEnabled = printer is not null && !_busy;
-      PrinterEditButton.IsEnabled = printer is not null && !_busy;
-      PrinterTestButton.IsEnabled = !_busy && printer is { Exposed: true } && printer.Formats.Length > 0;
-      SelectedPrinterText.Text = printer is null ? "Select a printer to view or edit its details." : $"{PrinterLabel(printer)}\nWindows queue: {printer.Name}";
-      ToolTipService.SetToolTip(SelectedPrinterText, SelectedPrinterText.Text);
-   }
-
-   private async void PrinterTest_Click(object sender, RoutedEventArgs e)
-   {
-      if((PrintersList.SelectedItem as PrinterRowView)?.Snapshot is PrinterSnapshot printer)
+      var selected = PrintersList.SelectedItem as PrinterRowView;
+      foreach(PrinterRowView row in _printerRows.Values)
       {
-         await TestPrintAsync(printer);
+         row.SetSelected(ReferenceEquals(row, selected));
+         row.SetBusy(_busy);
       }
    }
 
-   private async void PrinterEdit_Click(object sender, RoutedEventArgs e)
+   private async Task EditPrinterAsync(PrinterSnapshot printer)
    {
-      if((PrintersList.SelectedItem as PrinterRowView)?.Snapshot is not PrinterSnapshot printer)
-      {
-         return;
-      }
       var editor = new ProfileEditor(printer.DisplayName, printer.Description, printer.Location);
       editor.NameBox.PlaceholderText = printer.Name;
+      editor.AddPrinterContext(printer.Name, FriendlyState(printer.Status));
       if(await EditProfileAsync("Edit printer details", editor))
       {
          await RunActionAsync(new PipeRequest("set-printer-profile", PrinterId: printer.PrinterId, PrinterProfile: new PrinterProfile(editor.NameBox.Text, editor.DescriptionBox.Text, editor.LocationBox.Text)));
       }
-   }
-
-   private async void PrinterDetails_Click(object sender, RoutedEventArgs e)
-   {
-      if(_busy || (PrintersList.SelectedItem as PrinterRowView)?.Snapshot is not PrinterSnapshot printer)
-      {
-         return;
-      }
-      string text = $"Name: {PrinterLabel(printer)}\nWindows queue: {printer.Name}\nLocation: {printer.Location}\nDescription: {printer.Description}\n\nStatus: {FriendlyState(printer.Status)}\nFormats: {string.Join(", ", printer.Formats)}\nDriver: {printer.DriverName}\nPort: {printer.PortName}\nPrinter ID: {printer.PrinterId}";
-      var dialog = new ContentDialog { Title = "Printer details", CloseButtonText = "Close", XamlRoot = Content.XamlRoot, Content = new ScrollViewer { MaxHeight = 480, Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } } };
-      await DialogGuard.ShowAsync(dialog);
    }
 
    private static string PrinterLabel(PrinterSnapshot printer) => string.IsNullOrWhiteSpace(printer.DisplayName) ? printer.Name : printer.DisplayName;

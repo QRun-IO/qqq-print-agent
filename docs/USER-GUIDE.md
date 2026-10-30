@@ -1,5 +1,7 @@
 # Using QQQ Print Agent
 
+This guide describes the current 0.1.6 source. Its new sorting and inline-detail behavior is awaiting source and installed validation. Installed 0.1.5 has separate acceptance evidence; see [Acceptance](ACCEPTANCE.md).
+
 ## Menus
 
 **File** provides **Settings**, **Close window** (hide to the tray), and **Exit companion**. Exiting the companion leaves the print service running. **Help** provides the shared **Activity log**, user guide, support, releases, project links, **Check for updates**, and **About**.
@@ -12,11 +14,19 @@ Open **QQQ Print Agent** from Start. In **Settings → Server connection**, choo
 
 If enrollment times out, check QQQ before trying again: the code may already have been consumed. Generate a fresh code and revoke an unused/orphaned device through your administrator. An unreadable saved credential can be repaired by explicit enrollment; the previous encrypted file and journal are preserved.
 
-In **Printers**, use **Share with server** for each intended queue, then approve it in QQQ. Local sharing and server approval are separate. **Print test** asks for confirmation and PDF/ZPL format before sending one real test through QQQ. Virtual PDF, XPS, fax and save-to-file queues that need interaction are unavailable to the service. **Windows printer settings** opens the native queue setup page.
+In **Printers**, use the **Shared** checkbox for each intended queue, then approve it in QQQ. Local sharing and server approval are separate. Select a printer to expand its information directly below that row. **Settings** and **Print test** appear at the top of the expansion; there is no fixed printer-details area below the list. The description preview is limited to three lines, and **Windows diagnostics** expands the driver, port and identifier.
+
+Double-click the compact printer row, or select it and choose **Settings**, to open a wider editor. Text selection, sharing checkboxes and controls inside the expansion retain their own behavior. Read or edit the full description in Settings. **Print test** asks for confirmation and PDF/ZPL format before sending one real test through QQQ. Virtual PDF, XPS, fax and save-to-file queues that need interaction are unavailable to the service. **Windows printer settings** opens the native queue setup page.
+
+Printers initially sort by **Name ascending**. Click Name, Status, Location, Formats or Shared to sort that column; click it again to reverse direction. The active header shows an arrow and an accessible direction label. Long table values use ellipses and full tooltips; the expanded fields and editor expose the values separately from technical queue identity.
 
 ## Jobs
 
-The Jobs table aligns document title, printer, format, state and time. Select a row to enable its actions. Previous and Next browse 50 results at a time. Search matches the beginning of a document title, printer name or job ID; choose a state or Needs attention to narrow results. Long text is abbreviated with full tooltips; Details exposes selectable full values. Older jobs retain their IDs when their title was never recorded.
+The Jobs table aligns document title, printer, state, format and **Created** time. It initially sorts by **Created descending**, newest first. Creation time is retained from the job and does not change when a later status event arrives; last update time is shown separately in Details. If an older record has no creation time, the UI says **Not recorded** rather than inventing one.
+
+Click Document, Printer, Status, Format or Created to change sorting; click the active header again to reverse it. Sorting applies to the entire matching result set before 50-row paging, including the bounded cloud queue preview. Changing sort returns to the first page. The direction indicator describes the last successfully loaded order; a failed refresh leaves the old rows with an unavailable/stale explanation.
+
+Select a row to enable its actions. Double-click the row or choose **Details** to open a wider dialog with labeled document/printer/outcome fields and a structured event history. The dialog follows the available window size and scrolls vertically. Previous and Next browse 50 results at a time. Search matches the beginning of a document title, printer name or job ID; choose a state or Needs attention to narrow results. Long table text is abbreviated with full tooltips; Details exposes selectable full values. Older jobs retain their IDs when their title was never recorded.
 
 - **Details** shows local events and whether each was reported to QQQ.
 - **Print again** creates a new server job after confirmation. Inspect output first, especially for uncertain or previously spooled work. The original job is never reset.
@@ -34,11 +44,11 @@ A timeout on a print action is not proof of failure. Inspect QQQ Jobs and Logs b
 | FAILED | A definite failure or operator cancellation before dispatch; read its message. |
 | OUTCOME_UNKNOWN | Submission might have reached the printer; inspect before reprinting. |
 
-Detailed delivered history defaults to 30 days or the latest 300,000 detailed jobs. Pending events, active submissions, unreviewed failures and uncertain outcomes retain their evidence. Small final-state records remain for duplicate suppression. All retained local history is paged and searchable. Up to 50 server-queued jobs appear ahead of local history; a notice identifies a bounded queue preview. Its count is not the total of a larger cloud queue. Queued cancellation can fail if the server has already claimed a job. See [history and log limits](SCALABILITY.md).
+Detailed delivered history defaults to 30 days or the latest 300,000 detailed jobs. Pending events, active submissions, unreviewed failures and uncertain outcomes retain their evidence. Small final-state records remain for duplicate suppression. All retained local history is paged and searchable. Up to 50 server-queued jobs merge into the selected result order; a notice identifies this bounded queue preview. Its count is not the total of a larger cloud queue. Queued cancellation can fail if the server has already claimed a job. See [history and log limits](SCALABILITY.md).
 
 ## Computer and printer details
 
-Use **Settings → Computer details** to edit this installation’s display name, description and location. Select a printer and choose **Edit details** for its equivalent fields. Names/locations allow 512 characters; descriptions allow 4,096. Empty names fall back to Windows names. Metadata is stored by the service and synchronized to the server; it does not rename Windows queues, change stable IDs or replace server approval. Printer Details exposes the actual queue name, driver, port and ID.
+Use **Settings → Computer details** to edit this installation’s display name, description and location. Select a printer and choose its inline **Settings** button, or double-click its compact row, for the equivalent editor. Names/locations allow 512 characters; descriptions allow 4,096. Empty names fall back to Windows names. Metadata changes display values here and on the server; it does not rename Windows queues, change stable IDs or replace server approval. The expanded printer information exposes the actual queue name, with driver, port and ID under Windows diagnostics.
 
 ## Tray, logs and service
 

@@ -1,6 +1,18 @@
 # Acceptance evidence
 
-## Installed upgrade checkpoint — 2026-10-30
+## Current 0.1.6 source — validation pending
+
+Current source adds inline expansion of selected printer rows, double-click printer settings/job details, wider responsive native dialogs and sortable table headers. Printers default to Name ascending. Jobs default to immutable Created descending, with whole-result ordering before paging and explicit missing historical creation times. Status updates do not redefine a job's creation time.
+
+Independent source review confirmed the correction of unbounded expanded descriptions, text-selection conflicts, fixed dialog width after resize, mismatched visible sort keys and premature sort indicators. This is source-review evidence only. The 0.1.6 source gate and installed acceptance have not yet been recorded. Pending checks include keyboard selection and action buttons, checkbox and selectable-text double-click behavior, resizing open dialogs, long text, both sort directions across pages and service-query failure feedback. No physical print was sent for this UI review.
+
+## Installed 0.1.5 checkpoint — 2026-10-30
+
+Installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. This evidence belongs to that installed version. It does not qualify the subsequently changed 0.1.6 rows, sorting or dialogs, and it does not establish a new physical print, Zebra qualification, a general printer-driver matrix or production signing.
+
+The older checkpoints below are retained as history; their pending approval statements and artifact hashes describe their own point in time.
+
+## Historical 0.1.1 upgrade and 0.1.2 correction — 2026-10-30
 
 The authorized 0.1.1 MSI upgrade completed with installer exit 0. Saved encrypted credential bytes were unchanged, and the Windows service restarted successfully. SCM inspection confirmed the two 30-second recovery restarts. Nine installed desktop tests then exposed a native startup failure: the constructor passed an uncreated NavigationView SettingsItem to AutomationProperties. This failed result supersedes prior compile-only UI evidence.
 
@@ -8,11 +20,11 @@ The 0.1.2 correction waits for Navigation.Loaded and checks the item before assi
 
 The sections below are historical checkpoints.
 
-## Current source corrections — installed acceptance pending
+## Historical 0.1.1/0.1.2 source corrections
 
-The current source includes native Printers/Jobs/Logs/Settings navigation, unified AppKit logs, stable printer rows, service controls, opt-in sign-in startup, job identity/search/details/actions, accessible status text and branding contrast validation. The last integration corrections reject premature pipe EOF as an unknown outcome, retain an offline explanation for missing printers, and discard pre-action snapshots that could overwrite newer exposure state. Ordinary pipe requests are bounded to 35 seconds (3-second connection timeout); enrollment is bounded to 150 seconds.
+Source at that checkpoint included native Printers/Jobs/Logs/Settings navigation, unified AppKit logs, stable printer rows, service controls, opt-in sign-in startup, job identity/search/details/actions, accessible status text and branding contrast validation. Its integration corrections rejected premature pipe EOF as an unknown outcome, retained an offline explanation for missing printers, and discarded pre-action snapshots that could overwrite newer exposure state. Ordinary pipe requests were bounded to 35 seconds (3-second connection timeout); enrollment to 150 seconds.
 
-The latest source build passed with zero warnings/errors. The final gate passed 102 unit/regression tests (36 Core and 66 Windows/CLI). Current MSI upgrade/UAC approval and elevated interactive UI acceptance are pending. This section does not claim the installed companion, tray, startup task or new operator actions have passed acceptance. See [the current UX review](UX-REVIEW.md) for the remaining checks.
+That source build passed with zero warnings/errors and 102 unit/regression tests (36 Core and 66 Windows/CLI). Its MSI upgrade/UAC approval and elevated interactive UI acceptance were still pending when recorded. That unit gate did not qualify the installed companion, tray, startup task or operator actions. See [the current UX review](UX-REVIEW.md) for current checks.
 
 The historical evidence below includes **two user-confirmed laser pages**: the CLI path and the installed LocalSystem service path. Those confirmations remain valid for the tested earlier builds and do not qualify every subsequent UI/action change.
 

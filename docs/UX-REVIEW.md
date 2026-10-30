@@ -2,18 +2,18 @@
 
 ## Scope and evidence
 
-This review separates current source behavior from installed acceptance. Installed 0.1.4 passed 163 unit/regression tests and a zero-warning source gate. Its interactive suite passed 10 of 11 checks, including menus/About, splash and close/relaunch; log-window discovery timed out, and its focused rerun did not execute. The user explicitly confirmed that the tray icon now works. No new physical print was performed for the current changes.
+This review separates current source behavior from installed acceptance. Installed 0.1.5 passed 12 interactive checks across a ten-test run and a focused two-test run. The subsequent 0.1.6 source changes below have not yet completed their source gate or installed acceptance. No new physical print was performed for this review.
 
-The table, paging, metadata and diagnostic-limit changes below are newer than that installed version. Their source gate and installed visual/interactive acceptance are pending. Reference patterns remain native WinUI NavigationView and menus, GCLO/MarkdownViewr settings, and the single built-in AppKit LogWindow.
+The independent 0.1.6 source review inspected inline printer selection, double-click actions, dialog layout and lifetime, sortable headers, displayed sort keys and full-result paging. Reference patterns remain native WinUI NavigationView and menus, GCLO/MarkdownViewr settings, and the single built-in AppKit LogWindow. Source inspection does not establish Narrator, keyboard or resize behavior on an installed application.
 
 ## Current workflow matrix
 
 | Workflow | Current implementation | Remaining acceptance or limitation |
 | --- | --- | --- |
 | Shell and navigation | File/Help menus; left Printers, Jobs, Logs and Settings; persistent connection footer. Shared AppKit About, update prompts, theme and splash preferences. | Inspect new content at default/minimum sizes, keyboard navigation and display scaling. Prior installed shell tests do not qualify new tables. |
-| Printer inventory | Compact aligned name/status/location/formats/sharing columns. Stable rows retain identity across polls. Select a row for Details, Edit details or confirmed Print test; Windows printer settings is available. Unsupported interactive queues cannot be newly shared/tested, but old selections can be withdrawn. | Verify selection/focus across status/removal changes, long labels, real queue metadata and independent server approval. |
+| Printer inventory | Compact sortable name/status/location/formats/sharing columns, initially Name ascending. Selection expands information inside the row, with Settings/Print test first, labeled fields, a three-line description preview and a diagnostics expander. Double-clicking the compact row opens Settings. | Verify keyboard selection/focus, large names, checkbox interactions and status/removal changes. The inline subtree and selectable text are excluded from row double-click handling in source. |
 | Device/printer metadata | Settings edits computer name, description and location; selected printers have equivalent editors. Local service persistence and outbound synchronization preserve technical names and stable IDs. Names/locations have 512-character bounds, descriptions 4,096. | Verify save/reopen/restart/synchronization and explicit clearing. Friendly labels do not rename Windows queues. |
-| Jobs | Aligned document/printer/state/format/time columns, single selection and selected-row actions. Service queries page 50 results with indexed prefix search and state/attention filters across durable history. Full selectable details retain identifiers/events. | Inspect populated multi-page history, filters and long values. Live offset boundaries can move as new jobs arrive. Cloud-queued preview is limited to 50 and visibly disclosed; its count is not an unlimited cloud total. |
+| Jobs | Sortable document/printer/state/format/Created columns, initially immutable Created descending. Ordering covers matching local history and the bounded cloud preview before 50-row paging. Status sort uses displayed labels; missing metadata uses displayed fallbacks. Double-click or Details opens labeled summary fields and event columns. | Verify ordering across pages, changing filters and status updates, and missing historical creation times. Live offset boundaries can move as new jobs arrive. Cloud preview is limited to 50 and visibly disclosed. |
 | Actions | Confirmed server-mediated tests/reprints, queued or identity-checked spooler cancellation, and failure-review acknowledgement. Unknown outcomes retain duplicate-risk warnings. | Physical output and operational action acceptance remain separate. Spool acceptance cannot prove paper output. Zebra qualification is pending. |
 | Logs | Every logs entry point reuses the built-in AppKit viewer with both service/companion sources. Settings and Logs offer the same retention/daily-size editor and confirmed clearing. Usage/cap status is shown in the editor; daily rotation follows local calendar date. | Verify viewer discovery/reuse, both sources, cap/resume and clear confirmation on installed build. Limits are 1–365 days and 1–100 MiB; clearing preserves job evidence and credentials. |
 | Service and startup | Settings shows actual service state, bounded Start/Restart, Windows Services and installer guidance. Restart requires confirmation. Explicit per-user elevated sign-in task is opt-in and fixed to the installed executable. | Verify missing/stopped/access-denied states, sign-in/reboot, task removal and recovery. Standard users require administrator authorization for management. |
@@ -23,9 +23,21 @@ The table, paging, metadata and diagnostic-limit changes below are newer than th
 | Branding and long values | Runtime identity/logo/support, theme foregrounds and validated accent contrast. Table cells use ellipsis plus full tooltips; details/editor surfaces wrap and expose full values. | Inspect branded builds, long names, light/dark/high contrast and missing logos. Branding reload requires restart; fixed upgrade/service identity is preserved. |
 | Accessibility | Native controls, accessible row/action labels, text plus color, live health region, selectable details and DPI-aware windows. | Narrator, focus order, high contrast, large text and multi-monitor checks remain unverified. Source annotations are not certification. |
 
+## 0.1.6 review corrections
+
+- Replaced a single unbounded printer text block with labeled fields and a three-line description preview. Actions appear first; the full description remains in Settings.
+- Excluded buttons, checkboxes, editable/selectable text and the inline-details subtree from row double-click handling. Double-clicking text to select a word should not launch an editor.
+- Kept wide-dialog size resources scoped to each dialog. Content dimensions follow `XamlRoot.Changed` while open, and the handler is removed on close.
+- Reused the displayed printer status for sorting. Job ordering uses human-readable status labels and the same title/printer fallbacks shown in rows.
+- Committed job sort arrows and accessible direction labels only after a successful query, avoiding old rows under a new order indicator when the service fails.
+
+These corrections were confirmed by source review. Their build, automated regressions and installed interaction checks are pending for 0.1.6.
+
 ## Next installed checks
 
 - Inspect table headers/columns at small and large window sizes; select rows with keyboard, change filters/pages, and confirm full long values remain available.
+- Resize an open printer-settings/job-details dialog; double-click selectable expanded text; operate the Shared checkbox; verify those actions do not unexpectedly open a second dialog.
+- Confirm Name ascending and Created descending defaults, both sort directions across multiple pages, and a failed query retaining the prior applied indicator. Ensure a status update does not change a job's Created value.
 - Save and clear device/printer metadata, restart the service, and verify synchronization without changed IDs or queue names.
 - Confirm log viewer reuse, daily-limit feedback, retention settings and diagnostic-only clearing.
 - Exercise unavailable-service and action-error feedback, then verify stale polls cannot overwrite newer operations.
@@ -33,4 +45,6 @@ The table, paging, metadata and diagnostic-limit changes below are newer than th
 
 ## Historical observations
 
-The early build had a long scrolling setup page, duplicated log viewers, an expanded enrollment form and refresh that rebuilt controls. Later reviews identified missing service controls, actions, startup preference and accent constraints. These observations explain completed changes and are not descriptions of the current source. Installed evidence is scoped above rather than inferred from source review.
+The early build had a long scrolling setup page, duplicated log viewers, an expanded enrollment form and refresh that rebuilt controls. Later reviews identified missing service controls, actions, startup preference and accent constraints. These observations explain completed changes and are not descriptions of the current source.
+
+Historically, installed 0.1.4 had a zero-warning source gate and 163 unit/regression tests. Its interactive suite passed ten of eleven checks; log-window discovery timed out and the focused rerun did not execute. The user confirmed its tray icon worked. The later 0.1.5 installed results above supersede that interactive checkpoint for the checks actually rerun, but neither version qualifies the new 0.1.6 interactions.

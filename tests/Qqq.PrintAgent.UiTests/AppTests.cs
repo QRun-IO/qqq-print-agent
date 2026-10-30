@@ -72,7 +72,13 @@ public class AppTests
       session.WaitForElement("FooterStatus");
       session.WaitForElement("ViewServiceLogs");
       session.ClickElement("NavigateJobs");
-      session.WaitForElement("JobTableHeader");
+      string[] jobHeaders = ["SortJobTitle", "SortJobPrinter", "SortJobStatus", "SortJobFormat", "SortJobCreated"];
+      foreach(string header in jobHeaders)
+      {
+         AutomationElement button = session.WaitForElement(header);
+         Assert.Equal(ControlType.Button, button.ControlType);
+         Assert.False(button.IsOffscreen);
+      }
       session.WaitForElement("PreviousJobPage");
       session.WaitForElement("NextJobPage");
       session.WaitForElement("RecentJobs");
@@ -96,7 +102,13 @@ public class AppTests
    public void MetadataEditor_CanBeOpenedAndCanceled()
    {
       using var session = new AppSession();
-      session.WaitForElement("PrinterTableHeader");
+      string[] printerHeaders = ["SortPrinterName", "SortPrinterStatus", "SortPrinterLocation", "SortPrinterFormats", "SortPrinterShared"];
+      foreach(string header in printerHeaders)
+      {
+         AutomationElement button = session.WaitForElement(header);
+         Assert.Equal(ControlType.Button, button.ControlType);
+         Assert.False(button.IsOffscreen);
+      }
       session.ClickElement("NavigateSettings");
       session.ClickElement("EditDeviceProfile");
       session.WaitForElement("MetadataName");
@@ -105,6 +117,66 @@ public class AppTests
       session.ClickButton("Cancel");
       session.WaitForElementGone("MetadataName");
       Assert.False(session.App.HasExited);
+   }
+
+   /// <summary>A real installed queue expands in place and opens settings without saving or printing.</summary>
+   [Fact]
+   public void ExistingPrinter_DoubleClickOpensSettingsWithoutMutation()
+   {
+      using var session = new AppSession();
+      AutomationElement inventory = session.WaitForElement("PrinterInventory");
+      AutomationElement row = session.WaitFor(() => inventory.FindFirstDescendant(cf => cf.ByControlType(ControlType.ListItem)), "an installed printer row");
+      row.Patterns.SelectionItem.Pattern.Select();
+      AutomationElement settings = session.WaitForElement("EditPrinterProfile");
+      Assert.False(settings.IsOffscreen);
+      Assert.True(settings.BoundingRectangle.Top >= row.BoundingRectangle.Top);
+      Assert.True(settings.BoundingRectangle.Bottom <= row.BoundingRectangle.Bottom);
+      AutomationElement name = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByControlType(ControlType.Text)), "printer row text");
+      session.MainWindow.SetForeground();
+      name.DoubleClick();
+      AutomationElement nameBox = session.WaitForElement("MetadataName");
+      Assert.True(nameBox.BoundingRectangle.Width > 600, "The responsive printer settings editor should use the wide dialog layout.");
+      session.WaitForElement("MetadataLocation");
+      session.WaitForElement("MetadataDescription");
+      session.ClickButton("Cancel");
+      session.WaitForElementGone("MetadataName");
+      Assert.False(session.App.HasExited);
+   }
+
+   /// <summary>Uses existing job evidence only; the fixture must have at least one retained job.</summary>
+   [Fact]
+   public void ExistingJob_DoubleClickOpensStructuredDetailsWithoutMutation()
+   {
+      using var session = new AppSession();
+      session.ClickElement("NavigateJobs");
+      AutomationElement history = session.WaitForElement("RecentJobs");
+      AutomationElement row = session.WaitFor(() => history.FindFirstDescendant(cf => cf.ByControlType(ControlType.ListItem)), "an existing retained job row");
+      AutomationElement title = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByControlType(ControlType.Text)), "job row text");
+      session.MainWindow.SetForeground();
+      title.DoubleClick();
+      session.WaitForVisibleText("Outcome");
+      session.WaitFor(() => session.FindInApp(cf => cf.ByControlType(ControlType.Text).And(cf.ByName("Event history"))), "structured event history");
+      session.ClickButton("Close");
+      AppSession.WaitUntilGone(() => session.FindInApp(cf => cf.ByControlType(ControlType.Text).And(cf.ByName("Event history"))), "job details to close");
+      Assert.False(session.App.HasExited);
+   }
+
+   /// <summary>Header direction changes are presentation-only and do not change service job records.</summary>
+   [Fact]
+   public void SortingHeaders_ExposeDefaultsAndToggleDirection()
+   {
+      using var session = new AppSession();
+      Assert.Equal("Sort by name, ascending", session.WaitForElement("SortPrinterName").Name);
+      session.ClickElement("SortPrinterName");
+      Assert.Equal("Sort by name, descending", session.WaitForElement("SortPrinterName").Name);
+      session.ClickElement("SortPrinterLocation");
+      Assert.Equal("Sort by location, ascending", session.WaitForElement("SortPrinterLocation").Name);
+      session.ClickElement("NavigateJobs");
+      Assert.Equal("Sort by created, descending", session.WaitForElement("SortJobCreated").Name);
+      session.ClickElement("SortJobCreated");
+      session.WaitFor(() => session.FindInApp(cf => cf.ByAutomationId("SortJobCreated")) is { Name: "Sort by created, ascending" } button ? button : null, "creation sort query to finish");
+      session.ClickElement("SortJobTitle");
+      session.WaitFor(() => session.FindInApp(cf => cf.ByAutomationId("SortJobTitle")) is { Name: "Sort by document, ascending" } button ? button : null, "document sort query to finish");
    }
 
 

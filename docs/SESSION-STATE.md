@@ -1,5 +1,13 @@
 # Session state — 2026-10-30
-## Live recovery checkpoint — 2026-10-30
+
+## Current checkpoint: 0.1.6 source verification
+
+Corrected 0.1.5-rc.1 from 1d1727a is installed and opened. Installation returned 0 without a reboot; credential bytes were retained, the service restarted, and four printer queues were discovered. Management, profile, job-page and log-settings queries and the branded shortcut passed. All 12 existing native UI checks have passing results across the initial 10 passes and a focused two-test rerun. Exact-source CI 41127963112 passed 204 tests and MSI packaging. The existing cloud connection is offline.
+
+The 0.1.6 changes implement inline printer details, double-click settings/details, wider responsive dialogs and sortable headers. Printers default to friendly name ascending; jobs default to immutable creation time descending. SQL sorts the complete history, with bounded pages and a bounded merge of queued jobs. Creation-time migration preserves existing evidence. The full gate passed 211 tests (42 Core and 169 Windows/CLI), locked restore, and zero build warnings/errors. Packaging and installed UI acceptance are next. No physical print was sent for this scope.
+
+Root owns packaging, the normal UAC upgrade and publication after verification. Agent-owned source is frozen for the gate. Older checkpoints below are historical and do not describe the current installation.
+## Historical failed upgrade and recovery checkpoint — 2026-10-30
 
 Attempted0.1.5 installation (b45a906,MSI82A6C8B283612CD45238820F38BAEEBBE2AA76003833FA3E5FAAD3BC2991EE79) failed1603 in ApplyBranding. The earlier MSI MajorUpgrade schedule removed0.1.4 outside the rollback transaction, leaving its service/app absent. Protected device state and pre-upgrade backup remain. Recovery uses the verified installer artifact from passing CI41076156859 under cloud-printing-integration/runs/recovery-014/verified-ci; Restore-014.ps1 was launched through normal UAC, but Windows canceled elevation before it started. The user has been asked to reply retry for a fresh prompt; no elevation is now pending. Do not claim installation/recovery complete until result.json confirms it. Root owns recovery/install. The corrected source passes204tests (39Core+165Windows/CLI): Start menu checks allow deletion-only inherited user grants while rejecting content writes, and MajorUpgrade now uses afterInstallInitialize. Build outputs are isolated per numeric version to preserve prior recovery installers. Remote CI for b45a906 failed one timing-based heartbeat assertion; its corrected test waits for observed traffic while retaining the no-claims pause invariant. The strict protected updater-data ACL policy remains unchanged.
 ## 0.1.5 source gate — 2026-10-30

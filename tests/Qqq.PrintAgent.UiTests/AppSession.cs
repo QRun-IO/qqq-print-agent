@@ -147,6 +147,11 @@ public sealed class AppSession : IDisposable
    public AutomationElement WaitForElement(string automationId, TimeSpan? timeout = null)
        => WaitFor(() => FindInApp(cf => cf.ByAutomationId(automationId)), $"element '{automationId}'", timeout);
 
+   /// <summary>Finds visible text by its native UIA peer rather than a layout container without a peer.</summary>
+   public AutomationElement WaitForVisibleText(string text)
+       => WaitFor(() => MainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Text).And(cf.ByName(text)))
+          .FirstOrDefault(element => !element.IsOffscreen), $"visible text '{text}'");
+
 
 
    /// <summary>Waits until no element with the given automation id remains.</summary>
@@ -333,21 +338,14 @@ public sealed class AppSession : IDisposable
 
 
 
-   /// <summary>Closes the app (killing it if needed), then disposes the automation and deletes the data folder.</summary>
+   /// <summary>Terminates only this fixture's launched companion, then releases automation and its isolated settings.</summary>
    public void Dispose()
    {
       try
       {
-         App?.Close();
-      }
-      catch
-      {
-         // Already gone; the kill below double-checks.
-      }
-      try
-      {
          if(App is { HasExited: false })
          {
+            // Window close intentionally hides to tray. Cleanup is not an exit-behavior test.
             App.Kill();
          }
       }

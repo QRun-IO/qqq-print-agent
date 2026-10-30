@@ -7,7 +7,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 public sealed class AgentJobPageTests
 {
    [Fact]
-   public void QueuePrefix_PreservesPaginationFilteringAndLocalDeduplication()
+   public void SortedQueue_PreservesPaginationFilteringAndLocalDeduplication()
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-page-queue-" + Guid.NewGuid().ToString("N"));
       try
@@ -15,7 +15,7 @@ public sealed class AgentJobPageTests
          using AgentStore store = new(directory);
          store.Record("local", new PrintEvent("local-event", "SPOOLED"));
          store.Record("duplicate", new PrintEvent("duplicate-event", "SPOOLED"));
-         JobSnapshot[] queued = [new("cloud", "QUEUED", "now", null, null, "laser", "Warehouse", "Packing slip"), new("duplicate", "QUEUED", "now", null, null)];
+         JobSnapshot[] queued = [new("cloud", "QUEUED", "now", null, null, "laser", "Warehouse", "Packing slip", CreatedAt: "2099-01-01T00:00:00.0000000+00:00"), new("duplicate", "QUEUED", "now", null, null)];
          JobPage first = AgentRuntime.QueryJobsWithQueue(store, new JobQuery(PageSize: 1), queued);
          Assert.Equal("cloud", Assert.Single(first.Jobs).JobId);
          Assert.Equal(3, first.TotalCount);

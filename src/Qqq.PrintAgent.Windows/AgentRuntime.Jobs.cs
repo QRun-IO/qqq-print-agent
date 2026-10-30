@@ -83,17 +83,21 @@ public sealed partial class AgentRuntime
 
    internal static JobPage QueryJobsWithQueue(AgentStore store, JobQuery query, IReadOnlyList<JobSnapshot> queued)
    {
-      // Validate paging/filter bounds before using them against the bounded cached prefix.
-      JobPage local = store.QueryJobs(query);
-      JobSnapshot[] prefix = queued.Take(50).DistinctBy(job => job.JobId, StringComparer.Ordinal).Where(job => MatchesQuery(job, query) && !store.HasJob(job.JobId)).ToArray();
-      int localOffset = Math.Max(0, query.Offset - prefix.Length);
-      if(localOffset != query.Offset)
+      _ = AgentStore.ValidateJobQuery(query);
+      JobSnapshot[] cloud = queued.Take(50).DistinctBy(job => job.JobId, StringComparer.Ordinal)
+         .Where(job => MatchesQuery(job, query) && !store.HasJob(job.JobId)).ToArray();
+      int localStart = Math.Max(0, query.Offset - cloud.Length);
+      int localCount = query.Offset - localStart + query.PageSize;
+      JobPage first = store.QueryJobs(query with { Offset = localStart, PageSize = Math.Min(localCount, 100) });
+      List<JobSnapshot> candidates = [.. first.Jobs, .. cloud];
+      if(localCount > 100)
       {
-         local = store.QueryJobs(query with { Offset = localOffset });
+         JobPage second = store.QueryJobs(query with { Offset = localStart + 100, PageSize = localCount - 100 });
+         candidates.AddRange(second.Jobs);
       }
-      var page = prefix.Skip(query.Offset).Take(query.PageSize).ToList();
-      page.AddRange(local.Jobs.Take(query.PageSize - page.Count));
-      return new JobPage(page, local.TotalCount + prefix.Length, query.Offset, query.PageSize, queued.Count >= 50);
+      candidates.Sort((left, right) => JobSorting.Compare(left, right, query));
+      JobSnapshot[] page = candidates.Skip(query.Offset - localStart).Take(query.PageSize).ToArray();
+      return new JobPage(page, first.TotalCount + cloud.Length, query.Offset, query.PageSize, queued.Count >= 50);
    }
 
    private static bool MatchesQuery(JobSnapshot job, JobQuery query)
@@ -111,8 +115,8 @@ public sealed partial class AgentRuntime
          return false;
       }
       string? search = query.Search?.Trim();
-      return string.IsNullOrEmpty(search) || job.JobId.StartsWith(search, StringComparison.OrdinalIgnoreCase)
-         || job.Title?.StartsWith(search, StringComparison.OrdinalIgnoreCase) == true
-         || job.PrinterName?.StartsWith(search, StringComparison.OrdinalIgnoreCase) == true;
+      return string.IsNullOrEmpty(search) || JobSorting.MatchesPrefix(job.JobId, search)
+         || JobSorting.MatchesPrefix(job.Title, search)
+         || JobSorting.MatchesPrefix(job.PrinterName, search);
    }
 }

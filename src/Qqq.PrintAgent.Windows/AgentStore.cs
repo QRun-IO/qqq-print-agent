@@ -77,6 +77,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
          migration.Commit();
          command.Transaction = null;
          CreateJobIndexes();
+         MigrateJobCreationTime();
       }
    }
 
@@ -134,7 +135,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       using SqliteTransaction transaction = _database.BeginTransaction();
       using SqliteCommand command = _database.CreateCommand();
       command.Transaction = transaction;
-      command.CommandText = "INSERT INTO events(job_id,event_id,state,json,recorded_at,connection_id) VALUES($job,$event,$state,$json,$time,$scope); INSERT INTO local_jobs(connection_id,job_id,state,last_event_json,updated_at) VALUES($scope,$job,$state,$json,$time) ON CONFLICT(connection_id,job_id) DO UPDATE SET state=$state,last_event_json=$json,updated_at=$time,failure_acknowledged=0,history_pruned=0;";
+      command.CommandText = "INSERT INTO events(job_id,event_id,state,json,recorded_at,connection_id) VALUES($job,$event,$state,$json,$time,$scope); INSERT INTO local_jobs(connection_id,job_id,state,last_event_json,updated_at,created_at) VALUES($scope,$job,$state,$json,$time,$time) ON CONFLICT(connection_id,job_id) DO UPDATE SET state=$state,last_event_json=$json,updated_at=$time,created_at=COALESCE(local_jobs.created_at,$time),failure_acknowledged=0,history_pruned=0;";
       command.Parameters.AddWithValue("$job", jobId);
       command.Parameters.AddWithValue("$event", printEvent.EventId);
       command.Parameters.AddWithValue("$state", printEvent.Status);
@@ -148,13 +149,14 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    public void TrackJob(PrintJob job, string? printerName)
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "INSERT INTO local_jobs(connection_id,job_id,printer_id,printer_name,title,format) VALUES($scope,$job,$printer,$name,$title,$format) ON CONFLICT(connection_id,job_id) DO UPDATE SET printer_id=$printer,printer_name=$name,title=$title,format=$format;";
+      command.CommandText = "INSERT INTO local_jobs(connection_id,job_id,printer_id,printer_name,title,format,created_at) VALUES($scope,$job,$printer,$name,$title,$format,$created) ON CONFLICT(connection_id,job_id) DO UPDATE SET printer_id=$printer,printer_name=$name,title=$title,format=$format,created_at=COALESCE(local_jobs.created_at,$created);";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       command.Parameters.AddWithValue("$job", job.JobId);
       command.Parameters.AddWithValue("$printer", job.PrinterId);
       command.Parameters.AddWithValue("$name", (object?)Bounded(printerName) ?? DBNull.Value);
       command.Parameters.AddWithValue("$title", (object?)Bounded(job.Title) ?? DBNull.Value);
       command.Parameters.AddWithValue("$format", job.Format);
+      command.Parameters.AddWithValue("$created", JobSorting.NormalizeCreatedAt(job.CreatedAt) ?? DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
       command.ExecuteNonQuery();
    }
 
@@ -221,7 +223,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    public IReadOnlyList<JobSnapshot> RecentJobs()
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "SELECT job_id,state,updated_at,last_event_json,printer_id,printer_name,title,format,failure_acknowledged,history_pruned FROM local_jobs WHERE connection_id=$scope ORDER BY CASE WHEN state IN ('FAILED','OUTCOME_UNKNOWN') AND failure_acknowledged=0 THEN 0 ELSE 1 END,updated_at DESC,job_id DESC LIMIT 50";
+      command.CommandText = "SELECT " + JobColumns + " FROM local_jobs WHERE connection_id=$scope ORDER BY CASE WHEN state IN ('FAILED','OUTCOME_UNKNOWN') AND failure_acknowledged=0 THEN 0 ELSE 1 END,updated_at DESC,job_id DESC LIMIT 50";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       using SqliteDataReader reader = command.ExecuteReader();
       List<JobSnapshot> jobs = [];
@@ -235,7 +237,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    public JobDetailsSnapshot? GetJobDetails(string jobId)
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "SELECT job_id,state,updated_at,last_event_json,printer_id,printer_name,title,format,failure_acknowledged,history_pruned FROM local_jobs WHERE connection_id=$scope AND job_id=$job";
+      command.CommandText = "SELECT " + JobColumns + " FROM local_jobs WHERE connection_id=$scope AND job_id=$job";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       command.Parameters.AddWithValue("$job", jobId);
       JobSnapshot job;
@@ -286,7 +288,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    {
       PrintEvent? item = reader.IsDBNull(3) ? null : JsonSerializer.Deserialize<PrintEvent>(reader.GetString(3), PrintApiClient.JsonOptions);
       return new JobSnapshot(reader.GetString(0), reader.IsDBNull(1) ? "CLAIMED" : reader.GetString(1), reader.IsDBNull(2) ? "Earlier session" : reader.GetString(2), item?.Message, item?.SpoolerJobId,
-         NullableString(reader, 4), NullableString(reader, 5), NullableString(reader, 6), NullableString(reader, 7), reader.GetInt32(8) != 0);
+         NullableString(reader, 4), NullableString(reader, 5), NullableString(reader, 6), NullableString(reader, 7), reader.GetInt32(8) != 0, NullableString(reader, 10));
    }
 
    private static string? NullableString(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);

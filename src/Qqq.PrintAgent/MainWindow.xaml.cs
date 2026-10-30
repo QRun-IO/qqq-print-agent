@@ -427,12 +427,13 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          if(!_printerRows.TryGetValue(printer.PrinterId, out PrinterRowView? row))
          {
-            row = new PrinterRowView(SetExposureAsync);
+            row = new PrinterRowView(SetExposureAsync, EditPrinterAsync, TestPrintAsync);
             _printerRows.Add(printer.PrinterId, row);
             PrintersList.Items.Add(row);
          }
          row.Update(printer, FriendlyState(printer.Status), _busy);
       }
+      SortPrinterRows();
       PrintersEmpty.Visibility = snapshot.Printers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
       PrintersEmptyText.Text = snapshot.Enrolled ? "Add a printer in Windows Settings, then refresh this list." : "Connect this device to the server, then choose the printers to share.";
       PrintersSummary.Text = $"{snapshot.Printers.Count} printers · {snapshot.Printers.Count(printer => printer.Exposed)} shared with the server";
@@ -602,22 +603,7 @@ public sealed partial class MainWindow : Window, IDisposable
       => DateTimeOffset.TryParse(timestamp, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset time)
          ? time.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture) : "Not yet";
 
-   private static string FriendlyState(string state) => state switch
-   {
-      "READY" => "Ready",
-      "OFFLINE" => "Offline",
-      "PAUSED" => "Paused",
-      "ERROR" => "Needs attention",
-      "QUEUED" => "Queued",
-      "CLAIMED" => "Assigned to this computer",
-      "RECEIVED" => "Received",
-      "SUBMITTING" => "Sending to printer",
-      "SPOOLED" => "Sent to printer",
-      "SPOOLER_COMPLETED" => "Windows completed the job",
-      "FAILED" => "Failed",
-      "OUTCOME_UNKNOWN" => "Check printer before retrying",
-      _ => "Status unavailable",
-   };
+   private static string FriendlyState(string state) => JobLabels.Status(state);
 
    /// <summary>Persist presentation preferences only.</summary>
    private void Save()
