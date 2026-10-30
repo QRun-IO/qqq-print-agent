@@ -218,7 +218,7 @@ public sealed partial class MainWindow
    {
       if(await ConfirmAsync("Print another copy?", $"{job.Title ?? job.JobId}\n{job.PrinterName ?? job.PrinterId}\n\nThis creates a new job. Check the printer first: the previous attempt may already have produced output.", "Print again"))
       {
-         await RunActionAsync(new PipeRequest("retry-job", JobId: job.JobId, ConfirmDuplicateRisk: job.Status is "SPOOLED" or "OUTCOME_UNKNOWN" or "SPOOLER_COMPLETED"));
+         await RunActionAsync(new PipeRequest("retry-job", JobId: job.JobId, ConfirmDuplicateRisk: true));
       }
    }
 
