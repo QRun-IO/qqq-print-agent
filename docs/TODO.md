@@ -22,6 +22,9 @@
 
 ## Current verification and release
 
+- [x] Install0.1.4 tray/menu correction, retire obsolete debug companions, retain credentials and verify running service; source163tests and exact-commit GitHub CI passed.
+- [x] Installed0.1.4 menu/About, splash, close/relaunch and other shell checks:10passed.
+- [ ] Complete log-window focused rerun (initial0.1.4 suite had1failure) and user visual confirmation of the tray image.
 - [x] Current 0.1.3-rc.1 Windows gate: 163 tests (36 Core + 127 Windows/CLI), zero build warnings/errors and locked restore. UI tests compile only.
 - [x] QQQ 0.1.1-rc.1 gate: 19 tests, zero Checkstyle violations.
 - [x] Package and record the final 0.1.3-rc.1 MSI/checksum from source7344914; its GitHub CI build/test/package gate passed.

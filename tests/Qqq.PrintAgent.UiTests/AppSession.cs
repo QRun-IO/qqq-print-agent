@@ -241,13 +241,13 @@ public sealed class AppSession : IDisposable
    /// <summary>Invokes an element through UI Automation, falling back to a mouse click.</summary>
    private static void Invoke(AutomationElement element)
    {
-      if(element.Patterns.SelectionItem.TryGetPattern(out ISelectionItemPattern? selection))
-      {
-         selection.Select();
-      }
-      else if(element.Patterns.Invoke.TryGetPattern(out IInvokePattern? invoke))
+      if(element.Patterns.Invoke.TryGetPattern(out IInvokePattern? invoke))
       {
          invoke.Invoke();
+      }
+      else if(element.Patterns.SelectionItem.TryGetPattern(out ISelectionItemPattern? selection))
+      {
+         selection.Select();
       }
       else
       {
