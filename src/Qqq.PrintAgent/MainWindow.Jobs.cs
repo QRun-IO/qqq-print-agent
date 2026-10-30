@@ -202,7 +202,7 @@ public sealed partial class MainWindow
       {
          SetBusy(false);
       }
-      if(details is not null)
+      if(details is not null && !_updatesClosed)
       {
          await ShowJobDetailsAsync(details);
       }

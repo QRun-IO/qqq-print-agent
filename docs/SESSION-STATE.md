@@ -1,6 +1,14 @@
 # Session state — 2026-10-30
 
-## Current checkpoint: 0.1.7 published; laser, ZPL and corrected PDF output confirmed
+## Audit in progress — 2026-10-30
+
+Installed/public version remains 0.1.7-rc.1. Coordinated source audit fixes are uncommitted and not installed: bounded/cancellable IPC and HTTP bodies, full-length job metadata, SQLite initialization cleanup, immediate successful-backlog draining and companion shutdown guards. The fresh source gate passed **237 tests (59 Core + 178 Windows/CLI), zero warnings/errors**, using invocation-specific results and matching test build/platform outputs. No fresh installed or physical acceptance is implied.
+
+Release gates now include security, CodeQL and script analysis; checksum verification and build provenance are being added. Packaging rejects mixed source/payload/MSI versions and restores locked dependencies. Hosted release validation remains pending. The user explicitly accepts unsigned prereleases for now; provenance/checksums do not establish Authenticode publisher identity. Independent security scan remains pending.
+
+QQQ retention will be configurable in administration, default **one year**, with scheduled cleanup and platform object-storage integration. Preserve active/uncertain documents and job/deduplication history. No live cleanup has run. Read-only companion inspection is limited by the computer-use helper's lower Windows integrity; visual acceptance is not newly established.
+
+## Previous checkpoint: 0.1.7 published; laser, ZPL and corrected PDF output confirmed
 
 Installed **0.1.7, source 93dd5fc**, completed with MSI exit 0 and no reboot, retaining credentials. Management, computer profile, paged history, log settings, branded shortcut and connected-state checks passed. The source gate passed **227 tests (57 Core + 170 Windows/CLI)** with zero warnings/errors; [exact-source CI 41139885687](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41139885687) passed. All **16 installed UI checks passed in one run**, including the diagnostic media/DPI dialog, which was closed without printing during the UI test.
 

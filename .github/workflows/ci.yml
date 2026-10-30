@@ -9,10 +9,10 @@ on:
     inputs:
       product-version:
         type: string
-        default: '0.1.7'
+        default: '0.1.8'
       release-version:
         type: string
-        default: '0.1.7-rc.1'
+        default: '0.1.8-rc.1'
 
 permissions:
   contents: read
@@ -49,11 +49,13 @@ jobs:
       - name: Locked restore, build and test
         run: ./build/Verify.ps1
       - name: Validate branded installer dry run
-        run: ./build/Test-BrandedInstaller.ps1
+        run: |
+          ./build/Test-BrandedInstaller.ps1
+          ./build/Test-PackagingInputs.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.7' }}
-          RELEASE_VERSION: ${{ inputs.release-version || '0.1.7-rc.1' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.8' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '0.1.8-rc.1' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

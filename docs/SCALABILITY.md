@@ -1,5 +1,7 @@
 # History and diagnostic limits
 
+Audit source removes the configured idle delay after a newly submitted successful job. It yields and releases the connection gate between jobs; empty queues, duplicate receipts, failures, errors and pauses retain their delay/backoff. A regression drains three fake jobs before a configured 20-second interval, then verifies empty/error responses do not hot-loop. The fresh audit gate passed 237 tests with zero warnings/errors. This removes a scheduling bottleneck; it does not certify sustained physical throughput.
+
 The current source targets facilities producing about 10,000 jobs per day. Synthetic tests exercise 10,000/30,000 stored jobs, a 10,000-event delivery backlog and 30,000 normal status-log entries. They measure local query/write behavior with fake HTTP/printers; they do not certify physical printer throughput or production network capacity.
 
 The 2026-10-30 Windows gate passed204 tests (39 Core and165 Windows/CLI) with zero build warnings/errors. On the local development machine, the30,000-row combined query/count/retention checks took90ms after seeding;10,000 durable acknowledgements took30.5s in200-event batches;30,000 diagnostic entries used1,960,000bytes and took46.6s. These are regression observations under concurrent tests/coverage, not latency guarantees. The QQQ gate separately covers10,000-row pagination and bounded claims. Full Unicode profiles passed the actual local management pipe, persistence, heartbeat and inventory serialization paths using a fake server.

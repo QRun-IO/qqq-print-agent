@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.8-rc.1 — unreleased
+
+- Bound and cancel local management frames and server responses; apply a deadline to streamed document bodies.
+- Drain successful queued jobs without an extra idle delay while retaining independent heartbeats and failure backoff.
+- Preserve valid long job/printer names, close failed SQLite initialization handles and guard late UI completions after exit.
+- Require release security/CodeQL/script gates and verified artifacts before publication; add build provenance attestations.
+- Package from fresh output directories with locked restores and matching source, MSI and component versions.
+- Fresh regression gate: 237 tests, zero build warnings/errors. Installed audit acceptance and hosted provenance verification remain pending.
+
 ## 0.1.7-rc.1 — 2026-10-30
 
 - Built-in QQQ-branded warehouse diagnostics use the server's bundled legible font across PDF and ZPL.

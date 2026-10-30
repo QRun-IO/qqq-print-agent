@@ -90,7 +90,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.1.7 -ReleaseVersion 0.1.7-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.1.8 -ReleaseVersion 0.1.8-rc.1
 ```
 
 [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

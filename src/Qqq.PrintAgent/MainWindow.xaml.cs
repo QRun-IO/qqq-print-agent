@@ -101,6 +101,10 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Release the tray icon and polling timer when the companion exits.</summary>
    public void Dispose()
    {
+      if(_updatesClosed)
+      {
+         return;
+      }
       DisposeUpdates();
       _refreshTimer.Stop();
       _activationRegistration?.Unregister(null);
@@ -265,7 +269,7 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Query diagnostic information without exposing credentials.</summary>
    private async Task RefreshAsync()
    {
-      if(_busy || _refreshing)
+      if(_updatesClosed || _busy || _refreshing)
       {
          return;
       }
@@ -274,7 +278,7 @@ public sealed partial class MainWindow : Window, IDisposable
       try
       {
          string response = await AgentPipeClient.SendAsync(new PipeRequest("snapshot"));
-         if(_busy || mutationVersion != _mutationVersion)
+         if(_updatesClosed || _busy || mutationVersion != _mutationVersion)
          {
             return;
          }
@@ -312,6 +316,10 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Give actionable guidance without logging pipe payloads or secrets.</summary>
    private void ServiceUnavailable()
    {
+      if(_updatesClosed)
+      {
+         return;
+      }
       SetHealth("RED");
       StatusText.Text = "Local print service unavailable";
       FooterContact.Text = "Local service unavailable · retrying automatically; shown data may be stale";
@@ -323,6 +331,10 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Prevent overlapping local administration requests.</summary>
    private void SetBusy(bool busy)
    {
+      if(_updatesClosed)
+      {
+         return;
+      }
       if(busy)
       {
          _mutationVersion++;
@@ -344,6 +356,10 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Present the latest operation's result.</summary>
    private void Feedback(string title, string message, InfoBarSeverity severity)
    {
+      if(_updatesClosed)
+      {
+         return;
+      }
       FeedbackBar.Title = title;
       FeedbackBar.Message = message;
       FeedbackBar.Severity = severity;
@@ -378,6 +394,10 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Restore details from the tray without restarting the service.</summary>
    private void ShowDetails()
    {
+      if(_updatesClosed)
+      {
+         return;
+      }
       AppWindow.Show();
       if(AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
       {
@@ -391,6 +411,10 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Render the service's authoritative health, queues, jobs and bounded logs.</summary>
    private void RenderSnapshot(AgentSnapshot snapshot)
    {
+      if(_updatesClosed)
+      {
+         return;
+      }
       SetHealth(snapshot.Health);
       ConnectionButton.Content = snapshot.Enrolled ? "Sign in again" : "Connect this device";
       ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to the server";
@@ -474,6 +498,10 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Pair tray color with a text status so color is never the only signal.</summary>
    private void SetHealth(string health)
    {
+      if(_updatesClosed)
+      {
+         return;
+      }
       string label = health switch { "GREEN" => "Connected and ready", "ORANGE" => "Connected · printers need attention", _ => "Disconnected or needs attention" };
       FooterStatus.Text = label;
       _trayStatus.Text = label;

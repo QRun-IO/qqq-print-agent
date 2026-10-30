@@ -25,7 +25,20 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       _directory = Path.GetFullPath(directory);
       Directory.CreateDirectory(_directory);
       _database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "journal.db") }.ToString());
-      _database.Open();
+      try
+      {
+         _database.Open();
+         InitializeDatabase(recoverUnreadableConfiguration);
+      }
+      catch
+      {
+         _database.Dispose();
+         throw;
+      }
+   }
+
+   private void InitializeDatabase(bool recoverUnreadableConfiguration)
+   {
       lock(SchemaLock)
       {
          using SqliteCommand command = _database.CreateCommand();
@@ -54,11 +67,6 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
             // unscoped legacy evidence to the new identity when its original scope is unknown.
             _configurationRecoveryRequired = true;
             _connectionScope = "unreadable-" + Guid.NewGuid().ToString("N");
-         }
-         catch
-         {
-            _database.Dispose();
-            throw;
          }
          command.CommandText = "UPDATE events SET connection_id=$scope WHERE connection_id IS NULL";
          command.Parameters.AddWithValue("$scope", _connectionScope);
@@ -293,7 +301,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
    private static string? NullableString(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
-   private static string? Bounded(string? text) => text is null ? null : text[..Math.Min(text.Length, 256)];
+   private static string? Bounded(string? text) => text is null ? null : text[..Math.Min(text.Length, 1024)];
 
    /// <summary>Latest unfinished submissions for this connection, including acknowledged states.</summary>
    public IReadOnlyList<(string JobId, string State)> Incomplete()

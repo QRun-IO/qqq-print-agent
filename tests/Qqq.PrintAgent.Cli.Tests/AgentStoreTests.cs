@@ -6,6 +6,64 @@ namespace Qqq.PrintAgent.Cli.Tests;
 public sealed class AgentStoreTests
 {
    [Fact]
+   public void InvalidSchema_DoesNotKeepDatabaseOpenAfterConstructorFailure()
+   {
+      string directory = Path.Combine(Path.GetTempPath(), "qqq-invalid-schema-" + Guid.NewGuid().ToString("N"));
+      Directory.CreateDirectory(directory);
+      try
+      {
+         // Initialize the Windows SQLite provider through a separate valid store.
+         using(AgentStore valid = new(Path.Combine(directory, "valid")))
+         {
+            Assert.Null(valid.GetState("none"));
+         }
+         string path = Path.Combine(directory, "journal.db");
+         using(var database = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+         {
+            database.Open();
+            using Microsoft.Data.Sqlite.SqliteCommand command = database.CreateCommand();
+            command.CommandText = "CREATE TABLE events(unexpected TEXT)";
+            command.ExecuteNonQuery();
+         }
+         Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => new AgentStore(directory));
+         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+         using FileStream exclusive = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+         Assert.True(exclusive.Length > 0);
+      }
+      finally
+      {
+         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+         Directory.Delete(directory, recursive: true);
+      }
+   }
+
+   [Fact]
+   public void JobDetails_PreserveFullProtocolLengthNamesAcrossRestart()
+   {
+      string directory = Path.Combine(Path.GetTempPath(), "qqq-long-job-" + Guid.NewGuid().ToString("N"));
+      string title = new string('t', 1024);
+      string printerName = new string('p', 1024);
+      try
+      {
+         using(AgentStore store = new(directory))
+         {
+            store.TrackJob(new PrintJob("long-job", "printer", title, "PDF", "00", 1, new PrintOptions(), "", "CLAIMED"), printerName);
+            store.Record("long-job", new PrintEvent("received", "RECEIVED"));
+         }
+         using AgentStore restored = new(directory);
+         JobDetailsSnapshot details = Assert.IsType<JobDetailsSnapshot>(restored.GetJobDetails("long-job"));
+         Assert.Equal(title, details.Job.Title);
+         Assert.Equal(printerName, details.Job.PrinterName);
+         Assert.Equal(title, Assert.Single(restored.QueryJobs(new JobQuery(Search: "ttt")).Jobs).Title);
+      }
+      finally
+      {
+         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+         Directory.Delete(directory, recursive: true);
+      }
+   }
+
+   [Fact]
    public void RecentJobs_KeepsOlderUnreviewedFailureAccessibleAfterFiftySuccesses()
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-job-attention-" + Guid.NewGuid().ToString("N"));

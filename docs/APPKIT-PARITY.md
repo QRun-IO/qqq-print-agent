@@ -1,5 +1,7 @@
 # AppKit baseline parity
 
+**Latest evidence:** installed 0.1.7 passed all 16 desktop checks in one run. The audit source subsequently passed 237 tests with zero warnings/errors; it is not installed yet. See [SESSION-STATE.md](SESSION-STATE.md) for exact version-specific evidence. The 0.1.6 checkpoint below is historical. Real in-app update handoff and the broader accessibility/resize matrix remain unqualified.
+
 Reviewed 2026-10-30 against the local AppKit repository, GCLO and MarkdownViewr.Windows. Scope is shared desktop behavior, not Markdown editing, account sync or other app-specific features. AppKit packages pinned by this project are **0.1.0**; unreleased AppKit 0.2 structured-logging work is not assumed available.
 
 **Current checkpoint:** Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.

@@ -1,8 +1,11 @@
+#Requires -Version 7.4
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$resultsDirectory = Join-Path $projectRoot ('TestResults/verify-' + [Guid]::NewGuid().ToString('N'))
 $protocolFixtures = Join-Path (Split-Path -Parent $projectRoot) 'qqq-print-protocol\fixtures'
 if(-not (Test-Path -LiteralPath $protocolFixtures))
 {
@@ -17,9 +20,12 @@ try
    if($LASTEXITCODE -ne 0) { throw 'Solution build failed.' }
    foreach($project in @('tests/Qqq.PrintAgent.Core.Tests', 'tests/Qqq.PrintAgent.Cli.Tests'))
    {
-      & dotnet test $project --configuration Release '-p:Platform=x64' --no-restore --logger trx --collect 'XPlat Code Coverage' --results-directory TestResults
+      # Solution mappings use AnyCPU for these projects; direct x64 test invocations
+      # must build their own matching output instead of selecting a stale x64 DLL.
+      & dotnet test $project --configuration Release '-p:Platform=x64' --no-restore --settings coverage.runsettings --logger trx --collect 'XPlat Code Coverage' --results-directory $resultsDirectory
       if($LASTEXITCODE -ne 0) { throw "Tests failed: $project" }
    }
+   Write-Output "Current verification evidence: $resultsDirectory"
 }
 finally
 {

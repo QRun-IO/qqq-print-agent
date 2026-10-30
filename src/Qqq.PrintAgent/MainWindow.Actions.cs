@@ -19,7 +19,7 @@ public sealed partial class MainWindow
 
    private async Task<bool> ConfirmAsync(string title, string message, string action)
    {
-      if(_busy)
+      if(_updatesClosed || _busy)
       {
          return false;
       }
@@ -39,7 +39,7 @@ public sealed partial class MainWindow
 
    private async Task RunActionAsync(PipeRequest request)
    {
-      if(_busy)
+      if(_updatesClosed || _busy)
       {
          return;
       }
@@ -72,7 +72,7 @@ public sealed partial class MainWindow
 
    private async Task TestPrintAsync(PrinterSnapshot printer)
    {
-      if(_busy)
+      if(_updatesClosed || _busy)
       {
          return;
       }
@@ -120,6 +120,10 @@ public sealed partial class MainWindow
       try
       {
          (AgentServiceStatus Service, AgentStartupStatus Startup) state = await Task.Run(() => (Service: AgentServiceControl.GetStatus(), Startup: AgentStartup.GetStatus()));
+         if(_updatesClosed)
+         {
+            return;
+         }
          _serviceStatus = state.Service;
          ServiceStateText.Text = state.Service.Installed ? $"Windows service: {state.Service.State}" : "Windows service is not installed";
          ServiceGuidanceText.Text = state.Service.Guidance;
@@ -155,7 +159,7 @@ public sealed partial class MainWindow
 
    private async Task ChangeServiceAsync(bool restart)
    {
-      if(_busy)
+      if(_updatesClosed || _busy)
       {
          return;
       }

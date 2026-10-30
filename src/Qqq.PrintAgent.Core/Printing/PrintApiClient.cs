@@ -25,6 +25,7 @@ public sealed class PrintApiClient : IDisposable
       _http = handler is null ? new HttpClient() : new HttpClient(handler);
       _http.BaseAddress = uri;
       _http.Timeout = TimeSpan.FromSeconds(60);
+      _http.MaxResponseContentBufferSize = 2 * 1024 * 1024;
       if(token is not null)
       {
          _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -73,6 +74,9 @@ public sealed class PrintApiClient : IDisposable
          throw new InvalidDataException("Document exceeds the 20 MiB limit or is empty.");
       }
 
+      using var downloadTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+      downloadTimeout.CancelAfter(_http.Timeout);
+      token = downloadTimeout.Token;
       using HttpResponseMessage response = await _http.GetAsync($"device/jobs/{Uri.EscapeDataString(job.JobId)}/content", HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
       await using Stream source = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);

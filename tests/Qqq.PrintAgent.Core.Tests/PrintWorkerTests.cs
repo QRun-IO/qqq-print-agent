@@ -37,8 +37,8 @@ public sealed class PrintWorkerTests
       MemoryJournal journal = new();
       FakePrinter printer = new();
       PrintWorker worker = new(api, printer, journal);
-      await worker.RunOnceAsync();
-      await worker.RunOnceAsync();
+      Assert.True(await worker.RunOnceAsync());
+      Assert.False(await worker.RunOnceAsync());
       Assert.Equal(1, printer.PrintCount);
       Assert.Equal("SPOOLED", journal.GetState("job1"));
       Assert.Equal(job, journal.Jobs["job1"].Job);

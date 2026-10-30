@@ -8,7 +8,7 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// <summary>Serial happy-path worker. A locally ambiguous submission is never automatically printed again.</summary>
 public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null)
 {
-   public async Task RunOnceAsync(CancellationToken token = default)
+   public async Task<bool> RunOnceAsync(CancellationToken token = default)
    {
       // A recovered job must be reported even when the server never claims it again.
       foreach((string jobId, string previousState) in journal.Incomplete())
@@ -21,14 +21,14 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       if(journal.Pending().Count > 0)
       {
          // Drain a bounded outbox batch before claiming more work after an outage.
-         return;
+         return false;
       }
       IReadOnlyList<PrinterInfo> inventory = printers.Discover();
       await api.InventoryAsync(inventory, token).ConfigureAwait(false);
       PrintJob? job = await api.ClaimAsync(token).ConfigureAwait(false);
       if(job is null)
       {
-         return;
+         return false;
       }
 
       PrinterInfo? assignedPrinter = inventory.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal));
@@ -37,10 +37,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       string? state = journal.GetState(job.JobId);
       if(state is "SPOOLED" or "SPOOLER_COMPLETED" or "FAILED" or "OUTCOME_UNKNOWN")
       {
-         return;
+         return false;
       }
 
       bool submitting = false;
+      bool spooled = false;
       try
       {
          Record(job, "RECEIVED");
@@ -57,12 +58,14 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          submitting = true;
          string spoolId = await printers.PrintAsync(job, content, token).ConfigureAwait(false);
          Record(job, "SPOOLED", spoolerJobId: spoolId);
+         spooled = true;
       }
       catch(Exception exception) when(exception is not OperationCanceledException || submitting)
       {
          Record(job, submitting ? "OUTCOME_UNKNOWN" : "FAILED", exception.Message);
       }
       await FlushAsync(token).ConfigureAwait(false);
+      return spooled;
    }
 
    private void Record(PrintJob job, string state, string? message = null, string? spoolerJobId = null)

@@ -1,5 +1,10 @@
 # TODO
 
+- [x] Audit source regression gate: 237 tests and zero build warnings/errors, including bounded IPC/network responses, metadata preservation, backlog scheduling and SQLite initialization cleanup.
+- [ ] Complete independent deep security scan, review fixes and record canonical findings/coverage.
+- [ ] Verify audit packaging, installed UI/updater handoff and hosted security/provenance gates before publishing the next prerelease.
+- [x] Record user decision: prereleases remain unsigned for now; do not describe hashes or build attestations as code signing.
+
 - [x] Install 0.1.7 from 93dd5fc: MSI exit 0, no reboot, credentials retained; management/profile/history/log settings/branding/connected-state checks passed.
 - [x] Pass 227 unit/regression tests (57 Core + 170 Windows/CLI), zero warnings/errors and exact-source CI 41139885687.
 - [x] Pass all 16 installed UI checks in one run, including read-only diagnostic media/DPI choices.
