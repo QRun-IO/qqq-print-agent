@@ -1,6 +1,8 @@
 # Session state — 2026-10-30
 
-Current target: **0.1.3-rc.1**, including the startup correction, functional audit fixes and shared AppKit parity. The full source gate passed **36 Core + 127 Windows/CLI tests (163 total)**, locked restore and a zero-warning/error Release build. UI tests compile only. The new unsigned MSI is being packaged; installed startup/UI and real in-app upgrade acceptance remain pending. Root owns packaging, installation, hardware tests and publication.
+Current target: **0.1.3-rc.1**, including the startup correction, functional audit fixes and shared AppKit parity. Source commit **7344914** passed **36 Core + 127 Windows/CLI tests (163 total)**, locked restore and a zero-warning/error Release build. GitHub CI for that exact commit also passed, including MSI packaging. UI tests compile only. The final unsigned MSI is built; Windows canceled the local elevation request, so installed startup/UI and real in-app upgrade acceptance remain pending. Root owns installation, hardware tests and publication.
+
+Final local installer: `artifacts/installer/QqqPrintAgent-0.1.3-x64.msi`, SHA-256 `808869F507D0B87E67546F41940A4A25D059E89E655E9127635299D025EBF737`. The reviewed installation harness remains ready under the private integration workspace, but no 0.1.3 installation result exists. Do not repeat elevation automatically after cancellation or publish a replacement release as installed-qualified.
 
 ## Implemented source
 

@@ -2,7 +2,7 @@
 
 Reviewed 2026-10-30 against the local AppKit repository, GCLO and MarkdownViewr.Windows. Scope is shared desktop behavior, not Markdown editing, account sync or other app-specific features. AppKit packages pinned by this project are **0.1.0**; unreleased AppKit 0.2 structured-logging work is not assumed available.
 
-**Current checkpoint:** installed 0.1.1 has a companion startup failure. The 0.1.2 corrective source passed 102 tests, but the corrective UAC installation was canceled. The next parity target is **0.1.3-rc.1**. Source presence and passing older tests do not establish that the installed app has these fixes. Update backend, copied apply helper and shell parity wiring passed the full locked gate: **36 Core + 127 Windows/CLI tests (163 total)**, zero warnings/errors. UI tests compile only; packaging and installed acceptance remain pending. No completed update installation is claimed here.
+**Current checkpoint:** installed 0.1.1 has a companion startup failure. The 0.1.2 corrective source passed 102 tests, but the corrective UAC installation was canceled. The next parity target is **0.1.3-rc.1**. Source presence and passing older tests do not establish that the installed app has these fixes. Update backend, copied apply helper and shell parity wiring passed the full locked gate: **36 Core + 127 Windows/CLI tests (163 total)**, zero warnings/errors. UI tests compile only. Final MSI packaging and GitHub CI for source7344914 passed; Windows canceled the local installation elevation, so installed acceptance remains pending. See SESSION-STATE.md for the exact local checksum. No completed update installation is claimed here.
 
 ## Reference evidence
 
