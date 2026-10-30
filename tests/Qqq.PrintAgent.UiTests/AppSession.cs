@@ -47,7 +47,7 @@ public sealed class AppSession : IDisposable
       Directory.CreateDirectory(DataDirectory);
       File.WriteAllText(
           Path.Combine(DataDirectory, "settings.json"),
-          $$"""{ "ShowSplashScreen": {{(showSplash ? "true" : "false")}}, "CheckForUpdatesOnStartup": false }""");
+          $$"""{ "ShowSplashScreen": {{(showSplash ? "true" : "false")}}, "SplashMilliseconds": {{(showSplash ? 15000 : 2500)}}, "CheckForUpdatesOnStartup": false }""");
 
       var startInfo = new ProcessStartInfo(ExePath) { WorkingDirectory = Path.GetDirectoryName(ExePath) ?? "" };
       startInfo.Environment[AppIdentity.Info.DataDirectoryVariable] = DataDirectory;
@@ -76,6 +76,18 @@ public sealed class AppSession : IDisposable
    public Application App { get; }
 
    public Window MainWindow { get; }
+
+   /// <summary>Requires the same live native window and process, including while its UIA provider is hidden.</summary>
+   public void WaitForWindowVisibility(nint window, bool visible)
+   {
+      bool matched = Retry.WhileFalse(
+         () => !App.HasExited && NativeWindowState.Matches(window, App.ProcessId, visible),
+         timeout: s_defaultTimeout, interval: s_pollInterval).Success;
+      if(!matched)
+      {
+         throw new TimeoutException($"The original HWND did not remain alive and become {(visible ? "visible" : "hidden")}. App exited: {App.HasExited}.");
+      }
+   }
 
    /// <summary>Launches the same executable and presentation profile to exercise instance forwarding.</summary>
    public Process Relaunch()
@@ -225,7 +237,11 @@ public sealed class AppSession : IDisposable
    /// <summary>Invokes an element through UI Automation, falling back to a mouse click.</summary>
    private static void Invoke(AutomationElement element)
    {
-      if(element.Patterns.Invoke.TryGetPattern(out IInvokePattern? invoke))
+      if(element.Patterns.SelectionItem.TryGetPattern(out ISelectionItemPattern? selection))
+      {
+         selection.Select();
+      }
+      else if(element.Patterns.Invoke.TryGetPattern(out IInvokePattern? invoke))
       {
          invoke.Invoke();
       }

@@ -23,7 +23,7 @@ public class AppTests
    {
       using var session = new AppSession(showSplash: true);
       session.WaitForElement("AppKitSplash");
-      session.WaitForElementGone("AppKitSplash", TimeSpan.FromSeconds(15));
+      session.WaitForElementGone("AppKitSplash", TimeSpan.FromSeconds(20));
    }
 
 
@@ -76,8 +76,9 @@ public class AppTests
    {
       using var session = new AppSession();
       session.WaitForElement("FooterStatus");
+      nint originalWindow = session.MainWindow.Properties.NativeWindowHandle.Value;
       session.MainWindow.Close();
-      session.WaitFor(() => session.MainWindow.IsOffscreen ? session.MainWindow : null, "details window to hide to the tray");
+      session.WaitForWindowVisibility(originalWindow, visible: false);
       Assert.False(session.App.HasExited);
    }
 
@@ -88,13 +89,14 @@ public class AppTests
       using var session = new AppSession();
       session.WaitForElement("FooterStatus");
       int originalProcess = session.App.ProcessId;
+      nint originalWindow = session.MainWindow.Properties.NativeWindowHandle.Value;
       session.MainWindow.Close();
-      session.WaitFor(() => session.MainWindow.IsOffscreen ? session.MainWindow : null, "original window to hide");
+      session.WaitForWindowVisibility(originalWindow, visible: false);
       using System.Diagnostics.Process second = session.Relaunch();
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
       await second.WaitForExitAsync(timeout.Token);
       Assert.Equal(0, second.ExitCode);
-      session.WaitFor(() => !session.MainWindow.IsOffscreen ? session.MainWindow : null, "original window to reappear");
+      session.WaitForWindowVisibility(originalWindow, visible: true);
       Assert.False(session.App.HasExited);
       Assert.Equal(originalProcess, session.App.ProcessId);
       Assert.Single(session.TopLevelWindows(), window => string.Equals(window.Name, session.MainWindow.Name, StringComparison.Ordinal));
@@ -127,10 +129,16 @@ public class AppTests
       using var session = new AppSession();
       session.ClickElement("NavigateLogs");
       string title = AppIdentity.Info.DisplayName + " — Activity log";
-      session.WaitFor(
+      AutomationElement logWindow = session.WaitFor(
          () => session.TopLevelWindows().FirstOrDefault(window => string.Equals(window.Name, title, StringComparison.Ordinal)),
          "the activity log window");
-      session.WaitForElement("LogText");
+      string[] controls = ["Follow", "Errors only", "Copy", "Open logs folder"];
+      foreach(string control in controls)
+      {
+         session.WaitFor(() => logWindow.FindFirstDescendant(cf => cf.ByName(control)), "log toolbar control " + control);
+      }
+      session.WaitFor(() => logWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Text))
+         .FirstOrDefault(element => element.Name.Contains("[Companion]", StringComparison.Ordinal)), "companion events in the log viewer");
       session.MainWindow.SetForeground();
       session.ClickElement("ViewServiceLogs");
       Assert.Single(session.TopLevelWindows(), window => string.Equals(window.Name, title, StringComparison.Ordinal));

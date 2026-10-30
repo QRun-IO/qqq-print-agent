@@ -26,7 +26,8 @@
 - [x] QQQ 0.1.1-rc.1 gate: 19 tests, zero Checkstyle violations.
 - [x] Package and record the final 0.1.3-rc.1 MSI/checksum from source7344914; its GitHub CI build/test/package gate passed.
 - [x] Install 0.1.1 with retained encrypted credentials and successful service restart.
-- [ ] Install corrective 0.1.3 and pass desktop acceptance after fixing the NavigationView SettingsItem startup crash discovered on 0.1.1. Windows canceled the local elevation request; installation has not run.
+- [x] Install corrective 0.1.3: MSI exit0, no reboot required, encrypted credentials retained, service restart/management pipe passed and four queues discovered.
+- [ ] Complete installed desktop acceptance: first run5passed/5failed; correct pinned-AppKit/test-visibility assumptions and qualify input-dependent checks on an accessible desktop. Initial cloud snapshot was offline; recheck live connection.
 - [ ] Qualify real in-app update: consent, failed/canceled download or elevation, retained state, helper handoff, coherent versions, relaunch and restart-required reporting.
 - [ ] Review completed protected update stages/logs manually; no automatic completed-stage retention policy is implemented.
 - [ ] Verify tray/duplicate launch/close/exit, reconnect, stale service state, unified logs, job controls and keyboard/focus on the installed app.
