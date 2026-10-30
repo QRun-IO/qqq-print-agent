@@ -9,7 +9,7 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Prerelease software.** Installed 0.1.6 passed its 211-test source gate and all 15 UI checks across fourteen plus one runs. The service required an authorized restart after an unexplained clean stop and is Running with cloud connectivity offline. The MSI remains unsigned; physical printing and broader qualification are separate.
+> **Prerelease software.** Published v0.1.6-rc.1 assets are verified. Installed 0.1.6 passed its 211-test source gate and all 15 UI checks across fourteen plus one runs. The paired local QQQ connection is restored and the service is Running. A Zebra ZT411 at 300 dpi with 4 × 6-inch stock accepted one ZPL shipping test and one PDF barcode/alignment test through the system; physical output and barcode scanning await user confirmation. This used the loopback QQQ server, not a remote cloud deployment. The MSI remains unsigned; the earlier unexplained clean service stop remains under investigation.
 
 ## What works
 

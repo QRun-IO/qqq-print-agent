@@ -1,12 +1,18 @@
 # Acceptance evidence
 
+## Zebra submission checkpoint — 2026-10-30
+
+Published Windows v0.1.6-rc.1 assets are verified. The existing paired QQQ database was restarted on loopback port 18081 with credentials preserved. Read-only inspection found no pending jobs before startup, and the connection became healthy. The locally exposed and server-enabled Zebra ZT411 reported READY at 300 dpi with user-confirmed 4 × 6-inch stock.
+
+Exactly one ZPL shipping test and one PDF barcode/alignment test completed the server-to-service path and reached SPOOLED. Physical output, alignment and barcode scanning await user confirmation. The service remained Running during this session. This exercises the actual printing protocol against a local QQQ server; remote cloud deployment and broader driver qualification remain unproven. No production code changed.
+
 ## Installed 0.1.6 checkpoint — 2026-10-30
 
 Current source adds inline expansion of selected printer rows, double-click printer settings/job details, wider responsive native dialogs and sortable table headers. Printers default to Name ascending. Jobs default to immutable Created descending, with whole-result ordering before paging and explicit missing historical creation times. Status updates do not redefine a job's creation time.
 
 Installed **0.1.6, source d9033ae**, completed with exit 0 and no reboot, retaining credentials, four printers and two jobs. The source gate passed **211 tests (42 Core + 169 Windows/CLI)** with zero warnings/errors; [exact-source CI 41131558158](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41131558158) succeeded. Management, profile, logs, pagination and branding checks passed. All **15 installed UI checks have passing results across fourteen plus one runs**: the first run passed 14/15, then a test-only arbitrary-text double-click selector was corrected and the focused remaining check passed.
 
-The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and the final check found it Running, with cloud connectivity offline. No new physical print or separate visual inspection was performed. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
+The service was later observed Stopped with exit 0 and no matching crash evidence; the cause remains unknown. A normal UAC-authorized restart succeeded and that checkpoint found it Running, with connectivity offline. No physical print or separate visual inspection was performed during those UI checks; the later Zebra submissions are recorded above. These results do not establish every Narrator, keyboard, resize, long-text, scaling or high-contrast scenario.
 
 Source review also confirmed bounded expanded descriptions, text-selection guards, dialog resize handling, displayed sort keys and applied indicators. Additional checkbox/text-selection and service-query-failure scenarios remain to qualify; the recorded UI suite does not establish all possible interactions.
 
@@ -42,7 +48,7 @@ The initial implementation was exercised on Windows x64 with the actual Java pri
 - Core unit/contract/branding tests: 23 passing. CLI/Windows tests: 7 passing, including SQLite restart/pending-event persistence, DPAPI protection/round trip, persisted exposure, submission rejection after deselection and credential-free snapshots.
 - AppKit companion, service, CLI and installer compile/package validation completed locally with warnings treated as errors.
 
-## Not established by this acceptance
+## Historical limits of the initial acceptance
 
 Physical Zebra/ZPL output is pending connection of the Zebra printer. Automated elevated desktop/FlaUI execution, printer-driver stress/large documents, unattended reboot/logoff scenarios, MSI upgrade compatibility, proxy authentication, long-running retention and signed production distribution require additional qualification.
 

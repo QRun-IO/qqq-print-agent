@@ -4,7 +4,7 @@
 - [x] Restore 0.1.4, then install corrected 0.1.5; all 12 native UI checks have passing results; 204 tests and exact-source CI passed.
 - [x] Verify and install 0.1.6: 211 tests, clean build, passing exact-source CI, successful MSI upgrade and all 15 native UI checks across 14+1 runs.
 - [ ] Diagnose the later clean service stop; normal-UAC restart restored Running, but the cause is unconfirmed.
-- [ ] Verify live cloud reconnection; the installed connection is offline.
+- [x] Restore the paired local QQQ connection with credentials preserved and no pending jobs before startup; connection healthy on loopback port 18081.
 
 ## Implemented
 
@@ -28,28 +28,20 @@
 
 ## Current verification and release
 
-- [x] User confirmed the installed 0.1.4 tray icon works.
-- [x] Implement compact tables, 50-row history queries, metadata editors and synchronized labels, log limits and confirmed clearing.
-- [ ] Complete the new source gate and installed acceptance for selection/focus, paging, long values, metadata synchronization and log controls.
-
-- [x] Install0.1.4 tray/menu correction, retire obsolete debug companions, retain credentials and verify running service; source163tests and exact-commit GitHub CI passed.
-- [x] Installed0.1.4 menu/About, splash, close/relaunch and other shell checks:10passed.
-- [ ] Complete log-window focused rerun (initial0.1.4 suite had1failure).
-- [x] Current 0.1.3-rc.1 Windows gate: 163 tests (36 Core + 127 Windows/CLI), zero build warnings/errors and locked restore. UI tests compile only.
-- [x] QQQ 0.1.1-rc.1 gate: 19 tests, zero Checkstyle violations.
-- [x] Package and record the final 0.1.3-rc.1 MSI/checksum from source7344914; its GitHub CI build/test/package gate passed.
-- [x] Install 0.1.1 with retained encrypted credentials and successful service restart.
-- [x] Install corrective 0.1.3: MSI exit0, no reboot required, encrypted credentials retained, service restart/management pipe passed and four queues discovered.
-- [ ] Complete installed desktop acceptance: first run5passed/5failed; correct pinned-AppKit/test-visibility assumptions and qualify input-dependent checks on an accessible desktop. Initial cloud snapshot was offline; recheck live connection.
+- [x] Publish v0.1.6-rc.1 and verify its release assets.
+- [x] Complete the 211-test source gate and exact-source CI; install 0.1.6 with credentials retained.
+- [x] Complete all 15 installed UI checks across the initial 14 passes and one focused rerun; management, profile, pagination, log controls and branding checks passed.
+- [x] Supersede the earlier 0.1.3/0.1.4 desktop and log-window rerun items with the later passing installed checks. Historical evidence remains in ACCEPTANCE.md.
+- [x] Connect a Zebra ZT411 at 300 dpi with confirmed 4 × 6-inch stock; expose locally and enable in QQQ.
+- [x] Submit exactly one ZPL shipping test and one PDF barcode/alignment test through the paired local QQQ server; both reached SPOOLED and the service remained Running.
+- [ ] Obtain user confirmation of both Zebra outputs, alignment and barcode scanning. Spool acceptance alone does not establish physical output.
 - [ ] Qualify real in-app update: consent, failed/canceled download or elevation, retained state, helper handoff, coherent versions, relaunch and restart-required reporting.
 - [ ] Review completed protected update stages/logs manually; no automatic completed-stage retention policy is implemented.
-- [ ] Verify tray/duplicate launch/close/exit, reconnect, stale service state, unified logs, job controls and keyboard/focus on the installed app.
-- [ ] Qualify installed credential recovery, exposure/history persistence, service start/restart and bounded recovery.
+- [ ] Qualify remaining input-dependent selection/focus, long-value and metadata synchronization scenarios; passing UI checks do not cover every interaction.
+- [ ] Qualify installed credential recovery, queued/retry/cancel job controls, stale service state and bounded SCM recovery.
 - [ ] Qualify task enable/disable, sign-in, reboot and upgrade with retained credentials/journal.
-- [ ] Send a fresh explicitly authorized laser acceptance job through the final installed package; no new physical print has occurred for these corrections.
-- [ ] Attach Zebra and validate real ZPL output with intended stock/DPI.
+- [ ] Send a fresh explicitly authorized laser acceptance job through the final installed package; earlier laser confirmations belong to earlier builds.
 - [ ] Complete signing and distribution qualification; do not describe unsigned builds as signed.
-- [ ] Publish the reviewed replacement prerelease only after the applicable gates and acceptance evidence are recorded.
 
 ## Broader qualification
 
