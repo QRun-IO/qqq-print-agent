@@ -49,7 +49,7 @@ public sealed partial class MainWindow : Window, IDisposable
       SplashToggle.IsOn = _settings.ShowSplashScreen;
       ThemeChoice.SelectedIndex = _settings.ThemeKind switch { AppTheme.Light => 1, AppTheme.Dark => 2, _ => 0 };
       Navigation.SelectedItem = PrintersNavigation;
-      Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId((DependencyObject)Navigation.SettingsItem, "NavigateSettings");
+      Navigation.Loaded += Navigation_Loaded;
       Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(ThemeChoice, "AppTheme");
       _initializing = false;
       SplashOverlay.ShowOver(RootGrid, AppIdentity.Info, _settings);
@@ -121,6 +121,15 @@ public sealed partial class MainWindow : Window, IDisposable
    private async void Root_Loaded(object sender, RoutedEventArgs e)
    {
       await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync());
+   }
+
+   private void Navigation_Loaded(object sender, RoutedEventArgs e)
+   {
+      // The built-in settings item is created by the template, after construction.
+      if(Navigation.SettingsItem is DependencyObject settingsItem)
+      {
+         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(settingsItem, "NavigateSettings");
+      }
    }
 
    /// <summary>Apply tray-only startup after App has completed the initial Window.Activate call.</summary>

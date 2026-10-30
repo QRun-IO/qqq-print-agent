@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2-rc.1 — 2026-10-30
+
+- Fix installed companion startup: assign the built-in navigation Settings identifier after its template loads, instead of passing an uncreated item to WinUI.
+- Preserve the original launched process in desktop tests so native startup failures report the actual exit code.
+- The 0.1.1 MSI upgrade retained credentials and restarted the service, but installed UI testing found this startup crash; 0.1.1 was not published as a replacement release.
+- Always rebuild the WiX package so changes to the version or payload directory cannot reuse stale incremental output.
+
 ## 0.1.1-rc.1 — 2026-10-29
 
 - Native Windows navigation, stable printer rows, searchable job identity/history, confirmed test/reprint/cancel actions and persistent failure review.

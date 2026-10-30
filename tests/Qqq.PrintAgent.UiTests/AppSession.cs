@@ -246,11 +246,16 @@ public sealed class AppSession : IDisposable
           {
              if(App.HasExited)
              {
-                throw new InvalidOperationException($"The app exited while starting (exit code {App.ExitCode}). Exe: {ExePath}");
+                throw new InvalidOperationException($"The app exited while starting (exit code 0x{unchecked((uint)App.ExitCode):X8}). Exe: {ExePath}");
              }
              try
              {
-                return App.GetMainWindow(Automation, TimeSpan.FromMilliseconds(500));
+                // FlaUI GetMainWindow disposes/reopens its Process on every poll, losing
+                // the original exit handle if startup crashes. Retain that handle and
+                // discover the window through UIA instead.
+                Window? window = Automation.GetDesktop().FindFirstChild(cf => cf.ByProcessId(App.ProcessId)
+                   .And(cf.ByControlType(ControlType.Window)))?.AsWindow();
+                return window;
              }
              catch
              {

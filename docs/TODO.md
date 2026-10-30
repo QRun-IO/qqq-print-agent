@@ -22,7 +22,8 @@
 - [x] Final Windows gate: 102 tests (36 Core + 66 Windows/CLI), zero build warnings/errors.
 - [x] QQQ 0.1.1-rc.1 gate: 19 tests, zero Checkstyle violations.
 - [x] Final MSI rebuilt from verified sources, zero warnings/errors; unsigned status and checksum recorded in FUNCTIONAL-AUDIT.md.
-- [ ] Complete actual elevated upgrade and interactive UI acceptance after the pending user UAC approval.
+- [x] Install 0.1.1 with retained encrypted credentials and successful service restart.
+- [ ] Install corrective 0.1.2 and pass desktop acceptance after fixing the NavigationView SettingsItem startup crash discovered on 0.1.1.
 - [ ] Verify tray/duplicate launch/close/exit, reconnect, stale service state, unified logs, job controls and keyboard/focus on the installed app.
 - [ ] Qualify installed credential recovery, exposure/history persistence, service start/restart and bounded recovery.
 - [ ] Qualify task enable/disable, sign-in, reboot and upgrade with retained credentials/journal.

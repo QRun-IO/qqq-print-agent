@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = '0.1.1',
+   [string] $ProductVersion = '0.1.2',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '0.1.1-rc.1',
+   [string] $ReleaseVersion = '0.1.2-rc.1',
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [string] $CertificateThumbprint,
@@ -63,7 +63,8 @@ if($CertificateThumbprint)
    }
 }
 
-& dotnet build $installerProject --configuration Release '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$outputDirectory\"
+# WiX incremental inputs do not reliably invalidate a changed version/payload path.
+& dotnet build $installerProject --configuration Release -t:Rebuild '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$outputDirectory\"
 if($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
 $msi = Join-Path $outputDirectory "QqqPrintAgent-$ProductVersion-x64.msi"
 if(-not (Test-Path -LiteralPath $msi)) { throw 'MSI output was not produced.' }

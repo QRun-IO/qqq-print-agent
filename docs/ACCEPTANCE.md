@@ -1,5 +1,13 @@
 # Acceptance evidence
 
+## Installed upgrade checkpoint — 2026-10-30
+
+The authorized 0.1.1 MSI upgrade completed with installer exit 0. Saved encrypted credential bytes were unchanged, and the Windows service restarted successfully. SCM inspection confirmed the two 30-second recovery restarts. Nine installed desktop tests then exposed a native startup failure: the constructor passed an uncreated NavigationView SettingsItem to AutomationProperties. This failed result supersedes prior compile-only UI evidence.
+
+The 0.1.2 correction waits for Navigation.Loaded and checks the item before assigning its accessibility identifier. All 102 non-interactive regressions and the zero-warning build passed. The rebuilt unsigned MSI has SHA-256 `ADD29C41742440EC497903DCB87A3FC4A6DECE3D774CC4F8C78A74E3F097ACCA`. Corrective installation and desktop retest are awaiting the new Windows elevation prompt. No new physical print was sent.
+
+The sections below are historical checkpoints.
+
 ## Current source corrections — installed acceptance pending
 
 The current source includes native Printers/Jobs/Logs/Settings navigation, unified AppKit logs, stable printer rows, service controls, opt-in sign-in startup, job identity/search/details/actions, accessible status text and branding contrast validation. The last integration corrections reject premature pipe EOF as an unknown outcome, retain an offline explanation for missing printers, and discard pre-action snapshots that could overwrite newer exposure state. Ordinary pipe requests are bounded to 35 seconds (3-second connection timeout); enrollment is bounded to 150 seconds.

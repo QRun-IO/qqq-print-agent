@@ -66,6 +66,10 @@ Do not enroll the development CLI under your user and copy its protected file in
 
 Foreground CLI commands use `%LocalAppData%\QqqPrintAgent` by default. An explicit `--data-dir` may select a separate development directory; directly using the service ProgramData directory is rejected. Use `--service` for installed-service enrollment/exposure. Foreground enrollment and exposure changes take the same exclusive worker lock as `run`, so stop that foreground worker before changing its connection or exposure. Both CLI and service dispatch native discovery/printing through a bounded child process.
 
+## Updates
+
+This service-based app does not currently check for, download, or apply updates automatically. Its AppKit shell does not activate the Velopack updater used by GCLO and MarkdownViewr. Updates use the machine MSI so the service, companion and CLI remain one version. There is no Check for updates button or background updater in this release.
+
 ## Upgrade and remove
 
 Install a newer MSI as administrator. The installer stops and replaces the service and companion together. Current authoring retains ProgramData through upgrades and uninstall. Stop new job submissions and resolve uncertain jobs before upgrading.

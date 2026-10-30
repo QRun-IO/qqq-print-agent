@@ -9,7 +9,7 @@ using KofTwentyTwo.AppKit.Settings;
 namespace Qqq.PrintAgent.Core;
 
 /// <summary>
-/// The app's preferences: AppKit's shell settings (theme, splash, update checks) plus the
+/// The app's preferences: AppKit's shell settings (theme and splash) plus the
 /// app's own. Add properties here, repair them in <see cref="Sanitize"/>, and they are
 /// saved by <see cref="AppIdentity.SettingsStore"/>.
 /// </summary>
