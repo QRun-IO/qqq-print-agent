@@ -1,5 +1,8 @@
 # Session state — 2026-10-30
 
+## Branded warehouse diagnostics in progress — 2026-10-30
+
+User requested strongly QQQ-branded built-in test documents with warehouse-readable characters. Protocol 0.1.3 adds optional media/resolution profiles; Windows 0.1.7 adds explicit native choices and prefers ZPL on compatible label queues. Windows gate passed 227 tests (57 Core, 170 Windows/CLI), zero warnings/errors; the final UI acceptance test compiles. QQQ generator uses the existing QQQ logo and embedded JetBrains Mono Bold (dotted zero, distinct 1/I/l), rendered into bounded graphics for ZPL. Independent review caught and corrected the Zebra per-field graphic-size limit before any new built-in physical print. QQQ's repeated gate, final previews, installation and actual built-in print acceptance are in progress. The prior installed 0.1.6 and published artifacts remain available.
 ## Current checkpoint: 0.1.6 published and Zebra submissions accepted
 
 Public v0.1.6-rc.1 release assets are verified. The original paired QQQ database was restored on loopback port 18081 without changing device credentials; read-only inspection found no pending jobs before startup. The connection is healthy. A Zebra ZT411 at 300 dpi, loaded with confirmed 4 × 6-inch stock, is exposed locally, enabled in QQQ and READY. Exactly one ZPL shipping test and one PDF barcode/alignment test reached SPOOLED. Physical output and barcode scanning are pending user confirmation. The service remained Running throughout this session. This is local end-to-end protocol evidence, not a deployed remote cloud test. No production code changed.

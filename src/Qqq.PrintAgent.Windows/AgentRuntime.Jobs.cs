@@ -53,7 +53,8 @@ public sealed partial class AgentRuntime
          }
       }
       using PrintApiClient api = CreateApi(configuration);
-      string queuedJob = await api.OperatorActionAsync(request.Operation, request.JobId, request.PrinterId, request.Format, request.ConfirmDuplicateRisk, token).ConfigureAwait(false);
+      string? testProfile = string.Equals(request.Operation, "test-print", StringComparison.Ordinal) ? request.TestProfile : null;
+      string queuedJob = await api.OperatorActionAsync(request.Operation, request.JobId, request.PrinterId, request.Format, request.ConfirmDuplicateRisk, testProfile, token).ConfigureAwait(false);
       if(string.Equals(request.Operation, "cancel-job", StringComparison.Ordinal))
       {
          lock(_stateLock)

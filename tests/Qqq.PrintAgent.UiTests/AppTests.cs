@@ -185,6 +185,54 @@ public class AppTests
       session.WaitFor(() => session.FindInApp(cf => cf.ByAutomationId("SortJobTitle")) is { Name: "Sort by document, ascending" } button ? button : null, "document sort query to finish");
    }
 
+   /// <summary>Requires an exposed PDF/ZPL queue; opens diagnostic choices and cancels without submitting any job.</summary>
+   [Fact]
+   public void LabelTestDialog_OffersResolutionAndStockChoicesWithoutPrinting()
+   {
+      using var session = new AppSession();
+      AutomationElement inventory = session.WaitForElement("PrinterInventory");
+      AutomationElement row = session.WaitFor(() => inventory.FindAllDescendants(cf => cf.ByControlType(ControlType.ListItem))
+         .FirstOrDefault(IsSharedLabelRow), "an exposed PDF/ZPL queue for the read-only diagnostic dialog fixture");
+      row.Patterns.SelectionItem.Pattern.Select();
+      AutomationElement test = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByAutomationId("PrintTest")) is { IsEnabled: true } button ? button : null, "the selected queue's diagnostic button");
+      test.Patterns.Invoke.Pattern.Invoke();
+      ComboBox format = session.WaitForElement("TestPrintFormat").AsComboBox();
+      ComboBox media = session.WaitForElement("TestPrintMedia").AsComboBox();
+      Assert.Equal("Printer-ready label (ZPL)", format.SelectedItem?.Text);
+      string[] resolutions = ["4 × 6 in label — 203 dpi", "4 × 6 in label — 300 dpi", "4 × 6 in label — 600 dpi"];
+      foreach(string resolution in resolutions)
+      {
+         media.Select(resolution);
+         Assert.Equal(resolution, media.SelectedItem?.Text);
+      }
+      format.Select("Document (PDF)");
+      session.WaitFor(() => string.Equals(media.SelectedItem?.Text, "US Letter — 8.5 × 11 in", StringComparison.Ordinal) ? media : null, "PDF stock choices");
+      string[] stocks = ["US Letter — 8.5 × 11 in", "A4 — 210 × 297 mm", "4 × 6 in label"];
+      foreach(string stock in stocks)
+      {
+         media.Select(stock);
+         Assert.Equal(stock, media.SelectedItem?.Text);
+      }
+      session.ClickButton("Back");
+      session.WaitForElementGone("TestPrintFormat");
+      Assert.False(session.App.HasExited);
+   }
+
+   private static bool IsSharedLabelRow(AutomationElement row)
+   {
+      AutomationElement? exposure = row.FindFirstDescendant(cf => cf.ByControlType(ControlType.CheckBox));
+      if(row.IsOffscreen || exposure?.Patterns.Toggle.Pattern.ToggleState.Value != ToggleState.On)
+      {
+         return false;
+      }
+      return row.FindAllDescendants(cf => cf.ByControlType(ControlType.Text)).Any(element =>
+      {
+         string[] formats = element.Name.Split(',', StringSplitOptions.TrimEntries);
+         return element.BoundingRectangle.Bottom <= row.BoundingRectangle.Top + 44
+            && formats.Contains("ZPL", StringComparer.Ordinal) && formats.Contains("PDF", StringComparer.Ordinal);
+      });
+   }
+
 
 
    /// <summary>The close button hides details while the tray process stays alive.</summary>

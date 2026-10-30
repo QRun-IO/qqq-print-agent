@@ -116,7 +116,10 @@ public sealed class PrintApiClient : IDisposable
    }
 
    /// <summary>Request an explicit operator action without retaining document bytes locally.</summary>
-   public async Task<string> OperatorActionAsync(string operation, string? jobId, string? printerId, string? format, bool confirmDuplicateRisk, CancellationToken token)
+   public Task<string> OperatorActionAsync(string operation, string? jobId, string? printerId, string? format, bool confirmDuplicateRisk, CancellationToken token)
+      => OperatorActionAsync(operation, jobId, printerId, format, confirmDuplicateRisk, null, token);
+
+   public async Task<string> OperatorActionAsync(string operation, string? jobId, string? printerId, string? format, bool confirmDuplicateRisk, string? testProfile, CancellationToken token)
    {
       string path = operation switch
       {
@@ -125,7 +128,14 @@ public sealed class PrintApiClient : IDisposable
          "cancel-job" => $"device/jobs/{Uri.EscapeDataString(jobId ?? throw new ArgumentException("Job is required.", nameof(jobId)))}/cancel",
          _ => throw new ArgumentException("Unsupported operator action.", nameof(operation)),
       };
-      using HttpResponseMessage response = await _http.PostAsJsonAsync(path, new { printerId, format, confirmDuplicateRisk, requestId = Guid.NewGuid().ToString("N") }, JsonOptions, token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _http.PostAsJsonAsync(path, new
+      {
+         printerId,
+         format,
+         confirmDuplicateRisk,
+         testProfile = string.Equals(operation, "test-print", StringComparison.Ordinal) ? testProfile : null,
+         requestId = Guid.NewGuid().ToString("N"),
+      }, JsonOptions, token).ConfigureAwait(false);
       if(!response.IsSuccessStatusCode)
       {
          if(response.StatusCode == System.Net.HttpStatusCode.NotFound)

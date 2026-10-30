@@ -9,10 +9,10 @@ on:
     inputs:
       product-version:
         type: string
-        default: '0.1.6'
+        default: '0.1.7'
       release-version:
         type: string
-        default: '0.1.6-rc.1'
+        default: '0.1.7-rc.1'
 
 permissions:
   contents: read
@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: QRun-IO/qqq-print-protocol
-          ref: a0de93b00e602abde9be77c1ec9103b670bf3c09
+          ref: f4f977ca4aa6b749e6a52760eed5e53c99a7704d
           path: qqq-print-protocol
           persist-credentials: false
       - name: Set up .NET
@@ -52,8 +52,8 @@ jobs:
         run: ./build/Test-BrandedInstaller.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.6' }}
-          RELEASE_VERSION: ${{ inputs.release-version || '0.1.6-rc.1' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.7' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '0.1.7-rc.1' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

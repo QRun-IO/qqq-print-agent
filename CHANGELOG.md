@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.7-rc.1 — 2026-10-30
+
+- Built-in QQQ-branded warehouse diagnostics use the server's bundled legible font across PDF and ZPL.
+- Native test controls offer Letter, A4 and 4 × 6 labels with explicit 203/300/600-dpi ZPL choices.
+- Prefer ZPL for label-capable queues and suggest resolution from an explicit driver hint; operators verify stock and resolution before printing.
+- Existing API callers keep compatible defaults when testProfile is omitted.
+
+
 ## 0.1.6-rc.1 — 2026-10-30
 
 - Expand selected printer information within its row, with actions first, labeled fields, a bounded description preview and expandable Windows diagnostics.

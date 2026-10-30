@@ -76,14 +76,14 @@ public sealed partial class MainWindow
       {
          return;
       }
-      ComboBox format = new() { Header = "Test format", ItemsSource = printer.Formats, SelectedIndex = 0, MinWidth = 220 };
-      StackPanel content = new() { Spacing = 12 };
-      content.Children.Add(new TextBlock { Text = $"Send one test to {PrinterLabel(printer)} through the server? This uses real paper or a label. The printer must be shared here and approved on the server.", TextWrapping = TextWrapping.Wrap });
-      content.Children.Add(format);
-      var dialog = new ContentDialog { Title = "Print a test", Content = content, PrimaryButtonText = "Print one test", CloseButtonText = "Back", DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot };
-      if(await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary && format.SelectedItem is string selectedFormat)
+      var editor = new TestPrintEditor(printer, PrinterLabel(printer));
+      ContentDialog dialog = CreateWideDialog("Print a test", editor);
+      dialog.PrimaryButtonText = "Print one test";
+      dialog.CloseButtonText = "Back";
+      dialog.DefaultButton = ContentDialogButton.Close;
+      if(await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary && editor.SelectedProfile is string profile)
       {
-         await RunActionAsync(new PipeRequest("test-print", PrinterId: printer.PrinterId, Format: selectedFormat));
+         await RunActionAsync(new PipeRequest("test-print", PrinterId: printer.PrinterId, Format: editor.SelectedFormat, TestProfile: profile));
       }
    }
 
