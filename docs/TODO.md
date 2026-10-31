@@ -1,10 +1,10 @@
 # TODO
 
-- [x] Audit source regression gate: 237 tests and zero build warnings/errors, including bounded IPC/network responses, metadata preservation, backlog scheduling and SQLite initialization cleanup.
-- [ ] Complete independent deep security scan, review fixes and record canonical findings/coverage.
+- [x] Audit source regression gate: 249 tests and zero build warnings/errors, including authenticated/bounded IPC, machine-state ownership, metadata preservation, backlog scheduling and SQLite initialization cleanup.
+- [x] Complete independent deep security scan, investigate all five findings, review fixes and record canonical findings/coverage.
 - [ ] Verify audit packaging, installed UI/updater handoff and hosted security/provenance gates before publishing the next prerelease.
 - [x] Record user decision: prereleases remain unsigned for now; do not describe hashes or build attestations as code signing.
-- [x] Publish audit draft PR #2; head a560fe6 passes all hosted checks. Download and verify exact-source CI MSI/branding checksums. New installation and tagged-release attestations remain pending.
+- [x] Publish audit draft PR #2; final executable source 2e6a2e5 passes all hosted checks. Download and verify CI MSI/branding checksums and actual installer formatting/sequence/component identities. New installation and tagged-release attestations remain pending.
 - [x] Enforce all main-branch checks for administrators too, following explicit user approval; establish acknowledged R-drive coordination with Mobile Scanner and Record Files masters.
 
 - [x] Install 0.1.7 from 93dd5fc: MSI exit 0, no reboot, credentials retained; management/profile/history/log settings/branding/connected-state checks passed.
@@ -64,4 +64,5 @@
 - [ ] Qualify high contrast, Narrator, display scaling and small-screen behavior.
 - [ ] Track custom media dimensions and physical-output confirmation separately from spooler acceptance.
 
-- [ ] Complete independent review and deployment qualification after the five baseline security findings are remediated; current details are in SESSION-STATE.md.
+- [x] Complete independent review after the five baseline security findings are remediated; current details are in SESSION-STATE.md.
+- [ ] Complete installed and deployment qualification; the normal-UAC upgrade request is pending, not a successful installation.
