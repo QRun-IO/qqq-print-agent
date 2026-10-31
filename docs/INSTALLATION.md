@@ -58,13 +58,13 @@ Install each printer and its appropriate vendor driver in Windows. Print a norma
 
 Set the queue's default paper/tray/orientation for PDF printing. The initial API supports actual size or fit and copies, but rejects custom media dimensions. For ZPL, configure compatible Zebra/ZDesigner drivers and generate ZPL matching the printer's DPI and label stock.
 
-## Enroll
+## Sign in and pair
 
-Create a single-use enrollment code in QQQ. Open the companion, enter the QQQ server origin and code, then connect. Enrollment runs in the service so its credential is protected under the service identity. The desktop stores no device token.
+Upgrade the QQQ printing server first. In the companion's connection settings, enter its origin, discover the advertised sign-in options and sign in through the configured QQQ authentication. See [QQQ sign-in](QQQ-SIGN-IN.md) for browser-provider requirements and recovery.
 
-Do not enroll the development CLI under your user and copy its protected file into ProgramData: DPAPI credentials are bound to the account that created them. Use the companion or an elevated CLI `enroll --service` command.
+For an existing unbound installation, choose **Associate the existing pairing with my account**; preserve its device record and history. For a new installation, complete sign-in and enter a single-use enrollment code created in QQQ. Enrollment runs in the service, protecting its device proof and QQQ session under the service identity. The desktop does not retain the password or device token. **Set up a new pairing** is an explicit replacement flow, not routine upgrade migration.
 
-Foreground CLI commands use `%LocalAppData%\QqqPrintAgent` by default. An explicit `--data-dir` may select a separate development directory; directly using the service ProgramData directory is rejected. Use `--service` for installed-service enrollment/exposure. Foreground enrollment and exposure changes take the same exclusive worker lock as `run`, so stop that foreground worker before changing its connection or exposure. Both CLI and service dispatch native discovery/printing through a bounded child process.
+Normal CLI setup, printer exposure and connection commands use the authenticated installed service. Sign in through the companion first; `run` requests a connection refresh. Explicit `--legacy-compat` diagnostics require a separate `--data-dir` and cannot use `--service`. Do not copy a user-protected DPAPI credential into ProgramData: credentials are bound to the account that created them. The service owns unattended discovery and printing.
 
 ## Updates
 
