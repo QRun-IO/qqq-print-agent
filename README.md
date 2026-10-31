@@ -1,5 +1,7 @@
 # QQQ Print Agent
 
+<!-- Sized product icon; Markdown has no portable image-sizing syntax. -->
+<!-- markdownlint-disable-next-line MD033 -->
 <img src="src/Qqq.PrintAgent/Assets/Brand/app-preview.png" width="96" alt="QQQ Print Agent cloud and printer icon">
 
 [![CI](https://github.com/QRun-IO/qqq-print-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/QRun-IO/qqq-print-agent/actions/workflows/ci.yml)
@@ -90,7 +92,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.1.7 -ReleaseVersion 0.1.7-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.1.9 -ReleaseVersion 0.1.9-rc.1
 ```
 
 [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

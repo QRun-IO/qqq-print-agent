@@ -27,6 +27,7 @@ public static class AgentBrandingInstaller
    public static void ApplyInstalledBranding()
    {
       RequireAdministrator();
+      MachineStateDirectory.EnsureForPath(AgentStore.DefaultDirectory);
       ValidateDirectory(Path.GetDirectoryName(InstalledExecutable)!);
       if(!File.Exists(InstalledExecutable))
       {

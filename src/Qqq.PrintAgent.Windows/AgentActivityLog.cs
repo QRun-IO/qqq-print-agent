@@ -18,6 +18,7 @@ public sealed partial class AgentActivityLog : IActivityLog
 
    private AgentActivityLog(string directory)
    {
+      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(directory);
       _log = new FileActivityLog(Path.Combine(Path.GetFullPath(directory), "logs"), "qqq-print-agent", retentionDays: 0);
    }
 

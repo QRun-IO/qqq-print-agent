@@ -59,12 +59,13 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    {
       while(!token.IsCancellationRequested)
       {
+         bool processed = false;
          try
          {
             await _connectionGate.WaitAsync(token).ConfigureAwait(false);
             try
             {
-               await PollOnceAsync(token).ConfigureAwait(false);
+               processed = await PollOnceAsync(token).ConfigureAwait(false);
             }
             finally { _connectionGate.Release(); }
          }
@@ -79,20 +80,29 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             if(changed)
             { WriteLog("ERROR", exception.Message); }
          }
-         await _pollRequested.WaitAsync(TimeSpan.FromSeconds(_pollIntervalSeconds), token).ConfigureAwait(false);
+         if(processed)
+         {
+            // Release the connection gate and yield between jobs so update/enrollment
+            // commands and the independent heartbeat cannot starve behind a backlog.
+            await Task.Yield();
+         }
+         else
+         {
+            await _pollRequested.WaitAsync(TimeSpan.FromSeconds(_pollIntervalSeconds), token).ConfigureAwait(false);
+         }
       }
    }
 
-   private async Task PollOnceAsync(CancellationToken token)
+   private async Task<bool> PollOnceAsync(CancellationToken token)
    {
       if(UpdatePaused)
       {
-         return;
+         return false;
       }
       using AgentStore store = new(directory);
       AgentConfiguration? configuration = store.LoadConfiguration();
       if(configuration is null)
-      { return; }
+      { return false; }
       _pollIntervalSeconds = Math.Clamp(configuration.PollIntervalSeconds, 1, 20);
       using PrintApiClient api = CreateApi(configuration);
       long queueGeneration;
@@ -109,7 +119,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          }
       }
       ExposedPrinterBackend exposed = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
-      await new PrintWorker(api, exposed, store, message => WriteLog("INFO", message)).RunOnceAsync(token).ConfigureAwait(false);
+      bool processed = await new PrintWorker(api, exposed, store, message => WriteLog("INFO", message)).RunOnceAsync(token).ConfigureAwait(false);
       if(DateTimeOffset.UtcNow >= _nextHistoryMaintenance)
       {
          _ = store.PruneHistory();
@@ -123,6 +133,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       }
       if(recovered)
       { WriteLog("INFO", "Connected to the print server."); }
+      return processed;
    }
 
    private PrintApiClient CreateApi(AgentConfiguration configuration) => apiFactory?.Invoke(configuration) ?? new PrintApiClient(configuration.ServerUrl, configuration.DeviceToken);
@@ -199,27 +210,19 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
    private async Task ServePipeAsync(CancellationToken token)
    {
-      PipeSecurity security = new();
-      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, domainSid: null), PipeAccessRights.FullControl, AccessControlType.Allow));
-      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, domainSid: null), PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance, AccessControlType.Allow));
+      await using NamedPipeServerStream pipe = pipeFactory?.Invoke() ?? NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 4096, 4096, CreatePipeSecurity());
       while(!token.IsCancellationRequested)
       {
-         await using NamedPipeServerStream pipe = pipeFactory?.Invoke() ?? NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 4096, 4096, security);
          await pipe.WaitForConnectionAsync(token).ConfigureAwait(false);
-         using StreamReader reader = new(pipe, leaveOpen: true);
-         StreamWriter writer = new(pipe, leaveOpen: true) { AutoFlush = true };
+
          try
          {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
-            string line = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false) ?? "";
-            if(line.Length > 65536)
-            {
-               throw new InvalidDataException("Command too large.");
-            }
+            string line = await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumCommandCharacters, timeout.Token).ConfigureAwait(false);
             PipeRequest request = JsonSerializer.Deserialize<PipeRequest>(line, PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Invalid command.");
             timeout.CancelAfter(TimeSpan.FromSeconds(string.Equals(request.Operation, "enroll", StringComparison.Ordinal) ? 120 : 30));
-            await writer.WriteLineAsync(await HandleCommandAsync(request, timeout.Token).ConfigureAwait(false)).ConfigureAwait(false);
+            await AgentPipeFraming.WriteResponseAsync(pipe, await HandleCommandAsync(request, timeout.Token).ConfigureAwait(false), timeout.Token).ConfigureAwait(false);
          }
          catch(Exception exception) when(exception is not OperationCanceledException || !token.IsCancellationRequested)
          {
@@ -228,16 +231,28 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
                ? "The saved connection cannot be opened. Open Settings, choose Connect this device or Sign in again, and use a fresh server enrollment code. Existing job history will be preserved."
                : AgentActivityLog.Redact(exception.Message);
             try
-            { await writer.WriteLineAsync("Error: " + message).ConfigureAwait(false); }
-            catch(IOException) { /* A disconnected client must not stop the management pipe. */ }
+            {
+               using var errorTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+               errorTimeout.CancelAfter(TimeSpan.FromSeconds(1));
+               await AgentPipeFraming.WriteResponseAsync(pipe, "Error: " + message, errorTimeout.Token).ConfigureAwait(false);
+            }
+            catch(Exception writeException) when(writeException is IOException or OperationCanceledException)
+            { /* An unresponsive client must not stop the management pipe. */ }
          }
          finally
          {
-            try
-            { await writer.DisposeAsync().ConfigureAwait(false); }
-            catch(IOException) { /* Failed response buffers cannot be flushed to a closed pipe. */ }
+            // Disconnect also resets the Broken state after a peer closes mid-command.
+            pipe.Disconnect();
          }
       }
+   }
+
+   internal static PipeSecurity CreatePipeSecurity()
+   {
+      PipeSecurity security = new();
+      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, domainSid: null), PipeAccessRights.FullControl, AccessControlType.Allow));
+      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, domainSid: null), PipeAccessRights.ReadWrite, AccessControlType.Allow));
+      return security;
    }
 
 

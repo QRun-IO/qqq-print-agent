@@ -1,6 +1,6 @@
 # Threat model: QQQ Print Agent
 
-Parity target: 0.1.3-rc.1. Reviewed: 2026-10-30. This is an implementation-level inventory, not an independent security audit.
+Installed baseline: 0.1.7-rc.1; audit source changes pending release. Reviewed: 2026-10-30. This is an implementation-level inventory. The separate independent deep scan has not yet returned its findings.
 
 ## Boundaries and assets
 
@@ -10,10 +10,10 @@ The QQQ server supplies assigned document bytes over HTTPS. The Windows LocalSys
 | --- | --- | --- |
 | Internet to device | Outbound HTTPS, normal certificate validation; loopback-only HTTP development exception | Proxy/custom trust deployments not qualified |
 | Device to server | Dedicated bearer credential; server enforces device/job scope | A compromised trusted server can supply hostile print content |
-| Local UI to service | Pipe ACL permits SYSTEM/admins; narrow command set | Local administrators already control the machine; input allocation limits need further hardening |
+| Local UI to service | Pipe ACL permits SYSTEM/admins; narrow command set; bounded newline framing and cancellable reads/writes | Local administrators already control the machine; source regressions passed, installed audit acceptance pending |
 | Exposure selection | Service-owned persisted allowlist; discovered-ID validation; filter inventory and recheck submission | Removal cannot retract data already accepted by Windows |
 | Credentials at rest | DPAPI CurrentUser under service identity; restricted ProgramData ACL | Machine/service compromise defeats local protection |
-| Payload download | 20 MiB cap, declared length and SHA-256 validation | Integrity does not sanitize PDFs or printer languages |
+| Payload download | 20 MiB cap, declared length and SHA-256 validation; 60-second body deadline; separate 2 MiB control-response cap | Integrity does not sanitize PDFs or printer languages |
 | Rendering/driver execution | Native Windows PDF/GDI/spooler APIs; bounded render dimensions | Disposable child with bounded timeouts and parent-exit cleanup; child retains service privileges, so this is fault isolation, not a security sandbox |
 | RAW ZPL | Explicit compatible queue, trusted server workflow | ZPL can contain printer-control commands; not a sandboxed format |
 | Duplicate output | Persistent receipts and events; uncertain submissions require review | Database and physical printer cannot share a transaction |
@@ -28,7 +28,7 @@ Service and companion persist serialized, credential-redacted AppKit logs with 3
 
 ## Follow-up
 
-Qualify signed upgrades, stricter bounded IPC reads and broad hardware/driver behavior. Regression coverage now includes interrupted jobs, credential recovery, retention, operator actions and bounded child-process termination. Revisit this document when any network, privilege or persistence boundary changes.
+Qualify real in-app upgrades and broad hardware/driver behavior. The user accepts unsigned prereleases for now. Regression coverage includes interrupted jobs, credential recovery, retention, operator actions, bounded IPC and bounded child-process termination. Revisit this document when any network, privilege or persistence boundary changes.
 
 Runtime branding is presentation-only, loaded from the existing administrator-restricted ProgramData directory. JSON size, text length, color syntax, HTTPS support links, and local PNG file size/dimensions are validated. No remote logo fetch occurs; malformed settings fall back to defaults. Machine identity, credentials and authorization are unaffected.
 
@@ -37,7 +37,7 @@ Sign-in startup requires an explicit administrator preference in the installed c
 
 ## Machine-MSI updates: implemented source, installed acceptance pending
 
-The updater passed the **163-test locked source gate with zero warnings/errors**; no verified update installation is claimed. The AppKit `IUpdateService` adapter, `UpdateCoordinator` integration, fixed-feed client and copied apply helper are present in source. The installed 0.1.1 companion currently fails at startup; 0.1.2 corrective source passed 102 tests, but corrective installation was canceled at UAC. The 0.1.3 parity source gate is complete; installed acceptance remains pending.
+The current audit source gate passed **237 tests with zero warnings/errors**. The installed 0.1.7 companion passed all 16 desktop checks before this audit. The AppKit `IUpdateService` adapter, `UpdateCoordinator` integration, fixed-feed client and copied apply helper are implemented, but direct MSI upgrades and synthetic updater tests do not establish a successful real in-app update handoff. That qualification remains pending.
 
 ### Implemented flow and trust
 
@@ -87,3 +87,11 @@ Job pages deserialize at most100 summaries, event delivery/recovery uses200-reco
 The optional branded-install wrapper requires an administrator, validates bounded local configuration/artwork and stages it under the protected service directory. The MSI uses public display-label properties and remembers them in HKLM; customer labels never select the executable, service identity, updater origin or privileged command. The shortcut helper validates fixed target/empty arguments/ownership before replacing or deleting a tracked shortcut. Customer artwork and strings do not change code-signing identity or source/license attribution. WhatIf validation and pure shortcut tests do not establish a completed branded MSI upgrade/rollback qualification.
 
 Shared Start menu directories use a separate shortcut policy: deletion-only rights are allowed because they cannot create replacement content; untrusted writes, permission changes and ownership changes remain rejected. New shortcut folders have protected SYSTEM/Administrators full access and Users read/execute. Protected updater/data directories retain their stricter policy. MSI major-upgrade removal is now inside the install transaction; rollback behavior still requires installed qualification.
+
+### Local peer and pre-existing machine state (0.1.8 audit)
+
+Every management client authenticates the connected pipe's process against the installed SCM service PID, LocalSystem identity and fixed installed executable before transmitting request bytes. Retained service/process/token handles and repeated identity checks limit PID-reuse races. Clients request only explicit read/write rights with Anonymous impersonation; the runtime retains one protected first-instance pipe across requests. A substitute endpoint must receive no enrollment code or other command data.
+
+Canonical machine state accepts only SYSTEM, Administrators and TrustedInstaller ownership and access grants. The initial validation covers existing descendants and rejects links, null DACLs and untrusted inherit-only grants. Existing hostile state is rejected rather than normalized and adopted. Store, log, branding, startup and updater entry points share the invariant; explicitly separate diagnostic directories remain outside machine-state adoption. Administrator changes after successful validation remain within the trusted boundary.
+
+Direct MSI and branded installation enforce this invariant before using persisted files. The deferred preflight runs before folder creation; the installation script executes before old-product removal, which remains inside the rollback transaction. Startup definitions are created within validated state, then held against write/deletion while Task Scheduler reads them; the resulting definition is verified. Actual MSI formatting, component reuse, successful installed-peer authentication and hostile-tree rollback are separate native qualification requirements, not conclusions from unit tests.

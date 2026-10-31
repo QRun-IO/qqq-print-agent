@@ -6,6 +6,20 @@
 using Qqq.PrintAgent.Service;
 using Qqq.PrintAgent.Windows;
 
+if(args.Length == 1 && string.Equals(args[0], "--validate-machine-state", StringComparison.Ordinal))
+{
+   try
+   {
+      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(AgentStore.DefaultDirectory);
+      return 0;
+   }
+   catch(Exception exception)
+   {
+      Console.Error.WriteLine(exception.Message);
+      return 1;
+   }
+}
+
 if(args.Length == 1 && string.Equals(args[0], "--printer-worker", StringComparison.Ordinal))
 {
    return await PrinterWorkerHost.RunAsync().ConfigureAwait(false);

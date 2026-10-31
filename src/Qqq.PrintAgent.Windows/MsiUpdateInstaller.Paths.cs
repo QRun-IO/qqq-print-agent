@@ -14,6 +14,7 @@ public static partial class MsiUpdateInstaller
    public static void ValidateStagingDirectory(string path)
    {
       RequireAdministrator();
+      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(path);
       string directory = Path.GetFullPath(path);
       ValidateContainedPath(directory, UpdatesDirectory, allowRoot: true);
       if(!Directory.Exists(AgentStore.DefaultDirectory))

@@ -3,10 +3,10 @@
 Build the service, AppKit companion and CLI into one x64 machine MSI:
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 0.1.3 -ReleaseVersion 0.1.3-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.1.8 -ReleaseVersion 0.1.8-rc.1
 ```
 
-The build publishes self-contained .NET applications into `artifacts/package` and builds WiX 6.0.2 authoring. Existing publish outputs can be packaged using `-SkipPublish`. The resulting MSI is local development output and is **unsigned unless a signing certificate is explicitly provided**.
+The build publishes self-contained .NET applications into a fresh per-run directory under `artifacts/package` and builds WiX 6.0.2 authoring. An explicit publish directory must not already exist; this prevents obsolete files from entering the harvested MSI. Existing reviewed outputs can be packaged using `-SkipPublish -PayloadDirectory <path>`; all component versions must match the requested release and source version. The resulting MSI is local development output and is **unsigned unless a signing certificate is explicitly provided**.
 
 For a signing certificate already installed in the Windows certificate store:
 

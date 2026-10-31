@@ -1,0 +1,190 @@
+# Local copy of KofTwentyTwo/standards at fdf5ed029603c938615a32b1beca3628b8787945 (v0.1.2).
+# Scanner pins/checks retained; NuGet inventory and OSV evidence now fail closed.
+# Security scanning (K22-CI-20, K22-CI-21, K22-CI-23): secrets over full history,
+# software composition analysis of the lock files (Trivy for CVEs, OSV-Scanner for
+# malicious packages), and workflow linting. Called as:
+#
+#   jobs:
+#     security:
+#       uses: KofTwentyTwo/standards/.github/workflows/security.yml@<sha> # vX.Y.Z
+#       permissions:
+#         contents: read
+#         security-events: write
+#
+# producing the required contexts `security / secrets`, `security / sca`, and
+# `security / workflows`. Call it on pull_request, on push to main, and on a weekly
+# schedule so new advisories are caught between changes.
+#
+# Scanners run as digest-pinned containers (K22-CI-11) rather than third-party
+# actions. Repository-specific configuration is picked up from the repository root:
+# .gitleaks.toml, trivy.yaml / .trivyignore, and zizmor.yml / .github/zizmor.yml.
+name: security
+
+on:
+  workflow_call:
+    inputs:
+      trivy-skip-dirs:
+        description: Comma-separated directories the SCA scan skips (for example test fixtures with deliberately vulnerable manifests).
+        type: string
+        default: ""
+      sca-severity:
+        description: Severities that fail the SCA gate.
+        type: string
+        default: HIGH,CRITICAL
+
+permissions: {}
+
+jobs:
+  secrets:
+    name: secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The container runs as root over a workspace owned by the runner user; git
+      # refuses such repositories unless they are marked safe, which the
+      # GIT_CONFIG_* variables do without a writable global config.
+      - name: Gitleaks (every commit)
+        uses: docker://ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: safe.directory
+          GIT_CONFIG_VALUE_0: "*"
+        with:
+          args: git /github/workspace --redact --verbose --exit-code 1 --no-banner
+
+  sca:
+    name: sca
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload SARIF results to code scanning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # SARIF for code scanning carries MEDIUM and above for visibility; the gate
+      # below fails only on the configured severities (HIGH and CRITICAL by default).
+      - name: Test scan guard rejection paths
+        run: python3 .github/scripts/test-scan-gates.py
+
+      - name: Trivy dependency inventory and SARIF
+        env:
+          TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+          EXTRA_SKIP_DIRS: ${{ inputs.trivy-skip-dirs }}
+        run: |
+          set -euo pipefail
+          skip_dirs=".trivycache${EXTRA_SKIP_DIRS:+,$EXTRA_SKIP_DIRS}"
+          docker run --rm -v "$PWD:/src" "$TRIVY_IMAGE" \
+            fs --scanners vuln --severity MEDIUM,HIGH,CRITICAL \
+            --cache-dir /src/.trivycache --skip-dirs "$skip_dirs" \
+            --list-all-pkgs --format json --output /src/trivy.json --exit-code 0 /src
+          python3 .github/scripts/check-dependency-inventory.py trivy trivy.json .
+          docker run --rm -v "$PWD:/src" "$TRIVY_IMAGE" \
+            convert --format sarif --output /src/trivy.sarif /src/trivy.json
+          docker run --rm -v "$PWD:/src" "$TRIVY_IMAGE" \
+            convert --format cyclonedx --output /src/printing.cdx.json /src/trivy.json
+          python3 .github/scripts/check-dependency-inventory.py sbom printing.cdx.json .
+
+      - name: Upload SARIF to code scanning
+        # Fork pull requests get a read-only token, so only same-repository runs upload.
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-sca
+
+      # Malicious packages (OpenSSF malicious-packages feed, OSV `MAL-` IDs) are a
+      # different threat from CVEs and are not in Trivy's database, so OSV-Scanner
+      # checks the validated full NuGet graph via CycloneDX. Any MAL- finding fails.
+      - name: OSV-Scanner (malicious packages)
+        env:
+          OSV_IMAGE: ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+        run: |
+          set -euo pipefail
+          status=0
+          docker run --rm -v "$PWD:/src:ro" "$OSV_IMAGE" scan source --lockfile /src/printing.cdx.json --format json > osv.json || status=$?
+          # 0: nothing found, 1: vulnerabilities found. Empty/unreadable inventories fail.
+          python3 .github/scripts/check-dependency-inventory.py osv-status "$status"
+          malicious=$(jq -r '
+            [ .results[]?.packages[]?
+              | .package as $p
+              | .vulnerabilities[]?
+              | select((.id | startswith("MAL-")) or ((.aliases // []) | any(startswith("MAL-"))))
+              | "\(.id) \($p.ecosystem)/\($p.name)@\($p.version)" ]
+            | unique | .[]' osv.json)
+          if [[ -n "$malicious" ]]; then
+            while IFS= read -r finding; do
+              echo "::error title=Malicious package::$finding"
+            done <<< "$malicious"
+            exit 1
+          fi
+          echo "No dependency is flagged as malicious."
+
+      - name: Gate on vulnerable dependencies
+        env:
+          TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+          SCA_SEVERITY: ${{ inputs.sca-severity }}
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src:ro" "$TRIVY_IMAGE" \
+            convert --severity "$SCA_SEVERITY" --format table --exit-code 1 /src/trivy.json
+
+  workflows:
+    name: workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # upload SARIF results to code scanning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: zizmor (SARIF)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx zizmor@1.30.1 --format sarif --min-severity low . > zizmor.sarif || true
+
+      - name: Upload SARIF to code scanning
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
+      # GH_TOKEN enables zizmor's online audits (impostor commits, known-vulnerable
+      # actions, ref confusion); the read-only job token is enough.
+      - name: zizmor gate (medium and above)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx zizmor@1.30.1 --min-severity medium .
+
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLO "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check --strict
+          tar -xzf "${archive}" actionlint
+          ./actionlint -color

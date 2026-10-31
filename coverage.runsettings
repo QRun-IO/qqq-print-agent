@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Coverage contract for the 100% gate (K22-TEST-10): every hand-written line of the
-     UI-free core and the command line counts. There is deliberately no Include filter:
+<!-- Coverage reporting for the prerelease exception in docs/adr/0002-prerelease-quality-and-packaging.md.
+     This collection configuration does not enforce a 100% coverage gate.
+     There is deliberately no Include filter:
      coverlet measures the projects the unit tests reference whose sources are in this
-     repository (Core and the CLI), never test assemblies or NuGet packages, and an Include
+     repository (including Core, Windows and CLI), never NuGet packages, and an Include
      filter would silently drop the CLI, whose assembly name (the app id) contains dashes.
      Excluded, with intent:
      - GeneratedCodeAttribute: source-generated JSON contexts and MVVM Toolkit members.
      - ExcludeFromCodeCoverageAttribute: thin adapters a test cannot reach, each with a
        justification at its declaration.
-     The WinUI project is not measured: its views need a live compositor and are covered
-     by the FlaUI tests. Logic belongs in Qqq.PrintAgent.Core instead. -->
+     The WinUI project is not measured: its views need a live compositor. FlaUI acceptance
+     is run separately and must not be inferred from a successful unit-test run.
+     Report each suite separately; duplicate package measurements must not be averaged. -->
 <RunSettings>
    <DataCollectionRunSettings>
       <DataCollectors>

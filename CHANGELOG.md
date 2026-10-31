@@ -1,12 +1,30 @@
 # Changelog
 
+## 0.1.9-rc.1 — unreleased
+
+- Keep management responses available until the client closes its one-command connection or the existing deadline expires. This prevents Windows from discarding unread success and error responses during server disconnect.
+- Preserve current and older newline-framed clients without a new acknowledgement protocol or a blocking pipe drain. Cancellation and service shutdown remain bounded.
+- Reproduce the failure through the real runtime with delayed readers; verify successful responses, error responses, next-client reuse, deadlines and shutdown. The original eight-case private reproduction and all 255 combined regression tests pass; the solution/UI build has zero warnings/errors. Installed qualification remains pending.
+
+## 0.1.8-rc.1 — audit candidate, superseded before publication
+
+- Bound and cancel local management frames and server responses; apply a deadline to streamed document bodies.
+- Drain successful queued jobs without an extra idle delay while retaining independent heartbeats and failure backoff.
+- Preserve valid long job/printer names, close failed SQLite initialization handles and guard late UI completions after exit.
+- Carry explicit operator duplicate-risk consent for failed jobs that may already have reached a printer.
+- Require release security/CodeQL/script gates and verified artifacts before publication; add build provenance attestations.
+- Package from fresh output directories with locked restores and matching source, MSI and component versions.
+- Authenticate the installed service before sending local commands, retain pipe ownership, and reject unsafe machine-state owners, access grants or links before privileged use.
+- Protect sign-in task definitions through registration and validate machine state before an upgrade removes the prior product.
+- Fresh regression gate: 249 tests, zero build warnings/errors. Installed audit acceptance and hosted provenance verification remain pending.
+- The local candidate installed successfully with MSI exit 0 and preserved credentials/journal, but a subsequent management-history check exposed the response-disconnect race corrected in 0.1.9. Service heartbeat and both ready printers were confirmed independently through QQQ.
+
 ## 0.1.7-rc.1 — 2026-10-30
 
 - Built-in QQQ-branded warehouse diagnostics use the server's bundled legible font across PDF and ZPL.
 - Native test controls offer Letter, A4 and 4 × 6 labels with explicit 203/300/600-dpi ZPL choices.
 - Prefer ZPL for label-capable queues and suggest resolution from an explicit driver hint; operators verify stock and resolution before printing.
 - Existing API callers keep compatible defaults when testProfile is omitted.
-
 
 ## 0.1.6-rc.1 — 2026-10-30
 

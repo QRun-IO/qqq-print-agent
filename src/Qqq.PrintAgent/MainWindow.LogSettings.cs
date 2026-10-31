@@ -12,7 +12,7 @@ public sealed partial class MainWindow
    private async void LogSettings_Click(object sender, RoutedEventArgs e)
    {
       LogSettings? settings = await ReadLogSettingsAsync();
-      if(settings is null)
+      if(settings is null || _updatesClosed)
       {
          return;
       }

@@ -1,5 +1,18 @@
 # TODO
 
+- [x] Reproduce and correct management-response loss during immediate named-pipe disconnect; current/legacy delayed readers and bounded shutdown/deadline regressions pass.
+- [x] Install 0.1.8 with preserved credentials/journal and authenticated peers; independently confirm current QQQ heartbeat, two ready printers and no pending or uncertain jobs. The history-check failure requires the correction above.
+- [x] Pass the combined 0.1.9 solution/UI build with zero warnings/errors and all 255 tests (66 Core + 189 Windows/CLI); verify source/fixture bytes before and after the isolated run.
+- [x] Complete 0.1.9 hosted gates, state-preserving upgrade and installed app/service qualification: required checks, retained credentials/history, connected service and 16 installed UI checks pass.
+- [ ] Publish and verify the protected 0.1.9 corrective prerelease after recording installed acceptance.
+- [x] Audit source regression gate: 249 tests and zero build warnings/errors, including authenticated/bounded IPC, machine-state ownership, metadata preservation, backlog scheduling and SQLite initialization cleanup.
+- [x] Complete independent deep security scan, investigate all five findings, review fixes and record canonical findings/coverage.
+- [x] Qualify bounded production store/merge queries at 375,000 synthetic jobs and append 10,000 through journal APIs; integrity and retention checks pass. See SCALABILITY.md for measured scope; sustained service/network/printer throughput remains separate.
+- [ ] Verify audit packaging, installed UI/updater handoff and hosted security/provenance gates before publishing the next prerelease.
+- [x] Record user decision: prereleases remain unsigned for now; do not describe hashes or build attestations as code signing.
+- [x] Publish audit draft PR #2; final executable source 2e6a2e5 passes all hosted checks. Download and verify CI MSI/branding checksums and actual installer formatting/sequence/component identities. New installation and tagged-release attestations remain pending.
+- [x] Enforce all main-branch checks for administrators too, following explicit user approval; establish acknowledged R-drive coordination with Mobile Scanner and Record Files masters.
+
 - [x] Install 0.1.7 from 93dd5fc: MSI exit 0, no reboot, credentials retained; management/profile/history/log settings/branding/connected-state checks passed.
 - [x] Pass 227 unit/regression tests (57 Core + 170 Windows/CLI), zero warnings/errors and exact-source CI 41139885687.
 - [x] Pass all 16 installed UI checks in one run, including read-only diagnostic media/DPI choices.
@@ -56,3 +69,6 @@
 - [ ] Validate supported driver/network identity combinations and deployed QQQ integration.
 - [ ] Qualify high contrast, Narrator, display scaling and small-screen behavior.
 - [ ] Track custom media dimensions and physical-output confirmation separately from spooler acceptance.
+
+- [x] Complete independent review after the five baseline security findings are remediated; current details are in SESSION-STATE.md.
+- [ ] Complete installed and deployment qualification; the normal-UAC upgrade request is pending, not a successful installation.

@@ -5,11 +5,11 @@
 Download the x64 MSI and `SHA256SUMS` from the same [GitHub release](https://github.com/QRun-IO/qqq-print-agent/releases). Check the file locally:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.1.3-rc.1-x64.msi
+Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.1.7-rc.1-x64.msi
 Get-Content .\SHA256SUMS
 ```
 
-Compare the complete hash with the entry for the downloaded MSI. Checksums detect changes after publication; they do not replace publisher signing. This prerelease is **unsigned** and no Authenticode or provenance attestation is claimed. Download only from the project's release page and follow your organization's software-install policy.
+Use the filename of the release you downloaded and compare the complete hash with its `SHA256SUMS` entry. The published baseline is 0.1.7-rc.1; the audit candidate is not released yet. Checksums detect changes after publication; they do not replace publisher signing. The MSI is **unsigned**, with no Authenticode identity. The current release workflow also produces GitHub build-provenance attestations, which are verified separately from checksums and are not code signing. Older releases may lack those attestations; their presence must be checked for the exact downloaded asset. Download only from the project's release page and follow your organization's software-install policy.
 
 ## Install
 
@@ -76,7 +76,7 @@ After confirmation, the adapter downloads into a protected unique folder under `
 
 The helper records a dated result in `updates\last-result.json`, retains a private installation log and attempts to reopen the companion. Settings displays the last result. Exit 3010 means a Windows restart is required, not that the new app is fully ready. On failure, inspect Settings/Logs and the installed version before retrying. Completed update folders, helper copies and install logs are retained for administrator review; there is no automatic cleanup policy for completed stages. Remove an old stage only after confirming its installer/helper has exited and its evidence is no longer needed; never remove enrollment or journal files.
 
-The 0.1.3-rc.1 source gate passed 163 tests and a zero-warning build. Actual installed UI, coherent in-app upgrade, canceled elevation and reboot-required acceptance remain pending. The previously installed 0.1.1 companion has a known startup defect; use the reviewed corrective MSI directly to bootstrap a working companion rather than relying on that broken app's update UI.
+The installed 0.1.7 baseline passed its 16 native UI checks and confirmed laser PDF, Zebra ZPL and Zebra PDF output. The audit candidate's source gate passes 249 tests with zero warnings/errors, but its installation is still pending. These checks do not qualify a complete in-app upgrade, canceled elevation or restart-required recovery. See [current acceptance evidence](ACCEPTANCE.md) and [audit status](SESSION-STATE.md) for the exact versions and remaining checks. A nonworking older companion can be repaired using the reviewed MSI directly.
 
 ## Upgrade and remove
 
@@ -84,9 +84,8 @@ Install a newer MSI as administrator. The installer stops and replaces the servi
 
 Use **Settings → Apps → Installed apps → QQQ Print Agent → Uninstall** to remove application files and the service. Enrollment and journal data are retained to support recovery. After revoking/decommissioning the device in QQQ and resolving all outstanding jobs, an administrator may deliberately remove the retained data. Never delete a live journal as a troubleshooting shortcut: it is evidence used to avoid duplicate printing.
 
-The first prerelease has local install/service/uninstall acceptance. Upgrade, reboot and all supported-driver combinations still require wider qualification.
+Local MSI upgrades and installed UI checks are recorded by version in the acceptance evidence. Reboot/recovery, a complete in-app upgrade and broader driver combinations still require qualification; an MSI exit code alone does not establish those results.
 
 ## Select exposed printers
 
 New installations share no queues. Open the companion's Printers tab and enable **Expose to QQQ** for each intended printer, then approve/enable it in QQQ. Only the selected set is sent to the cloud; all discovered queues remain visible locally for setup. A missing formerly exposed queue is shown as offline.
-
