@@ -11,7 +11,9 @@
 - [x] Implement standard QQQ auth discovery/configured sign-in, protected service session storage and periodic resume, preserving device/journal identity.
 - [x] Complete the combined native-authentication, callback forwarding, CLI, UI and control gate: 356 tests (127 Core + 229 Windows/CLI), zero warnings/errors/skips, and independent source review fixes rechecked.
 - [ ] Qualify the configured provider and installed private callback end to end; source tests do not establish actual provider renewal or permissions deployment.
-- [ ] Qualify the combined candidate with a real server and installed companion only after review. No new physical printing is implied.
+- [x] Pass 23 actual Core client/native QQQ interoperability checks with table-based authentication and no print jobs.
+- [x] Build and inspect the unsigned candidate MSI, including payload versions/resources, callback registration and service configuration.
+- [ ] Qualify the installed companion after protected CI. No new physical printing is implied.
 
 ## Published 0.1.9-rc.1 — 2026-10-31
 

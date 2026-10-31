@@ -9,7 +9,7 @@ on:
     inputs:
       product-version:
         type: string
-        default: '0.1.9'
+        default: '0.2.0'
       release-version:
         type: string
         default: '0.2.0-rc.1'
@@ -54,7 +54,7 @@ jobs:
           ./build/Test-PackagingInputs.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '0.1.9' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '0.2.0' }}
           RELEASE_VERSION: ${{ inputs.release-version || '0.2.0-rc.1' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
