@@ -1,6 +1,14 @@
 # Session state — 2026-10-31
 
-## Explicit credential and pairing recovery — not released
+## Installed published 0.2.0-rc.1: local native happy path
+
+The exact published unsigned MSI installed with exit 0 and no reboot, preserving pairing, printer exposure and journal history. Standard QQQ table-based sign-in and explicit association of the existing pairing succeeded through the installed service. Both service and server observed pause, disconnect, reconnect and resume at revisions 1–4; inventory refresh has a confirmed `SUCCEEDED` / `INVENTORY_REFRESHED` receipt. The service is Running with automatic startup and ready exposed printers.
+
+Native QQQ processes submitted one Letter PDF and one 4 × 6-inch, 300-dpi ZPL label. Both reached `SPOOLED` with the reviewed content hashes; no active server queue remained. Physical confirmation is pending. Current visual UI acceptance is unverified, and a restart elevation was canceled before execution. Earlier UI tests do not qualify this installed version. Configured Authentik/provider renewal, remote deployment and 1.0 readiness remain outside this result. See [artifact identity and acceptance scope](ACCEPTANCE.md).
+
+All required release checks and all four asset checksum/attestation checks passed; the tagged source gate has 365 tests with zero warnings/errors/skips. The implementation checkpoints below are historical source evidence, not additional installed acceptance.
+
+## Historical source checkpoint: explicit credential and pairing recovery
 
 Latest isolated gate: **365 tests (127 Core + 238 Windows/CLI)**, zero warnings/errors/skips, including the final brand-neutral UI. Evidence: `pending-setup-verify.log`, `TestResults/verify-073522764d7e43eaaab76bab59199907`. Pending unbound sign-in now survives restart when the retained device proof is unreadable or belongs to another server, without replacing that file or allowing claims. Bound saved identities still fail closed for either condition before creating a network client. Both pending cases were reproduced before correction; successful explicit enrollment and preservation of old journal/exposure are covered. Earlier gates below remain historical checkpoints; no installed state or printers were touched.
 
@@ -8,7 +16,7 @@ The isolated recovery follow-up passes the full solution/UI gate: **360 tests (1
 
 The revoked-pairing follow-up now passes **361 tests (127 Core + 234 Windows/CLI)** with zero warnings/errors/skips: `new-pairing-verify.log`, `TestResults/verify-c27f72e1913549f88eb48f47135e4863`. A standard three-choice pairing selector keeps reuse as the default and adds explicit replacement setup. Saved unbound sign-in survives restart without presenting old revoked proof or claiming jobs. A denied default binding or rejected enrollment preserves old configuration; successful enrollment uses a new journal scope and preserves exposure/history. Final brand-neutral label edits passed a separate UI build in `new-pairing-ui-labels.log`; runtime and test sources were unchanged. UI automation was compiled, not executed against an installed application.
 
-## Isolated remote-control implementation — not released
+## Historical source checkpoint: isolated remote-control implementation
 
 The device-controls worktree adds independent control polling, persisted desired dispatch/connection state, connection-scoped command receipts and verified single-job spool cancellation. Pause stops new claims; administrator disconnect keeps control polling and existing print-event delivery alive while suppressing ordinary synchronization. Reconnect does not restart Windows, the service or an in-flight print. Authorization failure requires explicit local recovery and never erases the print journal. The companion displays desired state, control contact and the last remote action/outcome.
 

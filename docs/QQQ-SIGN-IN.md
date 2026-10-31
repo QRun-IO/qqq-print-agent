@@ -1,6 +1,6 @@
-# QQQ sign-in candidate
+# QQQ sign-in
 
-This describes the unreleased native-authentication implementation. It is not installed/provider acceptance evidence.
+This describes the native-authentication implementation published in 0.2.0-rc.1. Local installed-service table-based sign-in and existing-pairing association are qualified in [acceptance notes](ACCEPTANCE.md); current companion UI, browser callback and configured provider acceptance remain separate.
 
 Open **Settings → Sign in / Connection settings**, enter the QQQ server origin and choose **Discover sign-in options**. Discovery must advertise a compatible QQQ UI API and the printing extension before credentials are sent. Table-based authentication presents username/password fields; configured external authentication presents a browser button only for an explicitly advertised native session grant. Passwords remain in the companion and are sent only to the selected QQQ server, never stored or sent to the service.
 
@@ -14,13 +14,13 @@ Normal CLI `printers`, `enroll`, `expose`, `run` and `sign-out` commands use the
 
 Pending qualification includes the configured provider's grant, callback registration in the packaged installation, current-user permission changes and long-lived provider renewal. No successful synthetic test substitutes for those deployment checks.
 
-### Recovering unreadable local credentials
+## Recovering unreadable local credentials
 
 Explicit sign-in can replace unreadable saved QQQ session data only after fresh server authentication and, when device proof survives, authoritative device binding. Rejected binding leaves the unreadable file untouched. Successful recovery preserves its ciphertext in a uniquely named `qqq-session.recovery-*.dpapi` file in the protected data directory.
 
 If device proof itself is unreadable, sign-in does not enable printing or reconstruct that proof. Explicit enrollment is required; it preserves the old ciphertext as `connection.recovery-*.dpapi`, printer choices and the old connection's journal without attaching those receipts to the new device. Read-only status remains available. Explicit sign-out can quarantine unreadable session data locally, but cannot revoke an unavailable server session; revoke that previous session in QQQ. Ordinary background polling does not perform this recovery.
 
-### Replace a revoked or expired pairing
+## Replace a revoked or expired pairing
 
 In Connection settings, choose **Set up a new pairing** before signing in. This explicit choice authenticates an unbound QQQ session without presenting the old device proof. Printing stays blocked while awaiting a new enrollment code, including after a service restart when the retained old proof is unreadable or belongs to another server. The previous device configuration, journal and printer choices remain intact until the new enrollment succeeds; rejected enrollment leaves them unchanged. The replacement gets its own journal scope and never replays the old device's jobs.
 
