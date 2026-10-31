@@ -1,5 +1,11 @@
 # Session state — 2026-10-31
 
+## Installed 0.1.9-rc.1 qualification
+
+The exact CI installer from reviewed source `13aa84c` completed with MSI exit 0 and no restart requirement. Both installed management peers authenticated, protected credentials and journal history were preserved, and the service is running and connected. All **16 installed UI checks passed in one run**, and the companion opened successfully. No physical printing was requested. The source gate passed 255 tests with zero warnings/errors/skips; all ten required hosted checks passed. See [acceptance evidence](ACCEPTANCE.md).
+
+The paired local QQQ host completed its native authenticated cutover with preserved pairing and history. Remote deployment, production S3/IAM, Windows reboot/recovery, hostile-tree installer rollback and publisher signing remain separate qualification work. The candidate is installed locally; protected merge and public prerelease are pending.
+
 ## Corrective candidate 0.1.9-rc.1
 
 The original approved upgrade installed 0.1.8 with MSI exit 0 and no restart requirement. Credentials and the journal were retained; both the old and new installed management peers authenticated. A later `query-jobs` check failed because the service disconnected before the client read the complete response. The helper's `cloudConnected=false` and `printerCount=0` were unassigned defaults after that failure. Independent server inspection confirms a current heartbeat, two enabled/available/ready printers and seven already-spooled jobs, with no pending or uncertain work.
