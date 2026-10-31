@@ -29,10 +29,26 @@ public sealed class AgentRealtimeTests
       await fixture.WaitAsync(() => string.Equals(fixture.State("small"), "SPOOLED", StringComparison.Ordinal));
       Assert.Equal(1, fixture.Printer.Prints);
       await fixture.WaitAsync(() => fixture.LastClaimWasEmpty);
-      int claims = fixture.Claims;
-      await Task.Delay(250);
-      Assert.Equal(claims, fixture.Claims);
+      // Resume and JOB_AVAILABLE both wake a finite drain. An empty response does
+      // not mean the other explicit wake has finished; idle coverage is separate.
       Assert.Equal(0, fixture.ForbiddenPolls);
+   }
+
+   [Fact]
+   public async Task IdleHeartbeatsDoNotPollForJobsOrControls()
+   {
+      var settings = new RealtimeSettings(Revision: 1, HeartbeatIntervalSeconds: 5, HeartbeatTimeoutSeconds: 10);
+      await using var fixture = new RealtimeRuntimeFixture(settings: settings, cacheSettings: true);
+      _ = await fixture.ConnectAsync();
+      await fixture.WaitAsync(() => fixture.LastClaimWasEmpty);
+      // WELCOME and the first inventory publication each permit one initial drain.
+      // With no further server signals or inventory changes, successive real
+      // heartbeat cycles must not introduce claims or HTTP control polls.
+      await fixture.WaitAsync(() => fixture.Messages.Count(message => message.Type is "HEARTBEAT") >= 2);
+      Assert.InRange(fixture.Claims, 1, 2);
+      Assert.Equal(0, fixture.ForbiddenPolls);
+      Assert.Equal(0, fixture.Printer.Prints);
+      Assert.True(fixture.Runtime.GetSnapshot().Connected);
    }
 
    [Fact]

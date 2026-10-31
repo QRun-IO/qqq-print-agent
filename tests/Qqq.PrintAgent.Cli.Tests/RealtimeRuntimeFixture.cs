@@ -38,7 +38,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
    private readonly Task _run;
    private readonly List<Connection> _connections = [];
 
-   internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null)
+   internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null, bool cacheSettings = false)
    {
       Settings = (settings ?? Settings) with { MaxConcurrentDownloads = downloads };
       using(var store = new AgentStore(DirectoryPath))
@@ -47,6 +47,8 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
          store.SaveAuthentication(new AgentAuthentication(new QqqSessionBinding(Peer.Origin, "user", "tenant", "device"), new QqqSessionCredential(Peer.Origin, "synthetic-session")));
          store.SetExposure("printer", true, Printer.Discover());
          store.SetExposure("other", true, Printer.Discover());
+         if(cacheSettings)
+         { store.SaveRealtimeSettings(Settings); }
       }
       string pipe = "qqq-realtime-fixture-" + Guid.NewGuid().ToString("N");
       Runtime = new AgentRuntime(DirectoryPath, Logs.Enqueue, Printer, pipeName: pipe,
