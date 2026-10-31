@@ -20,7 +20,7 @@ public sealed partial class AgentRuntime
       {
          lock(_stateLock)
          {
-            return (apiFactory is not null || _authorizationReady) && _controlReady && !_controlState.AuthorizationRequired && string.Equals(_controlState.DesiredState.ConnectionState, "CONNECTED", StringComparison.Ordinal);
+            return (apiFactory is not null || (_authorizationReady && _realtimeReady)) && _controlReady && !_controlState.AuthorizationRequired && string.Equals(_controlState.DesiredState.ConnectionState, "CONNECTED", StringComparison.Ordinal);
          }
       }
    }
@@ -31,7 +31,7 @@ public sealed partial class AgentRuntime
       {
          lock(_stateLock)
          {
-            return NormalTrafficAllowed && !_controlState.DesiredState.DispatchPaused;
+            return NormalTrafficAllowed && !_controlState.DesiredState.DispatchPaused && (apiFactory is not null || _inventoryReady);
          }
       }
    }
@@ -91,7 +91,10 @@ public sealed partial class AgentRuntime
 
    private async Task<int> FetchControlPollAsync(AgentStore store, AgentConfiguration configuration, AgentControlState saved, long generation, CancellationToken token)
    {
-      using PrintApiClient api = CreateApi(configuration);
+      // This one-shot compatibility seam is exercised by existing protocol fixtures;
+      // production RunAsync uses only the persistent native channel.
+      using PrintApiClient api = apiFactory?.Invoke(configuration)
+         ?? PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException("Sign in is required."));
       try
       {
          DeviceControlPoll? poll = await api.ControlPollAsync(saved.DesiredState.Revision, token).ConfigureAwait(false);
@@ -178,6 +181,7 @@ public sealed partial class AgentRuntime
       {
          WakePoll();
       }
+      SignalPipeline();
    }
 
    private static async Task FlushControlReceiptsAsync(AgentStore store, PrintApiClient api, CancellationToken token)
@@ -195,7 +199,7 @@ public sealed partial class AgentRuntime
          await api.ControlReceiptAsync(commandId, receipt, token).ConfigureAwait(false);
          store.AcknowledgeControlReceipt(commandId);
       }
-      catch(HttpRequestException exception) when(exception.StatusCode == HttpStatusCode.NotFound)
+      catch(HttpRequestException exception) when(exception.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
       {
          if(!store.RetireExpiredControlReceipt(commandId))
          {

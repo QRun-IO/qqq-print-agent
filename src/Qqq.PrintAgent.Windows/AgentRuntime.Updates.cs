@@ -29,6 +29,17 @@ public sealed partial class AgentRuntime
          {
             _updatePauseUntil = DateTimeOffset.UtcNow.AddMinutes(10);
          }
+         while(true)
+         {
+            Task changed;
+            lock(_stateLock)
+            {
+               if(_activePrints == 0)
+               { break; }
+               changed = _pipelineChanged.Task;
+            }
+            await changed.WaitAsync(token).ConfigureAwait(false);
+         }
          WriteLog("INFO", "Printing paused for an application update after active submission finished.");
          return "Ready for update.";
       }
@@ -45,6 +56,7 @@ public sealed partial class AgentRuntime
          _updatePauseUntil = default;
       }
       WakePoll();
+      SignalPipeline();
       WriteLog("INFO", "Printing resumed after the application update attempt.");
       return "Printing resumed.";
    }

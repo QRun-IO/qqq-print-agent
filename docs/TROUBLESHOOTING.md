@@ -7,7 +7,9 @@
 | No printers in the service list | Install the queue for the machine/service identity. User-specific network mappings may not be visible to LocalSystem. Confirm Spooler is running. |
 | Windows test page fails | Repair driver, connection or printer hardware locally before testing cloud printing. |
 | Discovered printer never receives work | Enable the queue in QQQ, verify device/printer IDs and submit to that assigned queue. |
-| Job remains queued | Check service status, outbound network access, device authorization and polling. |
+| Job remains queued | Check service status, authenticated realtime connection, current user/device authority, server pause/disconnect state, queue approval/exposure and configured capacity. The cloud preview is bounded; inspect server records for the full queue. |
+| Realtime connection cannot start | Require printing extension 2.0 and allow outbound WSS upgrades to the configured origin. Inspect the safe connection/policy error; a 1.0 server or blocked socket does not enable HTTP polling fallback. |
+| CONFIGURATION_REQUIRED | Have the QQQ administrator correct the complete effective policy or upgrade the incompatible client. Limits must fit declared client ceilings; reconnect does not silently lower them. |
 | SPOOLED but no output | Check machine Printing Defaults, hardware media/method, pause and paper/label/ribbon conditions. A clear Windows queue or READY status is not proof of physical output. |
 | OUTCOME_UNKNOWN | Inspect output and the Windows queue before reprinting. Do not delete the journal or assume failure. |
 | PDF clipped or wrong size | Select actual size versus fit deliberately and configure correct default media in the Windows queue. Custom API media dimensions are not supported yet. |

@@ -16,16 +16,24 @@ public sealed partial class AgentRuntime
    /// <summary>Invalidate in-flight responses from the prior enrollment without clearing durable job evidence.</summary>
    private void ResetConnectionState()
    {
+      using var store = new AgentStore(directory, recoverUnreadableConfiguration: true);
+      RealtimeSettings settings = store.LoadRealtimeSettings();
       lock(_stateLock)
       {
+         _realtimeLifetime?.Cancel();
+         _realtimeReady = false;
+         if(_reconnectRequested.CurrentCount == 0)
+         { _reconnectRequested.Release(); }
          _connectionGeneration++;
          _lastSuccessfulPoll = null;
          _failure = null;
          _heartbeatFailure = null;
          _controlState = AgentControlState.Initial;
+         _realtimeSettings = settings;
          _controlReady = false;
          _controlFailure = null;
       }
+      SignalPipeline();
    }
 
    /// <summary>Cloud liveness continues independently while rendering or spooler submission is active.</summary>

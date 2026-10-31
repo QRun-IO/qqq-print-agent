@@ -15,7 +15,7 @@ namespace Qqq.PrintAgent.Windows;
 public static class PrinterWorkerHost
 {
    internal const string ParentEnvironmentVariable = "QQQ_PRINT_WORKER_PARENT";
-   internal sealed record Request(string Operation, PrintJob? Job = null, byte[]? Content = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null);
+   internal sealed record Request(string Operation, PrintJob? Job = null, byte[]? Content = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null, string? ContentPath = null);
    internal sealed record Response(bool Success, IReadOnlyList<PrinterInfo>? Printers = null, string? SpoolerJobId = null, string? Error = null, string? ErrorCode = null);
 
    /// <summary>Run before ordinary service or CLI hosting when invoked with --printer-worker.</summary>
@@ -54,6 +54,13 @@ public static class PrinterWorkerHost
             case "cancel":
                WindowsSpoolerJobs.Cancel(request.PrinterName ?? "", request.JobId ?? "", request.SpoolerJobId ?? "");
                response = new Response(true);
+               break;
+            case "print-file":
+               if(request.Job is null || request.ContentPath is null || printers is not IFilePrinterBackend files)
+               {
+                  throw new InvalidDataException("The print worker requires a verified document file.");
+               }
+               response = new Response(true, SpoolerJobId: await files.PrintFileAsync(request.Job, request.ContentPath, lifetime.Token).ConfigureAwait(false));
                break;
             default:
                throw new InvalidDataException("Unknown printer worker operation.");

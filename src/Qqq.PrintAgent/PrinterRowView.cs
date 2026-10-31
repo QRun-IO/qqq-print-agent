@@ -5,6 +5,7 @@
 
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Qqq.PrintAgent.Windows;
 
@@ -21,10 +22,12 @@ internal sealed class PrinterRowView : Grid
    private readonly PrinterDetailsView _detailsView = new();
    private readonly Button _settings = new() { Content = "Settings" };
    private readonly Button _test = new() { Content = "Print test" };
+   private readonly Button _disclosure = new() { Width = 32, Height = 32, Padding = new Thickness(0) };
+   private readonly FontIcon _chevron = new() { Glyph = "\uE76C", FontSize = 12 };
    internal PrinterSnapshot? Snapshot { get; private set; }
    internal CheckBox Exposure { get; } = new() { VerticalAlignment = VerticalAlignment.Center };
 
-   internal PrinterRowView(Func<PrinterSnapshot, bool, Task> exposure, Func<PrinterSnapshot, Task> settings, Func<PrinterSnapshot, Task> test)
+   internal PrinterRowView(Func<PrinterSnapshot, bool, Task> exposure, Func<PrinterSnapshot, Task> settings, Func<PrinterSnapshot, Task> test, Action<PrinterRowView> toggle)
    {
       ColumnSpacing = 12;
       MinHeight = 44;
@@ -35,7 +38,10 @@ internal sealed class PrinterRowView : Grid
       ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
       ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
       ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(76) });
-      FrameworkElement[] cells = [_name, _status, _location, _formats, Exposure];
+      _disclosure.Content = _chevron;
+      _disclosure.Command = new RelayCommand(() => toggle(this));
+      AutomationProperties.SetAutomationId(_disclosure, "TogglePrinterDetails");
+      FrameworkElement[] cells = [NameCell(), _status, _location, _formats, Exposure];
       for(int index = 0; index < cells.Length; index++)
       {
          SetColumn(cells[index], index);
@@ -43,6 +49,17 @@ internal sealed class PrinterRowView : Grid
       }
       Exposure.Command = new AsyncRelayCommand(() => Snapshot is PrinterSnapshot printer ? exposure(printer, Exposure.IsChecked == true) : Task.CompletedTask);
       InitializeDetails(settings, test);
+   }
+
+   private Grid NameCell()
+   {
+      Grid name = new() { ColumnSpacing = 4 };
+      name.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+      name.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      name.Children.Add(_disclosure);
+      SetColumn(_name, 1);
+      name.Children.Add(_name);
+      return name;
    }
 
    private void InitializeDetails(Func<PrinterSnapshot, Task> settings, Func<PrinterSnapshot, Task> test)
@@ -74,6 +91,7 @@ internal sealed class PrinterRowView : Grid
       ToolTipService.SetToolTip(_name, $"{_name.Text}\nWindows queue: {printer.Name}");
       ToolTipService.SetToolTip(_status, printer.Formats.Length == 0 ? "Unavailable for unattended service printing. Select this printer for details." : status);
       Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(Exposure, $"Share {_name.Text} with the server");
+      SetSelected(_details.Visibility == Visibility.Visible);
    }
 
    internal void SetBusy(bool busy)
@@ -83,7 +101,15 @@ internal sealed class PrinterRowView : Grid
       _test.IsEnabled = !busy && Snapshot is { Exposed: true } selected && selected.Formats.Length > 0;
    }
 
-   internal void SetSelected(bool selected) => _details.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+   internal void SetSelected(bool selected)
+   {
+      _details.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+      _chevron.Glyph = selected ? "\uE70D" : "\uE76C";
+      string action = selected ? "Collapse" : "Expand";
+      AutomationProperties.SetName(_disclosure, $"{action} printer details for {_name.Text}");
+      AutomationProperties.SetItemStatus(_disclosure, selected ? "Expanded" : "Collapsed");
+      ToolTipService.SetToolTip(_disclosure, $"{action} printer details");
+   }
 
    internal static string StatusLabel(PrinterSnapshot printer) => printer.Formats.Length > 0 ? JobLabels.Status(printer.Status)
       : string.Equals(printer.Status, "OFFLINE", StringComparison.Ordinal) ? "Offline" : "Interactive only";

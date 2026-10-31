@@ -1,5 +1,36 @@
 # Session state — 2026-10-31
 
+## Realtime and Jobs UI source — 0.3.0-rc.1 release candidate
+
+Current source adopts printing extension 2.0 and immutable protocol commit
+`df3729ac632d4a34a3fb8423acef465042a624fc`: client-initiated authenticated WSS,
+direct controls/events/receipts, event-driven finite claim drains and independent
+streamed HTTPS content. No job/control polling fallback is permitted. Complete
+server policy includes configurable document, copy, queue, concurrency, bandwidth,
+liveness and timeout limits, including native submission. README and current
+architecture/operations guides distinguish this source from published 0.2.
+
+Jobs UI changes add inline expansion and reject stale detail completions across
+collapse/reopen, filtering, paging, navigation and closing. Focused Debug x64
+application and UI-test builds passed with zero warnings/errors using existing
+project references; three headless tests of the actual generation tracker passed.
+Desktop assertions were compiled, not executed. Full coordinated consumer and
+installed realtime acceptance remain separate; no runtime or physical printing
+was performed by this documentation/UI lane.
+
+The 0.2 and earlier entries below retain their original checkpoint wording and
+test counts; they are not current realtime publication or deployment claims.
+
+## Installed published 0.2 happy path — user confirmed
+
+The published 0.2 MSI installed with pairing, printer exposure and journal history
+retained. Native QQQ table-based sign-in, existing-device association, all four
+dispatch/connection actions and inventory refresh succeeded. The user confirmed
+the Letter PDF and 4 × 6-inch Zebra ZPL printed correctly and manually confirmed
+the app's Connected footer and both printers. Restart elevation was canceled
+before execution. This is local 0.2 evidence; no installed 0.3 realtime/Jobs UI,
+Authentik renewal or remote-production acceptance is inferred.
+
 ## Explicit credential and pairing recovery — not released
 
 Latest isolated gate: **365 tests (127 Core + 238 Windows/CLI)**, zero warnings/errors/skips, including the final brand-neutral UI. Evidence: `pending-setup-verify.log`, `TestResults/verify-073522764d7e43eaaab76bab59199907`. Pending unbound sign-in now survives restart when the retained device proof is unreadable or belongs to another server, without replacing that file or allowing claims. Bound saved identities still fail closed for either condition before creating a network client. Both pending cases were reproduced before correction; successful explicit enrollment and preservation of old journal/exposure are covered. Earlier gates below remain historical checkpoints; no installed state or printers were touched.
@@ -114,3 +145,9 @@ The corrective 0.1.2 source passed 102 tests and built an unsigned MSI; its UAC 
 Earlier development and temporary installed-service laser pages were confirmed by the user. No fresh physical print has been performed for the latest corrections. Zebra is deferred. Reboot/sign-in/recovery, real update cancellation/relaunch and publisher signing remain pending. Do not report a canceled/pending elevation as a completed upgrade.
 
 QQQ `qbit-printing` 0.1.1-rc.1 verification passed **19 tests with zero Checkstyle violations**, including native record/table job controls. Synthetic Windows update/native-child tests do not invoke an installer or access physical printers.
+
+## Definitive realtime source verification — 2026-10-31
+
+Product0.3.0-rc.1 requires native printing API2.x (framework/wire/subprotocol remainv1), pinned shared contract df3729ac632d4a34a3fb8423acef465042a624fc. Locked restore and entire Release solution build passed with zero warnings/errors. Definitive fulltests399PASS:140Core+259Windows/CLI. Earlier UIbuilds and three headless detail-generation regressions passed; no automated desktop acceptance is claimed.
+
+Actual native-session WebSocket runtime tests cover stalled25MiB transfers with concurrent controls, exactACK replay/reconnect with no duplicate synthetic submission, stickyCLAIMED admission held throughRECEIVED commit, per-printer order/different-printer parallelism, aggregate bandwidth, live concurrency/limits/deadlines, policy/auth generation fences and startup unreadable-credential recovery with a functioning synthetic management pipe. Actual.NET/Java API2 integration separately passed13 checks using this unchanged ReleaseCore, including25MiB verifiedstream, replacement, receipt replay and sign-out denial. Protocol71definitions/73fixtures and server118tests pass. Current installed0.2 remains unchanged. Package/hostedCI/deployment and physicalqualification for0.3 remain separate; prioruserconfirmed0.2 outputs are not0.3 evidence.

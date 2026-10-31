@@ -12,10 +12,19 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Bounds blocking printer drivers inside a disposable helper rather than the service process.</summary>
-public sealed class IsolatedPrinterBackend(string helperExecutable) : IPrinterBackend, IPrinterJobControl
+public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrinterBackend, IPrinterJobControl
 {
    internal TimeSpan? OperationTimeoutOverride { get; init; }
    internal Func<ProcessStartInfo, Process>? StartProcess { get; init; }
+
+   public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
+      => PrintFileAsync(job, path, TimeSpan.FromMinutes(2), cancellationToken);
+
+   public async Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
+   {
+      PrinterWorkerHost.Response response = await InvokeAsync(new PrinterWorkerHost.Request("print-file", job, ContentPath: Path.GetFullPath(path)), submissionTimeout, cancellationToken).ConfigureAwait(false);
+      return response.SpoolerJobId ?? throw new InvalidDataException("Printer worker returned no spooler receipt.");
+   }
 
    /// <summary>Discovery remains synchronous for the backend contract but cannot block beyond 20 seconds.</summary>
    public IReadOnlyList<PrinterInfo> Discover()

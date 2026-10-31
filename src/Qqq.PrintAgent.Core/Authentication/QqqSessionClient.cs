@@ -177,7 +177,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { _gate.Release(); }
    }
 
-   /// <summary>Only native printing routes are accepted. Network I/O does not hold the state lock or delay control polling behind printing.</summary>
+   /// <summary>Only native printing routes are accepted. Network I/O does not hold the state lock or delay control traffic behind printing.</summary>
    public async Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
    {
       ArgumentNullException.ThrowIfNull(method);
@@ -204,7 +204,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          generation = _generation;
       }
       finally { _gate.Release(); }
-      HttpResponseMessage response = await SendCoreAsync(uri, method, content, PrintingLimit, cookie, device, null, cancellationToken).ConfigureAwait(false);
+      bool document = method == HttpMethod.Get && relativePath.StartsWith("device/jobs/", StringComparison.Ordinal) && relativePath.EndsWith("/content", StringComparison.Ordinal);
+      HttpResponseMessage response = await SendCoreAsync(uri, method, content, PrintingLimit, cookie, device, null, cancellationToken, streamContent: document, boundedByCaller: true).ConfigureAwait(false);
       bool acquired = false;
       try
       {
@@ -293,12 +294,13 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    }
 
    private async Task<HttpResponseMessage> SendCoreAsync(Uri uri, HttpMethod method, HttpContent? content, int maximumBytes, string? cookie,
-      QqqDeviceCredential? device, string? basic, CancellationToken cancellationToken, bool providerDiscovery = false)
+      QqqDeviceCredential? device, string? basic, CancellationToken cancellationToken, bool providerDiscovery = false, bool streamContent = false, bool boundedByCaller = false)
    {
       if(!providerDiscovery && !SameOrigin(uri, Origin))
       { throw new ArgumentException("Cross-origin QQQ requests are forbidden.", nameof(uri)); }
       using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-      timeout.CancelAfter(TimeSpan.FromSeconds(20));
+      if(!boundedByCaller)
+      { timeout.CancelAfter(TimeSpan.FromSeconds(20)); }
       using var request = new HttpRequestMessage(method, uri) { Content = content };
       request.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
       if(!providerDiscovery)
@@ -325,23 +327,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          {
             throw new QqqSessionException(QqqSessionException.FailureKind.TransportRefused, "Redirected authentication or API requests are refused.");
          }
-         if(response.Content.Headers.ContentLength > maximumBytes)
-         { throw InvalidResponse(); }
-         await using Stream input = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-         using var output = new MemoryStream();
-         byte[] buffer = new byte[8192];
-         int count;
-         while((count = await input.ReadAsync(buffer, timeout.Token).ConfigureAwait(false)) != 0)
+         if(streamContent && response.IsSuccessStatusCode)
          {
-            if(output.Length + count > maximumBytes)
-            { throw InvalidResponse(); }
-            output.Write(buffer, 0, count);
+            response.RequestMessage = null;
+            return response;
          }
-         var buffered = new ByteArrayContent(output.ToArray());
-         foreach(KeyValuePair<string, IEnumerable<string>> header in response.Content.Headers)
-         { buffered.Headers.TryAddWithoutValidation(header.Key, header.Value); }
-         response.Content.Dispose();
-         response.Content = buffered;
+         await BufferResponseAsync(response, maximumBytes, timeout.Token).ConfigureAwait(false);
          response.RequestMessage = null;
          return response;
       }
@@ -350,6 +341,27 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          response.Dispose();
          throw;
       }
+   }
+
+   private static async Task BufferResponseAsync(HttpResponseMessage response, int maximumBytes, CancellationToken token)
+   {
+      if(response.Content.Headers.ContentLength > maximumBytes)
+      { throw InvalidResponse(); }
+      await using Stream input = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+      using var output = new MemoryStream();
+      byte[] buffer = new byte[8192];
+      int count;
+      while((count = await input.ReadAsync(buffer, token).ConfigureAwait(false)) != 0)
+      {
+         if(output.Length + count > maximumBytes)
+         { throw InvalidResponse(); }
+         output.Write(buffer, 0, count);
+      }
+      var buffered = new ByteArrayContent(output.ToArray());
+      foreach(KeyValuePair<string, IEnumerable<string>> header in response.Content.Headers)
+      { buffered.Headers.TryAddWithoutValidation(header.Key, header.Value); }
+      response.Content.Dispose();
+      response.Content = buffered;
    }
 
    private void AdoptManagedSession(HttpResponseMessage response)

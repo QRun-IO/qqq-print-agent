@@ -2,9 +2,9 @@
 [CmdletBinding()]
 param(
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = '0.2.0',
+   [string] $ProductVersion = '0.3.0',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '0.2.0-rc.1',
+   [string] $ReleaseVersion = '0.3.0-rc.1',
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [string] $CertificateThumbprint,

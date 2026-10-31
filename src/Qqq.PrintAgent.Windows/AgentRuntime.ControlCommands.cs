@@ -27,7 +27,9 @@ public sealed partial class AgentRuntime
       message = AgentActivityLog.Redact(message);
       DeviceControlReceipt receipt = new(Guid.NewGuid().ToString("N"), outcome, Now(), message.Length <= 1024 ? message : message[..1024]);
       store.SaveControlReceipt(command.CommandId, receipt);
-      AgentControlState state = store.LoadControlState() with { LastCommand = command.Action, LastOutcome = outcome, LastCommandAt = receipt.CompletedAt };
+      AgentControlState state;
+      lock(_stateLock)
+      { state = _controlState with { LastCommand = command.Action, LastOutcome = outcome, LastCommandAt = receipt.CompletedAt }; }
       SetControlState(store, state);
    }
 
@@ -72,6 +74,14 @@ public sealed partial class AgentRuntime
    private async Task<(string Outcome, string Message)> CancelRemoteSpoolAsync(AgentStore store, string jobId, CancellationToken token)
    {
       JobSnapshot? job = store.GetJobDetails(jobId)?.Job;
+      lock(_stateLock)
+      {
+         if(string.Equals(job?.Status, "RECEIVED", StringComparison.Ordinal) && !_submittingJobs.Contains(jobId) && _activeTransfers.TryGetValue(jobId, out CancellationTokenSource? download))
+         {
+            download.Cancel();
+            return ("CANCEL_REQUESTED", "The active download was canceled before native spool submission.");
+         }
+      }
       if(job is null || job.PrinterId is null || job.SpoolerJobId is null)
       {
          return ("OWNERSHIP_MISMATCH", "No exact committed spooler receipt exists for this job in the current connection. No Windows job was changed.");

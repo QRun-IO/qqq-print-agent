@@ -1,6 +1,13 @@
 # History and diagnostic limits
 
-Audit source removes the configured idle delay after a newly submitted successful job. It yields and releases the connection gate between jobs; empty queues, duplicate receipts, failures, errors and pauses retain their delay/backoff. A regression drains three fake jobs before a configured 20-second interval, then verifies empty/error responses do not hot-loop. The current audit gate passed 249 tests with zero warnings/errors. This removes a scheduling bottleneck; it does not certify sustained physical throughput.
+Release candidate `0.3.0-rc.1` uses event-driven claim drains and direct realtime control
+traffic, with separately bounded document downloads and native submissions.
+Default document limits are 100 MiB PDF and 20 MiB ZPL; administrators configure
+these and concurrency, staging, bandwidth and deadlines. There is no periodic
+job/control fetch. See [realtime settings](REALTIME.md). The storage measurements
+below retain their original versions and do not certify the new runtime pipeline.
+
+The historical 0.1.8 audit removed the configured idle delay after a newly submitted successful job. Its regression drained three fake jobs before a configured 20-second interval, then verified empty/error responses did not hot-loop. That gate passed 249 tests with zero warnings/errors. This was scheduling evidence for the earlier HTTP transport, not sustained physical throughput qualification.
 
 The current source targets facilities producing about 10,000 jobs per day. Synthetic tests exercise 10,000/30,000 stored jobs, a 10,000-event delivery backlog and 30,000 normal status-log entries. They measure local query/write behavior with fake HTTP/printers; they do not certify physical printer throughput or production network capacity.
 
@@ -35,7 +42,7 @@ The Jobs page queries SQLite rather than filtering the latest snapshot. Page siz
 
 A bounded preview of up to 50 cloud-queued jobs interleaves with local history under the same selected sort order and keeps queued cancellation available before receipt. Matching local jobs suppress duplicate preview rows. The UI marks when the preview reaches its bound; its combined count is not an authoritative total for an arbitrarily large cloud queue. The merge reads at most 150 local candidates in bounded SQL pages, regardless of the requested offset, plus at most 50 cached queued jobs. Text ordering uses SQLite NOCASE (ASCII case folding, otherwise UTF-8 order) consistently for both sources; visible fallback labels and reviewed-status suffixes participate in ordering.
 
-Outbox delivery reads at most 200 ordered events per poll. The worker heartbeats and defers new claims until the previous backlog has drained. Interrupted-state recovery is also batched. Job details expose the latest 200 retained events. The legacy event-to-summary migration runs once, rather than grouping all events each time the service opens its store.
+Outbox reads remain bounded to 200 ordered events per batch. The realtime runtime sends events through the authenticated socket and waits for durable ACKs, preserving pending records across reconnect. Interrupted-state recovery is also batched. Job details expose the latest 200 retained events, with a short recent history in the expanded row. The legacy event-to-summary migration runs once, rather than grouping all events each time the service opens its store.
 
 Default detail retention is 30 days or 300,000 jobs, with at most 250 eligible jobs pruned per maintenance pass. Runtime schedules this maintenance once per minute. Pending events, active submissions, unreviewed failures and every uncertain outcome retain their evidence. Operator review never changes delivery status. Terminal summaries remain for duplicate suppression even after event detail is pruned; the database therefore has no fixed lifetime size ceiling. SQLite reuses freed pages; retention does not promise that its file immediately shrinks. Monitor disk use and resolve operational exceptions instead of deleting a live journal.
 

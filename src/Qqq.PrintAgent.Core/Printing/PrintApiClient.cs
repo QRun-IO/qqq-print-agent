@@ -48,6 +48,11 @@ public sealed partial class PrintApiClient : IDisposable
 
    public async Task InventoryAsync(IReadOnlyList<PrinterInfo> printers, CancellationToken token)
    {
+      if(_realtime is not null)
+      {
+         await RealtimeChannel.SendAsync("INVENTORY", new { printers }, acknowledged: true, token: token).ConfigureAwait(false);
+         return;
+      }
       using HttpResponseMessage response = await _http.PutAsJsonAsync("device/printers", new { printers }, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
    }
@@ -56,6 +61,11 @@ public sealed partial class PrintApiClient : IDisposable
 
    public async Task HeartbeatAsync(DeviceProfile? profile, CancellationToken token)
    {
+      if(_realtime is not null)
+      {
+         await RealtimeChannel.SendAsync("HEARTBEAT", new { agentVersion = AgentVersion, profile }, token: token).ConfigureAwait(false);
+         return;
+      }
       using HttpResponseMessage response = await _http.PostAsJsonAsync("device/heartbeat", new { agentVersion = AgentVersion, profile }, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
    }
@@ -103,6 +113,11 @@ public sealed partial class PrintApiClient : IDisposable
 
    public async Task EventAsync(string jobId, PrintEvent printEvent, CancellationToken token)
    {
+      if(_realtime is not null)
+      {
+         await RealtimeChannel.SendAsync("JOB_EVENT", new { jobId, @event = printEvent }, "event-" + printEvent.EventId, acknowledged: true, token: token).ConfigureAwait(false);
+         return;
+      }
       using HttpResponseMessage response = await _http.PostAsJsonAsync($"device/jobs/{Uri.EscapeDataString(jobId)}/events", printEvent, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
    }

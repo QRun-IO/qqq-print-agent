@@ -42,6 +42,9 @@ public sealed partial class MainWindow
 
    private void PrinterSelection_Changed(object sender, SelectionChangedEventArgs e) => UpdateSelectedPrinter();
 
+   private void TogglePrinterDetails(PrinterRowView row)
+      => PrintersList.SelectedItem = ReferenceEquals(PrintersList.SelectedItem, row) ? null : row;
+
    private void UpdateSelectedPrinter()
    {
       var selected = PrintersList.SelectedItem as PrinterRowView;

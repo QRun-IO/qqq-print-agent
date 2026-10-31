@@ -64,6 +64,7 @@ public sealed partial class MainWindow : Window, IDisposable
       _refreshTimer.Start();
       AppWindow.Closing += (_, args) =>
       {
+         InvalidateJobDetails();
          if(!_exitRequested && _tray.IsCreated)
          {
             args.Cancel = true;
@@ -107,6 +108,7 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          return;
       }
+      InvalidateJobDetails();
       DisposeUpdates();
       _refreshTimer.Stop();
       _activationRegistration?.Unregister(null);
@@ -157,6 +159,7 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       string page = args.IsSettingsSelected ? "Settings" : (args.SelectedItem as NavigationViewItem)?.Tag as string ?? "Printers";
+      InvalidateJobDetails();
       PrintersPage.Visibility = string.Equals(page, "Printers", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
       JobsPage.Visibility = string.Equals(page, "Jobs", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
       LogsPage.Visibility = string.Equals(page, "Logs", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
@@ -340,8 +343,12 @@ public sealed partial class MainWindow : Window, IDisposable
       if(busy)
       {
          _mutationVersion++;
+         InvalidateJobDetails();
       }
       _busy = busy;
+      JobsPrevious.IsEnabled = !busy && _jobOffset > 0;
+      JobsNext.IsEnabled = !busy && _jobOffset + JobPageSize < _jobTotal;
+      SetTableHeadersEnabled(!busy);
       PairingChoice.IsEnabled = !busy;
       EnrollButton.IsEnabled = !busy;
       RefreshButton.IsEnabled = !busy;
@@ -421,14 +428,14 @@ public sealed partial class MainWindow : Window, IDisposable
       SetHealth(snapshot.Health);
       ConnectionButton.Content = snapshot.Enrolled ? "Sign in again" : "Connect this device";
       ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to the server";
-      FooterContact.Text = $"Last server contact: {FormatTime(snapshot.LastSuccessfulPoll)} · refreshes every 5 seconds";
+      FooterContact.Text = $"Last server contact: {FormatTime(snapshot.LastSuccessfulPoll)} · Local status refreshes every 5 seconds";
       StatusText.Text = snapshot.Status;
       if(snapshot.Control is { } control)
       {
          if(control.AuthorizationRequired)
          { FooterStatus.Text = "Server authorization required — sign in again"; }
          else if(string.Equals(control.DesiredState.ConnectionState, "DISCONNECTED", StringComparison.Ordinal))
-         { FooterStatus.Text = "Disconnected by administrator · control polling active"; }
+         { FooterStatus.Text = "Dispatch disconnected by administrator"; }
          else if(control.DesiredState.DispatchPaused)
          { FooterStatus.Text = "Dispatch paused by administrator"; }
          FooterContact.Text += $" · Remote controls: {AgentControlLabels.Support(control.Support)} · Last control contact: {FormatTime(control.LastContact)}";
@@ -475,7 +482,7 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          if(!_printerRows.TryGetValue(printer.PrinterId, out PrinterRowView? row))
          {
-            row = new PrinterRowView(SetExposureAsync, EditPrinterAsync, TestPrintAsync);
+            row = new PrinterRowView(SetExposureAsync, EditPrinterAsync, TestPrintAsync, TogglePrinterDetails);
             _printerRows.Add(printer.PrinterId, row);
             PrintersList.Items.Add(row);
          }

@@ -1,16 +1,16 @@
 # Threat model: QQQ Print Agent
 
-## Remote device controls candidate
+## Realtime source boundary — 0.3.0-rc.1 release candidate
 
-The remote-control adapter accepts only inventory refresh and cancellation of one locally journaled spooler job. Desired pause/disconnect state is revisioned and persists by canonical server URL and device identity; older or conflicting revisions cannot resume a device. The independent poll loop does not wait behind rendering. A paused device still synchronizes but claims no new work. A disconnected device keeps only control traffic and existing event delivery active; already-submitted printing is not recalled. Reconnect is a transport refresh, never an OS or service restart.
+The remote-control adapter accepts only inventory refresh and cancellation of one locally journaled spooler job. Desired pause/disconnect state is revisioned and persists by canonical server URL and device identity; older or conflicting revisions cannot resume a device. An independently processed authenticated WSS channel carries controls and receipts while documents stream over separate same-origin HTTPS requests. There is no job/control polling fallback. A paused device claims no new work. A disconnected device retains control traffic and in-flight receipts; already-submitted printing is not recalled. Reconnect is a transport refresh, never an OS or service restart. See [the realtime contract and operational limits](../REALTIME.md).
 
 The native QQQ session adapter requires discovery before credentials and never treats a native control 404 as legacy permission. After support is negotiated, 404 does not remove restrictions. Authorization denial becomes authorization-required, without inferring that every 401/403 proves revocation. New claims wait for an authenticated, bound QQQ user and valid control state. Existing installations without a protected QQQ session wait for explicit sign-in; device proof alone cannot authorize normal service printing. Explicit isolated CLI diagnostics may use the compatibility bearer adapter with `--legacy-compat`; it is not a fallback from native authentication.
 
 The service stores only the QQQ session cookie and stable authoritative identity under service-identity DPAPI, and periodically resumes the standard session. Passwords stay in the companion; provider refresh/access tokens remain server-side. Normal CLI operations use the existing authenticated service pipe. The private browser callback is fixed and MSI-owned, forwarding bounded data only into an active same-user/session companion inbox after executable verification. It carries a short-lived authorization code, never a session cookie or PKCE verifier. Core validates exact advertised redirect, random state, PKCE and single-use expiry; no callback creates an authentication attempt. Provider registration, installed callback delivery and long-duration renewal remain deployment qualifications.
 
-Control responses are capped at 64 KiB after the HTTP client's bounded receive, with at most 20 commands. The journal admits at most 4,096 command records and 128 retained connection states, failing closed when capacity is exhausted. A durable marker precedes any effect. Crash recovery produces OUTCOME_UNKNOWN; duplicate delivery reuses the exact saved receipt rather than repeating cancellation. No raw executable, printer name or arbitrary spool ID comes from the server: CANCEL_SPOOL resolves its job ID through the current connection's local receipt and verifies the exact QQQ document at the Windows spooler boundary.
+Realtime frames and queues have administrator-configured byte/count bounds validated against declared client ceilings. Defaults are 1 MiB per complete frame, 64 queued frames and 4 MiB queued bytes. Fragmentation does not bypass the complete-message limit. The journal admits at most 4,096 command records and 128 retained connection states, failing closed when capacity is exhausted. A durable marker precedes any effect. Crash recovery produces OUTCOME_UNKNOWN; duplicate delivery reuses the exact saved receipt rather than repeating cancellation. No raw executable, printer name or arbitrary spool ID comes from the server: CANCEL_SPOOL resolves its job ID through the current connection's local receipt and verifies the exact QQQ document at the Windows spooler boundary.
 
-Successful cancellation means Windows accepted the request, not that printed paper was recalled. Absent/completed jobs, ownership mismatch, failure, expiry and uncertain outcome remain distinct. Only a specific receipt-endpoint 404 after expiry plus seven days retires its transport retry, preserving the exact local receipt and distinguishing retirement from server acknowledgement. A poll 404 never uses this exception. Acknowledged or transport-retired command history can be pruned after 30 days; unresolved current-connection evidence remains and causes explicit capacity backpressure. No global queue purge is implemented.
+Successful cancellation means Windows accepted the request, not that printed paper was recalled. Absent/completed jobs, ownership mismatch, failure, expiry and uncertain outcome remain distinct. Only a specific missing command receipt after expiry plus seven days retires its transport retry, preserving the exact local receipt and distinguishing retirement from server acknowledgement. Discovery/socket failures never use this exception. Acknowledged or transport-retired command history can be pruned after 30 days; unresolved current-connection evidence remains and causes explicit capacity backpressure. No global Windows queue purge is implemented.
 
 ## Historical audit baseline
 
@@ -22,17 +22,17 @@ The QQQ server supplies assigned document bytes over HTTPS. The Windows LocalSys
 
 | Boundary | Implemented control | Residual risk / qualification |
 | --- | --- | --- |
-| Internet to device | Outbound HTTPS, normal certificate validation; loopback-only HTTP development exception | Proxy/custom trust deployments not qualified |
-| Device to server | Dedicated bearer credential; server enforces device/job scope | A compromised trusted server can supply hostile print content |
+| Internet to device | Outbound WSS/HTTPS, normal certificate validation; explicit loopback-only WS/HTTP development exception | Proxy/custom trust deployments not qualified |
+| Device to server | Standard QQQ session plus secondary device proof; current user/tenant/job permissions | A compromised trusted server can supply hostile print content |
 | Local UI to service | Pipe ACL permits SYSTEM/admins; narrow command set; bounded newline framing and cancellable reads/writes | Local administrators already control the machine; source regressions passed, installed audit acceptance pending |
 | Exposure selection | Service-owned persisted allowlist; discovered-ID validation; filter inventory and recheck submission | Removal cannot retract data already accepted by Windows |
 | Credentials at rest | DPAPI CurrentUser under service identity; restricted ProgramData ACL | Machine/service compromise defeats local protection |
-| Payload download | 20 MiB cap, declared length and SHA-256 validation; 60-second body deadline; separate 2 MiB control-response cap | Integrity does not sanitize PDFs or printer languages |
+| Payload download | Configured per-format/staging limits, streamed length/SHA-256 checks and connect/idle/total deadlines; independent control channel | Integrity does not sanitize PDFs or printer languages; protected staging contains sensitive document bytes |
 | Rendering/driver execution | Native Windows PDF/GDI/spooler APIs; bounded render dimensions | Disposable child with bounded timeouts and parent-exit cleanup; child retains service privileges, so this is fault isolation, not a security sandbox |
 | RAW ZPL | Explicit compatible queue, trusted server workflow | ZPL can contain printer-control commands; not a sandboxed format |
 | Duplicate output | Persistent receipts and events; uncertain submissions require review | Database and physical printer cannot share a transaction |
 | Tray snapshot/logs | No device credential or document bytes; bounded recent jobs/logs | IDs/errors remain operational data and must be reviewed before sharing |
-| Software distribution | Public source, pinned actions/dependencies, audited locked restore, checksums | Initial installer is unsigned; no attestation/production signing claim |
+| Software distribution | Public source, pinned actions/dependencies, audited locked restore, checksums and exact-release attestations | Published prereleases remain unsigned; source checks do not qualify installed behavior |
 
 ## Data handling
 
@@ -47,7 +47,6 @@ Qualify real in-app upgrades and broad hardware/driver behavior. The user accept
 Runtime branding is presentation-only, loaded from the existing administrator-restricted ProgramData directory. JSON size, text length, color syntax, HTTPS support links, and local PNG file size/dimensions are validated. No remote logo fetch occurs; malformed settings fall back to defaults. Machine identity, credentials and authorization are unaffected.
 
 Sign-in startup requires an explicit administrator preference in the installed companion. The task uses that administrator's interactive identity and a fixed Program Files executable/arguments; it stores no password. Same-name foreign tasks are refused. Full uninstall deletes only exact owned definitions; upgrades preserve them. Device operator actions remain scoped to authenticated device jobs and approved/exposed printers; reprint creates a new job and requires duplicate-risk consent for uncertain/spooled originals.
-
 
 ## Machine-MSI updates: implemented source, installed acceptance pending
 
@@ -80,7 +79,6 @@ The current audit source gate passed **237 tests with zero warnings/errors**. Th
 ### Required update evidence
 
 Unit/integration fixtures must cover fixed-origin/asset validation, channel/version policy, size/hash mismatch, redirect rejection, canceled download cleanup, reparse/untrusted path rejection and failed helper/apply outcomes. Installed acceptance must cover explicit UAC cancellation, blocked/in-use files, coherent version replacement, retained credentials/deduplication evidence, restart and Windows Installer reboot-required results. No updater operation is considered accepted merely because the AppKit interface compiles.
-
 
 ### Apply-helper source checkpoint
 

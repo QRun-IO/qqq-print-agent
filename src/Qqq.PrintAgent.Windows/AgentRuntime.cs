@@ -16,7 +16,7 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>Hosts outbound printing and the local administrator management pipe.</summary>
 public sealed partial class AgentRuntime(string directory, Action<string> log, IPrinterBackend? printerBackend = null,
    Func<AgentConfiguration, PrintApiClient>? apiFactory = null, string pipeName = "QqqPrintAgent", Func<NamedPipeServerStream>? pipeFactory = null,
-   Func<Uri, IQqqSessionClient>? sessionFactory = null) : IDisposable
+   Func<Uri, IQqqSessionClient>? sessionFactory = null, TimeProvider? timeProvider = null) : IDisposable
 {
    private readonly Lock _stateLock = new();
    private readonly IPrinterBackend _printers = printerBackend ?? new WindowsPrinters();
@@ -31,6 +31,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private long _queueGeneration;
    private DateTimeOffset _nextHistoryMaintenance;
    private bool _pollStarted;
+   private DateTimeOffset ObservationTime => timeProvider?.GetUtcNow() ?? DateTimeOffset.UtcNow;
 
    /// <summary>No persistent database handles are held by the runtime.</summary>
    public void Dispose()
@@ -40,6 +41,11 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       _controlExecutionGate.Dispose();
       _authenticationGate.Dispose();
       _sessionClient?.Dispose();
+      _reconnectRequested.Dispose();
+      _eventDeliveryGate.Dispose();
+      _claimGate.Dispose();
+      _statusRequested.Dispose();
+      _queueRefreshRequested.Dispose();
    }
 
 
@@ -50,6 +56,13 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
       WriteLog("INFO", "Print service started.");
+      if(apiFactory is null)
+      {
+         await RunRealtimeAsync(token).ConfigureAwait(false);
+         return;
+      }
+      // Explicit injected HTTP fixtures retain their deterministic test harness;
+      // production native sessions never enter the legacy polling path.
       using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
       Task control = ControlLoopAsync(lifetime.Token);
       Task poll = PollAsync(lifetime.Token);
@@ -154,11 +167,26 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       return processed;
    }
 
-   private PrintApiClient CreateApi(AgentConfiguration configuration) => apiFactory?.Invoke(configuration)
-      ?? PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException("Sign in to QQQ before printing."));
+   private PrintApiClient CreateApi(AgentConfiguration configuration)
+   {
+      if(apiFactory is not null)
+      { return apiFactory(configuration); }
+      PrintingRealtimeChannel realtime;
+      lock(_stateLock)
+      { realtime = _realtime ?? throw new IOException("The realtime connection is unavailable."); }
+      return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException("Sign in to QQQ before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
+   }
+
+   private PrintingRealtimeChannel CurrentRealtime()
+   {
+      lock(_stateLock)
+      { return _realtime ?? throw new IOException("Realtime connection unavailable; durable receipts are retained."); }
+   }
 
    private void WakePoll()
    {
+      if(apiFactory is null)
+      { RequestStatusSynchronization(); RequestQueueRefresh(); }
       lock(_stateLock)
       {
          if(_pollRequested.CurrentCount == 0)
@@ -191,7 +219,8 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          }).ToArray();
          jobs = jobs.Concat(_queuedJobs.Where(queued => !jobs.Any(local => string.Equals(local.JobId, queued.JobId, StringComparison.Ordinal))))
             .Select(job => job.PrinterName is null ? job with { PrinterName = printers.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal))?.Name } : job).ToArray();
-         bool connected = configuration is not null && NormalTrafficAllowed && _failure is null && _heartbeatFailure is null && _lastSuccessfulPoll is not null && DateTimeOffset.UtcNow - _lastSuccessfulPoll.Value < TimeSpan.FromSeconds(30);
+         bool connected = configuration is not null && NormalTrafficAllowed && _failure is null && _heartbeatFailure is null && _lastSuccessfulPoll is not null
+            && ObservationTime - _lastSuccessfulPoll.Value < TimeSpan.FromSeconds(apiFactory is null ? _realtimeSettings.HeartbeatTimeoutSeconds : 30);
          bool printerIssue = !printers.Any(printer => printer.Exposed) || printers.Any(printer => printer.Exposed && !string.Equals(printer.Status, "READY", StringComparison.Ordinal));
          bool jobFailure = attentionCount > 0;
          string health = !connected || jobFailure ? "RED" : printerIssue ? "ORANGE" : "GREEN";

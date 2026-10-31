@@ -13,6 +13,7 @@
 
    <ItemGroup>
       <Using Include="Xunit" />
+      <Compile Include="../Qqq.PrintAgent.Core.Tests/LoopbackWebSocketPeer.cs" Link="LoopbackWebSocketPeer.cs" />
       <Content Include="..\..\installer\Package.wxs" Link="Fixtures\Package.wxs" CopyToOutputDirectory="PreserveNewest" />
    </ItemGroup>
 

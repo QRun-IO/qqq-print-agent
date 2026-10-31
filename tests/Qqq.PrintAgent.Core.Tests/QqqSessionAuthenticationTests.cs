@@ -22,7 +22,7 @@ public sealed class QqqSessionAuthenticationTests
    [InlineData("1.9.0", "1.09.0")]
    [InlineData("\"api\"", "\"windows\"")]
    [InlineData("\"printing\"", "\"other\"")]
-   [InlineData("\"1.0.0\"", "\"2.0.0\"")]
+   [InlineData("\"1.0.0\"", "\"3.0.0\"")]
    [InlineData("/qbit/printing", "/other")]
    [InlineData("\"widgets\"", "\"other\"")]
    public async Task DiscoveryFailurePrecedesAllCredentials(string oldValue, string newValue)

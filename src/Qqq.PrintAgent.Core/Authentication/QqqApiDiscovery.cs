@@ -28,19 +28,19 @@ public sealed class QqqApiDiscovery
          throw Configuration();
       }
       Extension printing = Extensions.Single(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal));
-      if(!SupportedVersion(printing.Version, 0) || !string.Equals(printing.PathPrefix, "/qbit/printing", StringComparison.Ordinal)
+      if(!(SupportedVersion(printing.Version, 0) || SupportedVersion(printing.Version, 0, "2")) || !string.Equals(printing.PathPrefix, "/qbit/printing", StringComparison.Ordinal)
          || (nativeSession && !Features.Contains("nativeSessionLogin", StringComparer.Ordinal)))
       {
          throw Configuration();
       }
    }
 
-   private static bool SupportedVersion(string? value, uint minimumMinor)
+   private static bool SupportedVersion(string? value, uint minimumMinor, string major = "1")
    {
       string[] parts = value?.Split('.') ?? [];
       return parts.Length == 3 && parts.All(part => part.Length != 0 && (part.Length == 1 || part[0] != '0')
          && uint.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out _))
-         && string.Equals(parts[0], "1", StringComparison.Ordinal)
+         && string.Equals(parts[0], major, StringComparison.Ordinal)
          && uint.Parse(parts[1], CultureInfo.InvariantCulture) >= minimumMinor;
    }
 

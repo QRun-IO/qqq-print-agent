@@ -8,6 +8,8 @@ namespace Qqq.PrintAgent.Core.Printing;
 public sealed partial class PrintApiClient
 {
    private static readonly string[] ControlCapabilities = ["REFRESH_INVENTORY", "CANCEL_SPOOL"];
+   public static void ValidateRealtimeCommand(DeviceControlCommand command)
+      => ValidateControlPoll(new DeviceControlPoll(1, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture), 5, new DeviceDesiredState(0, false, "CONNECTED"), [command]));
    /// <summary>A 404 means legacy only before this connection has negotiated control support.</summary>
    public async Task<DeviceControlPoll?> ControlPollAsync(long revision, CancellationToken token)
    {
@@ -66,6 +68,11 @@ public sealed partial class PrintApiClient
 
    public async Task ControlReceiptAsync(string commandId, DeviceControlReceipt receipt, CancellationToken token)
    {
+      if(_realtime is not null)
+      {
+         await RealtimeChannel.SendAsync("COMMAND_RECEIPT", new { commandId, receipt }, "receipt-" + receipt.ReceiptId, acknowledged: true, token: token).ConfigureAwait(false);
+         return;
+      }
       using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
       timeout.CancelAfter(TimeSpan.FromSeconds(20));
       using HttpResponseMessage response = await _http.PostAsJsonAsync($"device/control/commands/{Uri.EscapeDataString(commandId)}/receipt", receipt, JsonOptions, timeout.Token).ConfigureAwait(false);

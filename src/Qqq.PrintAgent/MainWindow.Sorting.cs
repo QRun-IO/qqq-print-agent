@@ -14,7 +14,7 @@ public sealed partial class MainWindow
 
    private void PrinterSort_Click(object sender, RoutedEventArgs e)
    {
-      if(sender is not Button { Tag: string key })
+      if(_busy || _updatesClosed || sender is not Button { Tag: string key })
       {
          return;
       }
@@ -26,12 +26,13 @@ public sealed partial class MainWindow
 
    private async void JobSort_Click(object sender, RoutedEventArgs e)
    {
-      if(sender is not Button { Tag: string key })
+      if(_busy || _updatesClosed || sender is not Button { Tag: string key })
       {
          return;
       }
       _jobSortDescending = string.Equals(_jobSortBy, key, StringComparison.Ordinal) ? !_jobSortDescending : string.Equals(key, "createdAt", StringComparison.Ordinal);
       _jobSortBy = key;
+      InvalidateJobDetails();
       _jobOffset = 0;
       await RefreshJobPageAsync();
    }
@@ -59,6 +60,16 @@ public sealed partial class MainWindow
       bool active = string.Equals(header.Tag as string, sortBy, StringComparison.Ordinal);
       header.Content = label + (active ? descending ? " ↓" : " ↑" : "");
       AutomationProperties.SetName(header, $"Sort by {label.ToLowerInvariant()}{(active ? descending ? ", descending" : ", ascending" : "")}");
+      ToolTipService.SetToolTip(header, active ? $"Sort by {label.ToLowerInvariant()} {(descending ? "ascending" : "descending")}" : $"Sort by {label.ToLowerInvariant()}");
+   }
+
+   private void SetTableHeadersEnabled(bool enabled)
+   {
+      foreach(Button header in new[] { PrinterNameHeader, PrinterStatusHeader, PrinterLocationHeader, PrinterFormatsHeader, PrinterSharedHeader,
+         JobTitleHeader, JobPrinterHeader, JobStatusHeader, JobFormatHeader, JobCreatedHeader })
+      {
+         header.IsEnabled = enabled;
+      }
    }
 
    private void SortPrinterRows()
