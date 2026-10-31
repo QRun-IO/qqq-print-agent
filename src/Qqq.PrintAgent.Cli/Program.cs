@@ -16,6 +16,11 @@ public static class Program
    {
       ["--printer-worker"] => PrinterWorkerHost.RunAsync(),
       ["--apply-update", string request] => ExecuteAsync(() => MsiUpdateInstaller.ApplyAsync(request)),
+      ["--auth-callback", string callback] => ExecuteAsync(async () =>
+      {
+         await QqqBrowserCallback.ForwardAsync(callback);
+         return 0;
+      }),
       _ => ExecuteAsync(() => DispatchAsync(args)),
    };
 
@@ -33,9 +38,18 @@ public static class Program
       catch(Exception exception) { Console.Error.WriteLine(exception.Message); return 1; }
    }
 
-   private static async Task<int> DispatchAsync(string[] args)
+   internal static async Task<int> DispatchAsync(string[] args, Func<PipeRequest, Task<string>>? serviceCommand = null)
    {
       string command = args.FirstOrDefault() ?? "help";
+      bool legacy = UseLegacyCompatibility(args);
+      if(legacy)
+      {
+         Console.Error.WriteLine("Explicit legacy compatibility diagnostics: private device bearer transport, separate local state. This is not QQQ user sign-in.");
+      }
+      if(!legacy && command is "printers" or "enroll" or "expose" or "run" or "sign-out")
+      {
+         return await DispatchServiceAsync(args, serviceCommand ?? AgentPipeClient.SendAsync);
+      }
       string directory = ResolveDataDirectory(args);
       switch(command)
       {
@@ -53,9 +67,49 @@ public static class Program
          case "run":
             return await RunAsync(args, directory);
          default:
-            Console.WriteLine("printers | enroll --server URL [--data-dir PATH] [--service] | expose --printer ID --exposed true|false [--data-dir PATH] [--service] | run [--data-dir PATH] [--once] | service-status | snapshot\nEnrollment code is read from QQQ_PRINT_ENROLLMENT_CODE or an interactive prompt.");
+            Console.WriteLine("printers | enroll --server URL | expose --printer ID --exposed true|false | run | sign-out | service-status | snapshot\nNormal commands use the authenticated installed service. Sign in through the companion first. run requests a connection refresh; the Windows service owns unattended printing.\nExplicit isolated legacy diagnostics only: add --legacy-compat and a separate --data-dir; legacy run accepts --once. Enrollment code is read from QQQ_PRINT_ENROLLMENT_CODE or an interactive prompt.");
             return command is "help" ? 0 : 1;
       }
+   }
+
+   internal static bool UseLegacyCompatibility(string[] args)
+   {
+      bool legacy = args.Contains("--legacy-compat", StringComparer.Ordinal);
+      if(legacy && args.Contains("--service", StringComparer.Ordinal))
+      {
+         throw new ArgumentException("Legacy compatibility cannot access the installed service's state.", nameof(args));
+      }
+      return legacy;
+   }
+
+   private static async Task<int> DispatchServiceAsync(string[] args, Func<PipeRequest, Task<string>> send)
+   {
+      if(args.Contains("--data-dir", StringComparer.Ordinal) || args.Contains("--once", StringComparer.Ordinal))
+      {
+         throw new ArgumentException("Foreground diagnostic options require explicit --legacy-compat. Normal printing is owned by the signed-in Windows service.", nameof(args));
+      }
+      PipeRequest request = args[0] switch
+      {
+         "run" => new("reconnect"),
+         "enroll" => new("enroll", Option(args, "--server") ?? throw new ArgumentException("--server is required.", nameof(args)), ReadEnrollmentCode()),
+         "expose" => new("set-exposure", PrinterId: Option(args, "--printer") ?? throw new ArgumentException("--printer is required.", nameof(args)),
+            Exposed: bool.TryParse(Option(args, "--exposed"), out bool exposed) ? exposed : throw new ArgumentException("--exposed must be true or false.", nameof(args))),
+         _ => new(args[0]),
+      };
+      string response = await send(request);
+      Console.WriteLine(response);
+      return response.StartsWith("Error:", StringComparison.Ordinal) ? 1 : 0;
+   }
+
+   private static string ReadEnrollmentCode()
+   {
+      string? code = Environment.GetEnvironmentVariable("QQQ_PRINT_ENROLLMENT_CODE");
+      if(string.IsNullOrWhiteSpace(code))
+      {
+         Console.Write("Enrollment code: ");
+         code = Console.ReadLine();
+      }
+      return !string.IsNullOrWhiteSpace(code) ? code : throw new InvalidOperationException("Enrollment code is required.");
    }
 
 

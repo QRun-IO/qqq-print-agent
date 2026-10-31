@@ -9,7 +9,7 @@ using System.Text.Json;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
-public sealed class PrintApiClient : IDisposable
+public sealed partial class PrintApiClient : IDisposable
 {
    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
    private readonly HttpClient _http;
@@ -34,7 +34,7 @@ public sealed class PrintApiClient : IDisposable
 
    public async Task<EnrollmentResponse> EnrollAsync(EnrollmentRequest request, CancellationToken token = default)
    {
-      using HttpResponseMessage response = await _http.PostAsJsonAsync("enroll", request, JsonOptions, token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _http.PostAsJsonAsync(_nativeSession ? "devices/enroll" : "enroll", request, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
       EnrollmentResponse result = await response.Content.ReadFromJsonAsync<EnrollmentResponse>(token).ConfigureAwait(false)
          ?? throw new InvalidDataException("Missing enrollment response.");

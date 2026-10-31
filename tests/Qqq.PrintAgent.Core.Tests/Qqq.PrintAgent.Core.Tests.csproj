@@ -2,6 +2,7 @@
 
    <PropertyGroup>
       <TargetFramework>net10.0</TargetFramework>
+      <PrintingProtocolFixtures Condition="'$(PrintingProtocolFixtures)' == ''">$(MSBuildThisFileDirectory)../../../qqq-print-protocol/fixtures</PrintingProtocolFixtures>
    </PropertyGroup>
 
    <ItemGroup>
@@ -25,6 +26,9 @@
       
    </ItemGroup>
 
-<ItemGroup><Content Include="../../../qqq-print-protocol/fixtures/claim.response.json" Link="fixtures/claim.response.json" CopyToOutputDirectory="PreserveNewest" /><Content Include="../../../qqq-print-protocol/fixtures/enroll.response.json" Link="fixtures/enroll.response.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup></Project>
+   <ItemGroup>
+      <Content Include="$(PrintingProtocolFixtures)/*.json" Link="fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+   </ItemGroup>
+</Project>
 
 

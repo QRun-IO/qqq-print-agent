@@ -18,8 +18,17 @@ public static class WindowsSpoolerJobs
       try
       {
          _ = GetJob(printer, id, 1, IntPtr.Zero, 0, out uint needed);
-         if(needed == 0 || needed > 1_048_576)
-         { throw new InvalidOperationException("The job is no longer in the Windows queue. Inspect its output."); }
+         if(needed == 0)
+         {
+            int error = Marshal.GetLastWin32Error();
+            if(error is 87 or 1168)
+            {
+               throw new SpoolCancellationException("ALREADY_ABSENT", "The job is no longer in the Windows queue. Pages already printed cannot be recalled.");
+            }
+            throw new Win32Exception(error);
+         }
+         if(needed > 1_048_576)
+         { throw new InvalidOperationException("The Windows spooler response exceeded its bound."); }
          IntPtr buffer = Marshal.AllocHGlobal((int)needed);
          try
          {
@@ -28,7 +37,7 @@ public static class WindowsSpoolerJobs
             JobInfo1 info = Marshal.PtrToStructure<JobInfo1>(buffer);
             if(!string.Equals(Marshal.PtrToStringUni(info.Document), "QQQ " + jobId, StringComparison.Ordinal))
             {
-               throw new InvalidOperationException("The spooler number now belongs to another document; cancellation was refused.");
+               throw new SpoolCancellationException("OWNERSHIP_MISMATCH", "The spooler number now belongs to another document; cancellation was refused.");
             }
             const uint jobControlDelete = 5;
             if(!SetJob(printer, id, 0, IntPtr.Zero, jobControlDelete))

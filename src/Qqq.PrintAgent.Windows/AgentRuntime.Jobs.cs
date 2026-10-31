@@ -42,6 +42,15 @@ public sealed partial class AgentRuntime
             return "Cancellation requested from Windows. Pages already sent to the printer may still print; inspect the output.";
          }
       }
+      return await SendOperatorActionAsync(store, request, token).ConfigureAwait(false);
+   }
+
+   private async Task<string> SendOperatorActionAsync(AgentStore store, PipeRequest request, CancellationToken token)
+   {
+      if(!NormalTrafficAllowed)
+      {
+         throw new InvalidOperationException("Server actions are unavailable while disconnected by the administrator or awaiting authorization/control negotiation. Local history is preserved.");
+      }
       AgentConfiguration configuration = store.LoadConfiguration() ?? throw new InvalidOperationException("Connect this device in Settings first.");
       if(string.Equals(request.Operation, "test-print", StringComparison.Ordinal))
       {

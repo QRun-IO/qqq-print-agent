@@ -87,6 +87,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
          command.Transaction = null;
          CreateJobIndexes();
          MigrateJobCreationTime();
+         InitializeControls();
       }
    }
 

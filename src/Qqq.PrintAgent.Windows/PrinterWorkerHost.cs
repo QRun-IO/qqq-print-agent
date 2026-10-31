@@ -16,7 +16,7 @@ public static class PrinterWorkerHost
 {
    internal const string ParentEnvironmentVariable = "QQQ_PRINT_WORKER_PARENT";
    internal sealed record Request(string Operation, PrintJob? Job = null, byte[]? Content = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null);
-   internal sealed record Response(bool Success, IReadOnlyList<PrinterInfo>? Printers = null, string? SpoolerJobId = null, string? Error = null);
+   internal sealed record Response(bool Success, IReadOnlyList<PrinterInfo>? Printers = null, string? SpoolerJobId = null, string? Error = null, string? ErrorCode = null);
 
    /// <summary>Run before ordinary service or CLI hosting when invoked with --printer-worker.</summary>
    public static Task<int> RunAsync() => RunAsync(new WindowsPrinters());
@@ -63,7 +63,7 @@ public static class PrinterWorkerHost
       }
       catch(Exception exception)
       {
-         await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new Response(false, Error: AgentActivityLog.Redact(exception.Message)), PrintApiClient.JsonOptions)).ConfigureAwait(false);
+         await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new Response(false, Error: AgentActivityLog.Redact(exception.Message), ErrorCode: (exception as SpoolCancellationException)?.Outcome), PrintApiClient.JsonOptions)).ConfigureAwait(false);
          return 1;
       }
       finally

@@ -56,6 +56,9 @@
             <Directory Id="APPDIR" Name="App">
                <Component Id="AgentCompanion" Guid="2FD52718-B33B-42AA-9E28-21B3B70FA4BB" Bitness="always64">
                   <File Id="CompanionExe" Source="$(PayloadRoot)\app\Qqq.PrintAgent.exe" KeyPath="yes" />
+                  <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\io.qrun.qqq-print-agent" Type="string" Value="URL:[BRANDNAME] sign-in" />
+                  <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\io.qrun.qqq-print-agent" Name="URL Protocol" Type="string" Value="" />
+                  <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\io.qrun.qqq-print-agent\shell\open\command" Type="string" Value="&quot;[CLIDIR]qqq-print-agent.exe&quot; --auth-callback &quot;%1&quot;" />
                </Component>
                <Files Include="$(PayloadRoot)\app\**">
                   <Exclude Files="$(PayloadRoot)\app\Qqq.PrintAgent.exe" />

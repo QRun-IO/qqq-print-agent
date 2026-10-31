@@ -102,6 +102,10 @@ public sealed class AgentRuntimeProfileTests
    {
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
+         if(request.RequestUri!.AbsolutePath.EndsWith("/control/poll", StringComparison.Ordinal))
+         {
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+         }
          Assert.Equal("synthetic-token", request.Headers.Authorization?.Parameter);
          string path = request.RequestUri!.AbsolutePath;
          if(request.Content is not null)

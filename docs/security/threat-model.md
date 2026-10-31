@@ -1,5 +1,19 @@
 # Threat model: QQQ Print Agent
 
+## Remote device controls candidate
+
+The remote-control adapter accepts only inventory refresh and cancellation of one locally journaled spooler job. Desired pause/disconnect state is revisioned and persists by canonical server URL and device identity; older or conflicting revisions cannot resume a device. The independent poll loop does not wait behind rendering. A paused device still synchronizes but claims no new work. A disconnected device keeps only control traffic and existing event delivery active; already-submitted printing is not recalled. Reconnect is a transport refresh, never an OS or service restart.
+
+The native QQQ session adapter requires discovery before credentials and never treats a native control 404 as legacy permission. After support is negotiated, 404 does not remove restrictions. Authorization denial becomes authorization-required, without inferring that every 401/403 proves revocation. New claims wait for an authenticated, bound QQQ user and valid control state. Existing installations without a protected QQQ session wait for explicit sign-in; device proof alone cannot authorize normal service printing. Explicit isolated CLI diagnostics may use the compatibility bearer adapter with `--legacy-compat`; it is not a fallback from native authentication.
+
+The service stores only the QQQ session cookie and stable authoritative identity under service-identity DPAPI, and periodically resumes the standard session. Passwords stay in the companion; provider refresh/access tokens remain server-side. Normal CLI operations use the existing authenticated service pipe. The private browser callback is fixed and MSI-owned, forwarding bounded data only into an active same-user/session companion inbox after executable verification. It carries a short-lived authorization code, never a session cookie or PKCE verifier. Core validates exact advertised redirect, random state, PKCE and single-use expiry; no callback creates an authentication attempt. Provider registration, installed callback delivery and long-duration renewal remain deployment qualifications.
+
+Control responses are capped at 64 KiB after the HTTP client's bounded receive, with at most 20 commands. The journal admits at most 4,096 command records and 128 retained connection states, failing closed when capacity is exhausted. A durable marker precedes any effect. Crash recovery produces OUTCOME_UNKNOWN; duplicate delivery reuses the exact saved receipt rather than repeating cancellation. No raw executable, printer name or arbitrary spool ID comes from the server: CANCEL_SPOOL resolves its job ID through the current connection's local receipt and verifies the exact QQQ document at the Windows spooler boundary.
+
+Successful cancellation means Windows accepted the request, not that printed paper was recalled. Absent/completed jobs, ownership mismatch, failure, expiry and uncertain outcome remain distinct. Only a specific receipt-endpoint 404 after expiry plus seven days retires its transport retry, preserving the exact local receipt and distinguishing retirement from server acknowledgement. A poll 404 never uses this exception. Acknowledged or transport-retired command history can be pruned after 30 days; unresolved current-connection evidence remains and causes explicit capacity backpressure. No global queue purge is implemented.
+
+## Historical audit baseline
+
 Installed baseline: 0.1.7-rc.1; audit source changes pending release. Reviewed: 2026-10-30. This is an implementation-level inventory. The separate independent deep scan has not yet returned its findings.
 
 ## Boundaries and assets

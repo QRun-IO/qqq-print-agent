@@ -6,7 +6,8 @@
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>Serial happy-path worker. A locally ambiguous submission is never automatically printed again.</summary>
-public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null)
+public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null,
+   Func<bool>? canDispatch = null, Func<bool>? canSynchronize = null)
 {
    public async Task<bool> RunOnceAsync(CancellationToken token = default)
    {
@@ -17,6 +18,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
             previousState is "SUBMITTING" ? "Agent restarted during submission; inspect the printer before reprinting." : "Agent stopped before submitting this job; submit a new job if printing is still needed.");
       }
       await FlushAsync(token).ConfigureAwait(false);
+      if(canSynchronize?.Invoke() == false)
+      {
+         return false;
+      }
       await api.HeartbeatAsync(token).ConfigureAwait(false);
       if(journal.Pending().Count > 0)
       {
@@ -24,13 +29,25 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          return false;
       }
       IReadOnlyList<PrinterInfo> inventory = printers.Discover();
+      if(canSynchronize?.Invoke() == false)
+      {
+         return false;
+      }
       await api.InventoryAsync(inventory, token).ConfigureAwait(false);
+      if(canDispatch?.Invoke() == false)
+      {
+         return false;
+      }
       PrintJob? job = await api.ClaimAsync(token).ConfigureAwait(false);
       if(job is null)
       {
          return false;
       }
+      return await ProcessJobAsync(job, inventory, token).ConfigureAwait(false);
+   }
 
+   private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
+   {
       PrinterInfo? assignedPrinter = inventory.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal));
       journal.TrackJob(job, string.IsNullOrWhiteSpace(assignedPrinter?.DisplayName) ? assignedPrinter?.Name : assignedPrinter.DisplayName);
 
