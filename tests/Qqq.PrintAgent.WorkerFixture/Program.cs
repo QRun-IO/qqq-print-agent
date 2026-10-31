@@ -34,7 +34,7 @@ public static class Program
       return await PrinterWorkerHost.RunAsync(new FakePrinters(args.Contains("--hang", StringComparer.Ordinal))).ConfigureAwait(false);
    }
 
-   private sealed class FakePrinters(bool hang) : IPrinterBackend
+   private sealed class FakePrinters(bool hang) : IFilePrinterBackend
    {
       public IReadOnlyList<PrinterInfo> Discover()
       {
@@ -49,5 +49,12 @@ public static class Program
 
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
          => throw new InvalidOperationException("This fixture must never print.");
+
+      public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
+      {
+         if(hang)
+         { Thread.Sleep(Timeout.Infinite); }
+         throw new InvalidOperationException("This fixture never opens documents or prints.");
+      }
    }
 }

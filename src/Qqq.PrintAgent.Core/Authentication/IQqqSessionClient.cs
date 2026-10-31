@@ -22,4 +22,6 @@ public interface IQqqSessionClient : IDisposable
    Task<QqqSessionBinding> GetSessionIdentityAsync(CancellationToken cancellationToken = default);
    Task<QqqSessionBinding> BindDeviceAsync(QqqDeviceCredential credential, bool claimLegacyDevice = false, CancellationToken cancellationToken = default);
    Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default);
+   Task<System.Net.WebSockets.WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
+      => throw new NotSupportedException("This session transport does not support realtime printing.");
 }

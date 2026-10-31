@@ -6,6 +6,7 @@
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
@@ -25,6 +26,7 @@ public sealed partial class MainWindow
       {
          return;
       }
+      InvalidateJobDetails();
       _jobOffset = 0;
       int version = ++_jobQueryVersion;
       await Task.Delay(300);
@@ -47,6 +49,7 @@ public sealed partial class MainWindow
          NeedsAttentionOnly: string.Equals(filter, "ATTENTION", StringComparison.Ordinal), Offset: _jobOffset, PageSize: JobPageSize, SortBy: _jobSortBy, Descending: _jobSortDescending);
       JobsPrevious.IsEnabled = false;
       JobsNext.IsEnabled = false;
+      bool refreshDetails = false;
       try
       {
          string response = await AgentPipeClient.SendAsync(new PipeRequest("query-jobs", JobQuery: query));
@@ -64,6 +67,7 @@ public sealed partial class MainWindow
          _jobTotal = page.TotalCount;
          RenderJobPage(page);
          UpdateJobSortHeaders(query.SortBy, query.Descending);
+         refreshDetails = true;
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
       {
@@ -76,15 +80,40 @@ public sealed partial class MainWindow
       {
          if(version == _jobQueryVersion && !_updatesClosed)
          {
-            JobsPrevious.IsEnabled = _jobOffset > 0;
-            JobsNext.IsEnabled = _jobOffset + JobPageSize < _jobTotal;
+            JobsPrevious.IsEnabled = !_busy && _jobOffset > 0;
+            JobsNext.IsEnabled = !_busy && _jobOffset + JobPageSize < _jobTotal;
          }
+      }
+      if(refreshDetails && version == _jobQueryVersion && !_updatesClosed)
+      {
+         await RefreshExpandedJobAsync();
       }
    }
 
    private void RenderJobPage(JobPage page)
    {
+      _renderingJobPage = true;
+      try
+      {
+         RenderJobRows(page);
+      }
+      finally
+      {
+         _renderingJobPage = false;
+      }
+      JobsSummary.Text = $"{page.Jobs.Count} of {page.TotalCount} matching jobs · page {page.Offset / JobPageSize + 1}";
+      JobsEmpty.Visibility = page.Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+      JobsEmptyTitle.Text = "No matching jobs";
+      JobsEmptyMessage.Text = "Try another prefix search or choose All states.";
+      JobsNotice.Text = (page.ServerQueueLimited ? "Cloud queue preview is limited to 50; local history remains searchable. " : "")
+         + "Sent to printer means Windows accepted the job. Check the printer to confirm physical output.";
+      UpdateSelectedJob();
+   }
+
+   private void RenderJobRows(JobPage page)
+   {
       string? selected = (JobsList.SelectedItem as JobRowView)?.Snapshot.JobId;
+      var focused = FocusManager.GetFocusedElement(Content.XamlRoot) as Control;
       var present = page.Jobs.Select(job => job.JobId).ToHashSet(StringComparer.Ordinal);
       foreach(string id in _jobRows.Keys.Where(id => !present.Contains(id)).ToArray())
       {
@@ -96,11 +125,11 @@ public sealed partial class MainWindow
          JobSnapshot job = page.Jobs[index];
          if(!_jobRows.TryGetValue(job.JobId, out JobRowView? row))
          {
-            row = new JobRowView(job);
+            row = new JobRowView(job, ToggleJobDetails, JobDetailsAsync, RetryJobAsync, CancelJobAsync, AcknowledgeJobAsync, RefreshJobDetailsAsync);
             _jobRows.Add(job.JobId, row);
             JobsList.Items.Insert(index, row);
          }
-         row.Update(job, FriendlyState(job.Status), job.CreatedAt is null ? "Not recorded" : FormatTime(job.CreatedAt));
+         row.Update(job, FriendlyState(job.Status), FormatJobCreated(job.CreatedAt));
          if(JobsList.Items.IndexOf(row) != index)
          {
             JobsList.Items.Remove(row);
@@ -108,17 +137,18 @@ public sealed partial class MainWindow
          }
       }
       JobsList.SelectedItem = selected is not null && _jobRows.TryGetValue(selected, out JobRowView? selectedRow) ? selectedRow : null;
-      JobsSummary.Text = $"{page.Jobs.Count} of {page.TotalCount} matching jobs · page {page.Offset / JobPageSize + 1}";
-      JobsEmpty.Visibility = page.Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-      JobsEmptyTitle.Text = "No matching jobs";
-      JobsEmptyMessage.Text = "Try another prefix search or choose All states.";
-      JobsNotice.Text = (page.ServerQueueLimited ? "Cloud queue preview is limited to 50; local history remains searchable. " : "")
-         + "Sent to printer means Windows accepted the job. Check the printer to confirm physical output.";
-      UpdateSelectedJob();
+      if(focused?.XamlRoot is not null && !ReferenceEquals(focused, FocusManager.GetFocusedElement(Content.XamlRoot)))
+      {
+         _ = focused.Focus(FocusState.Programmatic);
+      }
    }
+
+   private static string FormatJobCreated(string? value) => DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+      System.Globalization.DateTimeStyles.None, out DateTimeOffset timestamp) ? timestamp.ToLocalTime().ToString("G", System.Globalization.CultureInfo.CurrentCulture) : "Not recorded";
 
    private async void PreviousJobs_Click(object sender, RoutedEventArgs e)
    {
+      InvalidateJobDetails();
       _jobOffset = Math.Max(0, _jobOffset - JobPageSize);
       await RefreshJobPageAsync();
    }
@@ -127,53 +157,9 @@ public sealed partial class MainWindow
    {
       if(_jobOffset + JobPageSize < _jobTotal)
       {
+         InvalidateJobDetails();
          _jobOffset += JobPageSize;
          await RefreshJobPageAsync();
-      }
-   }
-
-   private void JobSelection_Changed(object sender, SelectionChangedEventArgs e) => UpdateSelectedJob();
-
-   private void UpdateSelectedJob()
-   {
-      JobSnapshot? job = (JobsList.SelectedItem as JobRowView)?.Snapshot;
-      JobDetailsButton.IsEnabled = job is not null && !_busy;
-      JobRetryButton.IsEnabled = !_busy && job?.Status is "FAILED" or "OUTCOME_UNKNOWN" or "SPOOLED" or "SPOOLER_COMPLETED";
-      JobCancelButton.IsEnabled = !_busy && job is not null && (job.Status is "QUEUED" || job.Status is "SPOOLED" && job.SpoolerJobId is not null);
-      JobReviewButton.IsEnabled = !_busy && job is { FailureAcknowledged: false, Status: "FAILED" or "OUTCOME_UNKNOWN" };
-      SelectedJobText.Text = job is null ? "Select a job for details and actions." : job.Title ?? job.JobId;
-      ToolTipService.SetToolTip(SelectedJobText, SelectedJobText.Text);
-   }
-
-   private async void JobDetails_Click(object sender, RoutedEventArgs e)
-   {
-      if((JobsList.SelectedItem as JobRowView)?.Snapshot is JobSnapshot job)
-      {
-         await JobDetailsAsync(job);
-      }
-   }
-
-   private async void JobRetry_Click(object sender, RoutedEventArgs e)
-   {
-      if((JobsList.SelectedItem as JobRowView)?.Snapshot is JobSnapshot job)
-      {
-         await RetryJobAsync(job);
-      }
-   }
-
-   private async void JobCancel_Click(object sender, RoutedEventArgs e)
-   {
-      if((JobsList.SelectedItem as JobRowView)?.Snapshot is JobSnapshot job)
-      {
-         await CancelJobAsync(job);
-      }
-   }
-
-   private async void JobReview_Click(object sender, RoutedEventArgs e)
-   {
-      if((JobsList.SelectedItem as JobRowView)?.Snapshot is JobSnapshot job)
-      {
-         await AcknowledgeJobAsync(job);
       }
    }
 
@@ -193,6 +179,10 @@ public sealed partial class MainWindow
             return;
          }
          details = JsonSerializer.Deserialize<JobDetailsSnapshot>(response, PrintApiClient.JsonOptions);
+         if(details?.Job is null || details.Events is null || !string.Equals(details.Job.JobId, job.JobId, StringComparison.Ordinal))
+         {
+            throw new JsonException("Job details do not match the selected row.");
+         }
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
       {

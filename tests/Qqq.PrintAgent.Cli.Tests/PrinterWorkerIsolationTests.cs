@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using Qqq.PrintAgent.Windows;
+using Qqq.PrintAgent.Core.Printing;
 
 
 namespace Qqq.PrintAgent.Cli.Tests;
@@ -13,6 +14,26 @@ namespace Qqq.PrintAgent.Cli.Tests;
 public sealed class PrinterWorkerIsolationTests
 {
    private static string FixtureExecutable => Path.ChangeExtension(typeof(WorkerFixture.Program).Assembly.Location, ".exe");
+
+   [Fact]
+   public async Task FileSubmissionUsesConfiguredWatchdogInsteadOfFixedTwoMinuteTimeout()
+   {
+      int childId = 0;
+      var backend = new IsolatedPrinterBackend(FixtureExecutable)
+      {
+         StartProcess = start =>
+         {
+            start.ArgumentList.Add("--hang");
+            Process child = Process.Start(start) ?? throw new InvalidOperationException("Fixture failed.");
+            childId = child.Id;
+            return child;
+         },
+      };
+      PrintJob job = new("synthetic", "fixture", "Never printed", "PDF", new string('0', 64), 1, new PrintOptions(), "", "RECEIVED");
+      using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      await Assert.ThrowsAsync<TimeoutException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-synthetic.document"), TimeSpan.FromSeconds(1), watchdog.Token));
+      Assert.True(ProcessExited(childId));
+   }
 
    [Fact]
    public void TimedOutWorkerIsKilledAndNextOperationSucceeds()

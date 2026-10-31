@@ -2,13 +2,17 @@
 
 ## Architecture
 
+Current source prepares unreleased `0.3.0-rc.1`, with printing extension 2.0.
+See [realtime architecture](REALTIME.md) for worker separation, policy, streaming
+and reconnect rules. The service never falls back from WSS to job/control polling.
+
 | Project | Responsibility |
 | --- | --- |
-| Qqq.PrintAgent.Core | Wire DTOs/client, submission state machine and exposure filter |
+| Qqq.PrintAgent.Core | QQQ authentication, HTTP/WSS clients, policy, streaming and submission state machine |
 | Qqq.PrintAgent.Windows | Native spooler/PDF adapter, SQLite/DPAPI store and local management runtime |
 | Qqq.PrintAgent.Service | .NET Windows Service host |
 | Qqq.PrintAgent | AppKit/WinUI setup, details and tray companion |
-| Qqq.PrintAgent.Cli | Scriptable setup and foreground diagnostics |
+| Qqq.PrintAgent.Cli | Authenticated service management and explicit isolated legacy diagnostics |
 
 The service owns the credential, journal and print operations. The UI is optional at runtime and sees only credential-free snapshots. Service IPC uses the `QqqPrintAgent` named pipe and accepts administrator clients. `snapshot` returns connection health, all locally discovered printers with exposure state, the latest 50 jobs and the latest 100 in-memory log entries. `set-exposure` persists a selected queue and returns a fresh snapshot. Legacy `status`, `printers` and `enroll` operations remain available.
 
@@ -26,21 +30,19 @@ This performs locked restore, Release solution build, core tests and Windows/CLI
 
 ## Local server and CLI
 
-Start the sibling qbit-printing demo as described in its README. The default local API origin is `http://localhost:18081`. The demo's administrative credential is a local harness mechanism, not the production QQQ authentication design.
+Use a disposable native QQQ host from the sibling qbit-printing project, advertising printing extension 2.0. Sign in through the companion's advertised QQQ authentication flow before using normal CLI commands. The service owns the session, device proof and unattended printing. A bearer-only demo is not a compatible realtime host.
 
 ```powershell
 $agent = '.\src\Qqq.PrintAgent.Cli\bin\x64\Debug\net10.0-windows10.0.19041.0\qqq-print-agent.exe'
-$data = Join-Path $env:LOCALAPPDATA 'QqqPrintAgent-Development'
+& $agent service-status
+& $agent snapshot
 & $agent printers
-# Enrollment code is read from QQQ_PRINT_ENROLLMENT_CODE or the prompt.
-& $agent enroll --server http://localhost:18081 --data-dir $data
-& $agent expose --printer '<discovered-printer-id>' --exposed true --data-dir $data
-& $agent run --data-dir $data --once
+& $agent run
 ```
 
-Enable the selected queue on the server, submit a recognizable test document, then run the worker again. Without `--once`, it polls until Ctrl+C. Use a dedicated private directory; do not share it with the installed service. The exclusive worker.lock prevents simultaneous workers on one journal.
+`run` requests a connection refresh through the authenticated service; it does not start a second foreground worker. Device setup and explicit printer exposure use that same service. Submit a physical test only when authorized, after approving the selected exposed queue in QQQ.
 
-For installed service management use elevated `enroll --service`, `expose --service`, `service-status` or `snapshot`. The CLI `printers` command runs under the invoking account; the service snapshot is authoritative for service-visible queues.
+Direct bearer diagnostics require explicit `--legacy-compat` and a separate private `--data-dir`; they cannot use `--service` and are never an automatic fallback. The exclusive `worker.lock` prevents simultaneous workers on one journal. Do not point a development worker at installed state.
 
 ## Reliability boundary
 
@@ -49,7 +51,7 @@ The worker persists receipt and SUBMITTING before invoking Windows. It records S
 ## Packaging
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 0.1.3 -ReleaseVersion 0.1.3-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.3.0 -ReleaseVersion 0.3.0-rc.1
 ```
 
 MSI ProductVersion is numeric; assembly/package informational version may contain the prerelease suffix. Service, companion and CLI are published into separate self-contained runtime directories and shipped in one machine MSI. Do not reintroduce the template's per-user Velopack updater.
@@ -60,4 +62,4 @@ MSI ProductVersion is numeric; assembly/package informational version may contai
 
 `GitHubMsiReleaseClient` reads the fixed QRun-IO release feed, applies strict version/channel/minimum policy and validates bounded release assets and SHA-256. `MsiUpdateInstaller` validates protected staging, ACLs and reparse boundaries, copies the installed self-contained CLI for handoff, rechecks the MSI and uses Windows Installer for all components. The runtime's `prepare-update`/`resume-after-update` operations coordinate a bounded claim pause while preserving heartbeats. No server-supplied executable, per-user replacement package or persistent privileged updater is involved. See the [threat model](security/threat-model.md) for trust and failure boundaries.
 
-Current 0.1.3-rc.1 verification: locked restore, zero-warning Release build, **36 Core + 127 Windows/CLI tests (163 total)**. Synthetic release/download/hash/request/ACL/version/maintenance tests do not install an MSI. UI tests compile only; installed shell and actual upgrade acceptance remain separate gates. Completed protected update stages are retained for manual administrator review.
+Historical 0.1.3-rc.1 verification: locked restore, zero-warning Release build, **36 Core + 127 Windows/CLI tests (163 total)**. Synthetic release/download/hash/request/ACL/version/maintenance tests do not install an MSI. Installed shell and actual upgrade acceptance remain separate gates; use [session state](SESSION-STATE.md) for current verification. Completed protected update stages are retained for manual administrator review.

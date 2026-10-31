@@ -1,0 +1,16 @@
+namespace Qqq.PrintAgent.Core.Printing;
+
+/// <summary>Owns a verified staging file and prevents replacement until the native worker finishes.</summary>
+public sealed class DownloadedDocument(string path, FileStream lease) : IDisposable
+{
+   public string Path { get; } = path;
+
+   public void Dispose()
+   {
+      lease.Dispose();
+      try
+      { File.Delete(Path); }
+      catch(IOException) { /* Protected abandoned staging is removed before the next service run. */ }
+      catch(UnauthorizedAccessException) { /* Cleanup failure must not change a committed spool receipt. */ }
+   }
+}

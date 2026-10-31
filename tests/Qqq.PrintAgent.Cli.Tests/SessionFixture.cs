@@ -43,6 +43,9 @@ internal sealed class SessionFixture : IDisposable
       internal string? RevokedDeviceId;
       internal HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
       internal bool DelayUnauthorizedPoll { get; set; }
+      internal Func<CancellationToken, Task<System.Net.WebSockets.WebSocket>>? ConnectRealtime { get; set; }
+      public Task<System.Net.WebSockets.WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
+         => ConnectRealtime?.Invoke(cancellationToken) ?? throw new NotSupportedException();
       internal TaskCompletionSource PollEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       internal TaskCompletionSource ReleasePoll { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       public void Dispose() { }

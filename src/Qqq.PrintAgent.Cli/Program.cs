@@ -146,6 +146,10 @@ public static class Program
 
    private static async Task<int> RunAsync(string[] args, string directory)
    {
+      if(!args.Contains("--once", StringComparer.Ordinal))
+      {
+         throw new InvalidOperationException("Continuous legacy polling is no longer supported. Sign in to the installed native-session service for realtime printing. --once is a legacy diagnostic only.");
+      }
       using FileStream instance = AcquireWorkerLock(directory);
       using AgentStore journal = new(directory);
       AgentConfiguration config = journal.LoadConfiguration() ?? throw new InvalidOperationException("Enroll this account first.");
@@ -156,24 +160,11 @@ public static class Program
       ConsoleCancelEventHandler cancelHandler = (_, e) => { e.Cancel = true; stopping.Cancel(); };
       Console.CancelKeyPress += cancelHandler;
       try
-      {
-         do
-         {
-            await worker.RunOnceAsync(stopping.Token);
-            if(args.Contains("--once", StringComparer.Ordinal))
-            {
-               break;
-            }
-            await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, config.PollIntervalSeconds)), stopping.Token);
-         } while(!stopping.IsCancellationRequested);
-      }
+      { await worker.RunOnceAsync(stopping.Token); }
       catch(OperationCanceledException) when(stopping.IsCancellationRequested) { return 0; }
       finally { Console.CancelKeyPress -= cancelHandler; }
       return 0;
    }
-
-
-
    private static async Task<int> SetExposureAsync(string[] args, string directory)
    {
       string id = Option(args, "--printer") ?? throw new ArgumentException("--printer is required.", nameof(args));

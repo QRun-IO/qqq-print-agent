@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Globalization;
 using System.Text.Json;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -127,7 +128,10 @@ public class AppTests
       using var session = new AppSession();
       AutomationElement inventory = session.WaitForElement("PrinterInventory");
       AutomationElement row = session.WaitFor(() => inventory.FindFirstDescendant(cf => cf.ByControlType(ControlType.ListItem)), "an installed printer row");
-      row.Patterns.SelectionItem.Pattern.Select();
+      AutomationElement disclosure = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByAutomationId("TogglePrinterDetails")), "printer disclosure button");
+      Assert.Equal("Collapsed", disclosure.Properties.ItemStatus.ValueOrDefault);
+      disclosure.Patterns.Invoke.Pattern.Invoke();
+      session.WaitFor(() => string.Equals(disclosure.Properties.ItemStatus.ValueOrDefault, "Expanded", StringComparison.Ordinal) ? disclosure : null, "printer disclosure to expand the selected row");
       AutomationElement settings = session.WaitForElement("EditPrinterProfile");
       Assert.False(settings.IsOffscreen);
       Assert.True(settings.BoundingRectangle.Top >= row.BoundingRectangle.Top);
@@ -158,7 +162,7 @@ public class AppTests
       session.ClickElement("NavigateJobs");
       AutomationElement history = session.WaitForElement("RecentJobs");
       AutomationElement row = session.WaitFor(() => history.FindFirstDescendant(cf => cf.ByControlType(ControlType.ListItem)), "an existing retained job row");
-      AutomationElement title = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByControlType(ControlType.Text)), "job row text");
+      AutomationElement title = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByAutomationId("JobDocumentCell")), "compact job document cell");
       session.MainWindow.SetForeground();
       title.DoubleClick();
       session.WaitForVisibleText("Outcome");
@@ -184,6 +188,75 @@ public class AppTests
       session.WaitFor(() => session.FindInApp(cf => cf.ByAutomationId("SortJobCreated")) is { Name: "Sort by created, ascending" } button ? button : null, "creation sort query to finish");
       session.ClickElement("SortJobTitle");
       session.WaitFor(() => session.FindInApp(cf => cf.ByAutomationId("SortJobTitle")) is { Name: "Sort by document, ascending" } button ? button : null, "document sort query to finish");
+   }
+
+   /// <summary>Requires retained jobs with at least two creation instants; verifies visible row values, not just header glyphs.</summary>
+   [Fact]
+   public void ExistingJobs_CreationSortChangesActualVisibleRowOrder()
+   {
+      using var session = new AppSession();
+      session.ClickElement("NavigateJobs");
+      AutomationElement history = session.WaitForElement("RecentJobs");
+      DateTimeOffset[] descending = WaitForCreatedOrder(session, history, descending: true);
+
+      session.ClickElement("SortJobCreated");
+      session.WaitFor(() => session.WaitForElement("SortJobCreated").Name is "Sort by created, ascending" ? history : null, "ascending query to finish");
+      DateTimeOffset[] ascending = WaitForCreatedOrder(session, history, descending: false);
+      Assert.True(descending[0] > ascending[0], "Ascending sort must show older retained jobs first, not only change the header arrow.");
+
+      session.ClickElement("SortJobCreated");
+      session.WaitFor(() => session.WaitForElement("SortJobCreated").Name is "Sort by created, descending" ? history : null, "descending query to finish");
+      _ = WaitForCreatedOrder(session, history, descending: true);
+   }
+
+   /// <summary>Expands existing evidence, collapses/reopens it and filters it away without changing jobs.</summary>
+   [Fact]
+   public void ExistingJob_DisclosureAndFilterKeepOnlyCurrentInlineDetails()
+   {
+      using var session = new AppSession();
+      session.ClickElement("NavigateJobs");
+      AutomationElement history = session.WaitForElement("RecentJobs");
+      AutomationElement row = session.WaitFor(() => history.FindFirstDescendant(cf => cf.ByControlType(ControlType.ListItem)), "an existing retained job row");
+      AutomationElement disclosure = session.WaitFor(() => row.FindFirstDescendant(cf => cf.ByAutomationId("ToggleJobDetails")), "job disclosure button");
+      Assert.Equal("Collapsed", disclosure.Properties.ItemStatus.ValueOrDefault);
+      disclosure.Patterns.Invoke.Pattern.Invoke();
+      AutomationElement details = session.WaitForElement("JobInlineDetailsContent");
+      Assert.Equal("Expanded", disclosure.Properties.ItemStatus.ValueOrDefault);
+      Assert.True(details.BoundingRectangle.Top >= row.BoundingRectangle.Top);
+      Assert.True(details.BoundingRectangle.Bottom <= row.BoundingRectangle.Bottom);
+      Assert.Single(history.FindAllDescendants(cf => cf.ByAutomationId("JobInlineDetailsContent")));
+
+      disclosure.Patterns.Invoke.Pattern.Invoke();
+      session.WaitForElementGone("JobInlineDetailsContent");
+      Assert.Equal("Collapsed", disclosure.Properties.ItemStatus.ValueOrDefault);
+      disclosure.Patterns.Invoke.Pattern.Invoke();
+      session.WaitForElement("JobInlineDetailsContent");
+      Assert.Single(history.FindAllDescendants(cf => cf.ByAutomationId("JobInlineDetailsContent")));
+
+      session.EnterText("JobSearch", "no-match-" + Guid.NewGuid().ToString("N"));
+      session.WaitFor(() => session.WaitForElement("JobsSummary").Name.StartsWith("0 of ", StringComparison.Ordinal) ? history : null, "filtered row and its details to disappear");
+      session.WaitForElementGone("JobInlineDetailsContent");
+      Assert.False(session.App.HasExited);
+   }
+
+   private static DateTimeOffset[] WaitForCreatedOrder(AppSession session, AutomationElement history, bool descending)
+   {
+      DateTimeOffset[] observed = [];
+      session.WaitFor(() =>
+      {
+         observed = history.FindAllDescendants(cf => cf.ByAutomationId("JobCreatedCell"))
+            .Where(cell => !cell.IsOffscreen)
+            .OrderBy(cell => cell.BoundingRectangle.Top)
+            .Select(cell => DateTimeOffset.TryParse(cell.Properties.HelpText.ValueOrDefault, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset created) ? (DateTimeOffset?)created : null)
+            .Where(created => created.HasValue).Select(created => created.GetValueOrDefault()).ToArray();
+         if(observed.Distinct().Count() < 2)
+         {
+            return null;
+         }
+         DateTimeOffset[] expected = descending ? observed.OrderDescending().ToArray() : observed.Order().ToArray();
+         return observed.SequenceEqual(expected) ? history : null;
+      }, "at least two distinct retained creation times in the requested visible order");
+      return observed;
    }
 
    /// <summary>Requires an exposed PDF/ZPL queue; opens diagnostic choices and cancels without submitting any job.</summary>

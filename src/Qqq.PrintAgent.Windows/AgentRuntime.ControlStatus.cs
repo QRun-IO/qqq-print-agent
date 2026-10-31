@@ -10,12 +10,31 @@ public sealed partial class AgentRuntime
       await _connectionGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
+         Task active;
+         lock(_stateLock)
+         {
+            _transitioning = true;
+            _connectionGeneration++;
+            _realtimeReady = false;
+            _realtimeLifetime?.Cancel();
+            _pipelineLifetime?.Cancel();
+            active = _pipelineTask;
+         }
+         try
+         { await active.WaitAsync(token).ConfigureAwait(false); }
+         catch(OperationCanceledException) when(!token.IsCancellationRequested) { }
          await _controlExecutionGate.WaitAsync(token).ConfigureAwait(false);
          try
          { return await action().ConfigureAwait(false); }
          finally { _controlExecutionGate.Release(); }
       }
-      finally { _connectionGate.Release(); }
+      finally
+      {
+         lock(_stateLock)
+         { _transitioning = false; }
+         SignalPipeline();
+         _connectionGate.Release();
+      }
    }
 
    private string ReconnectLocal()
@@ -28,7 +47,7 @@ public sealed partial class AgentRuntime
          }
          if(string.Equals(_controlState.DesiredState.ConnectionState, "DISCONNECTED", StringComparison.Ordinal))
          {
-            return "Disconnected by the administrator. Remote control polling remains active; ask the server administrator to reconnect this device.";
+            return "Disconnected by the administrator. The realtime control channel remains active; ask the server administrator to reconnect this device.";
          }
       }
       using AgentStore store = new(directory);
@@ -37,6 +56,12 @@ public sealed partial class AgentRuntime
          return "Not enrolled. Open Connection settings to connect this device.";
       }
       WakePoll();
+      lock(_stateLock)
+      {
+         _realtimeLifetime?.Cancel();
+         if(_reconnectRequested.CurrentCount == 0)
+         { _reconnectRequested.Release(); }
+      }
       WriteLog("INFO", "Connection retry requested.");
       return "Reconnect requested. Connection status will update after the next server response.";
    }
@@ -49,7 +74,7 @@ public sealed partial class AgentRuntime
       }
       if(string.Equals(_controlState.DesiredState.ConnectionState, "DISCONNECTED", StringComparison.Ordinal))
       {
-         return (jobFailure ? "RED" : "ORANGE", "Disconnected by the administrator. Control polling remains active for reconnect; in-flight print receipts are preserved." + ControlSuffix());
+         return (jobFailure ? "RED" : "ORANGE", "Disconnected by the administrator. The realtime control channel remains active for reconnect; in-flight print receipts are preserved." + ControlSuffix());
       }
       if(_controlState.DesiredState.DispatchPaused)
       {

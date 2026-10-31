@@ -5,11 +5,11 @@
 Download the x64 MSI and `SHA256SUMS` from the same [GitHub release](https://github.com/QRun-IO/qqq-print-agent/releases). Check the file locally:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.1.7-rc.1-x64.msi
+Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.2.0-rc.1-x64.msi
 Get-Content .\SHA256SUMS
 ```
 
-Use the filename of the release you downloaded and compare the complete hash with its `SHA256SUMS` entry. The published baseline is 0.1.7-rc.1; the audit candidate is not released yet. Checksums detect changes after publication; they do not replace publisher signing. The MSI is **unsigned**, with no Authenticode identity. The current release workflow also produces GitHub build-provenance attestations, which are verified separately from checksums and are not code signing. Older releases may lack those attestations; their presence must be checked for the exact downloaded asset. Download only from the project's release page and follow your organization's software-install policy.
+Use the filename of the release you downloaded and compare the complete hash with its `SHA256SUMS` entry. The published baseline is 0.2.0-rc.1; realtime source 0.3.0-rc.1 is unreleased. Checksums detect changes after publication; they do not replace publisher signing. The MSI is **unsigned**, with no Authenticode identity. The current release workflow also produces GitHub build-provenance attestations, which are verified separately from checksums and are not code signing. Older releases may lack those attestations; their presence must be checked for the exact downloaded asset. Download only from the project's release page and follow your organization's software-install policy.
 
 ## Install
 
@@ -20,7 +20,7 @@ Run the MSI as an administrator. Windows Installer deploys one coherent applicat
 - The `qqq-print-agent.exe` diagnostic CLI.
 - A restricted `%ProgramData%\QqqPrintAgent` directory for enrollment and the job journal.
 
-There is no inbound firewall rule or local HTTP server. Keep outbound HTTPS available to the QQQ server and, for update checks/downloads, GitHub release services. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
+There is no inbound firewall rule or local HTTP server. The unreleased realtime client requires outbound WSS upgrades and HTTPS to the QQQ server; update checks/downloads use HTTPS to GitHub release services. The matching server must advertise printing extension 2.0. The published 0.2 transport remains HTTP-based. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
 
 ## Service recovery
 
@@ -48,7 +48,7 @@ Full uninstall removes only tasks whose name, current-user SID, interactive prin
 
 ## Isolated native printer operations
 
-Discovery, submission and cancellation run in a short-lived child of the service or foreground CLI. The child receives its request through anonymous standard-input/output pipes; document bytes are not written to command arguments, activity logs or temporary files. Discovery and cancellation are limited to 20 seconds, and printing to 120 seconds. A timed-out child is terminated, with up to five seconds allowed for cleanup. A child also watches its parent and exits when the connector disappears.
+Discovery, submission and cancellation run in a short-lived child of the service or explicit diagnostic CLI. Control requests use anonymous standard-input/output pipes. Realtime documents stream to protected owned staging files; their content is not placed in command arguments or logs. Discovery and cancellation have bounded helper deadlines. Realtime printing uses the server's `nativeSubmissionTimeoutMillis`, default 120 seconds, rather than a fixed submission deadline. A timed-out child is terminated, with bounded cleanup, and also watches its parent. The child still runs with service privileges; isolation limits a blocked driver, not its authority.
 
 This bounds a blocked printer driver without stopping cloud connectivity permanently. It cannot retract bytes already accepted by a printer: timeout, crash or cancellation after submission begins is an uncertain outcome and requires inspection before reprinting. Existing spooler receipt cancellation verifies the exact QQQ document identity before requesting cancellation; it does not prove that no paper or label has already emerged. Synthetic subprocess tests use a fake backend and never access a printer.
 
@@ -60,7 +60,7 @@ Set the queue's default paper/tray/orientation for PDF printing. The initial API
 
 ## Sign in and pair
 
-Upgrade the QQQ printing server first. In the companion's connection settings, enter its origin, discover the advertised sign-in options and sign in through the configured QQQ authentication. See [QQQ sign-in](QQQ-SIGN-IN.md) for browser-provider requirements and recovery.
+Upgrade the QQQ printing server first; realtime source requires printing extension 2.0. In the companion's connection settings, enter its origin, discover the advertised sign-in options and sign in through the configured QQQ authentication. See [QQQ sign-in](QQQ-SIGN-IN.md) for browser-provider requirements and recovery.
 
 For an existing unbound installation, choose **Associate the existing pairing with my account**; preserve its device record and history. For a new installation, complete sign-in and enter a single-use enrollment code created in QQQ. Enrollment runs in the service, protecting its device proof and QQQ session under the service identity. The desktop does not retain the password or device token. **Set up a new pairing** is an explicit replacement flow, not routine upgrade migration.
 
@@ -72,11 +72,11 @@ In the MSI-installed companion, open Settings and select **Check for updates**. 
 
 The feed is fixed to [QRun-IO/qqq-print-agent releases](https://github.com/QRun-IO/qqq-print-agent/releases), independently of customer branding or the QQQ server. Stable builds accept newer stable versions; prerelease builds may accept newer RC or stable versions. Offers below core version 0.1.3 are rejected. Downloads require the expected versioned MSI and same-release `SHA256SUMS`. SHA-256 checks establish consistency with that release, not independent publisher identity or signing; the prerelease remains unsigned.
 
-After confirmation, the adapter downloads into a protected unique folder under `%ProgramData%\QqqPrintAgent\updates`, verifies size/hash and prepares a copied CLI helper. The service finishes its current poll/print operation before pausing new claims; heartbeats continue. The helper waits for the companion to exit, rechecks the package, then runs one MSI for service, companion and CLI. It preserves enrollment and journal evidence. Windows Installer is not forcibly terminated. A failed or abandoned handoff does not leave claims paused permanently.
+After confirmation, the adapter downloads into a protected unique folder under `%ProgramData%\QqqPrintAgent\updates`, verifies size/hash and prepares a copied CLI helper. The service pauses new claims and waits for active native submissions; connection/control traffic remains separate. The helper waits for the companion to exit, rechecks the package, then runs one MSI for service, companion and CLI. It preserves enrollment and journal evidence. Windows Installer is not forcibly terminated. A failed or abandoned handoff does not leave claims paused permanently.
 
 The helper records a dated result in `updates\last-result.json`, retains a private installation log and attempts to reopen the companion. Settings displays the last result. Exit 3010 means a Windows restart is required, not that the new app is fully ready. On failure, inspect Settings/Logs and the installed version before retrying. Completed update folders, helper copies and install logs are retained for administrator review; there is no automatic cleanup policy for completed stages. Remove an old stage only after confirming its installer/helper has exited and its evidence is no longer needed; never remove enrollment or journal files.
 
-The installed 0.1.7 baseline passed its 16 native UI checks and confirmed laser PDF, Zebra ZPL and Zebra PDF output. The audit candidate's source gate passes 249 tests with zero warnings/errors, but its installation is still pending. These checks do not qualify a complete in-app upgrade, canceled elevation or restart-required recovery. See [current acceptance evidence](ACCEPTANCE.md) and [audit status](SESSION-STATE.md) for the exact versions and remaining checks. A nonworking older companion can be repaired using the reviewed MSI directly.
+The published 0.2 MSI has completed a state-preserving local upgrade, native QQQ sign-in and device-control checks. The user confirmed Letter PDF and Zebra ZPL output plus the Connected footer and both printers. The earlier 0.1.9 automated UI run and 0.1.7 hardware checks retain their own scope. None of these establishes installed 0.3 realtime behavior, a complete in-app updater handoff or restart-required recovery. See [acceptance evidence](ACCEPTANCE.md) and [session state](SESSION-STATE.md) for exact versions and remaining checks. A nonworking older companion can be repaired using the reviewed MSI directly.
 
 ## Upgrade and remove
 

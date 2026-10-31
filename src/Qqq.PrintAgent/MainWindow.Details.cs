@@ -68,7 +68,7 @@ public sealed partial class MainWindow
       for(var current = source as DependencyObject; current is not null; current = VisualTreeHelper.GetParent(current))
       {
          if(current is ButtonBase or TextBox or PasswordBox or TextBlock { IsTextSelectionEnabled: true }
-            or FrameworkElement { Tag: "PrinterInlineDetails" })
+            or FrameworkElement { Tag: "PrinterInlineDetails" or "JobInlineDetails" })
          {
             return null;
          }

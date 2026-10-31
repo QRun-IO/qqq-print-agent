@@ -58,10 +58,7 @@ public sealed partial class AgentRuntime
          }
          else if(DateTimeOffset.UtcNow >= _nextSessionResume)
          {
-            await _sessionClient.ResumeSessionAsync(token).ConfigureAwait(false);
-            QqqSessionBinding binding = await _sessionClient.GetSessionIdentityAsync(token).ConfigureAwait(false);
-            RequireSameIdentity(saved.Binding, binding);
-            ActivateSession(_sessionClient, binding, store);
+            await ResumeAuthorizationAsync(saved, store, token).ConfigureAwait(false);
          }
          return _authorizationReady;
       }
@@ -73,6 +70,26 @@ public sealed partial class AgentRuntime
       finally { _authenticationGate.Release(); }
    }
 
+   private async Task ResumeAuthorizationAsync(AgentAuthentication saved, AgentStore store, CancellationToken token)
+   {
+      IQqqSessionClient session = _sessionClient ?? throw new InvalidOperationException("Sign in is required.");
+      string previousToken = session.ExportCredential().SessionToken;
+      await session.ResumeSessionAsync(token).ConfigureAwait(false);
+      QqqSessionBinding binding = await session.GetSessionIdentityAsync(token).ConfigureAwait(false);
+      RequireSameIdentity(saved.Binding, binding);
+      ActivateSession(session, binding, store);
+      if(!string.Equals(previousToken, session.ExportCredential().SessionToken, StringComparison.Ordinal))
+      {
+         lock(_stateLock)
+         {
+            _realtimeReady = false;
+            _realtimeLifetime?.Cancel();
+            if(_reconnectRequested.CurrentCount == 0)
+            { _reconnectRequested.Release(); }
+         }
+         SignalPipeline();
+      }
+   }
    private void ActivateSession(IQqqSessionClient client, QqqSessionBinding binding, AgentStore store)
    {
       store.SaveAuthentication(new AgentAuthentication(binding, client.ExportCredential()));
@@ -96,8 +113,11 @@ public sealed partial class AgentRuntime
          _authorizationReady = false;
          _authorizationBlocked = true;
          _controlReady = false;
+         _realtimeReady = false;
+         _realtimeLifetime?.Cancel();
          _authenticationMessage = "QQQ authorization is required. Sign in again; pairing and history are preserved.";
       }
+      SignalPipeline();
    }
 
    private static bool SameOrigin(Uri origin, string address) => Uri.TryCreate(address, UriKind.Absolute, out Uri? configured)

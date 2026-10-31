@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0-rc.1 — 2026-10-31
+
+Release candidate preparation; publication and installed qualification are pending.
+
+- Require the server's printing 2.x extension and authenticated persistent realtime channel. Replace periodic job/control HTTP polling with pushed state, commands, settings and job notifications.
+- Stream verified documents into protected staging files, with configurable aggregate bandwidth, storage, download concurrency, per-printer ordered submission and native submission deadlines.
+- Preserve durable receipts and command outcomes across reconnects; keep control traffic responsive during document transfers.
+- Expand job details and actions directly beneath the selected row, with consistent sortable table headers and bounded history paging.
+
 ## 0.2.0-rc.1 — 2026-10-31
 
 Release preparation only; publication and installed qualification remain pending.

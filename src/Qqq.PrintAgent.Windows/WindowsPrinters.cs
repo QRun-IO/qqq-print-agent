@@ -18,7 +18,7 @@ using Windows.Storage.Streams;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Windows spooler discovery, RAW ZPL, and Windows PDF renderer to native GDI.</summary>
-public sealed class WindowsPrinters : IPrinterBackend
+public sealed partial class WindowsPrinters : IFilePrinterBackend
 {
    /// <summary>Enumerate installed queues visible to this Windows identity.</summary>
    public IReadOnlyList<PrinterInfo> Discover()
@@ -102,9 +102,9 @@ public sealed class WindowsPrinters : IPrinterBackend
    public async Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
    {
       PrinterInfo printer = Discover().Single(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal));
-      if(job.Options.Copies is < 1 or > 100)
+      if(job.Options.Copies is < 1 or > 32767)
       {
-         throw new InvalidDataException("Copies must be between 1 and 100.");
+         throw new InvalidDataException("Copies must be between 1 and 32767.");
       }
       if(job.Options.PaperWidthMm is not null || job.Options.PaperHeightMm is not null)
       {
@@ -174,6 +174,11 @@ public sealed class WindowsPrinters : IPrinterBackend
       }
       pdfStream.Seek(0);
       PdfDocument document = await PdfDocument.LoadFromStreamAsync(pdfStream);
+      return await PrintPdfDocumentAsync(printerName, job, document, cancellationToken).ConfigureAwait(false);
+   }
+
+   private static async Task<string> PrintPdfDocumentAsync(string printerName, PrintJob job, PdfDocument document, CancellationToken cancellationToken)
+   {
       IntPtr dc = Native.CreateDC("WINSPOOL", printerName, null, IntPtr.Zero);
       if(dc == IntPtr.Zero)
       {

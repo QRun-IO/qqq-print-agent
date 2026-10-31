@@ -1,5 +1,25 @@
 # Acceptance evidence
 
+## Installed published 0.2.0 and confirmed output — 2026-10-31
+
+The exact published `0.2.0-rc.1` MSI completed with exit 0 and no reboot
+requirement, retaining pairing, exposed-printer choices and journal history.
+The installed service completed native QQQ table-based sign-in and explicit
+association of the existing device. Server pause, disconnect, reconnect and
+resume were observed; inventory refresh returned a successful receipt.
+
+Native QQQ Letter PDF and 4 × 6-inch, 300-dpi Zebra ZPL diagnostics reached
+SPOOLED with the reviewed content hashes. **The user confirmed that both outputs
+printed correctly**, and manually confirmed the companion's **Connected** footer
+and both printers. This manual observation is distinct from the historical
+16-test automated UI run on 0.1.9 below.
+
+This establishes the local installed 0.2 happy path. It does not establish the
+unreleased 0.3 realtime transport/Jobs UI, configured Authentik renewal, remote
+production deployment or broad driver qualification. The proposed restart
+elevation was canceled before execution, so this checkpoint does not claim a
+restart test. Source/CI checks for 0.3 remain separate from installed acceptance.
+
 ## Published 0.1.9-rc.1 — 2026-10-31
 
 [v0.1.9-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.1.9-rc.1) is published from protected main revision `cf0e362`. [Release workflow 41190815995](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41190815995) passed. The MSI, `SHA256SUMS`, `Install-Branded.ps1` and `branding.example.json` were verified against release checksums and asset digests; provenance attestations for all four assets were verified against the release workflow and tag.

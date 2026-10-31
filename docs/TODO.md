@@ -1,5 +1,15 @@
 # TODO
 
+## Realtime and Jobs UI — 0.3.0-rc.1 unreleased
+
+- [x] Adopt protocol commit `df3729ac632d4a34a3fb8423acef465042a624fc` for printing extension 2.0 and its complete configurable policy.
+- [x] Update current architecture/operations documentation for WSS, streamed HTTPS, administrator limits and bounded queue observations; preserve published 0.2 evidence.
+- [x] Compile Jobs UI and UI tests without warnings; pass three headless stale-detail generation regressions.
+- [ ] Complete combined source and independent runtime review gates, including stalled-transfer controls, ordering, lost ACKs and reconnect recovery.
+- [ ] Qualify installed realtime service/UI, configured provider renewal and physical output separately; no source check implies those results.
+
+The following entries preserve earlier implementation checkpoints.
+
 ## Remote controls candidate — not released
 
 - [x] Restore pending unbound setup across restart with unreadable or different-server old proof; preserve bound-identity refusal. Final isolated gate: 365 tests, zero warnings/errors/skips.
