@@ -61,6 +61,10 @@ public sealed class AgentRuntimeBacklogTests
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
+         if(path.EndsWith("/control/poll", StringComparison.Ordinal))
+         {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+         }
          if(path.EndsWith("/content", StringComparison.Ordinal))
          {
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1]) });

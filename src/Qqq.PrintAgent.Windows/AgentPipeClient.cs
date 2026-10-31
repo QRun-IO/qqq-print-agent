@@ -17,7 +17,7 @@ public static class AgentPipeClient
 
    internal static async Task<string> SendAsync(PipeRequest request, string pipeName)
    {
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(string.Equals(request.Operation, "enroll", StringComparison.Ordinal) ? 150 : 35));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(request.Operation is "enroll" or "sign-in" or "sign-out" ? 150 : 35));
       await using NamedPipeClientStream pipe = CreateClient(pipeName);
       using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
       connectTimeout.CancelAfter(TimeSpan.FromSeconds(3));

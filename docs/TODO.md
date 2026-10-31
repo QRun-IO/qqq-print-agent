@@ -1,5 +1,26 @@
 # TODO
 
+## Remote controls candidate — not released
+
+- [x] Restore pending unbound setup across restart with unreadable or different-server old proof; preserve bound-identity refusal. Final isolated gate: 365 tests, zero warnings/errors/skips.
+
+- [x] Add explicit replacement pairing after revocation, retain pending unbound sign-in across restart, and verify rejected setup preserves old state; 361-test full gate and final brand-neutral UI build pass.
+
+- [x] Reproduce unreadable session/device proof recovery failures and pass explicit recovery, denied binding, sign-out and preserved-journal regressions; full isolated gate now 360 tests with no warnings/errors/skips.
+
+- [x] Implement independent bounded control polling and persisted pause/disconnect state without interrupting active print submission.
+- [x] Persist command execution intent and immutable delivery receipts; recover interrupted commands as unknown without replaying physical cancellation.
+- [x] Reuse verified single-job spool cancellation, preserving current-connection ownership and reporting absence, refusal and uncertainty explicitly.
+- [x] Add companion desired-state, control-contact and last-action status with accessible text.
+- [x] Complete the isolated Verify.ps1 gate: 279 tests (72 Core + 207 Windows/CLI), zero warnings/errors/skips. Independent control-boundary review issues are fixed with runtime regressions.
+- [x] Wire native QQQ printing transport and refuse control-404 legacy fallback on that advertised extension; keep direct bearer diagnostics behind explicit `--legacy-compat`.
+- [x] Implement standard QQQ auth discovery/configured sign-in, protected service session storage and periodic resume, preserving device/journal identity.
+- [x] Complete the combined native-authentication, callback forwarding, CLI, UI and control gate: 356 tests (127 Core + 229 Windows/CLI), zero warnings/errors/skips, and independent source review fixes rechecked.
+- [ ] Qualify the configured provider and installed private callback end to end; source tests do not establish actual provider renewal or permissions deployment.
+- [x] Pass 23 actual Core client/native QQQ interoperability checks with table-based authentication and no print jobs.
+- [x] Build and inspect the unsigned candidate MSI, including payload versions/resources, callback registration and service configuration.
+- [ ] Qualify the installed companion after protected CI. No new physical printing is implied.
+
 ## Published 0.1.9-rc.1 — 2026-10-31
 
 - [x] Reproduce and correct management-response loss during immediate named-pipe disconnect; current/legacy delayed readers and bounded shutdown/deadline regressions pass.

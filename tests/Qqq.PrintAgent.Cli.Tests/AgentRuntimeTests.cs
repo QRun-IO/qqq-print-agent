@@ -101,6 +101,10 @@ public sealed class AgentRuntimeTests
    {
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
+         if(request.RequestUri!.AbsolutePath.EndsWith("/control/poll", StringComparison.Ordinal))
+         {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+         }
          if(count() == 1)
          { throw new TaskCanceledException("simulated timeout"); }
          return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

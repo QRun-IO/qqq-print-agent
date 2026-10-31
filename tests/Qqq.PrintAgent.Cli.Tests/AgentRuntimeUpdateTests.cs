@@ -122,6 +122,10 @@ public sealed class AgentRuntimeUpdateTests
    {
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
+         if(request.RequestUri!.AbsolutePath.EndsWith("/control/poll", StringComparison.Ordinal))
+         {
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+         }
          if(request.RequestUri!.AbsolutePath.EndsWith("/claim", StringComparison.Ordinal))
          {
             state.RecordClaim();

@@ -8,6 +8,24 @@ namespace Qqq.PrintAgent.Core.Tests;
 public sealed class PrintWorkerTests
 {
    [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public async Task PausedOrDisconnectedDrainsReceiptsWithoutClaiming(bool synchronize)
+   {
+      using FixtureHandler handler = new(null, []);
+      using PrintApiClient api = new("http://localhost", "fixture", handler);
+      MemoryJournal journal = new();
+      journal.Record("finished", new PrintEvent("receipt", "SPOOLED", SpoolerJobId: "1"));
+      FakePrinter printer = new();
+      Assert.False(await new PrintWorker(api, printer, journal, canDispatch: () => false, canSynchronize: () => synchronize).RunOnceAsync());
+      Assert.Equal(0, handler.Claims);
+      Assert.Equal(synchronize ? 1 : 0, handler.Inventories);
+      Assert.Equal(synchronize ? 1 : 0, handler.Heartbeats);
+      Assert.Empty(journal.Pending());
+      Assert.Equal("SPOOLED", Assert.Single(handler.Events));
+      Assert.Equal(0, printer.PrintCount);
+   }
+   [Theory]
    [InlineData("SPOOLED")]
    [InlineData("SPOOLER_COMPLETED")]
    [InlineData("FAILED")]
@@ -134,11 +152,20 @@ public sealed class PrintWorkerTests
 
    private sealed class FixtureHandler(PrintJob? job, byte[] content) : HttpMessageHandler
    {
+      internal int Claims { get; private set; }
+      internal int Heartbeats { get; private set; }
+      internal int Inventories { get; private set; }
       public List<string> Events { get; } = [];
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
          string path = request.RequestUri!.AbsolutePath;
+         if(path.EndsWith("/claim", StringComparison.Ordinal))
+         { Claims++; }
+         if(path.EndsWith("/heartbeat", StringComparison.Ordinal))
+         { Heartbeats++; }
+         if(path.EndsWith("/printers", StringComparison.Ordinal))
+         { Inventories++; }
          if(path.EndsWith("/content", StringComparison.Ordinal))
          {
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(content) };

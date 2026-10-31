@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — 0.2.0-rc.1 candidate
+
+Upgrade the server first: the new client requires the semantic printing extension
+and standard QQQ sign-in; older bearer-only servers need an upgrade. Existing
+pairings and history are preserved, but unbound devices need explicit account association.
+
+- Discover QQQ's semantic printing/authentication capabilities and sign in through
+  standard table-based or explicitly advertised native browser authentication.
+  Protect the service session with DPAPI; resume through QQQ and preserve pairing
+  and journals when authorization is lost.
+- Add independent device-control polling, durable desired state/command receipts
+  and exact owned spool cancellation; disconnect keeps the control path available.
+- Route normal CLI operations through the authenticated service; direct legacy
+  diagnostics require an explicit compatibility flag.
+- Add installer-owned browser callback forwarding, cancellable sign-in and
+  customer-branded callback text. Installed callback/provider acceptance remains
+  unqualified; no signing or stable 1.0 readiness is claimed.
+- Support explicit replacement pairing after revocation and safe recovery from
+  damaged saved credentials. Pending setup survives restart without presenting
+  old device proof or enabling printing; previous history and choices remain intact.
+- Pass 365 tests and build WinUI/service/CLI with zero warnings/errors/skips.
+
 ## 0.1.9-rc.1 — 2026-10-31
 
 - Keep management responses available until the client closes its one-command connection or the existing deadline expires. This prevents Windows from discarding unread success and error responses during server disconnect.

@@ -1,0 +1,27 @@
+# QQQ sign-in candidate
+
+This describes the unreleased native-authentication implementation. It is not installed/provider acceptance evidence.
+
+Open **Settings → Sign in / Connection settings**, enter the QQQ server origin and choose **Discover sign-in options**. Discovery must advertise a compatible QQQ UI API and the printing extension before credentials are sent. Table-based authentication presents username/password fields; configured external authentication presents a browser button only for an explicitly advertised native session grant. Passwords remain in the companion and are sent only to the selected QQQ server, never stored or sent to the service.
+
+The service receives the opaque QQQ session through its existing authenticated administrator pipe. It validates and resumes that session, verifies the authoritative user/tenant/device binding, and protects the session with service-identity DPAPI. Provider access and refresh tokens remain on the QQQ server. Normal printing uses `/qqq/v1/qbit/printing` with the current user session; the device ID/token are secondary possession proof, not independent user authority. Session resume runs periodically while printing continues. Expired or denied authorization stops new traffic until sign-in is restored, preserving receipts and pairing.
+
+Existing installations require sign-in after upgrading. To associate an existing unbound pairing, explicitly select **Associate the existing pairing with my account**. A new pairing still requires an enrollment code after sign-in. Sign-out preserves the device credential, printer choices and print journal, while removing the locally stored QQQ session. It does not recall pages already sent to a printer.
+
+The installed browser callback is exactly `io.qrun.qqq-print-agent:/oauth/callback`. The host must advertise and approve this redirect for its configured QQQ OAuth2 session client; the separate public bearer client is not substituted for the server-managed session exchange. MSI registers the stable scheme independently of display branding and removes its owned registration on uninstall. The browser launches the quoted installed CLI callback helper, which forwards only to an active companion attempt in the same Windows user/session, after checking the companion executable. The companion validates the single-use state and PKCE exchange using the standard QQQ grant. No callback starts a new sign-in attempt. No provider registration, registry changes or installed browser sign-in are performed by source tests.
+
+Normal CLI `printers`, `enroll`, `expose`, `run` and `sign-out` commands use the installed authenticated service. `run` requests a connection refresh; the service owns unattended printing. Direct bearer-based foreground diagnostics require explicit `--legacy-compat` and a separate user data directory; they cannot use `--service`. They are a compatibility diagnostic, not the app's sign-in or fallback path.
+
+Pending qualification includes the configured provider's grant, callback registration in the packaged installation, current-user permission changes and long-lived provider renewal. No successful synthetic test substitutes for those deployment checks.
+
+### Recovering unreadable local credentials
+
+Explicit sign-in can replace unreadable saved QQQ session data only after fresh server authentication and, when device proof survives, authoritative device binding. Rejected binding leaves the unreadable file untouched. Successful recovery preserves its ciphertext in a uniquely named `qqq-session.recovery-*.dpapi` file in the protected data directory.
+
+If device proof itself is unreadable, sign-in does not enable printing or reconstruct that proof. Explicit enrollment is required; it preserves the old ciphertext as `connection.recovery-*.dpapi`, printer choices and the old connection's journal without attaching those receipts to the new device. Read-only status remains available. Explicit sign-out can quarantine unreadable session data locally, but cannot revoke an unavailable server session; revoke that previous session in QQQ. Ordinary background polling does not perform this recovery.
+
+### Replace a revoked or expired pairing
+
+In Connection settings, choose **Set up a new pairing** before signing in. This explicit choice authenticates an unbound QQQ session without presenting the old device proof. Printing stays blocked while awaiting a new enrollment code, including after a service restart when the retained old proof is unreadable or belongs to another server. The previous device configuration, journal and printer choices remain intact until the new enrollment succeeds; rejected enrollment leaves them unchanged. The replacement gets its own journal scope and never replays the old device's jobs.
+
+**Reuse the saved pairing** remains the default and verifies its device proof. **Associate the existing pairing with my account** explicitly binds an unbound legacy device to the signed-in user; it does not bypass revocation. Neither choice silently falls back to replacement enrollment.

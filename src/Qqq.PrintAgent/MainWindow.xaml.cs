@@ -101,6 +101,8 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Release the tray icon and polling timer when the companion exits.</summary>
    public void Dispose()
    {
+      _browserSignInCancellation?.Cancel();
+      _signInClient?.Dispose();
       if(_updatesClosed)
       {
          return;
@@ -340,6 +342,7 @@ public sealed partial class MainWindow : Window, IDisposable
          _mutationVersion++;
       }
       _busy = busy;
+      PairingChoice.IsEnabled = !busy;
       EnrollButton.IsEnabled = !busy;
       RefreshButton.IsEnabled = !busy;
       ReconnectButton.IsEnabled = !busy;
@@ -420,9 +423,30 @@ public sealed partial class MainWindow : Window, IDisposable
       ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to the server";
       FooterContact.Text = $"Last server contact: {FormatTime(snapshot.LastSuccessfulPoll)} · refreshes every 5 seconds";
       StatusText.Text = snapshot.Status;
+      if(snapshot.Control is { } control)
+      {
+         if(control.AuthorizationRequired)
+         { FooterStatus.Text = "Server authorization required — sign in again"; }
+         else if(string.Equals(control.DesiredState.ConnectionState, "DISCONNECTED", StringComparison.Ordinal))
+         { FooterStatus.Text = "Disconnected by administrator · control polling active"; }
+         else if(control.DesiredState.DispatchPaused)
+         { FooterStatus.Text = "Dispatch paused by administrator"; }
+         FooterContact.Text += $" · Remote controls: {AgentControlLabels.Support(control.Support)} · Last control contact: {FormatTime(control.LastContact)}";
+         if(control.LastCommand is not null)
+         {
+            FooterContact.Text += $"\n{AgentControlLabels.Action(control.LastCommand)}: {AgentControlLabels.Outcome(control.LastOutcome)} · {FormatTime(control.LastCommandAt)}";
+         }
+      }
       ConnectionText.Text = snapshot.Enrolled
          ? $"Server: {snapshot.ServerUrl}\nDevice: {snapshot.DeviceId}\nLast successful poll: {FormatTime(snapshot.LastSuccessfulPoll)}"
          : "This device has not been enrolled. Open Connection settings to connect it to the server.";
+      AuthenticationText.Text = snapshot.Authentication is { } authentication
+         ? authentication.SignedIn ? $"Signed in as {authentication.PrincipalId} · Tenant {authentication.TenantId}\n{authentication.Message}" : authentication.Message
+         : "Sign in to QQQ to enable printing.";
+      if(snapshot.Authentication is { Authorized: false })
+      {
+         FooterStatus.Text = "QQQ authorization required";
+      }
       if(string.IsNullOrWhiteSpace(ServerBox.Text) && snapshot.ServerUrl is not null)
       {
          ServerBox.Text = snapshot.ServerUrl;

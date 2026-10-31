@@ -22,6 +22,9 @@ public sealed partial class AgentRuntime
          _lastSuccessfulPoll = null;
          _failure = null;
          _heartbeatFailure = null;
+         _controlState = AgentControlState.Initial;
+         _controlReady = false;
+         _controlFailure = null;
       }
    }
 
@@ -39,7 +42,7 @@ public sealed partial class AgentRuntime
          {
             using AgentStore store = new(directory);
             AgentConfiguration? configuration = store.LoadConfiguration();
-            if(configuration is not null)
+            if(configuration is not null && NormalTrafficAllowed)
             {
                using PrintApiClient api = CreateApi(configuration);
                await api.HeartbeatAsync(store.GetDeviceProfile(), token).ConfigureAwait(false);

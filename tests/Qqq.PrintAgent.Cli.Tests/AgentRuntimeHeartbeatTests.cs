@@ -85,6 +85,10 @@ public sealed class AgentRuntimeHeartbeatTests
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
+         if(path.EndsWith("/control/poll", StringComparison.Ordinal))
+         {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+         }
          string body = "{}";
          if(path.EndsWith("heartbeat", StringComparison.Ordinal))
          {
