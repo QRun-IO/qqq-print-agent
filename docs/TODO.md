@@ -2,6 +2,7 @@
 
 - [x] Audit source regression gate: 249 tests and zero build warnings/errors, including authenticated/bounded IPC, machine-state ownership, metadata preservation, backlog scheduling and SQLite initialization cleanup.
 - [x] Complete independent deep security scan, investigate all five findings, review fixes and record canonical findings/coverage.
+- [x] Qualify bounded production store/merge queries at 375,000 synthetic jobs and append 10,000 through journal APIs; integrity and retention checks pass. See SCALABILITY.md for measured scope; sustained service/network/printer throughput remains separate.
 - [ ] Verify audit packaging, installed UI/updater handoff and hosted security/provenance gates before publishing the next prerelease.
 - [x] Record user decision: prereleases remain unsigned for now; do not describe hashes or build attestations as code signing.
 - [x] Publish audit draft PR #2; final executable source 2e6a2e5 passes all hosted checks. Download and verify CI MSI/branding checksums and actual installer formatting/sequence/component identities. New installation and tagged-release attestations remain pending.
