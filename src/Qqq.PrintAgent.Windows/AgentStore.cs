@@ -23,6 +23,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    public AgentStore(string directory, bool recoverUnreadableConfiguration = false)
    {
       _directory = Path.GetFullPath(directory);
+      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(_directory);
       Directory.CreateDirectory(_directory);
       _database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "journal.db") }.ToString());
       try

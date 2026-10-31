@@ -210,12 +210,9 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
    private async Task ServePipeAsync(CancellationToken token)
    {
-      PipeSecurity security = new();
-      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, domainSid: null), PipeAccessRights.FullControl, AccessControlType.Allow));
-      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, domainSid: null), PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance, AccessControlType.Allow));
+      await using NamedPipeServerStream pipe = pipeFactory?.Invoke() ?? NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 4096, 4096, CreatePipeSecurity());
       while(!token.IsCancellationRequested)
       {
-         await using NamedPipeServerStream pipe = pipeFactory?.Invoke() ?? NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 4096, 4096, security);
          await pipe.WaitForConnectionAsync(token).ConfigureAwait(false);
 
          try
@@ -242,7 +239,20 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             catch(Exception writeException) when(writeException is IOException or OperationCanceledException)
             { /* An unresponsive client must not stop the management pipe. */ }
          }
+         finally
+         {
+            // Disconnect also resets the Broken state after a peer closes mid-command.
+            pipe.Disconnect();
+         }
       }
+   }
+
+   internal static PipeSecurity CreatePipeSecurity()
+   {
+      PipeSecurity security = new();
+      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, domainSid: null), PipeAccessRights.FullControl, AccessControlType.Allow));
+      security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, domainSid: null), PipeAccessRights.ReadWrite, AccessControlType.Allow));
+      return security;
    }
 
 

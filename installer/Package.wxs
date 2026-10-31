@@ -1,7 +1,10 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
    <Package Name="QQQ Print Agent" Manufacturer="QRun-IO" Version="$(ProductVersion)"
             UpgradeCode="D761CD03-F616-4C98-9A94-9F590A36E449" Scope="perMachine" InstallerVersion="500">
-      <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize" DowngradeErrorMessage="A newer print connector is already installed." />
+      <!-- Execute the protected-state preflight before removing the previous product.
+           Deferred actions are queued until InstallExecute, not run at their table slot.
+           Stable component GUIDs preserve shared files/service during old-product removal. -->
+      <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute" DowngradeErrorMessage="A newer print connector is already installed." />
       <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
       <Property Id="BRANDNAME" Secure="yes" />
       <Property Id="BRANDCOMPANY" Secure="yes" />
@@ -17,10 +20,15 @@
       <SetProperty Id="BRANDCOMPANY" Action="UseDefaultBrandCompany" Value="QRun-IO" After="UseStoredBrandCompany" Condition="NOT BRANDCOMPANY" />
       <SetProperty Id="ProductName" Action="SetBrandedProductName" Value="[BRANDNAME]" After="UseDefaultBrandCompany" />
       <SetProperty Id="Manufacturer" Action="SetBrandedManufacturer" Value="[BRANDCOMPANY]" After="SetBrandedProductName" />
+      <CustomAction Id="ValidateMachineStateBeforeFolders" Directory="System64Folder" ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$ErrorActionPreference=&apos;Stop&apos;; $trusted=@(&apos;S-1-5-18&apos;,&apos;S-1-5-32-544&apos;,&apos;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464&apos;); function AssertNode([\[]string[\]]$p) [\{] $i=Get-Item -LiteralPath $p -Force; if($i.Attributes -band [\[]IO.FileAttributes[\]]::ReparsePoint) [\{] throw &apos;Machine print state contains a link. Installation refused.&apos; [\}]; $a=$i.GetAccessControl(); if($a.GetOwner([\[]Security.Principal.SecurityIdentifier[\]]).Value -notin $trusted) [\{] throw &apos;Machine print state has an untrusted owner. Installation refused.&apos; [\}]; $raw=[\[]Security.AccessControl.RawSecurityDescriptor[\]]::new($a.GetSecurityDescriptorBinaryForm(),0); if($null -eq $raw.DiscretionaryAcl) [\{] throw &apos;Machine print state has no ACL.&apos; [\}]; foreach($r in $a.GetAccessRules($true,$true,[\[]Security.Principal.SecurityIdentifier[\]])) [\{] if($r.AccessControlType -eq &apos;Allow&apos; -and [\[]int[\]]$r.FileSystemRights -ne 0 -and $r.IdentityReference.Value -notin $trusted) [\{] throw &apos;Machine print state permits untrusted access. Installation refused.&apos; [\}] [\}]; if($i.PSIsContainer) [\{] foreach($c in [\[]IO.Directory[\]]::EnumerateFileSystemEntries($p)) [\{] AssertNode $c [\}] [\}] [\}]; try [\{] $root=Join-Path ([\[]Environment[\]]::GetFolderPath(&apos;CommonApplicationData&apos;)) &apos;QqqPrintAgent&apos;; for($p=$root;$p;$p=[\[]IO.Path[\]]::GetDirectoryName($p)) [\{] if(Test-Path -LiteralPath $p) [\{] if((Get-Item -LiteralPath $p -Force).Attributes -band [\[]IO.FileAttributes[\]]::ReparsePoint) [\{] throw &apos;Machine print state path contains a link.&apos; [\}] [\}] [\}]; if(-not [\[]IO.Directory[\]]::Exists($root)) [\{] $acl=[\[]Security.AccessControl.DirectorySecurity[\]]::new(); $acl.SetSecurityDescriptorSddlForm(&apos;O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)&apos;); [\[]IO.DirectoryInfo[\]]::new($root).Create($acl) [\}]; AssertNode $root; exit 0 [\}] catch [\{] [\[]Console[\]]::Error.WriteLine($_.Exception.Message); exit 1 [\}]&quot;" Execute="deferred" Impersonate="no" Return="check" />
+      <CustomAction Id="ValidateMachineStateAfterFiles" FileRef="ServiceExe" ExeCommand="--validate-machine-state" Execute="deferred" Impersonate="no" Return="check" />
       <CustomAction Id="RemoveStartupTasks" FileRef="ServiceExe" ExeCommand="--remove-startup-tasks" Execute="deferred" Impersonate="no" Return="check" />
       <CustomAction Id="ApplyBranding" FileRef="ServiceExe" ExeCommand="--apply-branding" Execute="deferred" Impersonate="no" Return="check" />
       <CustomAction Id="RemoveBrandingShortcut" FileRef="ServiceExe" ExeCommand="--remove-branding-shortcut" Execute="deferred" Impersonate="no" Return="check" />
       <InstallExecuteSequence>
+         <InstallExecute Sequence="6500" />
+         <Custom Action="ValidateMachineStateBeforeFolders" Before="CreateFolders" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+         <Custom Action="ValidateMachineStateAfterFiles" After="InstallFiles" Condition="NOT REMOVE~=&quot;ALL&quot;" />
          <Custom Action="RemoveStartupTasks" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
          <Custom Action="ApplyBranding" After="WriteRegistryValues" Condition="NOT REMOVE~=&quot;ALL&quot;" />
          <Custom Action="RemoveBrandingShortcut" Before="RemoveRegistryValues" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
@@ -67,7 +75,7 @@
             <!-- The journal must survive upgrades and uninstall/reinstall to avoid duplicate prints. -->
             <Component Id="ProtectedAgentData" Guid="55147A95-1D16-452D-BF75-1F3834867D07" Permanent="yes" Bitness="always64">
                <CreateFolder>
-                  <PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+                  <PermissionEx Sddl="O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
                </CreateFolder>
                <RegistryValue Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="DisplayName" Type="string" Value="[BRANDNAME]" />
                <RegistryValue Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="CompanyName" Type="string" Value="[BRANDCOMPANY]" />

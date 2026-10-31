@@ -77,15 +77,22 @@ public static partial class AgentStartup
             throw new InvalidOperationException("Only the installed Program Files companion can enable elevated sign-in startup.");
          }
          string setupDirectory = Path.Combine(AgentStore.DefaultDirectory, "setup");
+         Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(setupDirectory);
          Directory.CreateDirectory(setupDirectory);
          string definition = Path.Combine(setupDirectory, "startup-" + Guid.NewGuid().ToString("N") + ".xml");
          try
          {
-            await File.WriteAllTextAsync(definition, CreateTaskXml(identity.User?.Value ?? throw new InvalidOperationException("Current user has no SID.")), Encoding.Unicode).ConfigureAwait(false);
+            using FileStream heldDefinition = CreateHeldDefinition(definition, CreateTaskXml(identity.User?.Value ?? throw new InvalidOperationException("Current user has no SID.")));
+            Qqq.PrintAgent.Core.MachineStateDirectory.ValidateFile(definition);
             (int createCode, _) = await RunSchedulerAsync("/Create", "/TN", TaskName(identity), "/XML", definition, "/F").ConfigureAwait(false);
             if(createCode != 0)
             {
                throw new InvalidOperationException("Windows could not register the sign-in task. Check Task Scheduler and administrator permissions.");
+            }
+            (int verifyCode, string registered) = await RunSchedulerAsync("/Query", "/TN", TaskName(identity), "/XML").ConfigureAwait(false);
+            if(verifyCode != 0 || !IsOwnedTaskDefinition(TaskName(identity), registered))
+            {
+               throw new InvalidOperationException("The registered startup task could not be verified. Inspect Windows Task Scheduler; an unexpected task was left unchanged.");
             }
          }
          finally
@@ -97,6 +104,20 @@ public static partial class AgentStartup
    }
 
    private static string TaskName(WindowsIdentity identity) => "QQQ Print Agent " + (identity.User?.Value ?? throw new InvalidOperationException("Current user has no SID."));
+
+   internal static FileStream CreateHeldDefinition(string path, string xml)
+   {
+      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(path);
+      // The validated protected parent prevents replacement while switching from the
+      // exclusive writer to a read handle compatible with Task Scheduler's own reader.
+      using(FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+      {
+         byte[] bytes = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(xml)).ToArray();
+         stream.Write(bytes);
+         stream.Flush(flushToDisk: true);
+      }
+      return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+   }
 
    /// <summary>Full-uninstall cleanup removes only task definitions that exactly match this application's fixed identity.</summary>
    public static async Task RemoveInstalledTasksAsync()

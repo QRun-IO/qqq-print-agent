@@ -4,6 +4,8 @@
 - [ ] Complete independent deep security scan, review fixes and record canonical findings/coverage.
 - [ ] Verify audit packaging, installed UI/updater handoff and hosted security/provenance gates before publishing the next prerelease.
 - [x] Record user decision: prereleases remain unsigned for now; do not describe hashes or build attestations as code signing.
+- [x] Publish audit draft PR #2; head a560fe6 passes all hosted checks. Download and verify exact-source CI MSI/branding checksums. New installation and tagged-release attestations remain pending.
+- [x] Enforce all main-branch checks for administrators too, following explicit user approval; establish acknowledged R-drive coordination with Mobile Scanner and Record Files masters.
 
 - [x] Install 0.1.7 from 93dd5fc: MSI exit 0, no reboot, credentials retained; management/profile/history/log settings/branding/connected-state checks passed.
 - [x] Pass 227 unit/regression tests (57 Core + 170 Windows/CLI), zero warnings/errors and exact-source CI 41139885687.
@@ -61,3 +63,5 @@
 - [ ] Validate supported driver/network identity combinations and deployed QQQ integration.
 - [ ] Qualify high contrast, Narrator, display scaling and small-screen behavior.
 - [ ] Track custom media dimensions and physical-output confirmation separately from spooler acceptance.
+
+- [ ] Complete independent review and deployment qualification after the five baseline security findings are remediated; current details are in SESSION-STATE.md.

@@ -42,24 +42,58 @@ function Assert-NoReparse([string] $Path)
    }
 }
 
-function Assert-Protected([string] $Path, [string] $AdministratorSid)
+function Assert-TrustedDescriptor([Security.AccessControl.RawSecurityDescriptor] $Descriptor)
 {
    <#
    .SYNOPSIS
-   Require trusted ownership and prevent untrusted modification of machine state.
+   Reject untrusted ownership or access grants, including grants inherited by children.
+   #>
+   if($null -eq $Descriptor.DiscretionaryAcl) { throw 'Machine state must have an explicit access-control list.' }
+   $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+   if($null -eq $Descriptor.Owner -or $Descriptor.Owner.Value -notin $trusted) { throw 'Machine state has an untrusted owner.' }
+   foreach($ace in $Descriptor.DiscretionaryAcl)
+   {
+      if($ace -isnot [Security.AccessControl.QualifiedAce]) { throw 'Machine state contains an unsupported access-control entry.' }
+      if($ace.AceQualifier -eq [Security.AccessControl.AceQualifier]::AccessAllowed -and $ace.SecurityIdentifier.Value -notin $trusted)
+      {
+         throw 'Machine state grants access to an untrusted identity. Repair its permissions before installing.'
+      }
+   }
+}
+
+function Assert-Protected([string] $Path)
+{
+   <#
+   .SYNOPSIS
+   Validate one existing machine-state path before any privileged read or write.
    #>
    Assert-NoReparse $Path
    $acl = Get-Acl -LiteralPath $Path
-   $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorBinaryForm(), 0)
-   if($null -eq $descriptor.DiscretionaryAcl) { throw 'Branding state must have an explicit access-control list.' }
-   $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', $AdministratorSid)
-   if($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) { throw 'Branding state has an untrusted owner.' }
-   $mutation = [long][Security.AccessControl.FileSystemRights]::Write -bor [long][Security.AccessControl.FileSystemRights]::Delete -bor [long][Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [long][Security.AccessControl.FileSystemRights]::ChangePermissions -bor [long][Security.AccessControl.FileSystemRights]::TakeOwnership -bor 0x10000000 -bor 0x40000000
-   foreach($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+   Assert-TrustedDescriptor ([Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorBinaryForm(), 0))
+}
+
+function Initialize-ProtectedMachineState([string] $Path)
+{
+   <#
+   .SYNOPSIS
+   Provision absent state securely, or reject an unsafe existing tree without adopting it.
+   #>
+   Assert-NoReparse $Path
+   $security = [Security.AccessControl.DirectorySecurity]::new()
+   $security.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)')
+   # Create with its ACL atomically. Existing directories retain their permissions
+   # and must pass validation; an inaccessible path is never treated as absent.
+   [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($Path), $security)
+   $pending = [Collections.Generic.Stack[IO.DirectoryInfo]]::new()
+   $pending.Push([IO.DirectoryInfo]::new($Path))
+   while($pending.Count -gt 0)
    {
-      if(-not ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -and $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and ([long]$rule.FileSystemRights -band $mutation) -and $rule.IdentityReference.Value -notin $trusted)
+      $current = $pending.Pop()
+      Assert-Protected $current.FullName
+      foreach($entry in $current.EnumerateFileSystemInfos())
       {
-         throw 'Existing branding state permits modification by an untrusted identity. Repair its permissions before installing.'
+         Assert-Protected $entry.FullName
+         if($entry -is [IO.DirectoryInfo]) { $pending.Push($entry) }
       }
    }
 }
@@ -160,7 +194,6 @@ try
    try
    {
       if(-not [Security.Principal.WindowsPrincipal]::new($identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this script from an elevated administrator PowerShell session. No installer was started.' }
-      $administratorSid = $identity.User.Value
    }
    finally { $identity.Dispose() }
    $configPath = Join-Path $directory 'branding.json'
@@ -169,25 +202,12 @@ try
    $created = [Collections.Generic.List[string]]::new()
    try
    {
+      Initialize-ProtectedMachineState $directory
       if($BrandingFile)
       {
-         Assert-NoReparse $directory
-         if(-not [IO.Directory]::Exists($directory))
-         {
-            $security = [Security.AccessControl.DirectorySecurity]::new()
-            $security.SetAccessRuleProtection($true, $false)
-            $security.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
-            foreach($sid in @('S-1-5-18', 'S-1-5-32-544'))
-            {
-               $rule = [Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid), [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit', [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
-               $security.AddAccessRule($rule)
-            }
-            [IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($directory), $security)
-         }
-         Assert-Protected $directory $administratorSid
          if([IO.File]::Exists($configPath))
          {
-            Assert-Protected $configPath $administratorSid
+            Assert-Protected $configPath
             $previous = Read-BoundedFile $configPath 16KB
          }
          foreach($key in $assets.Keys)
@@ -222,7 +242,7 @@ try
    {
       if($changed)
       {
-         Assert-Protected $directory $administratorSid
+         Assert-Protected $directory
          Assert-NoReparse $configPath
          if($null -eq $previous) { Remove-Item -LiteralPath $configPath -Force }
          else { [IO.File]::WriteAllBytes($configPath, $previous) }

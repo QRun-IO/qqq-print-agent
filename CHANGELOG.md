@@ -8,7 +8,9 @@
 - Carry explicit operator duplicate-risk consent for failed jobs that may already have reached a printer.
 - Require release security/CodeQL/script gates and verified artifacts before publication; add build provenance attestations.
 - Package from fresh output directories with locked restores and matching source, MSI and component versions.
-- Fresh regression gate: 237 tests, zero build warnings/errors. Installed audit acceptance and hosted provenance verification remain pending.
+- Authenticate the installed service before sending local commands, retain pipe ownership, and reject unsafe machine-state owners, access grants or links before privileged use.
+- Protect sign-in task definitions through registration and validate machine state before an upgrade removes the prior product.
+- Fresh regression gate: 249 tests, zero build warnings/errors. Installed audit acceptance and hosted provenance verification remain pending.
 
 ## 0.1.7-rc.1 — 2026-10-30
 

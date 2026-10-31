@@ -1,12 +1,14 @@
 # Session state — 2026-10-30
 
-## Audit in progress — 2026-10-30
+## Audit candidate 0.1.8-rc.1
 
-Installed/public version remains 0.1.7-rc.1. Coordinated source audit fixes are uncommitted and not installed: bounded/cancellable IPC and HTTP bodies, full-length job metadata, SQLite initialization cleanup, immediate successful-backlog draining and companion shutdown guards. The fresh source gate passed **237 tests (59 Core + 178 Windows/CLI), zero warnings/errors**, using invocation-specific results and matching test build/platform outputs. No fresh installed or physical acceptance is implied.
+Independent baseline scan and fresh source review are complete. The Windows fixes authenticate the installed pipe peer before sending commands, retain pipe ownership, reject unsafe machine state across all privileged entry points, and protect startup task definitions. Reviewer and packaging findings were corrected. The isolated full gate passed **249 tests (66 Core + 183 Windows/CLI), zero warnings/errors/skips**; updated installer sequencing passed its focused regression. All 12 PowerShell tests and all 75 analyzer rules passed.
 
-Release gates now include security, CodeQL and script analysis; checksum verification and build provenance are being added. Packaging rejects mixed source/payload/MSI versions and restores locked dependencies. Hosted release validation remains pending. The user explicitly accepts unsigned prereleases for now; provenance/checksums do not establish Authenticode publisher identity. Independent security scan remains pending.
+The unsigned local candidate MSI SHA256 is `B1C11CC3267B3DB1CF332C610BBF9DD9E2C3F64E7D38372CA7CFCAD276A40122`. Actual Windows Installer safe-session formatting and sequence inspection passed; all 995 surviving file targets retain their component identities and key-path roles versus 0.1.7. No installer actions were executed. This supersedes earlier candidate package hashes. Final commits still require fresh hosted checks and installed qualification.
 
-QQQ retention will be configurable in administration, default **one year**, with scheduled cleanup and platform object-storage integration. Preserve active/uncertain documents and job/deduplication history. No live cleanup has run. Read-only companion inspection is limited by the computer-use helper's lower Windows integrity; visual acceptance is not newly established.
+Installed/public baseline remains **0.1.7-rc.1**, with the host service verified Running. No audit install, merge or release has occurred. Positive installed peer authentication, hostile-tree install/rollback, actual updater handoff, UI/reboot/recovery and remote deployment remain unqualified. See [audit evidence](AUDIT-2026-10-30.md).
+
+User authorization covers audit commits/pushes and deployment; required main-branch checks apply to administrators too. Master coordination is active at `R:\agent-comms\qqq-cloud-printing.md`, acknowledged by Record Files and Mobile Scanner. Each master owns its repositories and services. Retained originals and printing delivery copies have separate retention/buckets; their typed integration remains pending.
 
 ## Previous checkpoint: 0.1.7 published; laser, ZPL and corrected PDF output confirmed
 

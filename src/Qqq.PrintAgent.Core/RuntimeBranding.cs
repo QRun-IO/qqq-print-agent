@@ -44,6 +44,10 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
    {
       try
       {
+         if(OperatingSystem.IsWindows())
+         {
+            MachineStateDirectory.ValidateExistingForPath(path);
+         }
          using FileStream stream = File.OpenRead(path);
          if(stream.Length > 16 * 1024)
          {

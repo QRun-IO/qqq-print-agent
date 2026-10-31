@@ -29,7 +29,15 @@ internal sealed partial class PrintService(ILogger<PrintService> logger) : Backg
       }
       catch(Exception exception)
       {
-         AgentActivityLog.Create(AgentStore.DefaultDirectory).Error("[Service] Fatal runtime failure; Windows recovery may restart the service.", exception);
+         LogFatalRuntime(logger, exception);
+         try
+         {
+            AgentActivityLog.Create(AgentStore.DefaultDirectory).Error("[Service] Fatal runtime failure; Windows recovery may restart the service.", exception);
+         }
+         catch(Exception loggingFailure) when(loggingFailure is IOException or UnauthorizedAccessException)
+         {
+            // An unsafe machine tree must not be opened even to report its own rejection.
+         }
          // BackgroundService normally stops the host cleanly, which does not trigger SCM recovery.
          Environment.Exit(1);
       }
@@ -40,5 +48,8 @@ internal sealed partial class PrintService(ILogger<PrintService> logger) : Backg
    /// <summary>Write connector observations without allocating a logging argument array.</summary>
    [LoggerMessage(Level = LogLevel.Information, Message = "{Message}")]
    private static partial void LogAgentStatus(ILogger logger, string message);
+
+   [LoggerMessage(Level = LogLevel.Critical, Message = "The print runtime stopped. Machine state was not opened if its security validation failed.")]
+   private static partial void LogFatalRuntime(ILogger logger, Exception exception);
 }
 

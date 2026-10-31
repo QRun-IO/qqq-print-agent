@@ -13,6 +13,7 @@
 
    <ItemGroup>
       <Using Include="Xunit" />
+      <Content Include="..\..\installer\Package.wxs" Link="Fixtures\Package.wxs" CopyToOutputDirectory="PreserveNewest" />
    </ItemGroup>
 
    <ItemGroup>
