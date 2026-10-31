@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   security:
-    uses: KofTwentyTwo/standards/.github/workflows/security.yml@fdf5ed029603c938615a32b1beca3628b8787945 # v0.1.2
+    uses: ./.github/workflows/security-analysis.yml
     permissions:
       contents: read         # check out the code and its history
       security-events: write # upload Trivy and zizmor SARIF to code scanning

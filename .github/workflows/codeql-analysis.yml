@@ -1,0 +1,125 @@
+# Local copy of KofTwentyTwo/standards at fdf5ed029603c938615a32b1beca3628b8787945 (v0.1.2).
+# Pins, inputs and analysis checks preserved; report validation now fails closed.
+# Static analysis (K22-CI-22): CodeQL with the security-extended suite, failing on
+# alerts of high severity or above. Called as:
+#
+#   jobs:
+#     codeql:
+#       uses: KofTwentyTwo/standards/.github/workflows/codeql.yml@<sha> # vX.Y.Z
+#       permissions:
+#         contents: read
+#         security-events: write
+#       with:
+#         languages: '["csharp", "actions"]'
+#         build-mode: manual
+#         build-command: dotnet build MySolution.slnx -p:Platform=x64
+#         runs-on: windows-latest
+#
+# producing `codeql / analyze (<language>)` for each language. The CodeQL action
+# uploads results but never fails a build on them, so the last step reads the SARIF
+# and fails on any result whose rule has security-severity >= the threshold.
+# Suppress a false positive with a query filter in a CodeQL config file passed as
+# `config-file`, citing the exception record in a comment.
+name: codeql
+
+on:
+  workflow_call:
+    inputs:
+      languages:
+        description: JSON array of CodeQL languages, e.g. '["csharp","actions"]'.
+        type: string
+        required: true
+      build-mode:
+        description: CodeQL build mode for compiled languages (none, autobuild, manual). Interpreted languages always use none.
+        type: string
+        default: autobuild
+      build-command:
+        description: Command run for build-mode manual.
+        type: string
+        default: ""
+      runs-on:
+        description: Runner label; Windows-only builds (WinUI, WPF) need windows-latest.
+        type: string
+        default: ubuntu-24.04
+      setup-dotnet:
+        description: Install the .NET SDK from global.json before building.
+        type: boolean
+        default: false
+      config-file:
+        description: Optional path to a CodeQL configuration file in the calling repository.
+        type: string
+        default: ""
+      fail-on-security-severity:
+        description: Minimum CVSS-style security-severity that fails the job (7.0 = high).
+        type: string
+        default: "7.0"
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write # upload SARIF results to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test scan guard rejection paths
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path(".github/scripts/test-scan-gates.py", run_name="__main__")
+
+      - name: Set up .NET SDK
+        if: inputs.setup-dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ contains(fromJSON('["actions","javascript-typescript","python","ruby"]'), matrix.language) && 'none' || inputs.build-mode }}
+          queries: security-extended
+          config-file: ${{ inputs.config-file }}
+
+      - name: Build (manual mode)
+        if: inputs.build-mode == 'manual' && !contains(fromJSON('["actions","javascript-typescript","python","ruby"]'), matrix.language)
+        shell: bash
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+        run: |
+          if [[ -z "$BUILD_COMMAND" ]]; then
+            echo "::error::build-mode is manual but build-command is empty"
+            exit 1
+          fi
+          eval "$BUILD_COMMAND"
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}
+          output: codeql-sarif
+          # Fork pull requests have a read-only token; analyze still runs and gates.
+          upload: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'never' || 'always' }}
+
+      - name: Gate on security severity
+        shell: python
+        env:
+          SARIF_DIR: codeql-sarif
+          THRESHOLD: ${{ inputs.fail-on-security-severity }}
+          EXPECTED_LANGUAGE: ${{ matrix.language }}
+        run: |
+          import runpy
+          runpy.run_path(".github/scripts/check-codeql-sarif.py", run_name="__main__")
