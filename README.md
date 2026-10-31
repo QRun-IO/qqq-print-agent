@@ -11,7 +11,7 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Prerelease software.** Published v0.1.7-rc.1 assets are verified. Installed 0.1.7 passed 227 unit/regression tests and all 16 UI checks in one run. The user confirmed laser PDF, Zebra ZPL and Zebra PDF output; the PDF label required correcting machine printer defaults to 4 × 6-inch direct thermal. Barcode scanning and measured alignment remain unverified. The MSI remains unsigned.
+> **Prerelease software.** [v0.1.9-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.1.9-rc.1) is published; all four release assets and their build provenance attestations are verified. The 255-test source gate and all 16 installed UI checks passed. Installed acceptance used a separately built CI MSI; [acceptance notes](docs/ACCEPTANCE.md) distinguish it from the published MSI. The MSI remains unsigned, and remote deployment and broader hardware qualification remain open.
 
 ## What works
 
@@ -75,13 +75,15 @@ A printer visible only in a signed-in user's profile may not be available to the
 
 ## Validation so far
 
-Installed **0.1.7, source 93dd5fc**, completed with MSI exit 0 and no reboot, retaining credentials. Management, computer profile, paged history, log settings, branded shortcut and connected-state checks passed. The source gate passed **227 tests (57 Core + 170 Windows/CLI)** with zero warnings/errors; [exact-source CI 41139885687](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41139885687) passed. All **16 installed UI checks passed in one run**, including the diagnostic media/DPI dialog, which was closed without printing during the UI test.
+The 0.1.9 source gate passed **255 tests (66 Core + 189 Windows/CLI)** with zero warnings/errors, and the full solution/UI build passed. [CI build 41185716708](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41185716708) and the required security, CodeQL and script gates passed. The CI MSI upgraded the installed service, companion and CLI with exit 0 and no reboot, preserving protected credentials and journal history. Authenticated management, connection and history checks succeeded; all **16 installed UI checks passed in one run**. No print was submitted by the upgrade or UI tests.
 
-The initial laser PDF and Zebra ZPL diagnostics were physically confirmed. The first Zebra PDF was accepted by the spooler but did not print: machine driver defaults were 4.09 × 2-inch Thermal Transfer. After correcting them to 4 × 6-inch Thermal Direct and clearing the hardware pause, one fresh reviewed PDF printed fully and correctly, as confirmed by the user. Barcode scanning and measured alignment remain unverified. See [the configuration diagnosis](docs/ACCEPTANCE.md).
+[Release workflow 41190815995](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41190815995) published v0.1.9-rc.1 from protected main revision `cf0e362`. The MSI, `SHA256SUMS`, `Install-Branded.ps1` and `branding.example.json` were verified, including provenance attestations for all four assets. The published MSI differs from the installed CI MSI; runtime sources are unchanged, but the release package has not been separately reinstalled. Their full hashes and verification scopes are in [acceptance notes](docs/ACCEPTANCE.md).
 
-[Release workflow 41140882339](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41140882339) succeeded. [v0.1.7-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.1.7-rc.1) is published, and its MSI, SHA256SUMS and two branding assets were verified. The MSI remains unsigned. The earlier unexplained clean service stop remains unresolved. These checks used the paired loopback QQQ server and do not establish a remote-cloud deployment, broad driver qualification or every accessibility scenario.
+These results cover the local installed service/app upgrade. They do not establish remote deployment, Windows reboot/recovery, updater-initiated elevation, hostile-tree rollback, broad driver qualification or every accessibility scenario. Build attestations establish provenance, not publisher signing; the MSI remains unsigned. The earlier clean service stop still lacks a confirmed cause.
 
-Earlier laser paper output was confirmed on prior builds; those confirmations and historical installed results remain in [acceptance notes](docs/ACCEPTANCE.md).
+### Historical 0.1.7 hardware acceptance — 2026-10-30
+
+The user confirmed laser PDF, Zebra ZPL and Zebra PDF output on 0.1.7. The first Zebra PDF was accepted by the spooler but did not print until machine defaults were corrected to 4 × 6-inch direct thermal and the hardware pause was cleared. A fresh reviewed PDF then printed fully and correctly. Barcode scanning and measured alignment remain unverified. This dated evidence does not claim fresh physical output from 0.1.9; the [configuration diagnosis and earlier results](docs/ACCEPTANCE.md) retain their original scope.
 
 ## Development
 

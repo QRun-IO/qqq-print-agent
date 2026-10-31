@@ -1,10 +1,12 @@
 # Changelog
 
-## 0.1.9-rc.1 — unreleased
+## 0.1.9-rc.1 — 2026-10-31
 
 - Keep management responses available until the client closes its one-command connection or the existing deadline expires. This prevents Windows from discarding unread success and error responses during server disconnect.
 - Preserve current and older newline-framed clients without a new acknowledgement protocol or a blocking pipe drain. Cancellation and service shutdown remain bounded.
-- Reproduce the failure through the real runtime with delayed readers; verify successful responses, error responses, next-client reuse, deadlines and shutdown. The original eight-case private reproduction and all 255 combined regression tests pass; the solution/UI build has zero warnings/errors. Installed qualification remains pending.
+- Reproduce the failure through the real runtime with delayed readers; verify successful responses, error responses, next-client reuse, deadlines and shutdown. All eight reproduction cases and 255 combined regression tests pass; the solution/UI build has zero warnings/errors.
+- Complete the state-preserving CI-package upgrade and all 16 installed UI checks, including authenticated management and history queries. No physical print was requested by these checks.
+- Publish the corrective prerelease through [release workflow 41190815995](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41190815995); verify all four release assets and provenance attestations. The unsigned published MSI and the installed CI MSI are distinct builds; [acceptance notes](docs/ACCEPTANCE.md) record their hashes and scope.
 
 ## 0.1.8-rc.1 — audit candidate, superseded before publication
 
@@ -16,8 +18,8 @@
 - Package from fresh output directories with locked restores and matching source, MSI and component versions.
 - Authenticate the installed service before sending local commands, retain pipe ownership, and reject unsafe machine-state owners, access grants or links before privileged use.
 - Protect sign-in task definitions through registration and validate machine state before an upgrade removes the prior product.
-- Fresh regression gate: 249 tests, zero build warnings/errors. Installed audit acceptance and hosted provenance verification remain pending.
-- The local candidate installed successfully with MSI exit 0 and preserved credentials/journal, but a subsequent management-history check exposed the response-disconnect race corrected in 0.1.9. Service heartbeat and both ready printers were confirmed independently through QQQ.
+- Fresh regression gate: 249 tests, zero build warnings/errors. Installed audit acceptance and hosted provenance verification were pending at this superseded candidate checkpoint; the completed 0.1.9 checks are recorded above.
+- The local candidate installed successfully with MSI exit 0 and preserved credentials/journal, but a subsequent management-history check exposed the response-disconnect race corrected in 0.1.9. Service heartbeat and printer readiness were confirmed independently through QQQ.
 
 ## 0.1.7-rc.1 — 2026-10-30
 
