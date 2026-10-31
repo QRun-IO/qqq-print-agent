@@ -14,27 +14,33 @@ public sealed class AgentRealtimeOrderingTests
       fixture.AddJob("slow", () => slow, length: bytes.Length);
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-      var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-      var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-      fixture.BeforeAcknowledgement = message => message.Type is "STATE_APPLIED"
-         ? (message.Payload.GetProperty("lastSettingsRevision").GetInt64() == 1 ? first.Task : second.Task) : Task.CompletedTask;
+      var observed = new TaskCompletionSource<(bool Connected, string? State, int Prints)>(TaskCreationOptions.RunContinuationsAsynchronously);
+      fixture.BeforeAcknowledgement = async message =>
+      {
+         if(message.Type is not "STATE_APPLIED")
+         { return; }
+         if(message.Payload.GetProperty("lastSettingsRevision").GetInt64() == 1)
+         {
+            // The same server writer sends SETTINGS before ACK1: causal ordering,
+            // without withholding an ACK across test-thread scheduling or sleeps.
+            await connection.SendAsync("SETTINGS", fixture.Settings with { Revision = 2, MaxPdfBytes = 1 });
+         }
+         else
+         {
+            observed.TrySetResult((fixture.Runtime.GetSnapshot().Connected, fixture.State("slow"), fixture.Printer.Prints));
+         }
+      };
       try
       {
          await connection.SendAsync("DESIRED_STATE", new Qqq.PrintAgent.Core.Printing.DeviceDesiredState(2, false, "CONNECTED"));
-         await fixture.WaitAsync(() => fixture.Messages.Any(message => message.Type is "STATE_APPLIED" && message.Payload.GetProperty("lastAppliedRevision").GetInt64() == 2));
-         await connection.SendAsync("SETTINGS", fixture.Settings with { Revision = 2, MaxPdfBytes = 1 });
-         await Task.Delay(50);
-         first.TrySetResult();
-         await fixture.WaitAsync(() => fixture.Messages.Any(message => message.Type is "STATE_APPLIED" && message.Payload.GetProperty("lastSettingsRevision").GetInt64() == 2));
+         (bool connected, string? state, int prints) = await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+         Assert.False(connected);
+         Assert.Equal("RECEIVED", state);
+         Assert.Equal(0, prints);
          slow.Release.TrySetResult();
-         await Task.Delay(100);
-         Assert.False(fixture.Runtime.GetSnapshot().Connected);
-         Assert.Equal("RECEIVED", fixture.State("slow"));
-         Assert.Equal(0, fixture.Printer.Prints);
-         second.TrySetResult();
          await fixture.WaitAsync(() => fixture.State("slow") is "FAILED");
       }
-      finally { first.TrySetResult(); second.TrySetResult(); slow.Release.TrySetResult(); }
+      finally { slow.Release.TrySetResult(); }
    }
 
    [Fact]
