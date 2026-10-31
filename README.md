@@ -11,7 +11,7 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Prerelease software.** [v0.2.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.2.0-rc.1) is published. All four release assets, checksums and exact-tag build attestations are verified; the tagged build passed 365 tests with zero warnings/errors/skips. The MSI remains unsigned. Installed acceptance for this release is still in progress; [acceptance notes](docs/ACCEPTANCE.md) distinguish earlier installed versions and CI packages from published releases.
+> **Prerelease software.** [v0.2.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.2.0-rc.1) is published. All four release assets, checksums and exact-tag build attestations are verified; the tagged build passed 365 tests with zero warnings/errors/skips. The exact published MSI is installed with pairing, printer exposure and history preserved. The MSI remains unsigned; [acceptance notes](docs/ACCEPTANCE.md) record the local native happy path and remaining physical-output, UI and restart checks.
 
 Release `0.2.0-rc.1` adds standard QQQ sign-in and server device controls. Upgrade the QQQ printing server to the matching native extension before installing this client: it requires discovered printing extension `1.0.0` and a user session, and existing unbound pairings require explicit account association. An older bearer-only server will not work through a silent fallback. See [sign-in and migration](docs/QQQ-SIGN-IN.md), including replacement pairing and damaged-session recovery. Configured Authentik/provider renewal and installed browser-callback acceptance remain separate qualification work.
 
@@ -50,8 +50,8 @@ The companion projects are [qbit-printing](https://github.com/QRun-IO/qbit-print
 
 1. Download the x64 MSI and `SHA256SUMS` from [Releases](https://github.com/QRun-IO/qqq-print-agent/releases). Verify the checksum before installing.
 2. Install the MSI with administrator rights. It installs the service and adds **QQQ Print Agent**, or your configured customer label, under **Print Connectors** in the Start menu.
-3. In your QQQ printing administration, create an enrollment code for this facility/device.
-4. Open **QQQ Print Agent**, accept the administrator prompt, enter the QQQ server URL and enrollment code, and select **Connect**.
+3. For a new pairing, create an enrollment code for this facility/device in QQQ printing administration.
+4. Open **QQQ Print Agent**, accept the administrator prompt, and follow [QQQ sign-in](docs/QQQ-SIGN-IN.md) to discover the server and authenticate. Enter the enrollment code for a new pairing; an existing unbound pairing instead requires explicit account association.
 5. In **Printers**, select which queues to expose to QQQ. Then enable the intended discovered queue in QQQ and submit a test document.
 
 The QQQ URL must use HTTPS. HTTP is accepted only for loopback development such as `http://localhost:18081`. No inbound firewall rule is installed. Existing outbound proxy/network policies and local printer connectivity still apply.
@@ -76,6 +76,12 @@ A printer visible only in a signed-in user's profile may not be available to the
 `SPOOLED` means Windows accepted the job. It does **not** prove that paper came out. If the agent cannot determine whether a previous submission succeeded, it reports `OUTCOME_UNKNOWN`; an operator should inspect the printer before requesting another copy.
 
 ## Validation so far
+
+The published 0.2.0 MSI installed with exit 0 and no reboot on 2026-10-31. Local QQQ table-based sign-in and explicit association of the existing pairing succeeded through the installed service. Pause, disconnect, reconnect and resume were observed by both server and service; inventory refresh returned `SUCCEEDED` / `INVENTORY_REFRESHED`. Native QQQ test-print processes delivered one Letter PDF and one 4 × 6-inch, 300-dpi ZPL label to `SPOOLED`, with content hashes matching the reviewed documents.
+
+Physical confirmation of these two outputs is pending. Current visual UI acceptance is unverified, and the requested service-restart elevation was canceled before execution. Configured Authentik/browser-callback renewal, remote cloud deployment and production readiness remain separate. See [current installed acceptance](docs/ACCEPTANCE.md).
+
+### Historical 0.1.9 installed UI acceptance — 2026-10-31
 
 The 0.1.9 source gate passed **255 tests (66 Core + 189 Windows/CLI)** with zero warnings/errors, and the full solution/UI build passed. [CI build 41185716708](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41185716708) and the required security, CodeQL and script gates passed. The CI MSI upgraded the installed service, companion and CLI with exit 0 and no reboot, preserving protected credentials and journal history. Authenticated management, connection and history checks succeeded; all **16 installed UI checks passed in one run**. No print was submitted by the upgrade or UI tests.
 

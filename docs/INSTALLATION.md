@@ -5,11 +5,11 @@
 Download the x64 MSI and `SHA256SUMS` from the same [GitHub release](https://github.com/QRun-IO/qqq-print-agent/releases). Check the file locally:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.1.7-rc.1-x64.msi
+Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.2.0-rc.1-x64.msi
 Get-Content .\SHA256SUMS
 ```
 
-Use the filename of the release you downloaded and compare the complete hash with its `SHA256SUMS` entry. The published baseline is 0.1.7-rc.1; the audit candidate is not released yet. Checksums detect changes after publication; they do not replace publisher signing. The MSI is **unsigned**, with no Authenticode identity. The current release workflow also produces GitHub build-provenance attestations, which are verified separately from checksums and are not code signing. Older releases may lack those attestations; their presence must be checked for the exact downloaded asset. Download only from the project's release page and follow your organization's software-install policy.
+Use the filename of the release you downloaded and compare the complete hash with its `SHA256SUMS` entry. The current published prerelease is 0.2.0-rc.1; its exact installed-package scope is recorded in [acceptance notes](ACCEPTANCE.md). Checksums detect changes after publication; they do not replace publisher signing. The MSI is **unsigned**, with no Authenticode identity. The current release workflow also produces GitHub build-provenance attestations, which are verified separately from checksums and are not code signing. Older releases may lack those attestations; their presence must be checked for the exact downloaded asset. Download only from the project's release page and follow your organization's software-install policy.
 
 ## Install
 

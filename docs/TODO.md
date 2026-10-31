@@ -1,6 +1,15 @@
 # TODO
 
-## Remote controls candidate — not released
+## Published 0.2.0-rc.1 local acceptance
+
+- [x] Install the exact verified published MSI with pairing, printer exposure and journal history preserved; exit 0 and no reboot.
+- [x] Qualify installed-service native table-based sign-in, explicit existing-pairing association, observed pause/disconnect/reconnect/resume and successful inventory refresh.
+- [x] Submit the native Letter PDF and 4 × 6-inch, 300-dpi ZPL test processes; both reached `SPOOLED` with matching reviewed hashes.
+- [ ] Obtain physical confirmation of these two current-release outputs.
+- [ ] Qualify the current installed companion visually and run its UI acceptance; the UI bridge was unavailable.
+- [ ] Complete an actual service-restart check; the requested elevation was canceled before execution.
+
+## Remote controls implementation
 
 - [x] Restore pending unbound setup across restart with unreadable or different-server old proof; preserve bound-identity refusal. Final isolated gate: 365 tests, zero warnings/errors/skips.
 
@@ -17,9 +26,9 @@
 - [x] Implement standard QQQ auth discovery/configured sign-in, protected service session storage and periodic resume, preserving device/journal identity.
 - [x] Complete the combined native-authentication, callback forwarding, CLI, UI and control gate: 356 tests (127 Core + 229 Windows/CLI), zero warnings/errors/skips, and independent source review fixes rechecked.
 - [ ] Qualify the configured provider and installed private callback end to end; source tests do not establish actual provider renewal or permissions deployment.
-- [x] Pass 23 actual Core client/native QQQ interoperability checks with table-based authentication and no print jobs.
+- [x] Pass 25 actual Core client/native QQQ interoperability checks with table-based authentication and no print jobs.
 - [x] Build and inspect the unsigned candidate MSI, including payload versions/resources, callback registration and service configuration.
-- [ ] Qualify the installed companion after protected CI. No new physical printing is implied.
+- [ ] Complete current-release installed companion and provider acceptance; local installed-service evidence is recorded above and in [acceptance notes](ACCEPTANCE.md).
 
 ## Published 0.1.9-rc.1 — 2026-10-31
 

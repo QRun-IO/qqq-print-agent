@@ -1,5 +1,25 @@
 # Acceptance evidence
 
+## Installed published 0.2.0-rc.1: local native happy path — 2026-10-31
+
+The exact published [v0.2.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.2.0-rc.1) MSI installed successfully with exit 0 and no reboot. Pairing, exposed-printer choices and journal history were preserved. Its SHA-256 is `EAEBCF6DCC9F712849C06BD113B1134F5E5532120E868C2F52539F9D32ABE7DC`. [Release workflow 41218724382](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41218724382), all four release assets, checksums and exact-tag attestations were verified. The tagged build passed **365 tests (127 Core + 238 Windows/CLI)** with zero warnings/errors/skips. The MSI remains unsigned.
+
+Acceptance helpers exercised the installed service against the released local QQQ server using standard table-based user authentication. Sign-in and explicit association of the existing unbound pairing succeeded. The service remained Running with automatic startup, and its exposed printers were ready. This verifies the native session/device-binding path through the installed service; it does not establish companion-screen or browser-provider acceptance.
+
+| Installed native operation | Observed result |
+| --- | --- |
+| Pause dispatch | Server and service agreed on revision 1 and paused dispatch |
+| Disconnect | Server and service agreed on revision 2 while control polling remained available |
+| Reconnect | Server and service agreed on revision 3 |
+| Resume dispatch | Server and service agreed on revision 4 |
+| Refresh inventory | Read-only receipt confirmed `SUCCEEDED` / `INVENTORY_REFRESHED` |
+| Native QQQ test-page process | Letter PDF reached `SPOOLED`; content hash matched the reviewed document |
+| Native QQQ test-label process | 4 × 6-inch, 300-dpi ZPL reached `SPOOLED`; content hash matched the reviewed document |
+
+The two print requests used the native QQQ processes and installed service. No active server queue remained at the final observation. **Physical confirmation of these two outputs is pending**; spool acceptance does not prove paper or label output, alignment or barcode readability.
+
+Current visual UI acceptance is unverified because the native UI automation bridge was unavailable. A requested service restart was canceled at elevation before execution, so no restart test passed. The 16 installed UI checks below belong to the earlier 0.1.9 CI package. This local table-authentication evidence does not qualify Authentik/browser callbacks, long-lived provider renewal, remote cloud deployment, Windows reboot/recovery or production readiness.
+
 ## Published 0.1.9-rc.1 — 2026-10-31
 
 [v0.1.9-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.1.9-rc.1) is published from protected main revision `cf0e362`. [Release workflow 41190815995](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41190815995) passed. The MSI, `SHA256SUMS`, `Install-Branded.ps1` and `branding.example.json` were verified against release checksums and asset digests; provenance attestations for all four assets were verified against the release workflow and tag.
