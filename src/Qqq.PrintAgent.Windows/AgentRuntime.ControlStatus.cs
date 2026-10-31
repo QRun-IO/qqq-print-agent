@@ -2,7 +2,7 @@ namespace Qqq.PrintAgent.Windows;
 
 public sealed partial class AgentRuntime
 {
-   private async Task<string> EnrollWithGatesAsync(PipeRequest request, CancellationToken token)
+   internal async Task<string> EnrollWithGatesAsync(PipeRequest request, CancellationToken token)
       => await ConnectionTransitionAsync(() => EnrollAsync(request, token), token).ConfigureAwait(false);
 
    private async Task<string> ConnectionTransitionAsync(Func<Task<string>> action, CancellationToken token)

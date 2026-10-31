@@ -17,7 +17,10 @@ pairings and history are preserved, but unbound devices need explicit account as
 - Add installer-owned browser callback forwarding, cancellable sign-in and
   customer-branded callback text. Installed callback/provider acceptance remains
   unqualified; no signing or stable 1.0 readiness is claimed.
-- Pass 356 tests and build WinUI/service/CLI with zero warnings/errors/skips.
+- Support explicit replacement pairing after revocation and safe recovery from
+  damaged saved credentials. Pending setup survives restart without presenting
+  old device proof or enabling printing; previous history and choices remain intact.
+- Pass 365 tests and build WinUI/service/CLI with zero warnings/errors/skips.
 
 ## 0.1.9-rc.1 — 2026-10-31
 

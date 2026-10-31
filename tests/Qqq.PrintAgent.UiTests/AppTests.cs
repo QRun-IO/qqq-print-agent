@@ -86,6 +86,7 @@ public class AppTests
       session.ClickElement("NavigateSettings");
       session.ClickElement("ConnectionSettings");
       session.WaitForElement("ServerAddress");
+      Assert.Equal(ControlType.ComboBox, session.WaitForElement("PairingChoice").ControlType);
       session.WaitForElement("EnrollmentCode");
       Assert.Equal("Connect this device", session.WaitForElement("EnrollDevice").Name);
       session.ClickButton("Close");

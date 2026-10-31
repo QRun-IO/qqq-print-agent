@@ -171,7 +171,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// <summary>Current local observations, with no token or document content.</summary>
    public AgentSnapshot GetSnapshot()
    {
-      using AgentStore store = new(directory);
+      using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
       var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location)).ToList();

@@ -30,10 +30,11 @@ public sealed partial class AgentRuntime
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
-         using AgentStore store = new(directory);
+         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
          AgentAuthentication? saved = store.LoadAuthentication();
          AgentConfiguration? configuration = store.LoadConfiguration();
-         if(saved?.Credential is null || (configuration is not null && !SameOrigin(saved.Binding.Origin, configuration.ServerUrl)))
+         if(saved?.Credential is null || (saved.Binding.HasApprovedDevice
+            && (configuration is null || !SameOrigin(saved.Binding.Origin, configuration.ServerUrl))))
          {
             return false;
          }
@@ -43,7 +44,7 @@ public sealed partial class AgentRuntime
             try
             {
                await restored.RestoreSessionAsync(saved.Credential, token).ConfigureAwait(false);
-               QqqSessionBinding binding = configuration is null ? await restored.GetSessionIdentityAsync(token).ConfigureAwait(false)
+               QqqSessionBinding binding = configuration is null || !saved.Binding.HasApprovedDevice ? await restored.GetSessionIdentityAsync(token).ConfigureAwait(false)
                   : await restored.BindDeviceAsync(new QqqDeviceCredential(configuration.DeviceId, configuration.DeviceToken), cancellationToken: token).ConfigureAwait(false);
                RequireSameIdentity(saved.Binding, binding);
                ActivateSession(restored, binding, store);

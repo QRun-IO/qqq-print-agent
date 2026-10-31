@@ -39,6 +39,8 @@ internal sealed class SessionFixture : IDisposable
       internal int Resumes;
       internal QqqSessionException.FailureKind? ResumeFailure { get; set; }
       internal bool ClaimedLegacy;
+      internal bool DenyBinding;
+      internal string? RevokedDeviceId;
       internal HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
       internal bool DelayUnauthorizedPoll { get; set; }
       internal TaskCompletionSource PollEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -64,13 +66,26 @@ internal sealed class SessionFixture : IDisposable
       public Task<QqqSessionBinding> GetSessionIdentityAsync(CancellationToken cancellationToken = default) => Task.FromResult(Binding);
       public Task<QqqSessionBinding> BindDeviceAsync(QqqDeviceCredential credential, bool claimLegacyDevice = false, CancellationToken cancellationToken = default)
       {
-         Assert.Equal("device", credential.DeviceId);
+         if(DenyBinding || string.Equals(RevokedDeviceId, credential.DeviceId, StringComparison.Ordinal))
+         {
+            throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "Synthetic binding denied.");
+         }
+         Assert.Equal(Binding.DeviceId, credential.DeviceId);
          ClaimedLegacy = claimLegacyDevice;
          return Task.FromResult(Binding);
       }
       public async Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
       {
          Paths.Add(relativePath);
+         if(string.Equals(relativePath, "devices/enroll", StringComparison.Ordinal))
+         {
+            if(Status != HttpStatusCode.OK)
+            {
+               return new HttpResponseMessage(Status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+            }
+            Binding = Binding with { DeviceId = "replacement-device" };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new EnrollmentResponse(1, "replacement-device", "replacement-token", 5), PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") };
+         }
          if(DelayUnauthorizedPoll)
          {
             PollEntered.TrySetResult();

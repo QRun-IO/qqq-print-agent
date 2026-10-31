@@ -115,6 +115,10 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
    public AgentConfiguration? LoadConfiguration()
    {
+      if(_configurationRecoveryRequired)
+      {
+         return null;
+      }
       string path = Path.Combine(_directory, "connection.dpapi");
       if(!File.Exists(path))
       {

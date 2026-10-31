@@ -342,6 +342,7 @@ public sealed partial class MainWindow : Window, IDisposable
          _mutationVersion++;
       }
       _busy = busy;
+      PairingChoice.IsEnabled = !busy;
       EnrollButton.IsEnabled = !busy;
       RefreshButton.IsEnabled = !busy;
       ReconnectButton.IsEnabled = !busy;

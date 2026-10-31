@@ -29,7 +29,7 @@ public sealed partial class MainWindow
          _signInClient = null;
          if(!Uri.TryCreate(ServerBox.Text.Trim(), UriKind.Absolute, out Uri? origin))
          {
-            throw new InvalidOperationException("Enter a valid QQQ server origin.");
+            throw new InvalidOperationException("Enter a valid server origin.");
          }
          QqqSessionClient client = new(origin, allowLoopbackHttp: origin.IsLoopback);
          _signInClient = client;
@@ -39,12 +39,12 @@ public sealed partial class MainWindow
          BrowserSignInButton.Visibility = _signInMetadata.Values?.NativeSessionLogin is not null ? Visibility.Visible : Visibility.Collapsed;
          bool supported = PasswordSignInPanel.Visibility == Visibility.Visible || BrowserSignInButton.Visibility == Visibility.Visible;
          Feedback(supported ? "Sign-in options ready" : "Server configuration required",
-            supported ? "Use the sign-in method configured by this QQQ server." : "This server has not enabled a supported native QQQ sign-in grant. Ask its administrator to configure it.",
+            supported ? "Use the sign-in method configured by this server." : "This server has not enabled a supported native sign-in grant. Ask its administrator to configure it.",
             supported ? InfoBarSeverity.Informational : InfoBarSeverity.Warning);
       }
       catch(Exception exception) when(exception is IOException or ArgumentException or InvalidOperationException or HttpRequestException or OperationCanceledException)
       {
-         Feedback("Discovery failed", "The server did not provide compatible QQQ authentication and printing discovery. Check its address and configuration.", InfoBarSeverity.Error);
+         Feedback("Discovery failed", "The server did not provide compatible authentication and printing discovery. Check its address and configuration.", InfoBarSeverity.Error);
       }
       finally { SetBusy(false); }
    }
@@ -61,7 +61,7 @@ public sealed partial class MainWindow
       }
       catch(Exception exception) when(exception is IOException or ArgumentException or HttpRequestException or OperationCanceledException or UnauthorizedAccessException)
       {
-         Feedback("Sign-in not completed", "QQQ did not authorize this connection, or the service could not confirm it. Check your sign-in, device ownership and current permissions.", InfoBarSeverity.Error);
+         Feedback("Sign-in not completed", "The server did not authorize this connection, or the service could not confirm it. Check your sign-in, device ownership and current permissions.", InfoBarSeverity.Error);
       }
       finally
       {
@@ -72,7 +72,8 @@ public sealed partial class MainWindow
 
    private async Task TransferSignInAsync()
    {
-      string result = await AgentPipeClient.SendAsync(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(), ClaimLegacyDevice: ClaimExistingDevice.IsChecked == true));
+      string result = await AgentPipeClient.SendAsync(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(),
+         ClaimLegacyDevice: PairingChoice.SelectedIndex == 1, StartNewPairing: PairingChoice.SelectedIndex == 2));
       bool success = result.StartsWith("Signed in to QQQ.", StringComparison.Ordinal);
       Feedback(success ? "Signed in" : "Service authorization not completed", result, success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
    }
@@ -87,7 +88,7 @@ public sealed partial class MainWindow
          string result = await AgentPipeClient.SendAsync(new PipeRequest("sign-out"));
          _signInClient?.Dispose();
          _signInClient = null;
-         Feedback("QQQ sign-out", result, result.StartsWith("Error:", StringComparison.Ordinal) ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);
+         Feedback("Account sign-out", result, result.StartsWith("Error:", StringComparison.Ordinal) ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
       { ServiceUnavailable(); }
@@ -119,7 +120,7 @@ public sealed partial class MainWindow
       }
       catch(Exception exception) when(exception is IOException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
       {
-         Feedback("Browser sign-in not completed", "No validated QQQ session was received. Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly.", InfoBarSeverity.Warning);
+         Feedback("Browser sign-in not completed", "No validated account session was received. Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly.", InfoBarSeverity.Warning);
       }
       finally
       {
