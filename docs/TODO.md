@@ -1,17 +1,22 @@
 # TODO
 
+## Published 0.1.9-rc.1 — 2026-10-31
+
 - [x] Reproduce and correct management-response loss during immediate named-pipe disconnect; current/legacy delayed readers and bounded shutdown/deadline regressions pass.
-- [x] Install 0.1.8 with preserved credentials/journal and authenticated peers; independently confirm current QQQ heartbeat, two ready printers and no pending or uncertain jobs. The history-check failure requires the correction above.
+- [x] Record the superseded 0.1.8 installation with preserved credentials/journal and authenticated peers. Its history-check failure required the management-response correction above.
 - [x] Pass the combined 0.1.9 solution/UI build with zero warnings/errors and all 255 tests (66 Core + 189 Windows/CLI); verify source/fixture bytes before and after the isolated run.
 - [x] Complete 0.1.9 hosted gates, state-preserving upgrade and installed app/service qualification: required checks, retained credentials/history, connected service and 16 installed UI checks pass.
-- [ ] Publish and verify the protected 0.1.9 corrective prerelease after recording installed acceptance.
+- [x] Publish v0.1.9-rc.1 from protected main `cf0e362`; [release workflow 41190815995](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41190815995), all four assets and all four provenance attestations are verified.
+- [x] Record the distinct installed CI and published MSI hashes in [ACCEPTANCE.md](ACCEPTANCE.md). Runtime sources are unchanged; no separate installation of the published MSI is claimed.
 - [x] Audit source regression gate: 249 tests and zero build warnings/errors, including authenticated/bounded IPC, machine-state ownership, metadata preservation, backlog scheduling and SQLite initialization cleanup.
 - [x] Complete independent deep security scan, investigate all five findings, review fixes and record canonical findings/coverage.
 - [x] Qualify bounded production store/merge queries at 375,000 synthetic jobs and append 10,000 through journal APIs; integrity and retention checks pass. See SCALABILITY.md for measured scope; sustained service/network/printer throughput remains separate.
-- [ ] Verify audit packaging, installed UI/updater handoff and hosted security/provenance gates before publishing the next prerelease.
+- [x] Verify audit packaging, installed UI and hosted security/provenance gates for 0.1.9. Real in-app updater handoff remains a separate task below.
 - [x] Record user decision: prereleases remain unsigned for now; do not describe hashes or build attestations as code signing.
-- [x] Publish audit draft PR #2; final executable source 2e6a2e5 passes all hosted checks. Download and verify CI MSI/branding checksums and actual installer formatting/sequence/component identities. New installation and tagged-release attestations remain pending.
-- [x] Enforce all main-branch checks for administrators too, following explicit user approval; establish acknowledged R-drive coordination with Mobile Scanner and Record Files masters.
+- [x] Merge [audit PR #2](https://github.com/QRun-IO/qqq-print-agent/pull/2) through protected main after the corrective source and installed acceptance passed. Preserve the earlier 0.1.8 audit packaging evidence as history.
+- [x] Enforce all main-branch checks for administrators too.
+
+## Historical 0.1.7 acceptance — 2026-10-30
 
 - [x] Install 0.1.7 from 93dd5fc: MSI exit 0, no reboot, credentials retained; management/profile/history/log settings/branding/connected-state checks passed.
 - [x] Pass 227 unit/regression tests (57 Core + 170 Windows/CLI), zero warnings/errors and exact-source CI 41139885687.
@@ -24,7 +29,7 @@
 - [x] Restore 0.1.4, then install corrected 0.1.5; all 12 native UI checks have passing results; 204 tests and exact-source CI passed.
 - [x] Verify and install 0.1.6: 211 tests, clean build, passing exact-source CI, successful MSI upgrade and all 15 native UI checks across 14+1 runs.
 - [ ] Diagnose the later clean service stop; normal-UAC restart restored Running, but the cause is unconfirmed.
-- [x] Restore the paired local QQQ connection with credentials preserved and no pending jobs before startup; connection healthy on loopback port 18081.
+- [x] Restore the QQQ connection with credentials preserved and no pending jobs before startup.
 
 ## Implemented
 
@@ -46,7 +51,7 @@
 - [x] AppKit update coordinator/prompts, manual/startup checks, fixed GitHub version/channel policy, verified protected download and coherent machine MSI helper.
 - [x] Persisted splash duration, shared help/release/project/support links, dependency credits and version/channel display.
 
-## Current verification and release
+## Historical 0.1.6 verification — 2026-10-30
 
 - [x] Publish v0.1.6-rc.1 and verify its release assets.
 - [x] Complete the 211-test source gate and exact-source CI; install 0.1.6 with credentials retained.
@@ -55,6 +60,9 @@
 - [x] Connect a Zebra ZT411 at 300 dpi with confirmed 4 × 6-inch stock; expose locally and enable in QQQ.
 - [x] Submit exactly one ZPL shipping test and one PDF barcode/alignment test through the paired local QQQ server; both reached SPOOLED and the service remained Running.
 - [ ] Obtain user confirmation of the earlier 0.1.6 Zebra outputs, alignment and barcode scanning. Spool acceptance alone does not establish physical output.
+
+## Remaining installed qualification
+
 - [ ] Qualify real in-app update: consent, failed/canceled download or elevation, retained state, helper handoff, coherent versions, relaunch and restart-required reporting.
 - [ ] Review completed protected update stages/logs manually; no automatic completed-stage retention policy is implemented.
 - [ ] Qualify remaining input-dependent selection/focus, long-value and metadata synchronization scenarios; passing UI checks do not cover every interaction.
@@ -71,4 +79,4 @@
 - [ ] Track custom media dimensions and physical-output confirmation separately from spooler acceptance.
 
 - [x] Complete independent review after the five baseline security findings are remediated; current details are in SESSION-STATE.md.
-- [ ] Complete installed and deployment qualification; the normal-UAC upgrade request is pending, not a successful installation.
+- [ ] Complete remaining deployment and hardware qualification; the successful 0.1.9 CI-package installation does not establish remote or broader driver acceptance.

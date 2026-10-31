@@ -1,14 +1,25 @@
 # Acceptance evidence
 
-## Installed 0.1.9 audit correction — 2026-10-31
+## Published 0.1.9-rc.1 — 2026-10-31
 
-Reviewed source `13aa84c` passed all ten required hosted checks, including the 255-test build, security scans, both CodeQL languages, 12 PowerShell tests and script analysis. Exact CI MSI SHA256: `6DDA81FD515D33E2D27499AC9774D772B1C78094620CDCE098C2D28738D12EC1`.
+[v0.1.9-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.1.9-rc.1) is published from protected main revision `cf0e362`. [Release workflow 41190815995](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41190815995) passed. The MSI, `SHA256SUMS`, `Install-Branded.ps1` and `branding.example.json` were verified against release checksums and asset digests; provenance attestations for all four assets were verified against the release workflow and tag.
+
+| Package | SHA-256 | Verified scope |
+| --- | --- | --- |
+| Installed CI MSI | `6DDA81FD515D33E2D27499AC9774D772B1C78094620CDCE098C2D28738D12EC1` | State-preserving upgrade and 16 installed UI checks below |
+| Published release MSI | `04A0DDEB304F533E243707FA9FF654EA2760BFA6A7C6B0557718E288B0C1BE6C` | Release checksum, asset digest and provenance verification |
+
+These MSI files are distinct builds. Source comparison between the installed candidate and the published revision found only acceptance/session/task documentation changes; runtime sources are unchanged. The published MSI has not been separately reinstalled, so installed acceptance applies to the CI package above. Both packages remain unsigned prereleases; provenance attestations are not publisher code signing.
+
+## Installed 0.1.9 CI-package qualification — 2026-10-31
+
+Reviewed source `13aa84c` passed all ten required hosted checks: the 255-test [CI build 41185716708](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41185716708), security scans, both CodeQL languages, 12 PowerShell tests and script analysis.
 
 The authorized machine upgrade completed with MSI exit 0 and no restart requirement. Old and new service peers authenticated; protected credential bytes and all journal history were retained. Read-only inspection of a protected closed backup verified integrity and no active or newly uncertain submission before installation. Post-install service, connection and history queries succeeded. All **16 installed UI checks passed in one run**, and the installed companion opened successfully. The package reports `0.1.9-rc.1+4602769b00ac76a6dbded3b4e63873f82e8ad287`, identifying the CI merge revision for the reviewed branch.
 
-This verifies the corrected management transport and local installed service/app upgrade. It does not establish fresh physical output, Windows reboot behavior, updater-initiated elevation, hostile-tree rollback, remote deployment or publisher signing. No print was submitted by the installer or UI tests. Public release publication remains pending.
+This verifies the corrected management transport and local installed service/app upgrade. It does not establish fresh physical output, Windows reboot behavior, updater-initiated elevation, hostile-tree rollback, remote deployment or publisher signing. No print was submitted by the installer or UI tests. Publication and release-artifact verification are recorded separately above.
 
-## Zebra PDF configuration correction and confirmed output — 2026-10-30
+## Historical 0.1.7 Zebra PDF correction and confirmed output — 2026-10-30
 
 The user confirmed the laser PDF and Zebra ZPL output. The original Zebra PDF reached SPOOLED but produced no label. Windows machine **Printer properties → Advanced → Printing Defaults** was configured for **4.09 × 2 inches / Thermal Transfer**, while the installed stock is **4 × 6 inches and direct thermal, without ribbon**. The defaults were changed to **4.00 × 6.00 inches / Thermal Direct**, preserving other options; the saved machine DEVMODE dimensions were verified as 1016 × 1524 tenths of a millimeter. The printer was also returned to direct-thermal mode and unpaused without producing output during that correction.
 
