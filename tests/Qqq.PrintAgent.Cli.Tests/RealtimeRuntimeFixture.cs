@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,7 +18,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
 {
    internal LoopbackWebSocketPeer Peer { get; } = new();
    internal string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "qqq-native-runtime-" + Guid.NewGuid().ToString("N"));
-   internal RealtimeSettings Settings { get; set; } = new(Revision: 1, ReconnectMinDelayMillis: 100, ReconnectMaxDelayMillis: 1000, ReconnectJitterPercent: 0, AckTimeoutMillis: 1000);
+   internal RealtimeSettings Settings { get; set; } = new(Revision: 1, ReconnectMinDelayMillis: 100, ReconnectMaxDelayMillis: 1000, ReconnectJitterPercent: 0);
    internal ConcurrentQueue<PrintJob> Queue { get; } = new();
    internal ConcurrentDictionary<string, Func<Stream>> Documents { get; } = new(StringComparer.Ordinal);
    internal ConcurrentQueue<RealtimeEnvelope> Messages { get; } = new();
@@ -59,7 +60,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       WebSocket socket;
       try
       { socket = await Peer.AcceptAsync(_stopping.Token).WaitAsync(TimeSpan.FromSeconds(5)); }
-      catch(TimeoutException exception) { throw new InvalidOperationException("Synthetic runtime failed to connect: " + string.Join("; ", Logs), exception); }
+      catch(TimeoutException exception) { throw new InvalidOperationException(Diagnostic("WebSocket handshake"), exception); }
       var connection = new Connection(socket, this, loseSpoolAck, _stopping.Token);
       _connections.Add(connection);
       RealtimeEnvelope hello = await LoopbackWebSocketPeer.ReceiveAsync(socket, _stopping.Token);
@@ -67,7 +68,12 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       LastHelloSettingsRevision = hello.Payload.GetProperty("lastSettingsRevision").GetInt64();
       await connection.SendAsync("WELCOME", new { connectionId = Guid.NewGuid().ToString("N"), serverTime = Now(), desiredState = new DeviceDesiredState(1, false, "CONNECTED"), settings = Settings });
       connection.Start();
-      await WaitAsync(() => Runtime.GetSnapshot().Connected);
+      await WaitAsync(() =>
+      {
+         if(connection.Completion.IsCompleted)
+         { throw new InvalidOperationException(Diagnostic("initial realtime state synchronization: server channel stopped")); }
+         return Runtime.GetSnapshot().Connected;
+      }, "initial realtime state synchronization");
       return connection;
    }
 
@@ -81,10 +87,23 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
          new PrintOptions(), Now(), "QUEUED"));
    }
 
-   internal async Task WaitAsync(Func<bool> predicate)
+   internal async Task WaitAsync(Func<bool> predicate, [CallerArgumentExpression(nameof(predicate))] string stage = "")
    {
-      while(!predicate())
-      { await Task.Delay(20, _stopping.Token); }
+      try
+      {
+         while(!predicate())
+         { await Task.Delay(20, _stopping.Token); }
+      }
+      catch(OperationCanceledException exception) when(_stopping.IsCancellationRequested)
+      { throw new TimeoutException(Diagnostic(stage), exception); }
+   }
+
+   private string Diagnostic(string stage)
+   {
+      // Test evidence includes no envelope payload, cookie, proof, document or raw snapshot.
+      string types = string.Join(",", Messages.TakeLast(12).Select(message => message.Type));
+      string logs = string.Join("; ", Logs.TakeLast(8).Select(message => AgentActivityLog.Redact(message[..Math.Min(message.Length, 300)])));
+      return $"Synthetic runtime wait failed at {stage[..Math.Min(stage.Length, 200)]}; received types=[{types}]; recent logs=[{logs}]";
    }
 
    internal string? State(string id)
@@ -133,6 +152,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
    {
       private readonly SemaphoreSlim _send = new(1, 1);
       private Task _pump = Task.CompletedTask;
+      internal Task Completion => _pump;
       internal void Start() => _pump = PumpAsync();
       internal TaskCompletionSource LostSpoolAck { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       internal async Task SendAsync(string type, object payload)
