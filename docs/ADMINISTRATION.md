@@ -1,6 +1,6 @@
 # Administrator operations
 
-These transport and capacity instructions describe unreleased `0.3.0-rc.1`.
+These transport and capacity instructions describe release candidate `0.3.0-rc.1`.
 The published `0.2.0-rc.1` installer uses its earlier native HTTP transport.
 See [realtime architecture and settings](REALTIME.md) for the coordinated server requirement.
 

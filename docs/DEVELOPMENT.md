@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Current source prepares unreleased `0.3.0-rc.1`, with printing extension 2.0.
+Current source prepares release candidate `0.3.0-rc.1`, with printing extension 2.0.
 See [realtime architecture](REALTIME.md) for worker separation, policy, streaming
 and reconnect rules. The service never falls back from WSS to job/control polling.
 

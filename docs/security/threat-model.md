@@ -1,6 +1,6 @@
 # Threat model: QQQ Print Agent
 
-## Realtime source boundary — 0.3.0-rc.1 unreleased
+## Realtime source boundary — 0.3.0-rc.1 release candidate
 
 The remote-control adapter accepts only inventory refresh and cancellation of one locally journaled spooler job. Desired pause/disconnect state is revisioned and persists by canonical server URL and device identity; older or conflicting revisions cannot resume a device. An independently processed authenticated WSS channel carries controls and receipts while documents stream over separate same-origin HTTPS requests. There is no job/control polling fallback. A paused device claims no new work. A disconnected device retains control traffic and in-flight receipts; already-submitted printing is not recalled. Reconnect is a transport refresh, never an OS or service restart. See [the realtime contract and operational limits](../REALTIME.md).
 
@@ -32,7 +32,7 @@ The QQQ server supplies assigned document bytes over HTTPS. The Windows LocalSys
 | RAW ZPL | Explicit compatible queue, trusted server workflow | ZPL can contain printer-control commands; not a sandboxed format |
 | Duplicate output | Persistent receipts and events; uncertain submissions require review | Database and physical printer cannot share a transaction |
 | Tray snapshot/logs | No device credential or document bytes; bounded recent jobs/logs | IDs/errors remain operational data and must be reviewed before sharing |
-| Software distribution | Public source, pinned actions/dependencies, audited locked restore, checksums and exact-release attestations | Published prereleases remain unsigned; unreleased source checks do not qualify a new installer |
+| Software distribution | Public source, pinned actions/dependencies, audited locked restore, checksums and exact-release attestations | Published prereleases remain unsigned; source checks do not qualify installed behavior |
 
 ## Data handling
 

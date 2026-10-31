@@ -2,7 +2,9 @@
 
 ## 0.3.0-rc.1 — 2026-10-31
 
-Release candidate preparation; publication and installed qualification are pending.
+Upgrade the server before this client: native printing API 2.0 requires a
+synchronized authenticated WebSocket, with no job/control polling fallback.
+Installed and physical-output acceptance remain separate from source/test gates.
 
 - Require the server's printing 2.x extension and authenticated persistent realtime channel. Replace periodic job/control HTTP polling with pushed state, commands, settings and job notifications.
 - Stream verified documents into protected staging files, with configurable aggregate bandwidth, storage, download concurrency, per-printer ordered submission and native submission deadlines.

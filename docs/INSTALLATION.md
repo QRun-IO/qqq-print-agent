@@ -5,11 +5,11 @@
 Download the x64 MSI and `SHA256SUMS` from the same [GitHub release](https://github.com/QRun-IO/qqq-print-agent/releases). Check the file locally:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.2.0-rc.1-x64.msi
+Get-FileHash -Algorithm SHA256 -LiteralPath .\QqqPrintAgent-v0.3.0-rc.1-x64.msi
 Get-Content .\SHA256SUMS
 ```
 
-Use the filename of the release you downloaded and compare the complete hash with its `SHA256SUMS` entry. The published baseline is 0.2.0-rc.1; realtime source 0.3.0-rc.1 is unreleased. Checksums detect changes after publication; they do not replace publisher signing. The MSI is **unsigned**, with no Authenticode identity. The current release workflow also produces GitHub build-provenance attestations, which are verified separately from checksums and are not code signing. Older releases may lack those attestations; their presence must be checked for the exact downloaded asset. Download only from the project's release page and follow your organization's software-install policy.
+Use the filename of the release you downloaded and compare the complete hash with its `SHA256SUMS` entry. Current release candidate: [0.3.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.0-rc.1). Checksums detect changes after publication; they do not replace publisher signing. The MSI is **unsigned**, with no Authenticode identity. The current release workflow also produces GitHub build-provenance attestations, which are verified separately from checksums and are not code signing. Older releases may lack those attestations; their presence must be checked for the exact downloaded asset. Download only from the project's release page and follow your organization's software-install policy.
 
 ## Install
 
@@ -20,7 +20,7 @@ Run the MSI as an administrator. Windows Installer deploys one coherent applicat
 - The `qqq-print-agent.exe` diagnostic CLI.
 - A restricted `%ProgramData%\QqqPrintAgent` directory for enrollment and the job journal.
 
-There is no inbound firewall rule or local HTTP server. The unreleased realtime client requires outbound WSS upgrades and HTTPS to the QQQ server; update checks/downloads use HTTPS to GitHub release services. The matching server must advertise printing extension 2.0. The published 0.2 transport remains HTTP-based. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
+There is no inbound firewall rule or local HTTP server. The 0.3 realtime client requires outbound WSS upgrades and HTTPS to the QQQ server; update checks/downloads use HTTPS to GitHub release services. Upgrade the matching server first; it must advertise printing extension 2.0. The previous 0.2 transport is HTTP-based. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
 
 ## Service recovery
 

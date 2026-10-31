@@ -1,6 +1,6 @@
 # QQQ sign-in
 
-Standard QQQ sign-in shipped in `0.2.0-rc.1`. Unreleased `0.3.0-rc.1` requires printing extension `>=2.0.0 <3.0.0` before opening its realtime channel or dispatching work. The shared authentication client may discover and sign in to compatible 1.x or 2.x servers; a 1.x login does not authorize realtime dispatch or polling fallback. Extension 2.0 makes the authenticated channel mandatory for claims. This guide is not installed/provider acceptance evidence.
+Standard QQQ sign-in shipped in `0.2.0-rc.1`. Release candidate `0.3.0-rc.1` requires printing extension `>=2.0.0 <3.0.0` before opening its realtime channel or dispatching work. The shared authentication client may discover and sign in to compatible 1.x or 2.x servers; a 1.x login does not authorize realtime dispatch or polling fallback. Extension 2.0 makes the authenticated channel mandatory for claims. This guide is not installed/provider acceptance evidence.
 
 Open **Settings → Sign in / Connection settings**, enter the QQQ server origin and choose **Discover sign-in options**. Discovery must advertise a compatible QQQ UI API and the printing extension before credentials are sent. Table-based authentication presents username/password fields; configured external authentication presents a browser button only for an explicitly advertised native session grant. Passwords remain in the companion and are sent only to the selected QQQ server, never stored or sent to the service.
 

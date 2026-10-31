@@ -1,6 +1,6 @@
 # Session state — 2026-10-31
 
-## Realtime and Jobs UI source — 0.3.0-rc.1 unreleased
+## Realtime and Jobs UI source — 0.3.0-rc.1 release candidate
 
 Current source adopts printing extension 2.0 and immutable protocol commit
 `df3729ac632d4a34a3fb8423acef465042a624fc`: client-initiated authenticated WSS,

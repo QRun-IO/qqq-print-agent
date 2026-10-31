@@ -1,8 +1,8 @@
 # Realtime architecture and operation
 
-This describes unreleased `0.3.0-rc.1` source. The published `0.2.0-rc.1`
+This describes release candidate [0.3.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.0-rc.1). The published `0.2.0-rc.1`
 transport and its acceptance evidence remain historical. The authoritative
-[contract at the consumer pin](https://github.com/QRun-IO/qqq-print-protocol/blob/df3729ac632d4a34a3fb8423acef465042a624fc/docs/REALTIME.md)
+[contract at the consumer pin](https://github.com/QRun-IO/qqq-print-protocol/blob/f3cbc02e9b0fb4fdfefaa59d976c04df747cc589/docs/REALTIME.md)
 defines exact fields, bounds and required cross-runtime tests.
 
 Native printing is version 2.0 because claiming now requires a synchronized

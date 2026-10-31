@@ -1,6 +1,6 @@
 # History and diagnostic limits
 
-Unreleased `0.3.0-rc.1` uses event-driven claim drains and direct realtime control
+Release candidate `0.3.0-rc.1` uses event-driven claim drains and direct realtime control
 traffic, with separately bounded document downloads and native submissions.
 Default document limits are 100 MiB PDF and 20 MiB ZPL; administrators configure
 these and concurrency, staging, bandwidth and deadlines. There is no periodic

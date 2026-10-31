@@ -1,6 +1,6 @@
 # TODO
 
-## Realtime and Jobs UI — 0.3.0-rc.1 unreleased
+## Realtime and Jobs UI — 0.3.0-rc.1 release candidate
 
 - [x] Adopt protocol commit `df3729ac632d4a34a3fb8423acef465042a624fc` for printing extension 2.0 and its complete configurable policy.
 - [x] Update current architecture/operations documentation for WSS, streamed HTTPS, administrator limits and bounded queue observations; preserve published 0.2 evidence.

@@ -11,9 +11,9 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Current source: 0.3.0-rc.1 — unreleased.** It adds a persistent outbound WebSocket, streamed documents and the expanded Jobs view. Source checks do not establish installed or physical-output acceptance. The published baseline is [v0.2.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.2.0-rc.1): its four release assets, checksums and exact-tag attestations are verified, and its tagged build passed 365 tests with zero warnings/errors/skips. The MSI remains unsigned. See [acceptance notes](docs/ACCEPTANCE.md) for version-specific evidence.
+> **Current release candidate: [0.3.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.0-rc.1).** It adds a persistent outbound WebSocket, streamed documents and the expanded Jobs view. Source checks and publication do not establish installed or physical-output acceptance. The previous [v0.2.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.2.0-rc.1) has verified release assets, checksums and exact-tag attestations; its tagged build passed 365 tests with zero warnings/errors/skips. The MSI remains unsigned. See [acceptance notes](docs/ACCEPTANCE.md) for version-specific evidence.
 
-The unreleased client requires discovered printing extension `>=2.0.0 <3.0.0` and standard QQQ sign-in. Upgrade the server before adopting it; a 1.0 server cannot provide realtime printing. The service opens authenticated WSS for controls, receipts, status and job notifications, while documents stream separately over HTTPS. There is no job/control polling or fallback. Existing unbound pairings require explicit account association, not automatic replacement. See [realtime operation](docs/REALTIME.md) and [sign-in and migration](docs/QQQ-SIGN-IN.md). Configured Authentik/provider renewal and installed browser-callback acceptance remain separate qualification work.
+The 0.3 client requires discovered printing extension `>=2.0.0 <3.0.0` and standard QQQ sign-in. Upgrade the server before adopting it; a 1.0 server cannot provide realtime printing. The service opens authenticated WSS for controls, receipts, status and job notifications, while documents stream separately over HTTPS. There is no job/control polling or fallback. Existing unbound pairings require explicit account association, not automatic replacement. See [realtime operation](docs/REALTIME.md) and [sign-in and migration](docs/QQQ-SIGN-IN.md). Configured Authentik/provider renewal and installed browser-callback acceptance remain separate qualification work.
 
 ## Current source features
 
@@ -55,13 +55,13 @@ The companion projects are [qbit-printing](https://github.com/QRun-IO/qbit-print
 4. For a new pairing, create an enrollment code in QQQ and enter it after sign-in. For an existing unbound pairing, explicitly associate it with your account; do not create a replacement merely to upgrade.
 5. In **Printers**, select which queues to expose to QQQ. Then enable the intended discovered queue in QQQ and submit an authorized test document.
 
-The QQQ URL must use HTTPS, with outbound WebSocket upgrades allowed to the same origin. HTTP/WS is accepted only for explicit loopback development. No inbound firewall rule is installed. Existing outbound proxy/network policies and local printer connectivity still apply. The published 0.2 installer retains its earlier HTTP transport; the realtime source above has not been published as an installer.
+The QQQ URL must use HTTPS, with outbound WebSocket upgrades allowed to the same origin. HTTP/WS is accepted only for explicit loopback development. No inbound firewall rule is installed. Existing outbound proxy/network policies and local printer connectivity still apply. The previous 0.2 installer uses its earlier HTTP transport; coordinate the 0.3 server and client upgrade because native API 2.0 requires an active synchronized channel for claims.
 
 See the [installation guide](docs/INSTALLATION.md) for verification, service identity, upgrade and removal instructions, and the [user guide](docs/USER-GUIDE.md) for the setup screen and job statuses.
 
 ## Requirements and supported behavior
 
-| Area | Unreleased source behavior |
+| Area | 0.3 release candidate behavior |
 | --- | --- |
 | Server | QQQ 4.1+ with printing semantic extension 2.0 and wire-v1 payloads |
 | Windows | x64; Windows 11 used for hardware acceptance; API target Windows 10 build 19041+ |
@@ -79,11 +79,11 @@ A printer visible only in a signed-in user's profile may not be available to the
 
 ## Validation so far
 
-The realtime contract and Jobs UI are unreleased. Focused application/UI-test builds passed with zero warnings/errors; three headless request-generation tests passed. They do not execute the desktop assertions or qualify installed realtime behavior. Full consumer, slow-transfer/control, reconnect/replay and installed acceptance are tracked separately in [session state](docs/SESSION-STATE.md).
+The realtime contract and Jobs UI are included in the 0.3 release candidate. Focused application/UI-test builds passed with zero warnings/errors; three headless request-generation tests passed. They do not execute the desktop assertions or qualify installed realtime behavior. Full consumer, slow-transfer/control, reconnect/replay and installed acceptance are tracked separately in [session state](docs/SESSION-STATE.md).
 
 ### Installed published 0.2.0 — 2026-10-31
 
-The exact published 0.2.0-rc.1 MSI installed successfully with pairing, printer exposure and history retained. Native QQQ table-based sign-in, existing-device association, server controls and inventory refresh succeeded. The user confirmed that the Letter PDF and 4 × 6-inch Zebra ZPL printed correctly, and manually confirmed the app's Connected footer and both printers. This is local 0.2 acceptance, not installed or physical-output evidence for unreleased 0.3, Authentik or a remote production deployment. See [acceptance notes](docs/ACCEPTANCE.md).
+The exact published 0.2.0-rc.1 MSI installed successfully with pairing, printer exposure and history retained. Native QQQ table-based sign-in, existing-device association, server controls and inventory refresh succeeded. The user confirmed that the Letter PDF and 4 × 6-inch Zebra ZPL printed correctly, and manually confirmed the app's Connected footer and both printers. This is local 0.2 acceptance, not installed or physical-output evidence for 0.3, Authentik or a remote production deployment. See [acceptance notes](docs/ACCEPTANCE.md).
 
 ### Historical 0.1.9 build and installed checks
 

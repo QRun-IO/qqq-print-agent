@@ -15,7 +15,7 @@ and both printers. This manual observation is distinct from the historical
 16-test automated UI run on 0.1.9 below.
 
 This establishes the local installed 0.2 happy path. It does not establish the
-unreleased 0.3 realtime transport/Jobs UI, configured Authentik renewal, remote
+0.3 realtime transport/Jobs UI, configured Authentik renewal, remote
 production deployment or broad driver qualification. The proposed restart
 elevation was canceled before execution, so this checkpoint does not claim a
 restart test. Source/CI checks for 0.3 remain separate from installed acceptance.
