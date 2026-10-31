@@ -1,5 +1,9 @@
 # TODO
 
+- [x] Reproduce and correct management-response loss during immediate named-pipe disconnect; current/legacy delayed readers and bounded shutdown/deadline regressions pass.
+- [x] Install 0.1.8 with preserved credentials/journal and authenticated peers; independently confirm current QQQ heartbeat, two ready printers and no pending or uncertain jobs. The history-check failure requires the correction above.
+- [x] Pass the combined 0.1.9 solution/UI build with zero warnings/errors and all 255 tests (66 Core + 189 Windows/CLI); verify source/fixture bytes before and after the isolated run.
+- [ ] Complete 0.1.9 hosted gates, state-preserving upgrade and installed app/service qualification.
 - [x] Audit source regression gate: 249 tests and zero build warnings/errors, including authenticated/bounded IPC, machine-state ownership, metadata preservation, backlog scheduling and SQLite initialization cleanup.
 - [x] Complete independent deep security scan, investigate all five findings, review fixes and record canonical findings/coverage.
 - [x] Qualify bounded production store/merge queries at 375,000 synthetic jobs and append 10,000 through journal APIs; integrity and retention checks pass. See SCALABILITY.md for measured scope; sustained service/network/printer throughput remains separate.

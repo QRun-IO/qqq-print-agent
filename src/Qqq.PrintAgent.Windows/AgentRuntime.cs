@@ -222,7 +222,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             string line = await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumCommandCharacters, timeout.Token).ConfigureAwait(false);
             PipeRequest request = JsonSerializer.Deserialize<PipeRequest>(line, PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Invalid command.");
             timeout.CancelAfter(TimeSpan.FromSeconds(string.Equals(request.Operation, "enroll", StringComparison.Ordinal) ? 120 : 30));
-            await AgentPipeFraming.WriteAsync(pipe, await HandleCommandAsync(request, timeout.Token).ConfigureAwait(false), AgentPipeFraming.MaximumResponseCharacters, timeout.Token).ConfigureAwait(false);
+            await AgentPipeFraming.WriteResponseAsync(pipe, await HandleCommandAsync(request, timeout.Token).ConfigureAwait(false), timeout.Token).ConfigureAwait(false);
          }
          catch(Exception exception) when(exception is not OperationCanceledException || !token.IsCancellationRequested)
          {
@@ -234,7 +234,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             {
                using var errorTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                errorTimeout.CancelAfter(TimeSpan.FromSeconds(1));
-               await AgentPipeFraming.WriteAsync(pipe, "Error: " + message, AgentPipeFraming.MaximumResponseCharacters, errorTimeout.Token).ConfigureAwait(false);
+               await AgentPipeFraming.WriteResponseAsync(pipe, "Error: " + message, errorTimeout.Token).ConfigureAwait(false);
             }
             catch(Exception writeException) when(writeException is IOException or OperationCanceledException)
             { /* An unresponsive client must not stop the management pipe. */ }

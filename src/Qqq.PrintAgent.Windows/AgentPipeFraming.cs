@@ -54,4 +54,20 @@ public static class AgentPipeFraming
       byte[] bytes = Encoding.UTF8.GetBytes(message + "\n");
       await stream.WriteAsync(bytes, token).ConfigureAwait(false);
    }
+
+   /// <summary>Keep a queued response alive until the one-command client closes or the server deadline expires.</summary>
+   internal static async Task WriteResponseAsync(Stream stream, string message, CancellationToken token)
+   {
+      await WriteAsync(stream, message, MaximumResponseCharacters, token).ConfigureAwait(false);
+      try
+      {
+         // DisconnectNamedPipe discards unread output. Existing clients close after reading
+         // their reply; an unexpected second command also ends this one-command connection.
+         _ = await stream.ReadAsync(new byte[1], token).ConfigureAwait(false);
+      }
+      catch(Exception exception) when(exception is IOException or OperationCanceledException)
+      {
+         // A closed or unresponsive client cannot hold the pipe past its existing deadline.
+      }
+   }
 }
