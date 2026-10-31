@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — 0.2.0-rc.1 candidate
+## 0.2.0-rc.1 — 2026-10-31
+
+Release preparation only; publication and installed qualification remain pending.
 
 Upgrade the server first: the new client requires the semantic printing extension
 and standard QQQ sign-in; older bearer-only servers need an upgrade. Existing
