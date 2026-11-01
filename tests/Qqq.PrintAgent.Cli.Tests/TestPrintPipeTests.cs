@@ -9,8 +9,10 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The companion asks the service to print a test through the local pipe; this checks the request format carries the chosen media without disturbing older callers.</summary>
 public sealed class TestPrintPipeTests
 {
+   /// <summary>An old test-print request with no media profile reads back with none and serializes without a testProfile member. A request with a ZPL format and a label profile survives a serialize-and-parse round trip unchanged, so new media choices cross the pipe and old messages keep their original shape.</summary>
    [Fact]
    public void TestMedia_RoundTripsThroughLocalPipeRequestWithoutChangingLegacyDefaults()
    {

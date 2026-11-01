@@ -189,7 +189,7 @@ public sealed class RealtimeTransportTests
 
 
 
-      /// <summary>Readable.</summary>
+      /// <summary>Reports the stream as readable, which the download code requires before it will try to read the body.</summary>
       public override bool CanRead => true;
 
 
@@ -199,7 +199,7 @@ public sealed class RealtimeTransportTests
 
 
 
-      /// <summary>Not writable.</summary>
+      /// <summary>Reports the stream as not writable, as a downloaded network body is read-only.</summary>
       public override bool CanWrite => false;
 
 
@@ -229,22 +229,22 @@ public sealed class RealtimeTransportTests
 
 
 
-      /// <summary>Unsupported.</summary>
+      /// <summary>Throws, because a read-only stalled body has nothing to flush and the download must never try.</summary>
       public override void Flush() => throw new NotSupportedException();
 
 
 
-      /// <summary>Unsupported.</summary>
+      /// <summary>Throws, because a forward-only network body cannot be repositioned and the download must read it once in order.</summary>
       public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
 
 
-      /// <summary>Unsupported.</summary>
+      /// <summary>Throws, because the length of a streamed body cannot be set by the reader.</summary>
       public override void SetLength(long value) => throw new NotSupportedException();
 
 
 
-      /// <summary>Unsupported.</summary>
+      /// <summary>Throws, because the body is read-only and nothing may be written back into it.</summary>
       public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
    }
 }

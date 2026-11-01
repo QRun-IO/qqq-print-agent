@@ -196,7 +196,7 @@ public sealed class AgentRuntimePipeResponseTests
    /// <summary>Printer backend with no queues whose print call throws, so any accidental print fails the test.</summary>
    private sealed class NoPrinters : IPrinterBackend
    {
-      /// <summary>Reports no printers.</summary>
+      /// <summary>Reports an empty printer inventory; the pipe tests only exchange management messages and need no queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [];
 
 

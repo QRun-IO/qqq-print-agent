@@ -257,6 +257,10 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
 
       /// <summary>Begins reading and acknowledging agent messages.</summary>
       internal void Start() => _pump = PumpAsync();
+
+
+
+      /// <summary>Completed when the connection deliberately drops the SPOOLED receipt without acknowledging it, so a test can wait for that exact moment before reconnecting.</summary>
       internal TaskCompletionSource LostSpoolAck { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 

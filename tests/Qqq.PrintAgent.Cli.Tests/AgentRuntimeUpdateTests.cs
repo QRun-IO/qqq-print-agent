@@ -173,7 +173,7 @@ public sealed class AgentRuntimeUpdateTests
    /// <summary>Printer backend with no queues that throws if asked to print.</summary>
    private sealed class NoPrintBackend : IPrinterBackend
    {
-      /// <summary>Reports no printers.</summary>
+      /// <summary>Reports an empty printer inventory, since the update test only exercises claiming and heartbeats and needs no queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [];
 
 

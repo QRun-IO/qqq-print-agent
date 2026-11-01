@@ -7,8 +7,14 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>First steps of a realtime connection: how long the agent waits for the server's first acknowledgement, and what it reports when that wait fails.</summary>
 public sealed class AgentRealtimeStartupTests
 {
+   /// <summary>
+   /// A server that acknowledges the first state report 1.2 seconds late is accepted under the default policy. With the minimum
+   /// one-second deadline and the acknowledgement withheld, connecting fails with an error naming the stage and the message type,
+   /// the runtime logs a timeout, and no session cookie or device proof appears in that error. Nothing prints and no HTTP polling happens.
+   /// </summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]

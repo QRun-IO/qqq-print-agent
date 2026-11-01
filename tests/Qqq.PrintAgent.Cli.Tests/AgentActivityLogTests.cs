@@ -9,6 +9,7 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The shared activity log must never persist secrets, and the service and companion, which write to the same daily file independently, must both keep every entry and its severity.</summary>
 public sealed class AgentActivityLogTests
 {
    /// <summary>Credential-shaped message and exception fields never reach the shared AppKit file.</summary>

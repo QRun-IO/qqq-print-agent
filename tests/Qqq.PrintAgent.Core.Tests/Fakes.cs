@@ -11,7 +11,7 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>A clock fixed at one local time, in a UTC zone so local time equals the given time.</summary>
 internal sealed class FixedTimeProvider(int hour) : TimeProvider
 {
-   /// <summary>Today at the given hour.</summary>
+   /// <summary>Always returns 15 March 2026 at the configured hour and half past, so time-of-day logic can be tested at a chosen hour with no dependence on the real clock.</summary>
    public override DateTimeOffset GetUtcNow() => new(2026, 3, 15, hour, 30, 0, TimeSpan.Zero);
 
 
@@ -25,7 +25,7 @@ internal sealed class FixedTimeProvider(int hour) : TimeProvider
 /// <summary>An activity log that records entries in memory.</summary>
 internal sealed class RecordingLog : IActivityLog
 {
-   /// <summary>Entries as "LEVEL message".</summary>
+   /// <summary>Every logged entry in order, each formatted as the level in capitals, a space and the message, so tests can assert both severity and text.</summary>
    public List<string> Entries { get; } = [];
 
 
@@ -59,7 +59,7 @@ internal sealed class RecordingLog : IActivityLog
 /// <summary>A per-test temporary directory, deleted on dispose.</summary>
 internal sealed class TempDirectory : IDisposable
 {
-   /// <summary>Creates the directory.</summary>
+   /// <summary>Creates a new, uniquely named directory under the system temp folder, so each test gets its own empty workspace and tests cannot interfere with each other.</summary>
    public TempDirectory()
    {
       Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "qqq-print-agent-tests", Guid.NewGuid().ToString("N"));
@@ -68,7 +68,7 @@ internal sealed class TempDirectory : IDisposable
 
 
 
-   /// <summary>The directory.</summary>
+   /// <summary>The full path of the temporary directory this instance created.</summary>
    public string Path { get; }
 
 

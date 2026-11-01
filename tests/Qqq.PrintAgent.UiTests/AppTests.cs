@@ -40,7 +40,7 @@ public class AppTests
 
 
 
-   /// <summary>Splash: shows, then dismisses itself.</summary>
+   /// <summary>With the splash enabled the splash window appears at launch and then closes on its own within 20 seconds, so a user is never left behind a stuck splash screen.</summary>
    [Fact]
    public void Splash_ShowsThenDismissesItself()
    {
@@ -51,7 +51,7 @@ public class AppTests
 
 
 
-   /// <summary>About: shows the build version.</summary>
+   /// <summary>Opening About from the settings page shows a "Version ..." line for the running build and can be closed again, so users and support can read exactly which build is installed.</summary>
    [Fact]
    public void About_ShowsTheBuildVersion()
    {
@@ -417,7 +417,7 @@ public class AppTests
 
 
 
-   /// <summary>Theme: the choice is saved to settings.json.</summary>
+   /// <summary>Choosing the Dark theme in settings is written to the app's settings.json, so the choice survives a restart; the test reads the file the app itself saved.</summary>
    [Fact]
    public void ThemeChoice_IsSaved()
    {

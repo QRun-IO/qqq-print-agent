@@ -75,12 +75,16 @@ internal sealed class SessionFixture : IDisposable
       /// <summary>Opens the realtime channel through the scripted connector; without one the realtime path is unsupported in that test.</summary>
       public Task<System.Net.WebSockets.WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
          => ConnectRealtime?.Invoke(cancellationToken) ?? throw new NotSupportedException();
+
+
+
+      /// <summary>Completed when a control poll has reached the fake session, so a test can act while that poll is still in flight.</summary>
       internal TaskCompletionSource PollEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       internal TaskCompletionSource ReleasePoll { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 
 
-      /// <summary>Nothing to release.</summary>
+      /// <summary>Does nothing: the fake session owns no connection or handle, so there is nothing to release when the runtime disposes it.</summary>
       public void Dispose() { }
 
 

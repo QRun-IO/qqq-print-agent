@@ -170,7 +170,7 @@ public sealed class AgentRuntimeProfileTests
 
 
 
-      /// <summary>Always throws.</summary>
+      /// <summary>Always throws, because a metadata test must never send a document to a printer.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Metadata tests must never print.");
    }

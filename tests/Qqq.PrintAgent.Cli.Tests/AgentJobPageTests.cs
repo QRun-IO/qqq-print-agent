@@ -9,8 +9,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The job history page merges the durable local journal with the server's waiting queue; these tests cover how that merged list is paged, filtered and de-duplicated.</summary>
 public sealed class AgentJobPageTests
 {
+   /// <summary>
+   /// A queued job from the server appears in the merged list (newest first) but a queued entry whose id is already in the local
+   /// journal is not counted twice, giving a total of three. Paging, search plus status and printer filters, and the
+   /// needs-attention filter apply to the merged list, and a full 50-entry queue is flagged as possibly truncated.
+   /// </summary>
    [Fact]
    public void SortedQueue_PreservesPaginationFilteringAndLocalDeduplication()
    {

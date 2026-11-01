@@ -210,7 +210,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
    /// <summary>Printer backend with no queues that throws if asked to print.</summary>
    private sealed class NoPrinter : IPrinterBackend
    {
-      /// <summary>Reports no printers.</summary>
+      /// <summary>Reports an empty printer inventory; the scale tests drive the store and the receipt outbox and need no queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [];
 
 
