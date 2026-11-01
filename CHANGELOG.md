@@ -1,6 +1,17 @@
 # Changelog
 
-## 0.3.1-rc.1 — unreleased
+## 0.3.2-rc.1 — unreleased
+
+- Verify that the app, service and CLI all have the requested release and identical full build versions before recording MSI update success. Report missing, unreadable or mixed builds without claiming rollback.
+- Correct the Windows App SDK credit to reference its Microsoft terms and installed third-party notices.
+- Give the isolated native test host the same PerMonitorV2 DPI declaration as production while retaining its unelevated execution level.
+
+The updater regressions first failed against the earlier implementation, then
+passed with the correction. The integrated client gate passed 426 tests with
+zero warnings, errors or skips. Actual in-app update handoff and the historical
+layout-cycle cause remain separate acceptance items.
+
+## 0.3.1-rc.1 — 2026-11-01
 
 - Show explicit WebSocket connection state and server authority in the footer, with live upload/download rates and service-lifetime application-payload totals. A lightweight local observation refresh adds no QQQ job/control polling.
 - Recognize Windows-normalized startup account names only when they resolve to the exact expected SID; preserve the remaining task ownership checks. Rename the tray startup section to distinguish it from the automatic print service.

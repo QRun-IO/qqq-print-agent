@@ -114,4 +114,75 @@ public sealed class MsiUpdateInstallerTests
    {
       Assert.Equal(expected, MsiUpdateInstaller.InstalledVersionMatches(installed, requested));
    }
+
+   [Theory]
+   [InlineData("Qqq.PrintAgent.exe", "0.3.1-rc.1")]
+   [InlineData("Qqq.PrintAgent.Service.exe", "0.3.1-rc.1")]
+   [InlineData("qqq-print-agent.exe", "0.3.1-rc.1")]
+   [InlineData("Qqq.PrintAgent.Service.exe", null)]
+   [InlineData("qqq-print-agent.exe", null)]
+   public void SuccessfulMsiDoesNotEstablishCoherenceWhenAnyComponentIsOldOrMissing(string component, string? version)
+   {
+      const string requested = "0.3.2-rc.1";
+      InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
+         MsiUpdateInstaller.ValidateInstalledVersions(requested, path =>
+            string.Equals(Path.GetFileName(path), component, StringComparison.Ordinal) ? version : requested + "+reviewed-source"));
+      Assert.Contains("Windows Installer returned success", failure.Message, StringComparison.Ordinal);
+      Assert.Contains(component, failure.Message, StringComparison.Ordinal);
+      Assert.DoesNotContain("rolled back", failure.Message, StringComparison.OrdinalIgnoreCase);
+   }
+
+   [Fact]
+   public void MissingInstalledExecutableReportsUnverifiedVersionAfterMsiSuccess()
+   {
+      InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
+         MsiUpdateInstaller.ValidateInstalledVersions("0.3.2-rc.1", path =>
+            string.Equals(Path.GetFileName(path), "Qqq.PrintAgent.Service.exe", StringComparison.Ordinal)
+               ? throw new FileNotFoundException("Synthetic missing service executable.")
+               : "0.3.2-rc.1"));
+      Assert.IsType<FileNotFoundException>(failure.InnerException);
+      Assert.Contains("Windows Installer returned success", failure.Message, StringComparison.Ordinal);
+      Assert.Contains("Qqq.PrintAgent.Service.exe version could not be verified", failure.Message, StringComparison.Ordinal);
+   }
+
+   [Theory]
+   [InlineData("+source-a", "+source-b", "+source-a")]
+   [InlineData("+source-a", "", "+source-a")]
+   [InlineData("", "+source-a", "")]
+   [InlineData("+source-a", "+source-a", "+source-b")]
+   public void SuccessfulMsiRequiresIdenticalSourceBuildsAcrossAllComponents(string appMetadata, string serviceMetadata, string cliMetadata)
+   {
+      const string requested = "0.3.2-rc.1";
+      InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
+         MsiUpdateInstaller.ValidateInstalledVersions(requested, path => requested + (Path.GetFileName(path) switch
+         {
+            "Qqq.PrintAgent.exe" => appMetadata,
+            "Qqq.PrintAgent.Service.exe" => serviceMetadata,
+            "qqq-print-agent.exe" => cliMetadata,
+            _ => throw new InvalidOperationException("Unexpected component path."),
+         })));
+      Assert.Contains("Windows Installer returned success", failure.Message, StringComparison.Ordinal);
+      Assert.Contains("incoherent", failure.Message, StringComparison.Ordinal);
+      Assert.DoesNotContain("rolled back", failure.Message, StringComparison.OrdinalIgnoreCase);
+   }
+
+   [Theory]
+   [InlineData("0.3.2-rc.1")]
+   [InlineData("0.3.2-rc.1+reviewed-source")]
+   public void SuccessfulMsiChecksCompanionServiceAndCliAtTheirInstalledPaths(string installedVersion)
+   {
+      List<string> examined = [];
+      MsiUpdateInstaller.ValidateInstalledVersions("0.3.2-rc.1", path =>
+      {
+         examined.Add(path);
+         return installedVersion;
+      });
+      string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent");
+      Assert.Equal(new[]
+      {
+         Path.Combine(root, "App", "Qqq.PrintAgent.exe"),
+         Path.Combine(root, "Service", "Qqq.PrintAgent.Service.exe"),
+         Path.Combine(root, "Cli", "qqq-print-agent.exe"),
+      }, examined, StringComparer.OrdinalIgnoreCase);
+   }
 }

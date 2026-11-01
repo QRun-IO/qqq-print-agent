@@ -1,5 +1,38 @@
 # Acceptance evidence
 
+## Installed published 0.3.1 and next updater candidate — 2026-11-01
+
+The [0.3.1 release](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.1-rc.1)
+was verified against its signed tag, source
+`346fc285198908c47a2ee9db7b9adb53d5e88c3c`, checksums and all four asset
+attestations from [release run 41295660341](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41295660341).
+The installed MSI SHA-256 is
+`5DE3141DE8861FB96C41DF96A6202F6DFBC9DAAE9C14C6436745CEC66876DCC4`.
+Read-only MSI inspection verified coherent payload versions, 995 stable existing
+component identities and all 13 packaged legal files before installation.
+
+The direct MSI upgrade returned 0 without a reboot, restored the native QQQ
+session and connected WebSocket, and preserved pairing, printer profiles,
+exposure, log policy and all 28 local job receipts. All three installed product
+versions match the published source. The original 27 server jobs also retained
+all five history/content/receipt digests while six later jobs were accounted for
+separately. The operator confirmed successful test prints and a responsive window;
+that confirmation does not identify every document format separately.
+
+Repeated nonprinting native tests exercised the dialog, real timer, fake queued
+response, job progression, banner dismissal, status transitions and navigation.
+The original and current UI both passed at the observed 125% DPI and 1100 by 994
+outer window size. The original layout-cycle cause remains unproven. The exact
+fatal-error mitigation was separately qualified with a real induced native
+exception; this is not an underlying layout fix.
+
+The next updater candidate rejects missing, old, unreadable and mixed full build
+versions across app, service and CLI. It passed 73 focused updater cases and the
+integrated 426-test Release gate. Direct MSI evidence does not qualify the actual
+AppKit update confirmation, helper handoff or automatic reopen. Real provider
+native-session acceptance also remains separate; the frozen QQQ RC.20 runtime
+does not advertise the required API 1.9 grant. No 1.0 sign-off is claimed here.
+
 ## Installed published 0.2.0 and confirmed output — 2026-10-31
 
 The exact published `0.2.0-rc.1` MSI completed with exit 0 and no reboot

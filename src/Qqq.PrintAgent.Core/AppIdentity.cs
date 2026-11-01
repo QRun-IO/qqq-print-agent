@@ -43,7 +43,7 @@ public static class AppIdentity
          new("Microsoft.Data.Sqlite", "MIT License"),
          new("SQLitePCLRaw", "Apache License 2.0"),
          new("Velopack", "MIT License"),
-         new("Windows App SDK / WinUI 3", "MIT License, with Microsoft binary components"),
+         new("Windows App SDK / WinUI 3", "Microsoft license terms; see ThirdPartyNotices in the installed App directory"),
          new(".NET Runtime", "MIT License"),
       ],
    };
