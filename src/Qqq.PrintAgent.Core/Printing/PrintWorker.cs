@@ -29,7 +29,9 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          // Drain a bounded outbox batch before claiming more work after an outage.
          return false;
       }
+      long inventoryStarted = System.Diagnostics.Stopwatch.GetTimestamp();
       IReadOnlyList<PrinterInfo> inventory = printers.Discover();
+      TimeSpan inventoryElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(inventoryStarted);
       if(canSynchronize?.Invoke() == false)
       {
          return false;
@@ -40,13 +42,15 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       {
          return false;
       }
+      long claimStarted = System.Diagnostics.Stopwatch.GetTimestamp();
       PrintJob? job = await ClaimAndRegisterAsync(inventory, token).ConfigureAwait(false);
+      TimeSpan claimElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(claimStarted);
       if(job is null)
       {
          return false;
       }
       try
-      { return await ProcessJobAsync(job, inventory, token).ConfigureAwait(false); }
+      { return await ProcessJobAsync(job, inventory, new JobAttempt(inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
       finally { options?.ActiveJobChanged?.Invoke(null); }
    }
 
@@ -84,7 +88,14 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       finally { options?.ClaimGate?.Release(); }
    }
 
-   private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
+   /// <summary>
+   /// Runs one claimed job and reports its outcome. The submission steps live in <see cref="SubmitJobAsync"/> so their
+   /// disposal scope stays inside this method's try block, which keeps every failure, including one raised while
+   /// releasing a reservation, recorded through the same FAILED or OUTCOME_UNKNOWN decision. One timing line per job is
+   /// logged afterwards so a slow print can be attributed to a phase from the service's own log without any extra
+   /// request, payload or printer access.
+   /// </summary>
+   private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, JobAttempt attempt, CancellationToken token)
    {
       PrinterInfo? assignedPrinter = inventory.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal));
       journal.TrackJob(job, string.IsNullOrWhiteSpace(assignedPrinter?.DisplayName) ? assignedPrinter?.Name : assignedPrinter.DisplayName);
@@ -95,47 +106,89 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          return false;
       }
 
-      bool submitting = false;
-      bool spooled = false;
+      attempt.Restart();
       try
-      {
-         if(job.Options.Copies < 1 || job.Options.Copies > EffectiveSettings.MaxCopies)
-         {
-            throw new InvalidDataException("Copies exceed the effective printing policy.");
-         }
-         await using IAsyncDisposable? reservation = options?.ReserveDocumentAsync is null ? null : await options.ReserveDocumentAsync(job, token).ConfigureAwait(false);
-         using DownloadedDocument? file = options?.StagingDirectory is null ? null : await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, token, options.ThrottleDownloadAsync).ConfigureAwait(false);
-         byte[]? content = file is null ? await api.DownloadAsync(job, token).ConfigureAwait(false) : null;
-         if(!printers.Discover().Any(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal) && p.Formats.Contains(job.Format, StringComparer.Ordinal)))
-         {
-            throw new InvalidOperationException("Assigned printer or document format is unavailable.");
-         }
-
-         await using IAsyncDisposable? submission = options?.AcquireSubmissionAsync is null ? null : await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
-         if((options?.CanSubmit ?? canDispatch)?.Invoke() == false)
-         { throw new InvalidOperationException("Dispatch is paused before native submission."); }
-         Record(job, "SUBMITTING");
-         await FlushAsync(token).ConfigureAwait(false);
-         if((options?.CanSubmit ?? canDispatch)?.Invoke() == false)
-         { throw new InvalidOperationException("Dispatch stopped before native submission; no bytes were submitted."); }
-         RealtimeSettings submissionSettings = EffectiveSettings;
-         if(job.Options.Copies > submissionSettings.MaxCopies || job.ContentLength > submissionSettings.MaximumDocumentBytes(job.Format))
-         { throw new InvalidDataException("Document or copies exceed the current submission policy."); }
-         token.ThrowIfCancellationRequested();
-         submitting = true;
-         string spoolId = file is not null && printers is IFilePrinterBackend files
-            ? await files.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token).ConfigureAwait(false)
-            : await printers.PrintAsync(job, content ?? throw new InvalidOperationException("File printing is required."), token).ConfigureAwait(false);
-         Record(job, "SPOOLED", spoolerJobId: spoolId);
-         spooled = true;
-      }
+      { await SubmitJobAsync(job, attempt, token).ConfigureAwait(false); }
       catch(Exception exception)
       {
-         Record(job, submitting ? "OUTCOME_UNKNOWN" : "FAILED", exception.Message);
+         Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? "OUTCOME_UNKNOWN" : "FAILED", exception.Message);
       }
+      log?.Invoke(attempt.TimingMessage(job.JobId));
       if(!token.IsCancellationRequested)
       { await FlushAsync(token).ConfigureAwait(false); }
-      return spooled || options?.RecoverIncomplete == false;
+      return attempt.Spooled || options?.RecoverIncomplete == false;
+   }
+
+   /// <summary>
+   /// Downloads, revalidates and submits one job. The reservation, staged file and submission lease are declared here and
+   /// released when this method returns, after SPOOLED is recorded, exactly as when the same steps ran inline. The
+   /// attempt records how far the job got so the caller can tell a refusal before any bytes from an uncertain submission.
+   /// </summary>
+   private async Task SubmitJobAsync(PrintJob job, JobAttempt attempt, CancellationToken token)
+   {
+      if(job.Options.Copies < 1 || job.Options.Copies > EffectiveSettings.MaxCopies)
+      {
+         throw new InvalidDataException("Copies exceed the effective printing policy.");
+      }
+      await using IAsyncDisposable? reservation = options?.ReserveDocumentAsync is null ? null : await options.ReserveDocumentAsync(job, token).ConfigureAwait(false);
+      using DownloadedDocument? file = options?.StagingDirectory is null ? null : await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, token, options.ThrottleDownloadAsync).ConfigureAwait(false);
+      byte[]? content = file is null ? await api.DownloadAsync(job, token).ConfigureAwait(false) : null;
+      attempt.Download = attempt.Lap();
+      RequireCurrentPrinter(job);
+      attempt.Revalidate = attempt.Lap();
+
+      await using IAsyncDisposable? submission = options?.AcquireSubmissionAsync is null ? null : await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
+      RequireSubmitAllowed("Dispatch is paused before native submission.");
+      Record(job, "SUBMITTING");
+      await FlushAsync(token).ConfigureAwait(false);
+      attempt.Gate = attempt.Lap();
+      RequireSubmitAllowed("Dispatch stopped before native submission; no bytes were submitted.");
+      RealtimeSettings submissionSettings = EffectiveSettings;
+      if(job.Options.Copies > submissionSettings.MaxCopies || job.ContentLength > submissionSettings.MaximumDocumentBytes(job.Format))
+      { throw new InvalidDataException("Document or copies exceed the current submission policy."); }
+      token.ThrowIfCancellationRequested();
+      attempt.Submitting = true;
+      attempt.Restart();
+      string spoolId = await SubmitNativeAsync(job, file, content, submissionSettings, token).ConfigureAwait(false);
+      attempt.Submit = attempt.Lap();
+      Record(job, "SPOOLED", spoolerJobId: spoolId);
+      attempt.Spooled = true;
+   }
+
+   /// <summary>
+   /// Discovers the printers again after the download and requires the assigned queue to still offer the job's format and
+   /// the selected media profile, so a queue or driver default that changed while the document streamed is refused before
+   /// any submission instead of printing on the wrong stock.
+   /// </summary>
+   private void RequireCurrentPrinter(PrintJob job)
+   {
+      PrinterInfo? currentPrinter = printers.Discover().SingleOrDefault(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal) && p.Formats.Contains(job.Format, StringComparer.Ordinal));
+      if(currentPrinter is null)
+      {
+         throw new InvalidOperationException("Assigned printer or document format is unavailable.");
+      }
+      PrinterMediaProfile.RequireMatch(job.Options, currentPrinter.MediaProfiles);
+   }
+
+   /// <summary>
+   /// Refuses the submission when dispatch is paused or stopped. It is checked before and after the SUBMITTING receipt is
+   /// acknowledged, because a pause can arrive while that acknowledgement is in flight and no bytes may be sent after it.
+   /// </summary>
+   private void RequireSubmitAllowed(string refusal)
+   {
+      if((options?.CanSubmit ?? canDispatch)?.Invoke() == false)
+      { throw new InvalidOperationException(refusal); }
+   }
+
+   /// <summary>
+   /// Hands the verified staged file, or the in-memory content for a backend without file support, to the native printer
+   /// and returns its spooler receipt. This is the only step after which an outcome is uncertain.
+   /// </summary>
+   private Task<string> SubmitNativeAsync(PrintJob job, DownloadedDocument? file, byte[]? content, RealtimeSettings submissionSettings, CancellationToken token)
+   {
+      return file is not null && printers is IFilePrinterBackend files
+         ? files.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
+         : printers.PrintAsync(job, content ?? throw new InvalidOperationException("File printing is required."), token);
    }
 
    private RealtimeSettings EffectiveSettings => options?.CurrentSettings?.Invoke() ?? options?.Settings ?? new();
@@ -165,7 +218,48 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       }
       finally { options?.EventGate?.Release(); }
    }
+
+   /// <summary>
+   /// Progress and phase timing of one claimed job. Progress tells the caller whether native submission began, which
+   /// decides between a known refusal and an uncertain outcome; the durations come from the monotonic clock and feed the
+   /// single timing line, so they carry no document content.
+   /// </summary>
+   private sealed class JobAttempt(TimeSpan inventory, TimeSpan claim)
+   {
+      private long _mark = System.Diagnostics.Stopwatch.GetTimestamp();
+
+      public bool Submitting { get; set; }
+
+      public bool Spooled { get; set; }
+
+      public TimeSpan Download { get; set; }
+
+      public TimeSpan Revalidate { get; set; }
+
+      public TimeSpan Gate { get; set; }
+
+      public TimeSpan Submit { get; set; }
+
+      /// <summary>Starts the next phase now, discarding the time since the previous mark.</summary>
+      public void Restart()
+      {
+         _mark = System.Diagnostics.Stopwatch.GetTimestamp();
+      }
+
+      /// <summary>Returns the time since the previous mark and starts the next phase at the same instant, so phases never overlap or leave a gap.</summary>
+      public TimeSpan Lap()
+      {
+         long now = System.Diagnostics.Stopwatch.GetTimestamp();
+         TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(_mark, now);
+         _mark = now;
+         return elapsed;
+      }
+
+      /// <summary>Formats the one per-job log line: the job identifier and whole milliseconds per phase, nothing else.</summary>
+      public string TimingMessage(string jobId)
+      {
+         return string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"{jobId}: timing inventory={inventory.TotalMilliseconds:F0}ms claim={claim.TotalMilliseconds:F0}ms download={Download.TotalMilliseconds:F0}ms revalidate={Revalidate.TotalMilliseconds:F0}ms gate={Gate.TotalMilliseconds:F0}ms submit={Submit.TotalMilliseconds:F0}ms");
+      }
+   }
 }
-
-
-

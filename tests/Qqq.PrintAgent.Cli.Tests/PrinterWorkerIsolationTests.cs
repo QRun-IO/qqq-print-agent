@@ -16,6 +16,21 @@ public sealed class PrinterWorkerIsolationTests
    private static string FixtureExecutable => Path.ChangeExtension(typeof(WorkerFixture.Program).Assembly.Location, ".exe");
 
    [Fact]
+   public async Task VerifiedMediaRefusalSurvivesTheWorkerBoundaryWithoutAnUncertainOutcome()
+   {
+      var backend = new IsolatedPrinterBackend(FixtureExecutable)
+      {
+         StartProcess = start =>
+         {
+            start.ArgumentList.Add("--media-drift");
+            return Process.Start(start) ?? throw new InvalidOperationException("Fixture failed.");
+         },
+      };
+      PrintJob job = new("fixture", "fixture", "Not printed", "PDF", new string('0', 64), 1, new PrintOptions(), "", "RECEIVED");
+      await Assert.ThrowsAsync<PrinterMediaMismatchException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-media-fixture.pdf"), CancellationToken.None));
+   }
+
+   [Fact]
    public async Task FileSubmissionUsesConfiguredWatchdogInsteadOfFixedTwoMinuteTimeout()
    {
       int childId = 0;

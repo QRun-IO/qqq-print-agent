@@ -76,11 +76,7 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrint
          PrinterWorkerHost.Response response = JsonSerializer.Deserialize<PrinterWorkerHost.Response>(text, PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Printer worker returned no response.");
          if(child.ExitCode != 0 || !response.Success)
          {
-            if(response.ErrorCode is "ALREADY_ABSENT" or "OWNERSHIP_MISMATCH")
-            {
-               throw new SpoolCancellationException(response.ErrorCode, response.Error ?? "Verified spool cancellation was refused.");
-            }
-            throw new IOException(response.Error ?? "The printer worker stopped unexpectedly. Inspect the printer before retrying.");
+            ThrowWorkerFailure(response);
          }
          return response;
       }
@@ -104,5 +100,14 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrint
             }
          }
       }
+   }
+
+   private static void ThrowWorkerFailure(PrinterWorkerHost.Response response)
+   {
+      if(string.Equals(response.ErrorCode, "MEDIA_PROFILE_MISMATCH", StringComparison.Ordinal))
+      { throw new PrinterMediaMismatchException(response.Error ?? "The selected printer default changed before submission."); }
+      if(response.ErrorCode is "ALREADY_ABSENT" or "OWNERSHIP_MISMATCH")
+      { throw new SpoolCancellationException(response.ErrorCode, response.Error ?? "Verified spool cancellation was refused."); }
+      throw new IOException(response.Error ?? "The printer worker stopped unexpectedly. Inspect the printer before retrying.");
    }
 }
