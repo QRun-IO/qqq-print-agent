@@ -20,6 +20,8 @@ public static class Program
    /// <summary>A payload-free activation signal, scoped to this user's session and settings profile.</summary>
    internal static EventWaitHandle? ActivationSignal { get; private set; }
 
+
+
    /// <summary>Initialize WinUI; machine installation and updates are handled by MSI.</summary>
    [STAThread]
    private static void Main()

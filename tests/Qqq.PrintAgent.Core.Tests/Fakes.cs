@@ -40,17 +40,17 @@ internal sealed class RecordingLog : IActivityLog
 
 
 
-   /// <inheritdoc/>
+   /// <summary>Captures an informational message in memory as "INFO " followed by the text, without writing any file, so a test can assert what was logged and at which level.</summary>
    public void Info(string message) => Entries.Add("INFO " + message);
 
 
 
-   /// <inheritdoc/>
+   /// <summary>Captures a warning in memory as "WARN " followed by the text, without writing any file, so a test can assert that a warning (not an error) was raised.</summary>
    public void Warning(string message) => Entries.Add("WARN " + message);
 
 
 
-   /// <inheritdoc/>
+   /// <summary>Captures an error in memory as "ERROR " followed by the text. The optional exception argument is deliberately ignored: only the level and message are recorded, so tests cannot depend on exception details.</summary>
    public void Error(string message, Exception? exception = null) => Entries.Add("ERROR " + message);
 }
 
