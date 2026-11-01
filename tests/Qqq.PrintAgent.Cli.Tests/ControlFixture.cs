@@ -14,6 +14,11 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// Shared test harness for remote-control behavior: an enrolled agent state in a temporary folder, a scriptable fake server
+/// (control poll, receipts, heartbeat, inventory, claim) and a synthetic printer that can block or fail cancellation. Tests set
+/// the scripted responses, then read the counters to see exactly what the runtime did.
+/// </summary>
 internal sealed class ControlFixture : IDisposable
 {
    internal string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "qqq-control-" + Guid.NewGuid().ToString("N"));
@@ -32,6 +37,9 @@ internal sealed class ControlFixture : IDisposable
    internal bool OfferJob { get; set; }
    internal static byte[] Content => [1, 2, 3];
 
+
+
+   /// <summary>Saves an enrolled configuration and shares the synthetic queue, so the runtime starts in a connected, ready state.</summary>
    internal ControlFixture()
    {
       using AgentStore store = new(DirectoryPath);
@@ -39,6 +47,9 @@ internal sealed class ControlFixture : IDisposable
       store.SetExposure("printer", true, Printer.Discover());
    }
 
+
+
+   /// <summary>Builds a runtime bound to this fixture's fake server on a unique private pipe, with 30 ms control and heartbeat intervals so tests finish quickly.</summary>
    internal AgentRuntime Runtime()
    {
       string pipe = "qqq-control-test-" + Guid.NewGuid().ToString("N");
@@ -47,10 +58,16 @@ internal sealed class ControlFixture : IDisposable
       { ControlIntervalOverride = TimeSpan.FromMilliseconds(30), HeartbeatInterval = TimeSpan.FromMilliseconds(30) };
    }
 
+
+
+   /// <summary>Builds a server command, by default an unexpired cancel of the seeded job; expired shifts both timestamps into the past so staleness handling can be tested.</summary>
    internal static DeviceControlCommand Command(string action = "CANCEL_SPOOL", string id = "command", bool expired = false) => new(id, "request-" + id, action,
       DateTimeOffset.UtcNow.AddMinutes(expired ? -20 : -1).ToString("O", CultureInfo.InvariantCulture),
       DateTimeOffset.UtcNow.AddMinutes(expired ? -10 : 10).ToString("O", CultureInfo.InvariantCulture), string.Equals(action, "CANCEL_SPOOL", StringComparison.Ordinal) ? "job" : null);
 
+
+
+   /// <summary>Records a job that has already been handed to the Windows spooler (spooler id 123) with its receipt acknowledged, the state a cancel command acts on.</summary>
    internal void SeedSpooledJob()
    {
       using AgentStore store = new(DirectoryPath);
@@ -60,9 +77,15 @@ internal sealed class ControlFixture : IDisposable
       store.Acknowledge(receipt.EventId);
    }
 
+
+
+   /// <summary>The one synthetic PDF job, with a hash that matches the fixture's three content bytes.</summary>
    private static PrintJob Job() => new("job", "printer", "Synthetic", "PDF", Convert.ToHexString(SHA256.HashData(Content)), Content.Length,
       new PrintOptions(), DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture), "CLAIMED");
 
+
+
+   /// <summary>Releases any blocked print, clears SQLite's pool so the files unlock, and deletes the temporary state folder.</summary>
    public void Dispose()
    {
       Printer.Release.TrySetResult();
@@ -70,6 +93,12 @@ internal sealed class ControlFixture : IDisposable
       Directory.Delete(DirectoryPath, recursive: true);
    }
 
+
+
+   /// <summary>
+   /// A printer and spooler-control stand-in. Printing returns spooler id 123 (optionally blocking until released), and
+   /// cancellation can succeed, be refused with a chosen outcome, or throw after the action to mimic a lost worker reply.
+   /// </summary>
    internal sealed class SyntheticPrinter : IPrinterBackend, IPrinterJobControl
    {
       internal int Cancellations;
@@ -78,7 +107,15 @@ internal sealed class ControlFixture : IDisposable
       internal bool LoseCancellationResult { get; set; }
       internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>Reports the single ready PDF queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new("printer", "Synthetic printer", "Fixture", "None", "READY", ["PDF"])];
+
+
+
+      /// <summary>Signals that printing started, optionally waits to be released, and returns the fixed spooler job id.</summary>
       public async Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
       {
          Entered.TrySetResult();
@@ -86,6 +123,10 @@ internal sealed class ControlFixture : IDisposable
          { await Release.Task.WaitAsync(cancellationToken); }
          return "123";
       }
+
+
+
+      /// <summary>Checks it was asked to cancel exactly the seeded spooler job, counts the call, then fails or refuses as scripted or succeeds.</summary>
       public Task CancelAsync(string printerName, string jobId, string spoolerJobId, CancellationToken cancellationToken = default)
       {
          Assert.Equal("Synthetic printer", printerName);
@@ -102,8 +143,12 @@ internal sealed class ControlFixture : IDisposable
       }
    }
 
+
+
+   /// <summary>Fake print server driven by the fixture's scripted state: it counts each kind of call and can fail polls and receipts on demand.</summary>
    private sealed class Handler(ControlFixture fixture) : HttpMessageHandler
    {
+      /// <summary>Routes by URL suffix to the matching scripted response and counter; unrecognized paths get an accepted-true reply.</summary>
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;

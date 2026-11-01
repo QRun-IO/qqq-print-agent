@@ -13,8 +13,15 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Operator-chosen device and printer descriptions must survive every hop between the companion and the server.</summary>
 public sealed class AgentRuntimeProfileTests
 {
+   /// <summary>
+   /// Full-length non-Latin profiles (512 and 4,096 characters) are sent over the management pipe, which escapes them into a
+   /// request larger than 8 KiB but within the 64 KiB command limit. They must come back in the snapshot, persist in the journal,
+   /// and reach the server unchanged in both the heartbeat and the printer inventory, while the Windows queue name and driver
+   /// stay the real ones rather than being replaced by the display name.
+   /// </summary>
    [Fact]
    public async Task FullUnicodeProfiles_RoundTripThroughPipePersistenceHeartbeatAndInventory()
    {
@@ -51,6 +58,9 @@ public sealed class AgentRuntimeProfileTests
       Assert.Contains("queue-id", persisted.GetExposedPrinterIds());
    }
 
+
+
+   /// <summary>A running agent runtime on a private test pipe with a fast heartbeat, a fake server and a no-print backend, plus signals for what the server saw.</summary>
    private sealed class Fixture : IAsyncDisposable
    {
       private readonly CancellationTokenSource _stop = new(TimeSpan.FromSeconds(30));
@@ -62,6 +72,9 @@ public sealed class AgentRuntimeProfileTests
       public TaskCompletionSource<DeviceProfile> DeviceSeen { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       public TaskCompletionSource<PrinterInfo> PrinterSeen { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+
+
+      /// <summary>Seeds an enrolled configuration with the queue already shared, then starts the runtime heartbeating every 50 ms.</summary>
       public Fixture()
       {
          NoPrintBackend backend = new();
@@ -77,6 +90,9 @@ public sealed class AgentRuntimeProfileTests
          _running = _runtime.RunAsync(Token);
       }
 
+
+
+      /// <summary>Sends one request over the pipe and returns the snapshot the service replies with.</summary>
       public async Task<AgentSnapshot> SendAsync(PipeRequest request)
       {
          await using NamedPipeClientStream pipe = new(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -88,6 +104,9 @@ public sealed class AgentRuntimeProfileTests
          return JsonSerializer.Deserialize<AgentSnapshot>(result, PrintApiClient.JsonOptions) ?? throw new IOException("Snapshot missing.");
       }
 
+
+
+      /// <summary>Stops the runtime, waits for it to unwind, clears SQLite's pools and deletes the temporary state directory.</summary>
       public async ValueTask DisposeAsync()
       {
          await _stop.CancelAsync();
@@ -103,8 +122,12 @@ public sealed class AgentRuntimeProfileTests
       }
    }
 
+
+
+   /// <summary>Fake server that checks the bearer token and reports the full-length device profile and printer description it receives.</summary>
    private sealed class Handler(Fixture fixture) : HttpMessageHandler
    {
+      /// <summary>Control polls get 404; heartbeat and inventory bodies are inspected for the 4,096-character descriptions and signal the fixture.</summary>
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          if(request.RequestUri!.AbsolutePath.EndsWith("/control/poll", StringComparison.Ordinal))
@@ -137,9 +160,17 @@ public sealed class AgentRuntimeProfileTests
       }
    }
 
+
+
+   /// <summary>One ready synthetic queue whose print call throws, because metadata tests must never print.</summary>
    private sealed class NoPrintBackend : IPrinterBackend
    {
+      /// <summary>Reports the single synthetic queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new("queue-id", "Windows Queue", "Synthetic driver", "TEST", "READY", ["PDF"])];
+
+
+
+      /// <summary>Always throws.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Metadata tests must never print.");
    }

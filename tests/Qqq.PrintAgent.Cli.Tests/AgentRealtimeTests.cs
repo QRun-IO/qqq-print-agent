@@ -8,8 +8,18 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// End-to-end behavior of the realtime (WebSocket) print path in a real agent runtime: server instructions arrive promptly even
+/// while a document is downloading, idle connections stay quiet, and a reconnect replays what the server never acknowledged
+/// without printing anything twice. The fixture treats any HTTP polling route as a failure.
+/// </summary>
 public sealed class AgentRealtimeTests
 {
+   /// <summary>
+   /// While a large document download is stuck, a pause is applied and a cancel command for that job is answered with a receipt,
+   /// and the job ends FAILED without ever reaching the printer. After resuming, a small job prints normally. No HTTP polling
+   /// route is touched at any point, which shows the push channel alone carries these instructions.
+   /// </summary>
    [Fact]
    public async Task PauseAndCancelRemainResponsiveDuringLargeDownloadWithoutHttpPolling()
    {
@@ -39,6 +49,9 @@ public sealed class AgentRealtimeTests
       Assert.Equal(0, fixture.ForbiddenPolls);
    }
 
+
+
+   /// <summary>With nothing to do, repeated heartbeats do not add claims or control polls: only the initial drains (after the server's welcome and the first inventory) may claim, so an idle device does not hammer the server.</summary>
    [Fact]
    public async Task IdleHeartbeatsDoNotPollForJobsOrControls()
    {
@@ -56,6 +69,13 @@ public sealed class AgentRealtimeTests
       Assert.True(fixture.Runtime.GetSnapshot().Connected);
    }
 
+
+
+   /// <summary>
+   /// The server never acknowledges the SPOOLED receipt and the connection drops. After reconnecting, that same receipt (same
+   /// message id) is sent again, and a job queued during the outage is printed, so two prints in total: the first job is not
+   /// printed a second time just because its receipt had to be replayed.
+   /// </summary>
    [Fact]
    public async Task ReconnectReplaysLostSpoolReceiptAndDrainsBufferedJobsWithoutPrintingAgain()
    {
@@ -77,24 +97,71 @@ public sealed class AgentRealtimeTests
       Assert.Equal(0, fixture.ForbiddenPolls);
    }
 
+
+
+   /// <summary>A read-only stream whose first read signals the test and then never completes until cancelled, simulating a document download that stalls.</summary>
    private sealed class StalledDocument : Stream
    {
       internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>Readable.</summary>
       public override bool CanRead => true;
+
+
+
+      /// <summary>Not seekable, as a network body is not.</summary>
       public override bool CanSeek => false;
+
+
+
+      /// <summary>Not writable.</summary>
       public override bool CanWrite => false;
+
+
+
+      /// <summary>Unknown length, as for a chunked response.</summary>
       public override long Length => throw new NotSupportedException();
+
+
+
+      /// <summary>Position is unsupported on a forward-only network body.</summary>
       public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+
+
+      /// <summary>Signals that the download reached the body, then waits until cancelled.</summary>
       public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
       {
          Entered.TrySetResult();
          await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
          return 0;
       }
+
+
+
+      /// <summary>Synchronous reads are unsupported; the download must be asynchronous.</summary>
       public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override void Flush() => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override void SetLength(long value) => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
    }
 }

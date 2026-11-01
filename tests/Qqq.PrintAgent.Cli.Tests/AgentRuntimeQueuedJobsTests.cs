@@ -13,8 +13,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Covers jobs the server has queued for this device but that have produced no local receipt yet.</summary>
 public sealed class AgentRuntimeQueuedJobsTests
 {
+   /// <summary>
+   /// A job known only from the server's queue must show in the snapshot, in a name-sorted page and in job details (with no
+   /// events), yet leave nothing in the local journal. Cancelling it asks the server, removes it from the view, and must never
+   /// reach the printer: the fake backend throws if a print is attempted, and the test also asserts zero attempts.
+   /// </summary>
    [Fact]
    public async Task QueuedJobAppearsAndCanBeCanceledBeforeAnyLocalReceipt()
    {
@@ -76,6 +82,9 @@ public sealed class AgentRuntimeQueuedJobsTests
       }
    }
 
+
+
+   /// <summary>A queued job's details come from the queue snapshot alone: status QUEUED and an empty event history.</summary>
    private static async Task VerifyQueuedDetailsAsync(string pipeName, string jobId, CancellationToken token)
    {
       string text = await SendAsync(pipeName, new PipeRequest("job-details", JobId: jobId), token);
@@ -84,6 +93,9 @@ public sealed class AgentRuntimeQueuedJobsTests
       Assert.Empty(details.Events);
    }
 
+
+
+   /// <summary>Sorting by printer name must carry the operator-chosen display name onto queued jobs, which have no local row to take it from.</summary>
    private static async Task VerifyPagedPrinterNameAsync(string pipeName, CancellationToken token)
    {
       string text = await SendAsync(pipeName, new PipeRequest("query-jobs", JobQuery: new JobQuery(SortBy: "printerName", Descending: false)), token);
@@ -91,6 +103,9 @@ public sealed class AgentRuntimeQueuedJobsTests
       Assert.Equal("Dispatch labels", Assert.Single(page.Jobs).PrinterName);
    }
 
+
+
+   /// <summary>Sends one line-delimited JSON request over the runtime's private test pipe and returns the one-line reply.</summary>
    private static async Task<string> SendAsync(string name, PipeRequest request, CancellationToken token)
    {
       await using NamedPipeClientStream pipe = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -101,13 +116,20 @@ public sealed class AgentRuntimeQueuedJobsTests
       return await reader.ReadLineAsync(token) ?? throw new IOException("Pipe closed before response.");
    }
 
+
+
+   /// <summary>Counts cancel calls so the fake server can stop listing the job once it has been cancelled.</summary>
    private sealed class ServerState
    {
       public int Cancellations;
    }
 
+
+
+   /// <summary>Fake server: lists one queued job until it is cancelled, has nothing to claim, and answers control polls with 404.</summary>
    private sealed class Handler(ServerState server) : HttpMessageHandler
    {
+      /// <summary>Routes by URL suffix: queued list, cancel, claim and control poll; anything else gets an empty JSON object.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
@@ -136,10 +158,21 @@ public sealed class AgentRuntimeQueuedJobsTests
       }
    }
 
+
+
+   /// <summary>A ready PDF queue that records and rejects any print attempt.</summary>
    private sealed class NoPrintBackend : IPrinterBackend
    {
       public int PrintAttempts { get; private set; }
+
+
+
+      /// <summary>Reports the single synthetic queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new PrinterInfo("printer", "Synthetic printer", "Fixture", "None", "READY", ["PDF"])];
+
+
+
+      /// <summary>Counts the attempt and throws, because a queued job must never be printed by these tests.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
       {
          PrintAttempts++;

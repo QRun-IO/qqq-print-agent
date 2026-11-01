@@ -13,8 +13,14 @@ using Qqq.PrintAgent.Testing;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
+/// <summary>
+/// The realtime transport carries job notifications and receipts over a WebSocket that the session client opens with the QQQ
+/// session cookie plus device proof. These tests cover when that connection may be opened, that large documents stream to disk
+/// with length and hash verification, and that a stalled download never blocks incoming messages.
+/// </summary>
 public sealed class RealtimeTransportTests
 {
+   /// <summary>The printing extension must be in a supported major version (2.x) before a realtime connection is opened; 1.x or 3.x fail with a configuration error instead of connecting to a server whose protocol may differ.</summary>
    [Theory]
    [InlineData("1.0.0")]
    [InlineData("1.1.0")]
@@ -34,6 +40,9 @@ public sealed class RealtimeTransportTests
       Assert.Equal(QqqSessionException.FailureKind.ConfigurationRequired, exception.Failure);
    }
 
+
+
+   /// <summary>A 25 MiB PDF, larger than the old 20 MiB in-memory limit, is streamed to a staging file and its full SHA-256 verifies, so big documents work without being held in memory.</summary>
    [Fact]
    public async Task PdfLargerThanLegacyTwentyMiBLimitStreamsAndVerifiesSuccessfully()
    {
@@ -53,6 +62,13 @@ public sealed class RealtimeTransportTests
       finally { Directory.Delete(staging, recursive: true); }
    }
 
+
+
+   /// <summary>
+   /// The WebSocket upgrade must carry the session cookie, the device proof and the client channel. While a document download
+   /// is stuck mid-body, a server message still reaches the channel within two seconds, so a slow download cannot hide a pause or
+   /// cancel command. Cancelling then aborts the download and leaves nothing in the staging folder.
+   /// </summary>
    [Fact]
    public async Task NativeCookieAndDeviceProofUpgradeKeepsReceivingDuringStalledDocument()
    {
@@ -95,6 +111,12 @@ public sealed class RealtimeTransportTests
       }
    }
 
+
+
+   /// <summary>
+   /// A download with matching bytes leaves one file that is held open against writers; a download whose hash does not match
+   /// throws and leaves no file. Either way the staging folder never holds a partial or unverified document.
+   /// </summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]
@@ -120,16 +142,27 @@ public sealed class RealtimeTransportTests
       finally { if(Directory.Exists(staging)) { Directory.Delete(staging, recursive: true); } }
    }
 
+
+
+   /// <summary>A synthetic PDF job of the given declared length; tests set the hash when they need a real one.</summary>
    private static PrintJob Job(long length) => new("job", "printer", "Synthetic", "PDF", new string('0', 64), length, new PrintOptions(), "", "CLAIMED");
 
+
+
+   /// <summary>Fake server that answers every request with the same document bytes.</summary>
    private sealed class DocumentHandler(byte[] bytes) : HttpMessageHandler
    {
+      /// <summary>Returns 200 with the configured bytes whatever the URL.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
          => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) });
    }
 
+
+
+   /// <summary>Fake native QQQ server: discovery (advertising the given printing extension version), table-based login, session identity and a document body supplied by the test. Any other route is a test failure.</summary>
    private sealed class NativeHandler(Stream content, string extensionVersion = "2.0.0") : HttpMessageHandler
    {
+      /// <summary>Serves the scripted discovery, authentication and identity responses, or the content stream for a content URL.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
@@ -147,24 +180,71 @@ public sealed class RealtimeTransportTests
       }
    }
 
+
+
+   /// <summary>A read-only stream whose first read signals the test and then never completes until cancelled, simulating a server that stalls mid-document.</summary>
    private sealed class BlockingDocument : Stream
    {
       internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>Readable.</summary>
       public override bool CanRead => true;
+
+
+
+      /// <summary>Not seekable, as a network body is not.</summary>
       public override bool CanSeek => false;
+
+
+
+      /// <summary>Not writable.</summary>
       public override bool CanWrite => false;
+
+
+
+      /// <summary>Unknown length, as for a chunked response.</summary>
       public override long Length => throw new NotSupportedException();
+
+
+
+      /// <summary>Position is unsupported on a forward-only network body.</summary>
       public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+
+
+      /// <summary>Signals that the download reached the body, then waits forever (until the token cancels).</summary>
       public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
       {
          Entered.TrySetResult();
          await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
          return 0;
       }
+
+
+
+      /// <summary>Synchronous reads are unsupported; the download must be asynchronous.</summary>
       public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override void Flush() => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override void SetLength(long value) => throw new NotSupportedException();
+
+
+
+      /// <summary>Unsupported.</summary>
       public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
    }
 }

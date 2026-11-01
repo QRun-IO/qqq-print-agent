@@ -8,8 +8,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// The agent store is the local durable record of what was claimed, attempted and reported. These tests protect what must not
+/// be lost or confused: pending receipts, uncertain submissions, operator review state, retention limits, protected
+/// credentials, and separation of one enrollment's history from another's.
+/// </summary>
 public sealed class AgentStoreTests
 {
+   /// <summary>A database with an unexpected schema makes the constructor fail, and the failure must release the file so the damaged journal can be inspected or replaced rather than left locked by a half-built store.</summary>
    [Fact]
    public void InvalidSchema_DoesNotKeepDatabaseOpenAfterConstructorFailure()
    {
@@ -42,6 +48,9 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>Document and printer names at the protocol maximum of 1,024 characters are stored whole, survive a restart, and remain searchable by prefix, so long names are never silently truncated in the history.</summary>
    [Fact]
    public void JobDetails_PreserveFullProtocolLengthNamesAcrossRestart()
    {
@@ -68,6 +77,9 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>The recent-jobs list holds 50 entries, but an old failure the operator has not reviewed stays in it even after 55 later successes, and drops out only once it has been acknowledged.</summary>
    [Fact]
    public void RecentJobs_KeepsOlderUnreviewedFailureAccessibleAfterFiftySuccesses()
    {
@@ -95,6 +107,12 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>
+   /// Job details keep the document, printer and format across a restart. An operator marking a failure as reviewed is a separate
+   /// fact from the server having received the receipt: reviewing never marks the failure event as delivered.
+   /// </summary>
    [Fact]
    public void JobDetails_PersistIdentityAndIndependentOperatorAcknowledgement()
    {
@@ -133,6 +151,13 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>
+   /// Pruning detailed history trims only a completed, delivered job's event list (its final state and spooler id remain, so a
+   /// redelivered job is still recognized and not printed twice). Jobs with an undelivered receipt, an unreviewed uncertain
+   /// outcome or active work keep their events until each of those conditions is cleared.
+   /// </summary>
    [Fact]
    public void Retention_PreservesUndeliveredUnreviewedAndActiveJobsAndDeduplication()
    {
@@ -174,6 +199,13 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>
+   /// Credentials that cannot be decrypted are never overwritten silently: a normal open fails and leaves the file untouched.
+   /// An explicit recovery open starts a clean scope, keeps the unreadable file as a recovery copy when new credentials are
+   /// saved, and brings the old pending and incomplete work back if the original device is enrolled again.
+   /// </summary>
    [Fact]
    public void ExplicitReenrollment_PreservesUnreadableCredentialsAndOldJournal()
    {
@@ -212,6 +244,9 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>A recorded SUBMITTING event and its undelivered receipt survive a restart, and the receipt stops being pending only after it is acknowledged; this is what lets the agent know a job may already have printed.</summary>
    [Fact]
    public void Journal_RetainsSubmissionAndPendingEventsAcrossRestart()
    {
@@ -237,6 +272,9 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>The saved server address, device id and token read back equal under the same Windows identity, while the device token does not appear as plain text in the file on disk.</summary>
    [Fact]
    public void Configuration_IsProtectedAndRoundTripsUnderCurrentIdentity()
    {
@@ -257,6 +295,13 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>
+   /// Enrolling against a different server and device starts a separate history, so the new connection cannot see or resend the
+   /// old one's pending receipts. A worker still running under the old enrollment keeps its original scope, and returning to the
+   /// original device (even with a rotated token or a trailing-slash address) restores its history in the order it happened.
+   /// </summary>
    [Fact]
    public void Reenrollment_IsolatesPendingEventsAndPreservesPreviousConnectionHistory()
    {
@@ -298,6 +343,12 @@ public sealed class AgentStoreTests
       }
    }
 
+
+
+   /// <summary>
+   /// A journal written before connection scoping existed is adopted by the connection that was saved at the time, so its
+   /// incomplete job is still visible to that device. Enrolling elsewhere hides it, and re-enrolling the original device brings it back.
+   /// </summary>
    [Fact]
    public void LegacyJournal_IsBoundToSavedConnectionBeforeReenrollment()
    {

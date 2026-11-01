@@ -11,8 +11,15 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Checks the print loop's pacing against a synthetic server: queued work is never delayed by the poll interval.</summary>
 public sealed class AgentRuntimeBacklogTests
 {
+   /// <summary>
+   /// With a 20-second poll interval configured, three queued jobs and the empty fourth claim must all complete within seconds, so
+   /// a backlog is drained back to back rather than one job per interval. After the queue empties (or the server fails) the loop
+   /// must stop claiming and wait, so an idle or failing server is not hammered. Claims are held until the loop is ready so setup
+   /// time does not count against the drain budget.
+   /// </summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]
@@ -64,6 +71,9 @@ public sealed class AgentRuntimeBacklogTests
       }
    }
 
+
+
+   /// <summary>Shared counters and gates between the test and the fake server: when the first claim arrived, when claims may proceed, and when the queue ran dry.</summary>
    private sealed class ServerState(bool failWhenEmpty)
    {
       public int Claims;
@@ -73,8 +83,12 @@ public sealed class AgentRuntimeBacklogTests
       public TaskCompletionSource Empty { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
    }
 
+
+
+   /// <summary>Fake print server: no control channel, one-byte documents, three jobs on the first three claims, then an empty (or failing) queue.</summary>
    private sealed class Handler(ServerState state) : HttpMessageHandler
    {
+      /// <summary>Answers control polls with 404, content with one byte and claims from the scripted queue, signalling the test at the first and the empty claim.</summary>
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
@@ -110,10 +124,21 @@ public sealed class AgentRuntimeBacklogTests
       }
    }
 
+
+
+   /// <summary>One ready PDF queue that counts documents instead of printing; no physical device is involved.</summary>
    private sealed class FakePrinter : IPrinterBackend
    {
       public int Printed { get; private set; }
+
+
+
+      /// <summary>Reports the single synthetic queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new("queue", "Synthetic", "Fake", "Fake", "READY", ["PDF"])];
+
+
+
+      /// <summary>Counts the document and returns a fixed receipt.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
       {
          Printed++;

@@ -19,6 +19,11 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// Harness for the realtime (WebSocket) print path: a real agent runtime on a temporary store, connected over a loopback
+/// WebSocket to a scripted server that speaks the realtime envelope protocol, with a queue of synthetic jobs and a file-based
+/// fake printer. Tests drive what the server says (settings, state, acknowledgements) and read back what the agent sent.
+/// </summary>
 internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
 {
    internal LoopbackWebSocketPeer Peer { get; } = new();
@@ -58,6 +63,13 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
    private readonly Task _run;
    private readonly List<Connection> _connections = [];
 
+
+
+   /// <summary>
+   /// Seeds an enrolled, signed-in agent store with two shared queues, then starts the runtime with a session client wired to
+   /// this fixture's fake HTTP server and loopback WebSocket. The concurrent-download limit and (optionally) cached realtime
+   /// settings are set up front so tests start from a known negotiated state.
+   /// </summary>
    internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null, bool cacheSettings = false, string printingVersion = "2.0.0")
    {
       PrintingVersion = printingVersion;
@@ -78,6 +90,13 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       _run = Runtime.RunAsync(_stopping.Token);
    }
 
+
+
+   /// <summary>
+   /// Accepts the agent's WebSocket, requires HELLO first, records its settings revision and capabilities, answers WELCOME with
+   /// the desired state and settings, and waits until the agent reports itself connected. A missing handshake or a server channel
+   /// that dies early fails with a redacted diagnostic instead of hanging.
+   /// </summary>
    internal async Task<Connection> ConnectAsync(bool loseSpoolAck = false, DeviceDesiredState? desiredState = null)
    {
       WebSocket socket;
@@ -101,8 +120,18 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       return connection;
    }
 
+
+
+   /// <summary>Current UTC time in round-trip format, as the server would stamp it.</summary>
    internal static string Now() => DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
+
+
+   /// <summary>
+   /// Queues a synthetic PDF job and registers how its document is served. Without a custom stream the document is a few real
+   /// bytes with a matching hash; with one, the declared length defaults to 25 MiB (or the given length) so large and failing
+   /// downloads can be simulated.
+   /// </summary>
    internal void AddJob(string id, Func<Stream>? content = null, string printerId = "printer", long? length = null)
    {
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-" + id);
@@ -111,6 +140,9 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
          new PrintOptions(), Now(), "QUEUED"));
    }
 
+
+
+   /// <summary>Polls a condition every 20 ms until it holds, and on the fixture's 30-second limit fails with a diagnostic naming the awaited expression.</summary>
    internal async Task WaitAsync(Func<bool> predicate, [CallerArgumentExpression(nameof(predicate))] string stage = "")
    {
       try
@@ -122,6 +154,9 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       { throw new TimeoutException(Diagnostic(stage), exception); }
    }
 
+
+
+   /// <summary>Builds a timeout message from message types and redacted, truncated log lines only, never payloads, cookies, proofs or documents.</summary>
    private string Diagnostic(string stage)
    {
       // Test evidence includes no envelope payload, cookie, proof, document or raw snapshot.
@@ -130,12 +165,18 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       return $"Synthetic runtime wait failed at {stage[..Math.Min(stage.Length, 200)]}; received types=[{types}]; recent logs=[{logs}]";
    }
 
+
+
+   /// <summary>Reads a job's recorded state from the agent's durable store, independent of what the agent reported over the wire.</summary>
    internal string? State(string id)
    {
       using var store = new AgentStore(DirectoryPath);
       return store.GetState(id);
    }
 
+
+
+   /// <summary>Stops the runtime and every server connection, tolerating the cancellations that shutdown causes, then removes the temporary store.</summary>
    public async ValueTask DisposeAsync()
    {
       await _stopping.CancelAsync();
@@ -151,13 +192,31 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       Directory.Delete(DirectoryPath, recursive: true);
    }
 
+
+
+   /// <summary>
+   /// A printer that accepts only the file-based submission the realtime path uses, counts and orders the jobs it receives, and
+   /// remembers the submission timeout it was given. The in-memory print method throws, so a regression to the older path fails.
+   /// </summary>
    internal sealed class SyntheticFilePrinter : IFilePrinterBackend
    {
       internal int Prints;
       internal TimeSpan LastSubmissionTimeout;
       internal ConcurrentQueue<string> Order { get; } = new();
+
+
+
+      /// <summary>Reports two ready queues, "printer" and "other", each accepting PDF and ZPL.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new("printer", "Synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"]), new("other", "Other synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"])];
+
+
+
+      /// <summary>Always throws: the native realtime path must submit a file, not a byte array.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new InvalidOperationException("The native realtime path must use a file.");
+
+
+
+      /// <summary>Checks the staged file's size matches the declared content length, records the job in order, and returns spooler id 123.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
       {
          Assert.Equal(job.ContentLength, new FileInfo(path).Length);
@@ -165,6 +224,10 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
          Order.Enqueue(job.JobId);
          return Task.FromResult("123");
       }
+
+
+
+      /// <summary>Captures the submission timeout the agent chose so tests can assert it, then submits normally.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
       {
          LastSubmissionTimeout = submissionTimeout;
@@ -172,14 +235,33 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       }
    }
 
+
+
+   /// <summary>
+   /// The server side of one accepted WebSocket. A background pump records every agent message, acknowledges it (the server's
+   /// durable-receipt promise), answers pings, releases claimed jobs on RECEIVED, and can drop the connection at the SPOOLED event
+   /// to simulate losing an acknowledgement.
+   /// </summary>
    internal sealed class Connection(WebSocket socket, RealtimeRuntimeFixture fixture, bool loseSpoolAck, CancellationToken token) : IAsyncDisposable
    {
       private readonly SemaphoreSlim _send = new(1, 1);
       private Task _pump = Task.CompletedTask;
       internal Task Completion => _pump;
+
+
+
+      /// <summary>Drops the socket without a close handshake, as a network failure would.</summary>
       internal void Abort() => socket.Abort();
+
+
+
+      /// <summary>Begins reading and acknowledging agent messages.</summary>
       internal void Start() => _pump = PumpAsync();
       internal TaskCompletionSource LostSpoolAck { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>Sends one server message, serialized so concurrent senders cannot interleave frames.</summary>
       internal async Task SendAsync(string type, object payload)
       {
          await _send.WaitAsync(token);
@@ -187,6 +269,14 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
          { await LoopbackWebSocketPeer.SendAsync(socket, type, payload, token); }
          finally { _send.Release(); }
       }
+
+
+
+      /// <summary>
+      /// Reads agent messages until cancelled. Test hooks can hold acknowledgement (before-ack, state-applied, received-release) to
+      /// create precise timing windows. A RECEIVED event frees the server's claimed job; PING gets PONG; otherwise ACK echoes the
+      /// message id, except that the SPOOLED event can be left unacknowledged and the connection dropped.
+      /// </summary>
       private async Task PumpAsync()
       {
          while(!token.IsCancellationRequested)
@@ -218,6 +308,10 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
             await SendAsync("ACK", new { acknowledgedMessageId = message.MessageId });
          }
       }
+
+
+
+      /// <summary>Aborts the socket, lets the pump finish and releases the socket and send gate.</summary>
       public async ValueTask DisposeAsync()
       {
          socket.Abort();
@@ -229,8 +323,16 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       }
    }
 
+
+
+   /// <summary>
+   /// Fake HTTP server for the session client: version discovery (advertising native sign-in and the configured printing
+   /// version), document content, claims, the queued list, enrollment and session identity. Any other route is a forbidden
+   /// polling or control call and is counted and thrown, which proves the realtime path adds no HTTP polling.
+   /// </summary>
    private sealed class Handler(RealtimeRuntimeFixture fixture) : HttpMessageHandler
    {
+      /// <summary>Routes by path; claims hand out the queue head under a lock so a job is claimed once until its RECEIVED event arrives.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
@@ -280,11 +382,19 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
             _ => Unexpected(path),
          });
       }
+
+
+
+      /// <summary>Counts and rejects a route the realtime path must never call.</summary>
       private string Unexpected(string path)
       {
          Interlocked.Increment(ref fixture.ForbiddenPolls);
          throw new InvalidOperationException("Unexpected HTTP polling/control route: " + path);
       }
+
+
+
+      /// <summary>A 200 response with the given text body.</summary>
       private static Task<HttpResponseMessage> Response(string value) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(value) });
    }
 }

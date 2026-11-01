@@ -13,8 +13,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Verifies how the running service quiesces itself so an MSI update never lands in the middle of a print.</summary>
 public sealed class AgentRuntimeUpdateTests
 {
+   /// <summary>
+   /// While a claim is in flight, prepare-update must wait for it and answer only after it finishes. Once ready, the service
+   /// stops claiming new jobs for longer than the poll interval yet keeps sending heartbeats, so the server still sees the machine
+   /// as alive. Resuming restores claiming. The fake server counts any claim made during the pause as a failure.
+   /// </summary>
    [Fact]
    public async Task UpdatePreparationDrainsActiveWorkThenPausesClaimsButKeepsHeartbeats()
    {
@@ -59,6 +65,9 @@ public sealed class AgentRuntimeUpdateTests
       }
    }
 
+
+
+   /// <summary>Sends one line-delimited management request over the runtime's private test pipe and returns the one-line reply.</summary>
    private static async Task<string> SendAsync(string name, string operation, CancellationToken token)
    {
       await using NamedPipeClientStream pipe = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -69,6 +78,9 @@ public sealed class AgentRuntimeUpdateTests
       return await reader.ReadLineAsync(token) ?? throw new IOException("Pipe closed.");
    }
 
+
+
+   /// <summary>Fake-server bookkeeping: counts claims and heartbeats and turns the pause and resume windows into awaitable signals for the test.</summary>
    private sealed class ServerState
    {
       public int Claims;
@@ -81,18 +93,27 @@ public sealed class AgentRuntimeUpdateTests
       public TaskCompletionSource PausedHeartbeat { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       public TaskCompletionSource ResumedClaim { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+
+
+      /// <summary>Starts the clock and begins treating any claim as a violation.</summary>
       public void ObservePause()
       {
          _pauseStarted = Stopwatch.GetTimestamp();
          Volatile.Write(ref _observingPause, 1);
       }
 
+
+
+      /// <summary>Ends the pause window and starts waiting for the first claim after resume.</summary>
       public void ObserveResume()
       {
          Volatile.Write(ref _observingPause, 0);
          Volatile.Write(ref _observingResume, 1);
       }
 
+
+
+      /// <summary>Counts a claim; during the pause it also fails the pause signal, after resume it completes the resumed-claim signal.</summary>
       public void RecordClaim()
       {
          Interlocked.Increment(ref Claims);
@@ -107,6 +128,9 @@ public sealed class AgentRuntimeUpdateTests
          }
       }
 
+
+
+      /// <summary>Completes the paused-heartbeat signal only for a heartbeat that arrives well after the pause began, proving traffic continues during it.</summary>
       public void RecordHeartbeat()
       {
          // Observe actual HTTP traffic after the original pause window (longer than
@@ -118,8 +142,12 @@ public sealed class AgentRuntimeUpdateTests
       }
    }
 
+
+
+   /// <summary>Fake server: the first claim is held open until released, which simulates a job in progress when the update is requested.</summary>
    private sealed class Handler(ServerState state) : HttpMessageHandler
    {
+      /// <summary>Control polls get 404, claims are recorded and held, heartbeats are recorded, and everything else returns an empty object.</summary>
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          if(request.RequestUri!.AbsolutePath.EndsWith("/control/poll", StringComparison.Ordinal))
@@ -140,9 +168,17 @@ public sealed class AgentRuntimeUpdateTests
       }
    }
 
+
+
+   /// <summary>Printer backend with no queues that throws if asked to print.</summary>
    private sealed class NoPrintBackend : IPrinterBackend
    {
+      /// <summary>Reports no printers.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [];
+
+
+
+      /// <summary>Always throws: update tests must never print.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Update tests must never print.");
    }

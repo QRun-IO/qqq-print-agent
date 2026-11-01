@@ -8,6 +8,11 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>Machine branding changes presentation without changing deployment identity.</summary>
 public sealed class RuntimeBrandingTests
 {
+   /// <summary>
+   /// An accent color is accepted only if its exact, unrounded contrast ratio against white text is at least 4.5:1 (#767676 passes,
+   /// #777777 does not), so a customer color can never make white button text unreadable. Rejection falls back to the default
+   /// gradient rather than to a nearby color.
+   /// </summary>
    [Theory]
    [InlineData("#FFFFFF", false)]
    [InlineData("#FFFF00", false)]
@@ -28,6 +33,12 @@ public sealed class RuntimeBrandingTests
       Assert.Equal(expected, new RuntimeBranding(AccentColor: color).Apply(AppIdentity.DefaultInfo).Brand.GradientStart);
    }
 
+
+
+   /// <summary>
+   /// Valid branding changes only what the customer sees (name, tagline, color, support link). The application id, copyright,
+   /// repository and data-directory variable are deployment identity and attribution, and must come through unchanged.
+   /// </summary>
    [Fact]
    public void ValidBrandingPreservesIdentityAndAttribution()
    {
@@ -46,6 +57,12 @@ public sealed class RuntimeBrandingTests
       Assert.Equal(AppIdentity.DefaultInfo.DataDirectoryVariable, info.DataDirectoryVariable);
    }
 
+
+
+   /// <summary>
+   /// Malformed JSON, a non-object root, and an object whose every field is unsafe (wrong type, control character, plain-http
+   /// support link, bad color, remote logo) all load as the default branding. A broken file must never stop the app or half-apply.
+   /// </summary>
    [Theory]
    [InlineData("not json")]
    [InlineData("[]")]
@@ -59,6 +76,9 @@ public sealed class RuntimeBrandingTests
       Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
    }
 
+
+
+   /// <summary>An absent file and one just over the 16 KiB limit both yield the default branding, bounding what a machine file can cost to read.</summary>
    [Fact]
    public void MissingAndOversizedFilesFallBack()
    {
@@ -69,6 +89,12 @@ public sealed class RuntimeBrandingTests
       Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
    }
 
+
+
+   /// <summary>
+   /// A support link with embedded credentials, a local file, or a script scheme is dropped while the valid display name beside
+   /// it is kept: the link is opened from the UI, so only safe web addresses may be offered.
+   /// </summary>
    [Theory]
    [InlineData("https://user:password@example.com")]
    [InlineData("file:///C:/support.html")]
@@ -83,6 +109,12 @@ public sealed class RuntimeBrandingTests
       Assert.Equal("Valid name", branding.DisplayName);
    }
 
+
+
+   /// <summary>
+   /// A logo is used only when it is a real PNG file resolved beside the settings file. A file that is not an image, or a
+   /// network (UNC) path, is rejected so the app never loads an arbitrary or remote file as an image.
+   /// </summary>
    [Fact]
    public void OnlyLocalBoundedPngLogoIsAccepted()
    {
@@ -98,6 +130,9 @@ public sealed class RuntimeBrandingTests
       Assert.Null(RuntimeBranding.Load(path).LogoPath);
    }
 
+
+
+   /// <summary>Names of 181 characters exceed the installer's 180-character branding limit, so the whole file is ignored rather than truncated.</summary>
    [Fact]
    public void LabelsBeyondInstallerLimitAreIgnored()
    {
@@ -107,6 +142,12 @@ public sealed class RuntimeBrandingTests
       Assert.Equal(new RuntimeBranding(), RuntimeBranding.Load(path));
    }
 
+
+
+   /// <summary>
+   /// Names at exactly the 180-character limit are kept intact, and the description stays generic so a customer name never
+   /// leaves the vendor's product name behind in descriptive text.
+   /// </summary>
    [Fact]
    public void LongCustomerNamesArePreservedAndGenericDescriptionIsUsed()
    {

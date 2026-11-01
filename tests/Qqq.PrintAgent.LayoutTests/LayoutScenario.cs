@@ -13,9 +13,22 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Qqq.PrintAgent;
 
+/// <summary>
+/// Drives the real main window through the operator's print-test path using UI automation peers, against the non-printing
+/// synthetic service: select a printer, open and confirm the test dialog, switch screens, check the footer and the About dialog,
+/// and write a result file. Each step waits for the visible state it depends on and throws a specific message if the UI differs.
+/// </summary>
 internal static class LayoutScenario
 {
    private static readonly JsonSerializerOptions s_json = new() { WriteIndented = true };
+
+
+
+   /// <summary>
+   /// Runs the whole scenario. The test label must be submitted exactly once, the success feedback must show, and optionally the
+   /// printer list must refresh behind the open dialog from the real five-second timer. On success it writes the measured window
+   /// size and the service's call counts as evidence; any deviation throws and nothing is written.
+   /// </summary>
    internal static async Task RunAsync(MainWindow window, SyntheticService service)
    {
       await WaitAsync(() => window.Content.XamlRoot is not null && service.Snapshots > 0);
@@ -73,6 +86,13 @@ internal static class LayoutScenario
       }, s_json));
    }
 
+
+
+   /// <summary>
+   /// Leaves the dialog open for 6.5 seconds without calling the refresh method, so only the window's own five-second timer can
+   /// update the screen. The dialog must stay open, nothing may be submitted, and the printer row and footer must show the new
+   /// snapshot; otherwise a timer refresh would be invisible to users who leave a dialog up.
+   /// </summary>
    private static async Task HoldForTimerRefreshAsync(FrameworkElement root, ListView printers, SyntheticService service)
    {
       string previousFooter = ((TextBlock)root.FindName("FooterContact")).Text;
@@ -97,6 +117,9 @@ internal static class LayoutScenario
       }
    }
 
+
+
+   /// <summary>Selects a navigation item through its automation peer, the same route assistive technology takes, rather than poking the control directly.</summary>
    private static void Navigate(FrameworkElement root, string id)
    {
       NavigationViewItem item = Descendants(root).OfType<NavigationViewItem>().Single(element => string.Equals(AutomationProperties.GetAutomationId(element), id, StringComparison.Ordinal));
@@ -108,6 +131,9 @@ internal static class LayoutScenario
       selection.Select();
    }
 
+
+
+   /// <summary>Presses a button through its automation invoke pattern, which fails if the control is not actually accessible.</summary>
    private static void Invoke(Control button)
    {
       AutomationPeer peer = FrameworkElementAutomationPeer.CreatePeerForElement(button) ?? throw new InvalidOperationException("Button automation peer missing.");
@@ -118,6 +144,13 @@ internal static class LayoutScenario
       invoke.Invoke();
    }
 
+
+
+   /// <summary>
+   /// Checks the footer end to end: known traffic shows as 2 KiB/s down and 1 KiB/s up, the rate decays to zero when idle while the
+   /// totals stay and are exposed in the accessible help text, and the server link is a local settings action with no web address.
+   /// Opening it must show the connection dialog, which is then closed.
+   /// </summary>
    private static async Task VerifyFooterAsync(FrameworkElement root, SyntheticService service)
    {
       var state = (TextBlock)root.FindName("TransportStateText");
@@ -155,9 +188,15 @@ internal static class LayoutScenario
       }
    }
 
+
+
+   /// <summary>Finds the content dialog currently shown in an open popup, or null when none is open.</summary>
    private static ContentDialog? Dialog(XamlRoot root) => VisualTreeHelper.GetOpenPopupsForXamlRoot(root)
       .SelectMany(popup => Descendants(popup.Child).Prepend(popup.Child)).OfType<ContentDialog>().FirstOrDefault();
 
+
+
+   /// <summary>Walks the visual tree depth first and yields every descendant of the given element.</summary>
    private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
    {
       for(int index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
@@ -171,6 +210,9 @@ internal static class LayoutScenario
       }
    }
 
+
+
+   /// <summary>Polls a UI condition every 25 ms and fails with a cancellation after 10 seconds, so a stuck window ends the run instead of hanging it.</summary>
    private static async Task WaitAsync(Func<bool> condition)
    {
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));

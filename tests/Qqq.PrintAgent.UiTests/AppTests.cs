@@ -38,6 +38,8 @@ public class AppTests
       session.WaitForElementGone("AboutVersionText");
    }
 
+
+
    /// <summary>Splash: shows, then dismisses itself.</summary>
    [Fact]
    public void Splash_ShowsThenDismissesItself()
@@ -99,6 +101,8 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
    /// <summary>The computer metadata dialog permits inspection and cancellation without changing the service.</summary>
    [Fact]
    public void MetadataEditor_CanBeOpenedAndCanceled()
@@ -120,6 +124,8 @@ public class AppTests
       session.WaitForElementGone("MetadataName");
       Assert.False(session.App.HasExited);
    }
+
+
 
    /// <summary>A real installed queue expands in place and opens settings without saving or printing.</summary>
    [Fact]
@@ -154,6 +160,8 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
    /// <summary>Uses existing job evidence only; the fixture must have at least one retained job.</summary>
    [Fact]
    public void ExistingJob_DoubleClickOpensStructuredDetailsWithoutMutation()
@@ -171,6 +179,8 @@ public class AppTests
       AppSession.WaitUntilGone(() => session.FindInApp(cf => cf.ByControlType(ControlType.Text).And(cf.ByName("Event history"))), "job details to close");
       Assert.False(session.App.HasExited);
    }
+
+
 
    /// <summary>Header direction changes are presentation-only and do not change service job records.</summary>
    [Fact]
@@ -190,6 +200,8 @@ public class AppTests
       session.WaitFor(() => session.FindInApp(cf => cf.ByAutomationId("SortJobTitle")) is { Name: "Sort by document, ascending" } button ? button : null, "document sort query to finish");
    }
 
+
+
    /// <summary>Requires retained jobs with at least two creation instants; verifies visible row values, not just header glyphs.</summary>
    [Fact]
    public void ExistingJobs_CreationSortChangesActualVisibleRowOrder()
@@ -208,6 +220,8 @@ public class AppTests
       session.WaitFor(() => session.WaitForElement("SortJobCreated").Name is "Sort by created, descending" ? history : null, "descending query to finish");
       _ = WaitForCreatedOrder(session, history, descending: true);
    }
+
+
 
    /// <summary>Expands existing evidence, collapses/reopens it and filters it away without changing jobs.</summary>
    [Fact]
@@ -239,6 +253,12 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
+   /// <summary>
+   /// Waits until the visible job rows show at least two distinct creation times in the requested order, reading each time from
+   /// the cell's accessible help text. Comparing what a user can actually see (not the header arrow) is what proves the sort.
+   /// </summary>
    private static DateTimeOffset[] WaitForCreatedOrder(AppSession session, AutomationElement history, bool descending)
    {
       DateTimeOffset[] observed = [];
@@ -258,6 +278,8 @@ public class AppTests
       }, "at least two distinct retained creation times in the requested visible order");
       return observed;
    }
+
+
 
    /// <summary>Requires an exposed PDF/ZPL queue; opens diagnostic choices and cancels without submitting any job.</summary>
    [Fact]
@@ -292,6 +314,12 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
+   /// <summary>
+   /// True for a visible printer row whose share checkbox is on and whose compact header lists both ZPL and PDF. These rows are
+   /// the only ones the diagnostic dialog test can use, so the test waits for one instead of assuming a particular queue name.
+   /// </summary>
    private static bool IsSharedLabelRow(AutomationElement row)
    {
       AutomationElement? exposure = row.FindFirstDescendant(cf => cf.ByControlType(ControlType.CheckBox));
@@ -321,6 +349,8 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
    /// <summary>A second launch restores the hidden existing window and exits without another companion.</summary>
    [Fact]
    public async Task Relaunch_RestoresHiddenExistingCompanion()
@@ -340,6 +370,8 @@ public class AppTests
       Assert.Equal(originalProcess, session.App.ProcessId);
       Assert.Single(session.TopLevelWindows(), window => string.Equals(window.Name, session.MainWindow.Name, StringComparison.Ordinal));
    }
+
+
 
    /// <summary>Search/filter remain read-only and lifecycle controls are discoverable without invoking them.</summary>
    [Fact]
@@ -396,6 +428,8 @@ public class AppTests
          () => session.ReadSettings().Contains("\"Theme\": \"Dark\"", StringComparison.Ordinal) ? session.MainWindow : null,
          "settings.json to record the dark theme");
    }
+
+
 
    /// <summary>Shared shell preferences persist without checking the network or changing machine startup.</summary>
    [Fact]

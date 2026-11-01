@@ -11,6 +11,11 @@ using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
+/// <summary>
+/// The sign-in client's trust rules, tested against scripted server responses: compatibility is checked before any credential is
+/// sent, a password goes only to the standard session endpoint, the browser flow uses PKCE with strict callback validation, and
+/// device proof headers travel only on routes the server scopes to the signed-in device.
+/// </summary>
 public sealed class QqqSessionAuthenticationTests
 {
    private static readonly Uri Origin = new("https://printing.example.invalid");
@@ -21,6 +26,13 @@ public sealed class QqqSessionAuthenticationTests
    private const string Provider = """{"issuer":"https://id.example.invalid/application/","authorization_endpoint":"https://id.example.invalid/authorize","code_challenge_methods_supported":["S256"]}""";
    private static readonly Uri Redirect = new("io.qrun.qqq-print-agent:/oauth/callback");
 
+
+
+   /// <summary>
+   /// A server whose discovery document has the wrong API version, client channel, extension name or version, path prefix or a
+   /// missing widgets feature is refused with a configuration error after exactly one public request, so no password, cookie or
+   /// device header is ever sent to an incompatible or unexpected server.
+   /// </summary>
    [Theory]
    [InlineData("1.9.0", "1.7.0")]
    [InlineData("1.9.0", "2.0.0")]
@@ -42,6 +54,13 @@ public sealed class QqqSessionAuthenticationTests
       AssertPublic(request);
    }
 
+
+
+   /// <summary>
+   /// The password appears only as Basic credentials on the manageSession login and is not kept afterwards. A cookie-only response
+   /// completes sign-in, later calls carry the cookie but no Authorization header, the exported credential redacts itself when
+   /// printed, and logout is sent cookie-only with the server's own origin.
+   /// </summary>
    [Fact]
    public async Task PasswordIsUsedOnlyForManageSessionAndCookieOnlyResponseIsAccepted()
    {
@@ -71,6 +90,13 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal(Origin.GetLeftPart(UriPartial.Authority), handler.Requests[4].Origin);
    }
 
+
+
+   /// <summary>
+   /// Login never succeeds on ambiguous evidence: a body uuid that disagrees with the cookie, duplicate or wrong-typed uuid
+   /// fields, no session at all, a cookie scoped to another path, or an immediately expired cookie. Any of these must leave the
+   /// client unauthenticated rather than guessing which value is the real session.
+   /// </summary>
    [Theory]
    [InlineData("""{"uuid":"other"}""", "sessionUUID=session-secret; Path=/; HttpOnly")]
    [InlineData("""{"uuid":"one","UUID":"two"}""", null)]
@@ -88,6 +114,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.False(client.IsAuthenticated);
    }
 
+
+
+   /// <summary>Two different session cookie names in one response (sessionUUID and sessionId) are contradictory, so login is rejected instead of choosing one.</summary>
    [Fact]
    public async Task ConflictingSessionCookiesAreRejected()
    {
@@ -103,6 +132,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.False(client.IsAuthenticated);
    }
 
+
+
+   /// <summary>When the server advertises an authentication type the client does not implement, password sign-in stops after discovery and metadata, with no credential request sent.</summary>
    [Theory]
    [InlineData("TOKEN")]
    [InlineData("unknown")]
@@ -118,6 +150,12 @@ public sealed class QqqSessionAuthenticationTests
       Assert.All(handler.Requests, AssertPublic);
    }
 
+
+
+   /// <summary>
+   /// Restoring a saved session first rechecks discovery and authentication metadata with public requests, then resumes only
+   /// through the standard manageSession call (an empty body, the cookie, the server origin, no Authorization header).
+   /// </summary>
    [Fact]
    public async Task RestoreDiscoversBeforeCookieAndResumesOnlyThroughStandardManageSession()
    {
@@ -140,6 +178,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal("saved-session", client.ExportCredential().SessionToken);
    }
 
+
+
+   /// <summary>A saved credential from a different server is refused locally, before any request, so a session cookie can never be replayed to another host.</summary>
    [Fact]
    public async Task AnotherOriginCredentialIsRejectedWithoutNetwork()
    {
@@ -149,6 +190,13 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Empty(handler.Requests);
    }
 
+
+
+   /// <summary>
+   /// After the server confirms the device belongs to the signed-in user, the device id and proof ride along only on device
+   /// routes. The admin route and the enrollment route get the session cookie but never the device proof, so management calls
+   /// cannot leak the device secret.
+   /// </summary>
    [Fact]
    public async Task DeviceProofIsBoundByServerIdentityAndNeverSentToManagementOrEnrollment()
    {
@@ -181,6 +229,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal("QQQ device credential (redacted)", proof.ToString());
    }
 
+
+
+   /// <summary>If binding returns a different principal than sign-in did, the bind fails and the client signs out, even when the email address is identical; identity comes from the server's principal id, never from email.</summary>
    [Fact]
    public async Task BindingRejectsChangedPrincipalWithoutInferringIdentityFromEmail()
    {
@@ -195,6 +246,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.False(client.IsAuthenticated);
    }
 
+
+
+   /// <summary>An identity reply lacking a principal and tenant id cannot approve a device, even if it names one; later device requests are refused without being sent.</summary>
    [Fact]
    public async Task IncompleteIdentityCannotApproveDevice()
    {
@@ -208,6 +262,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal(4, handler.Requests.Count);
    }
 
+
+
+   /// <summary>The client accepts the identity responses from the shared server-side fixtures (unbound and bound), so client and server agree on the wire shape.</summary>
    [Theory]
    [InlineData("printing-session.response.json", false)]
    [InlineData("printing-session-bound.response.json", true)]
@@ -226,6 +283,13 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal(bound, identity.HasApprovedDevice);
    }
 
+
+
+   /// <summary>
+   /// Printing calls must be a relative path inside the printing area. Absolute URLs, leading slashes, dot segments (plain or
+   /// encoded), fragments and non-printing paths are rejected before any request, so credentials cannot be steered to another
+   /// host or route.
+   /// </summary>
    [Theory]
    [InlineData("https://elsewhere.invalid/device/jobs")]
    [InlineData("/device/jobs")]
@@ -243,6 +307,12 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal(3, handler.Requests.Count);
    }
 
+
+
+   /// <summary>
+   /// 401 means sign in again and drops the session; 403 means signed in but not permitted and keeps it. The distinction decides
+   /// whether the operator is asked to log in or told they lack access.
+   /// </summary>
    [Theory]
    [InlineData(HttpStatusCode.Unauthorized, QqqSessionException.FailureKind.AuthenticationRequired, false)]
    [InlineData(HttpStatusCode.Forbidden, QqqSessionException.FailureKind.PermissionDenied, true)]
@@ -258,6 +328,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal(authenticated, client.IsAuthenticated);
    }
 
+
+
+   /// <summary>A response that expires the session cookie ends the local session and reports authentication required, matching what the server just did.</summary>
    [Fact]
    public async Task ExpiredCookieOnApiResponseClearsSession()
    {
@@ -271,6 +344,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.False(client.IsAuthenticated);
    }
 
+
+
+   /// <summary>A redirect to the login call is a transport refusal: it is not followed, its cookie is not adopted, and no extra request is made, so credentials are never re-sent to a redirect target.</summary>
    [Fact]
    public async Task RedirectedLoginNeverFollowsOrAcceptsCredentialResponse()
    {
@@ -283,6 +359,13 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal(3, handler.Requests.Count);
    }
 
+
+
+   /// <summary>
+   /// Browser sign-in requires the server to advertise exactly the supported native grant: the PKCE session flow, S256 challenge,
+   /// forced login prompt, the nativeSessionLogin block and an https issuer. Any weaker variant fails after two public requests,
+   /// before the provider or any credential is contacted.
+   /// </summary>
    [Theory]
    [InlineData("AUTHORIZATION_CODE_PKCE_SESSION", "AUTHORIZATION_CODE")]
    [InlineData("S256", "plain")]
@@ -301,6 +384,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.All(handler.Requests, AssertPublic);
    }
 
+
+
+   /// <summary>Native session login needs API 1.9 and the explicit nativeSessionLogin feature; an older API or a missing feature is refused after discovery and metadata only.</summary>
    [Fact]
    public async Task NativeSessionRequiresCore19AndExplicitFeature()
    {
@@ -315,6 +401,9 @@ public sealed class QqqSessionAuthenticationTests
       }
    }
 
+
+
+   /// <summary>The login redirect must be the one the server advertised and the client supports; a different custom scheme or a loopback http address is refused before the provider is contacted.</summary>
    [Fact]
    public async Task OnlyExactAdvertisedAndCentralSupportedRedirectCanBeUsed()
    {
@@ -329,6 +418,13 @@ public sealed class QqqSessionAuthenticationTests
       }
    }
 
+
+
+   /// <summary>
+   /// The authorization URL carries the client id, an S256 challenge, a forced login prompt, the exact redirect and 43-character
+   /// state and nonce. Completing the callback sends only the one-time code, the flow name and the PKCE verifier (whose hash is the
+   /// challenge) to manageSession with no credentials of any other kind, and the same attempt cannot be completed twice.
+   /// </summary>
    [Fact]
    public async Task BrowserUsesPkceStatePromptAndOnlyStandardSessionExchange()
    {
@@ -363,6 +459,13 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Equal(4, handler.Requests.Count);
    }
 
+
+
+   /// <summary>
+   /// A callback with the wrong or repeated state, a different address, a fragment, a foreign issuer, or one arriving after the
+   /// five-minute window is rejected without any exchange request, and it uses up the attempt so the correct callback cannot be
+   /// replayed afterwards.
+   /// </summary>
    [Theory]
    [InlineData("wrong-state")]
    [InlineData("duplicate-state")]
@@ -394,6 +497,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.False(client.IsAuthenticated);
    }
 
+
+
+   /// <summary>If the provider's own discovery document names a different issuer than the server advertised, no browser URL is produced, which stops a swapped or spoofed identity provider.</summary>
    [Fact]
    public async Task DiscoveryIssuerMismatchCannotLaunchBrowser()
    {
@@ -406,6 +512,12 @@ public sealed class QqqSessionAuthenticationTests
       Assert.All(handler.Requests, AssertPublic);
    }
 
+
+
+   /// <summary>
+   /// The identity key depends only on origin, principal, tenant and device, so it stays the same when the session token rotates,
+   /// and fields containing separator characters cannot be shifted between positions to collide with another identity.
+   /// </summary>
    [Fact]
    public async Task StableBindingExcludesRotatingCredentialsAndHasUnambiguousIdentity()
    {
@@ -425,6 +537,12 @@ public sealed class QqqSessionAuthenticationTests
          new QqqSessionBinding(Origin, "alpha", "beta\ngamma", "device").IdentityKey, StringComparer.Ordinal);
    }
 
+
+
+   /// <summary>
+   /// A slow document download must not hold up a control poll made on the same client, and signing out while it is in flight
+   /// wins: when the download later completes, it fails and the client stays signed out instead of reviving the session.
+   /// </summary>
    [Fact]
    public async Task LongPrintingResponseDoesNotBlockControlAndCannotRestoreLoggedOutSession()
    {
@@ -448,6 +566,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.False(client.IsAuthenticated);
    }
 
+
+
+   /// <summary>A pre-login discovery response over 64 KiB is rejected after one public request, bounding what an untrusted server can make the client read.</summary>
    [Fact]
    public async Task OversizedPublicResponseIsRejectedBeforeCredentials()
    {

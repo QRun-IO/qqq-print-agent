@@ -16,6 +16,11 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>Keep real pipe responses available until current and older clients read them.</summary>
 public sealed class AgentRuntimePipeResponseTests
 {
+   /// <summary>
+   /// A client that waits before reading must still get the complete reply, for both the length-framed reader and the older
+   /// line reader, whether the operation succeeds or is unknown. Afterwards the single pipe instance must accept the next client,
+   /// so one slow reader cannot lock operators out of the service.
+   /// </summary>
    [Theory]
    [InlineData("query-jobs", false)]
    [InlineData("query-jobs", true)]
@@ -41,6 +46,12 @@ public sealed class AgentRuntimePipeResponseTests
       Assert.Equal(0, JsonSerializer.Deserialize<JobPage>(next, PrintApiClient.JsonOptions)!.TotalCount);
    }
 
+
+
+   /// <summary>
+   /// If a client sends a request and never reads the reply, stopping the runtime must cancel the pending response wait instead
+   /// of hanging service shutdown on that client.
+   /// </summary>
    [Fact]
    public async Task Shutdown_CancelsResponseWait_WhenClientNeverReads()
    {
@@ -53,6 +64,12 @@ public sealed class AgentRuntimePipeResponseTests
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Running.WaitAsync(TimeSpan.FromSeconds(3)));
    }
 
+
+
+   /// <summary>
+   /// The response write on a bare pipe pair keeps waiting for the client to close, but gives up when its own deadline token
+   /// fires. This is the bound that stops an unresponsive client from holding the pipe past the service's per-command deadline.
+   /// </summary>
    [Fact]
    public async Task ResponseWait_RespectsDeadline_WhenClientNeverReads()
    {
@@ -72,6 +89,8 @@ public sealed class AgentRuntimePipeResponseTests
       await response.WaitAsync(TimeSpan.FromSeconds(2), deadline.Token);
       Assert.True(responseDeadline.IsCancellationRequested);
    }
+
+
 
    /// <summary>Observe the buffered response without consuming it, then deliberately delay the reader.</summary>
    private static async Task<string> SendAsync(Fixture fixture, string operation, bool legacyReader, bool delayedReader)
@@ -101,6 +120,8 @@ public sealed class AgentRuntimePipeResponseTests
       return await AgentPipeFraming.ReadAsync(client, AgentPipeFraming.MaximumResponseCharacters, fixture.Stop.Token);
    }
 
+
+
    /// <summary>A pre-fix disconnect is also ready to inspect; an arbitrary handler delay is not.</summary>
    private static async Task WaitForResponseOrDisconnectAsync(NamedPipeClientStream client, CancellationToken token)
    {
@@ -123,6 +144,8 @@ public sealed class AgentRuntimePipeResponseTests
       }
    }
 
+
+
    /// <summary>No configuration, network transport or real printer is present in this runtime fixture.</summary>
    private sealed class Fixture : IAsyncDisposable
    {
@@ -132,6 +155,9 @@ public sealed class AgentRuntimePipeResponseTests
       public CancellationTokenSource Stop { get; } = new(TimeSpan.FromSeconds(15));
       public Task Running { get; }
 
+
+
+      /// <summary>Starts the runtime on a uniquely named private pipe with small buffers, so tests never touch the installed service's pipe.</summary>
       public Fixture()
       {
          _runtime = new(_directory, _ => { }, new NoPrinters(), pipeName: PipeName,
@@ -140,6 +166,9 @@ public sealed class AgentRuntimePipeResponseTests
          Running = _runtime.RunAsync(Stop.Token);
       }
 
+
+
+      /// <summary>Stops the runtime, waits briefly for it to unwind, and removes the temporary state directory.</summary>
       public async ValueTask DisposeAsync()
       {
          await Stop.CancelAsync();
@@ -155,13 +184,24 @@ public sealed class AgentRuntimePipeResponseTests
       }
    }
 
+
+
+   /// <summary>Win32 peek: reports how many bytes are waiting on the pipe without consuming them, so tests can tell a buffered reply from a dropped connection.</summary>
    [DllImport("kernel32.dll", SetLastError = true)]
    [return: MarshalAs(UnmanagedType.Bool)]
    private static extern bool PeekNamedPipe(SafePipeHandle pipe, IntPtr buffer, uint bufferSize, IntPtr bytesRead, out uint totalBytesAvailable, IntPtr bytesLeftThisMessage);
 
+
+
+   /// <summary>Printer backend with no queues whose print call throws, so any accidental print fails the test.</summary>
    private sealed class NoPrinters : IPrinterBackend
    {
+      /// <summary>Reports no printers.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [];
+
+
+
+      /// <summary>Always throws: physical printing is forbidden here.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new InvalidOperationException("Physical printing is forbidden in this test.");
    }
 }

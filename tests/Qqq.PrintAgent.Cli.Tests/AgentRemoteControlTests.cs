@@ -10,8 +10,15 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// The server can pause the device, disconnect it, ask it to refresh its printer list, or cancel a job already handed to the
+/// Windows spooler. These tests protect the rules that make that safe: a stale or incomplete instruction never resumes a paused
+/// device, a cancel is performed at most once however many times it is delivered, and an uncertain result is reported as
+/// unknown rather than invented.
+/// </summary>
 public sealed class AgentRemoteControlTests
 {
+   /// <summary>A desired-state reply missing its dispatch flag or its revision is a malformed instruction. It is rejected and the device stays paused at its previous revision, so a truncated reply can never un-pause printing.</summary>
    [Theory]
    [InlineData("{\"revision\":6,\"connectionState\":\"CONNECTED\"}")]
    [InlineData("{\"dispatchPaused\":false,\"connectionState\":\"CONNECTED\"}")]
@@ -27,6 +34,9 @@ public sealed class AgentRemoteControlTests
       Assert.Equal(5, runtime.GetSnapshot().Control!.DesiredState.Revision);
    }
 
+
+
+   /// <summary>Every command receipt sent to the server, whether produced by a normal run or recovered after an interrupted one, carries a UTC completion time ending in Z and short enough for the server's field, because the server rejects any other form.</summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]
@@ -54,6 +64,9 @@ public sealed class AgentRemoteControlTests
       }
    }
 
+
+
+   /// <summary>If the cancel was performed but the worker's answer was lost, the outcome is recorded as unknown and later polls do not repeat the cancel (one call in total); retrying could cancel something it should not.</summary>
    [Fact]
    public async Task LostNativeCancellationResultStaysUnknownAndNeverRepeats()
    {
@@ -69,6 +82,13 @@ public sealed class AgentRemoteControlTests
       Assert.Equal(1, fixture.Printer.Cancellations);
    }
 
+
+
+   /// <summary>
+   /// When the server has forgotten an old command (404 on its receipt), a command nine days old is retired locally without
+   /// touching the spooler, and its saved receipt is kept. The seven-day window is what separates a pruned record from a receipt
+   /// the server simply has not seen yet, and normal command handling continues afterwards.
+   /// </summary>
    [Fact]
    public async Task PrunedServerReceiptRetiresTransportOnlyAfterSevenDays()
    {
@@ -97,6 +117,9 @@ public sealed class AgentRemoteControlTests
       Assert.Equal(1, fixture.Inventories);
    }
 
+
+
+   /// <summary>A 404 for a receipt of a current command is an error, not a delivery: the receipt stays pending to be retried (the cancel itself has already run once), so a server hiccup cannot make the agent forget what it did.</summary>
    [Fact]
    public async Task FutureReceipt404IsNotTreatedAsDeliveredOrRetired()
    {
@@ -111,6 +134,9 @@ public sealed class AgentRemoteControlTests
       Assert.Equal(1, fixture.Printer.Cancellations);
    }
 
+
+
+   /// <summary>After a pause at revision 5, an older revision (4) or a different instruction claiming the same revision (5, resumed) is refused as invalid data, so a delayed or conflicting reply cannot resume a device the operator paused.</summary>
    [Fact]
    public async Task OlderOrConflictingRevisionCannotResumePausedDevice()
    {
@@ -125,6 +151,12 @@ public sealed class AgentRemoteControlTests
       Assert.True(runtime.GetSnapshot().Control!.DesiredState.DispatchPaused);
    }
 
+
+
+   /// <summary>
+   /// The server never gets the first receipt, the agent restarts, and the same command is delivered again. The spooler cancel
+   /// still happens exactly once and every resent receipt is identical, which is what makes redelivery safe.
+   /// </summary>
    [Fact]
    public async Task LostReceiptAndDuplicateDeliveryNeverRepeatSpoolCancellation()
    {
@@ -145,6 +177,9 @@ public sealed class AgentRemoteControlTests
       Assert.Equal("CANCEL_REQUESTED", JsonSerializer.Deserialize<DeviceControlReceipt>(fixture.Receipts[0], PrintApiClient.JsonOptions)!.Outcome);
    }
 
+
+
+   /// <summary>A command that was marked as started but never finished (the agent stopped mid-run) is concluded as unknown on restart with no spooler call, and the job keeps its recorded state; the agent cannot tell whether the cancel happened, so it does not try again.</summary>
    [Fact]
    public async Task InterruptedExecutionMarkerBecomesUnknownWithoutNativeCall()
    {
@@ -161,6 +196,9 @@ public sealed class AgentRemoteControlTests
       Assert.Equal("SPOOLED", inspected.GetState("job"));
    }
 
+
+
+   /// <summary>An expired command, or one for a job this device does not hold, is answered with EXPIRED or OWNERSHIP_MISMATCH and never reaches Windows, so a late or misdirected cancel cannot affect a printer.</summary>
    [Theory]
    [InlineData(true, "EXPIRED")]
    [InlineData(false, "OWNERSHIP_MISMATCH")]
@@ -175,6 +213,9 @@ public sealed class AgentRemoteControlTests
       Assert.Equal(0, fixture.Printer.Cancellations);
    }
 
+
+
+   /// <summary>When Windows verifiably refuses the cancel (the spooler job is already gone, or is not ours), the exact reason is reported as the outcome rather than claiming a cancellation that did not occur.</summary>
    [Theory]
    [InlineData("ALREADY_ABSENT")]
    [InlineData("OWNERSHIP_MISMATCH")]
@@ -190,6 +231,12 @@ public sealed class AgentRemoteControlTests
       Assert.Equal(outcome, store.GetControlReceipt("command")!.Outcome);
    }
 
+
+
+   /// <summary>
+   /// While the server says disconnected, an inventory-refresh command is held, with no inventory sent and no receipt. The
+   /// disconnected state survives a restart even when the next poll fails, and the held refresh runs once the server reconnects the device.
+   /// </summary>
    [Fact]
    public async Task DisconnectedRefreshWaitsForReconnectAndRestrictionsSurviveRestart()
    {
@@ -211,6 +258,13 @@ public sealed class AgentRemoteControlTests
       Assert.Equal("INVENTORY_REFRESHED", restarted.GetSnapshot().Control!.LastOutcome);
    }
 
+
+
+   /// <summary>
+   /// A 401 on control polling marks the device as needing re-authorization, persists across a restart without further polling,
+   /// and keeps the job journal. Enrolling under a new device identity clears the denial and starts a fresh journal scope, after
+   /// which control is supported again.
+   /// </summary>
    [Fact]
    public async Task AuthDenialPersistsUntilNewEnrollmentScopeWithoutErasingJournal()
    {
@@ -236,6 +290,9 @@ public sealed class AgentRemoteControlTests
       Assert.Equal("SUPPORTED", reenrolled.GetSnapshot().Control!.Support);
    }
 
+
+
+   /// <summary>A 404 on the control endpoint means the server predates remote control, so the device records LEGACY support and keeps printing normally.</summary>
    [Fact]
    public async Task Legacy404ExplicitlyAllowsNormalPrinting()
    {

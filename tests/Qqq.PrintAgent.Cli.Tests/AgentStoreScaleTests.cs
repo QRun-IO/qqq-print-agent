@@ -15,8 +15,15 @@ using Xunit.Abstractions;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Volume checks for the local journal: history views, retention and the event outbox stay bounded as the store grows to tens of thousands of jobs.</summary>
 public sealed class AgentStoreScaleTests(ITestOutputHelper output)
 {
+   /// <summary>
+   /// With 10,000 and 30,000 seeded jobs, pages are limited to 100 and do not overlap, counts for status, attention, printer and
+   /// search filters are exact, and wildcard or quote characters in a search are treated as plain text. Pruning keeps the default
+   /// detail budget untouched, trims to a one-job budget when asked, and still protects an unreviewed failure's evidence. The
+   /// generous 30-second ceiling only catches unbounded growth; it is not a performance benchmark.
+   /// </summary>
    [Theory]
    [InlineData(10000)]
    [InlineData(30000)]
@@ -58,6 +65,12 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>
+   /// Ten thousand unacknowledged events are sent at most 200 per poll, and a new job is claimed only once the outbox is empty
+   /// (the claim happens on the 50th poll, not before), so a large backlog cannot starve receipts or grow a request unboundedly.
+   /// </summary>
    [Fact]
    public async Task TenThousandPendingEvents_DrainInBoundedBatchesBeforeAnotherClaim()
    {
@@ -87,6 +100,13 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>
+   /// Reading one page must not parse stored JSON for rows outside it, and reopening the store must not re-run the one-time
+   /// migration of legacy events. A deliberately corrupt row and a legacy-only event would break these calls if either work
+   /// were repeated on every query or open.
+   /// </summary>
    [Fact]
    public void Query_DoesNotDeserializeUnselectedHistoryOrRepeatLegacyBackfill()
    {
@@ -115,6 +135,9 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>Opens a direct connection to the store's journal file for seeding and tampering.</summary>
    private static SqliteConnection Open(string directory)
    {
       SqliteConnection database = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "journal.db") }.ToString());
@@ -122,6 +145,12 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       return database;
    }
 
+
+
+   /// <summary>
+   /// Inserts count jobs and one event each in a single transaction: every tenth job FAILED, printers alternating, titles
+   /// numbered, and events marked acknowledged unless pending is requested.
+   /// </summary>
    private static void Seed(string directory, int count, bool pending)
    {
       using SqliteConnection database = Open(directory);
@@ -150,11 +179,17 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       transaction.Commit();
    }
 
+
+
+   /// <summary>Fake server that counts event deliveries and claims and always answers with no job.</summary>
    private sealed class CountingHandler : HttpMessageHandler
    {
       public int Events { get; private set; }
       public int Claims { get; private set; }
 
+
+
+      /// <summary>Increments the matching counter by URL suffix and returns an empty claim.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
@@ -170,9 +205,17 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>Printer backend with no queues that throws if asked to print.</summary>
    private sealed class NoPrinter : IPrinterBackend
    {
+      /// <summary>Reports no printers.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [];
+
+
+
+      /// <summary>Always throws: scale tests must not print.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new InvalidOperationException("Scale tests must not print.");
    }
 }
