@@ -43,28 +43,33 @@ internal sealed class TestPrintEditor : StackPanel
 
    private void FormatChanged(object sender, SelectionChangedEventArgs e) => UpdateProfiles();
 
+   private void ProfileChanged(object sender, SelectionChangedEventArgs e) => UpdateGuidance();
+
    private void UpdateProfiles()
    {
+      _profile.SelectionChanged -= ProfileChanged;
       _profile.Items.Clear();
       bool zpl = string.Equals(SelectedFormat, "ZPL", StringComparison.Ordinal);
-      if(zpl)
+      foreach((string label, string value) in TestPrintDefaults.Choices(SelectedFormat))
       {
-         AddProfile("4 × 6 in label — 203 dpi", "LABEL_4X6_203");
-         AddProfile("4 × 6 in label — 300 dpi", "LABEL_4X6_300");
-         AddProfile("4 × 6 in label — 600 dpi", "LABEL_4X6_600");
-      }
-      else
-      {
-         AddProfile("US Letter — 8.5 × 11 in", "LETTER");
-         AddProfile("A4 — 210 × 297 mm", "A4");
-         AddProfile("4 × 6 in label", "LABEL_4X6_300");
+         AddProfile(label, value);
       }
       string preferred = TestPrintDefaults.Profile(SelectedFormat, _driverName);
       _profile.SelectedItem = _profile.Items.Cast<ComboBoxItem>().First(item => string.Equals(item.Tag as string, preferred, StringComparison.Ordinal));
       _profile.Header = zpl ? "Label stock and resolution" : "Paper or label stock";
-      _guidance.Text = zpl
-         ? "Load 4 × 6 in labels and verify the printer's actual resolution before printing. The default is only a driver-name suggestion (203 dpi when unknown); a wrong DPI changes the printed size. This diagnostic does not calibrate the printer or save device configuration."
-         : "Load stock matching the selected size and set the Windows queue to the same paper or label size. The diagnostic prints one copy at actual size; the stock selection does not change Windows printer defaults.";
+      UpdateGuidance();
+      _profile.SelectionChanged += ProfileChanged;
+   }
+
+   private void UpdateGuidance()
+   {
+      string stock = TestPrintDefaults.LabelStock(SelectedProfile);
+      bool shortPdf = !string.Equals(SelectedFormat, "ZPL", StringComparison.Ordinal) && (SelectedProfile?.StartsWith("LABEL_4X6_", StringComparison.Ordinal) == false) && stock.Length > 0;
+      _guidance.Text = string.Equals(SelectedFormat, "ZPL", StringComparison.Ordinal)
+         ? $"Load {(stock.Length > 0 ? stock : "matching")} labels and verify the printer's actual resolution before printing. The default is only a driver-name suggestion (203 dpi when unknown); a wrong DPI changes the printed size. This diagnostic does not calibrate the printer or save device configuration."
+         : shortPdf
+            ? $"Load {stock} labels first. This job carries its own actual-size {stock} paper, so the Windows queue default (for example 4 × 6 in) is not changed and nothing is printed until you continue. The diagnostic prints one copy."
+            : "Load stock matching the selected size and set the Windows queue to the same paper or label size. The diagnostic prints one copy at actual size; the stock selection does not change Windows printer defaults.";
    }
 
    private void AddProfile(string label, string value) => _profile.Items.Add(new ComboBoxItem { Content = label, Tag = value });

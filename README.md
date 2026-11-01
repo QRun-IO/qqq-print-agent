@@ -46,7 +46,7 @@ The 0.3 client requires discovered printing extension `>=2.0.0 <3.0.0` and stand
 - Set theme and splash duration, and open project/help/release links and dependency credits.
 - Print packing slips and other PDFs through the installed Windows driver.
 - Send printer-ready ZPL to Zebra/ZDesigner queues.
-- Generate one QQQ-branded warehouse diagnostic at a time: Letter, A4 or 4 × 6-inch PDF; 4 × 6-inch ZPL at 203, 300 or 600 dpi. Native choices prefer ZPL on compatible label queues, with a driver-name DPI suggestion that the operator verifies.
+- Generate one QQQ-branded warehouse diagnostic at a time: Letter, A4, or 4 × 6, 4 × 2 or 4 × 1-inch PDF; 4 × 6, 4 × 2 or 4 × 1-inch ZPL at 203, 300 or 600 dpi. Native choices prefer ZPL on compatible label queues, with a driver-name DPI suggestion that the operator verifies.
 - Sign in using the QQQ server's advertised authentication, then associate an existing pairing or enroll a new device with a short-lived code; the service protects its session and secondary device credential.
 - Keep printing when the desktop app is closed or the user logs out.
 - Preserve job receipts and outgoing status events across service restarts.

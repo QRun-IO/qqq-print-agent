@@ -7,6 +7,7 @@ printing extension 2.3.0 (wire payload v1 unchanged). Against a 2.0, 2.1 or 2.2
 (rendering) server the client keeps its three-capability HELLO and offers no media
 profiles, so existing behavior is unchanged.
 
+- Add 4 × 1 and 4 × 2 in test labels (ZPL at 203/300/600 dpi, one PDF choice each) to the existing Print test choices; the 4 × 6 choices and defaults are unchanged. These PDFs carry explicit actual-size job paper (101.6 × 25.4 / 50.8 mm) applied to a job-local copy of the queue defaults (so its Direct Thermal and other settings are kept) and checked against the device context before StartDoc. Needs the matching unreleased 0.4 server; older clients reject job paper. Load the correct stock first; nothing prints until the operator confirms.
 - Report each queue's machine-default paper dimensions and resolution as an opaque, revision-bound media profile, and advertise `printer-media-v1` only when the discovered server supports it. Defaults are configured facts, not physical stock sensing.
 - Refuse a selected-media job before spooling when the profile is unknown or its revision has drifted, and again at the native submission boundary. A proven pre-submit refusal is recorded as FAILED and is never treated as an uncertain outcome.
 - Normalize job-only driver copies and scale for selected PDFs and verify the effective device-context dimensions and resolution before StartDoc. ZPL (RAW) only rechecks the profile immediately before StartDocPrinter.

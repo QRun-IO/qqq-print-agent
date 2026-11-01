@@ -64,6 +64,64 @@ public sealed partial class WindowsPrinters
 
 
    /// <summary>
+   /// Rejects malformed or conflicting job paper, and any use with raw ZPL, which carries its own dimensions.
+   /// </summary>
+   internal static void RequireJobPaperSupport(PrintJob job)
+   {
+      if(job.Options.CustomPaperMicrons() is not null && !string.Equals(job.Format, "PDF", StringComparison.Ordinal))
+      {
+         throw new InvalidDataException("Job paper dimensions apply to PDF documents only; ZPL carries its own dimensions.");
+      }
+   }
+
+
+
+   /// <summary>
+   /// Applies explicit job paper to a clone of the machine defaults and verifies the driver kept one copy and 100 percent scale.
+   /// The caller validates physical geometry on the device context; the queue default, form list and persistent settings are untouched.
+   /// </summary>
+   internal static byte[] BuildCustomPaperMode(byte[] captured, (int WidthMicrons, int HeightMicrons) paper, Func<byte[], byte[]> normalize)
+   {
+      byte[] input = captured.ToArray();
+      uint fields = BinaryPrimitives.ReadUInt32LittleEndian(input.AsSpan(72));
+      uint overrides = fields & 0x110;
+      if((overrides & 0x10) != 0)
+      { BinaryPrimitives.WriteInt16LittleEndian(input.AsSpan(84), 100); }
+      if((overrides & 0x100) != 0)
+      { BinaryPrimitives.WriteInt16LittleEndian(input.AsSpan(86), 1); }
+      // Orientation, paper size, length and width on; a stored form name must not override the explicit size.
+      const uint explicitPaper = 0x1 | 0x2 | 0x4 | 0x8;
+      const uint formName = 0x10000;
+      BinaryPrimitives.WriteUInt32LittleEndian(input.AsSpan(72), (fields | explicitPaper) & ~formName);
+      BinaryPrimitives.WriteInt16LittleEndian(input.AsSpan(76), 1);
+      // DMPAPER_USER with tenths of a millimeter; length is the feed direction.
+      BinaryPrimitives.WriteInt16LittleEndian(input.AsSpan(78), 256);
+      BinaryPrimitives.WriteInt16LittleEndian(input.AsSpan(80), checked((short)Math.Round(paper.HeightMicrons / 100d)));
+      BinaryPrimitives.WriteInt16LittleEndian(input.AsSpan(82), checked((short)Math.Round(paper.WidthMicrons / 100d)));
+      byte[] output = normalize(input);
+      RequirePdfDefaults(output);
+      if((BinaryPrimitives.ReadUInt32LittleEndian(output.AsSpan(72)) & 0x110) != overrides)
+      {
+         throw new PrinterMediaMismatchException("The driver changed support for job-level copies or scale.");
+      }
+      return output;
+   }
+
+
+
+   /// <summary>
+   /// Reads the unchanged machine defaults for the queue and builds job-local explicit paper settings from them.
+   /// </summary>
+   private static byte[] PrepareCustomPdfMode(PrinterInfo printer, (int WidthMicrons, int HeightMicrons) paper)
+   {
+      byte[] captured = ReadMachineDevMode(printer.Name)
+         ?? throw new PrinterMediaMismatchException("The queue has no readable machine defaults to apply job paper to.");
+      return BuildCustomPaperMode(captured, paper, mode => MergeDriverMode(printer.Name, mode));
+   }
+
+
+
+   /// <summary>
    /// Lets DocumentProperties reconcile private settings in bounded buffers using input/output flags only, with no prompt or queue update.
    /// </summary>
    private static byte[] MergeDriverMode(string printerName, byte[] input)

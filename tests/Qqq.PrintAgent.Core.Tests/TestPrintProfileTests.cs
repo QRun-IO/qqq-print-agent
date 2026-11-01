@@ -18,6 +18,11 @@ public sealed class TestPrintProfileTests
    [InlineData("ZPL", "LABEL_4X6_203")]
    [InlineData("ZPL", "LABEL_4X6_300")]
    [InlineData("ZPL", "LABEL_4X6_600")]
+   [InlineData("PDF", "LABEL_4X2_300")]
+   [InlineData("PDF", "LABEL_4X1_300")]
+   [InlineData("ZPL", "LABEL_4X2_203")]
+   [InlineData("ZPL", "LABEL_4X1_300")]
+   [InlineData("ZPL", "LABEL_4X1_600")]
    public async Task SelectedMediaProfile_IsIncludedInActualTestPrintRequest(string format, string profile)
    {
       using CaptureHandler handler = new();
@@ -70,6 +75,30 @@ public sealed class TestPrintProfileTests
    [InlineData("PDF", "Laser 600dpi", "LETTER")]
    public void ResolutionSuggestion_UsesExplicitDpiHintsOnly(string format, string driver, string expected)
       => Assert.Equal(expected, TestPrintDefaults.Profile(format, driver));
+
+   [Fact]
+   public void ShortLabelChoices_AreFriendlyAndKeepFourBySixFirst()
+   {
+      IReadOnlyList<(string Label, string Profile)> zpl = TestPrintDefaults.Choices("ZPL");
+      Assert.Equal(
+         new[] { "LABEL_4X6_203", "LABEL_4X6_300", "LABEL_4X6_600", "LABEL_4X2_203", "LABEL_4X2_300", "LABEL_4X2_600", "LABEL_4X1_203", "LABEL_4X1_300", "LABEL_4X1_600" },
+         zpl.Select(choice => choice.Profile));
+      Assert.Equal("4 × 6 in label — 203 dpi", zpl[0].Label);
+      Assert.Equal("4 × 1 in label — 600 dpi", zpl[^1].Label);
+      IReadOnlyList<(string Label, string Profile)> pdf = TestPrintDefaults.Choices("PDF");
+      Assert.Equal(new[] { "LETTER", "A4", "LABEL_4X6_300", "LABEL_4X2_300", "LABEL_4X1_300" }, pdf.Select(choice => choice.Profile));
+      Assert.Equal("4 × 6 in label", pdf[2].Label);
+      Assert.All(zpl.Concat(pdf), choice => Assert.DoesNotContain("LABEL_", choice.Label, StringComparison.Ordinal));
+   }
+
+   [Theory]
+   [InlineData("LABEL_4X6_300", "4 × 6 in")]
+   [InlineData("LABEL_4X2_203", "4 × 2 in")]
+   [InlineData("LABEL_4X1_600", "4 × 1 in")]
+   [InlineData("LETTER", "")]
+   [InlineData(null, "")]
+   public void LabelStock_NamesTheStockToLoad(string? profile, string expected)
+      => Assert.Equal(expected, TestPrintDefaults.LabelStock(profile));
 
    private sealed class CaptureHandler : HttpMessageHandler
    {
