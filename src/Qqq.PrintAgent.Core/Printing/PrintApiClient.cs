@@ -9,12 +9,28 @@ using System.Text.Json;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
+/// <summary>
+/// The agent's client for the QQQ printing API. The base part holds the HTTP calls that remain (enrollment, claim, content,
+/// queued jobs and operator actions) and routes inventory, heartbeat and events over the realtime channel whenever one is
+/// attached. Other parts add the native session, downloads, realtime and control calls.
+/// </summary>
 public sealed partial class PrintApiClient : IDisposable
 {
    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
    private readonly HttpClient _http;
+
+
+
+   /// <summary>The agent's assembly version, sent with heartbeats so the server can show which build each device runs.</summary>
    public static string AgentVersion => typeof(PrintApiClient).Assembly.GetName().Version?.ToString() ?? "unknown";
 
+
+
+   /// <summary>
+   /// Creates a client for one server. The address must be HTTPS, or HTTP only on loopback for local development. Responses
+   /// are limited to 2 MiB and requests to 60 seconds, and a bearer token is attached only when one is supplied (the legacy
+   /// diagnostic path); native sessions authenticate through the session client instead.
+   /// </summary>
    public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null)
    {
       Uri uri = new(serverUrl.TrimEnd('/') + "/printing/v1/");
@@ -32,6 +48,9 @@ public sealed partial class PrintApiClient : IDisposable
       }
    }
 
+
+
+   /// <summary>Enrolls this computer with a short-lived code and returns the device identity and its secondary proof. A protocol version other than 1 is rejected rather than guessed at.</summary>
    public async Task<EnrollmentResponse> EnrollAsync(EnrollmentRequest request, CancellationToken token = default)
    {
       using HttpResponseMessage response = await _http.PostAsJsonAsync(_nativeSession ? "devices/enroll" : "enroll", request, JsonOptions, token).ConfigureAwait(false);
@@ -46,6 +65,9 @@ public sealed partial class PrintApiClient : IDisposable
       return result;
    }
 
+
+
+   /// <summary>Reports the printers this computer shares, over the realtime channel when attached (waiting for the server's acknowledgement) and otherwise over HTTP.</summary>
    public async Task InventoryAsync(IReadOnlyList<PrinterInfo> printers, CancellationToken token)
    {
       if(_realtime is not null)
@@ -57,8 +79,14 @@ public sealed partial class PrintApiClient : IDisposable
       response.EnsureSuccessStatusCode();
    }
 
+
+
+   /// <summary>Sends a liveness heartbeat without a device profile.</summary>
    public Task HeartbeatAsync(CancellationToken token) => HeartbeatAsync(null, token);
 
+
+
+   /// <summary>Sends a liveness heartbeat carrying the agent version and, when given, the computer profile, over the realtime channel when attached and otherwise over HTTP.</summary>
    public async Task HeartbeatAsync(DeviceProfile? profile, CancellationToken token)
    {
       if(_realtime is not null)
@@ -70,6 +98,9 @@ public sealed partial class PrintApiClient : IDisposable
       response.EnsureSuccessStatusCode();
    }
 
+
+
+   /// <summary>Asks the server for the next job for this device, or null when none is waiting. The server replays a claimed job until its RECEIVED event commits, so the caller must record it.</summary>
    public async Task<PrintJob?> ClaimAsync(CancellationToken token)
    {
       using HttpResponseMessage response = await _http.PostAsJsonAsync("device/jobs/claim", new { }, JsonOptions, token).ConfigureAwait(false);
@@ -77,6 +108,13 @@ public sealed partial class PrintApiClient : IDisposable
       return (await response.Content.ReadFromJsonAsync<JobClaim>(token).ConfigureAwait(false))?.Job;
    }
 
+
+
+   /// <summary>
+   /// Downloads a whole document into memory, rejecting an empty or over-20 MiB declaration up front. Reading stops the moment
+   /// the data exceeds the declared length, and the result must match the declared length and SHA-256 or it is refused, so a
+   /// truncated or altered document can never be printed.
+   /// </summary>
    public async Task<byte[]> DownloadAsync(PrintJob job, CancellationToken token)
    {
       if(job.ContentLength is < 1 or > 20_971_520)
@@ -111,6 +149,12 @@ public sealed partial class PrintApiClient : IDisposable
       return content;
    }
 
+
+
+   /// <summary>
+   /// Delivers one job event. Over the realtime channel the message id is derived from the event id and the server must
+   /// acknowledge it, so a replay after a lost acknowledgement carries the same identity and is not applied twice.
+   /// </summary>
    public async Task EventAsync(string jobId, PrintEvent printEvent, CancellationToken token)
    {
       if(_realtime is not null)
@@ -122,8 +166,14 @@ public sealed partial class PrintApiClient : IDisposable
       response.EnsureSuccessStatusCode();
    }
 
+
+
+   /// <summary>Releases the HTTP client.</summary>
    public void Dispose() => _http.Dispose();
 
+
+
+   /// <summary>Lists jobs the server is holding for this device but this computer has not received. A server without the endpoint (404) is treated as having none, so an older server only loses the preview.</summary>
    public async Task<IReadOnlyList<PrintJob>> QueuedJobsAsync(CancellationToken token)
    {
       using HttpResponseMessage response = await _http.GetAsync("device/jobs/queued", token).ConfigureAwait(false);
@@ -134,10 +184,19 @@ public sealed partial class PrintApiClient : IDisposable
       return result.RootElement.TryGetProperty("jobs", out JsonElement jobs) ? jobs.Deserialize<PrintJob[]>(JsonOptions) ?? [] : [];
    }
 
+
+
    /// <summary>Request an explicit operator action without retaining document bytes locally.</summary>
    public Task<string> OperatorActionAsync(string operation, string? jobId, string? printerId, string? format, bool confirmDuplicateRisk, CancellationToken token)
       => OperatorActionAsync(operation, jobId, printerId, format, confirmDuplicateRisk, null, token);
 
+
+
+   /// <summary>
+   /// Asks the server to run a test print, retry or cancel as an explicit operator action. Each call carries a fresh request
+   /// identifier, the retry flag states that the operator accepted the duplicate-print risk, and a refusal is turned into the
+   /// server's own message when it gave one. Returns the new job identifier, or empty when the action created none.
+   /// </summary>
    public async Task<string> OperatorActionAsync(string operation, string? jobId, string? printerId, string? format, bool confirmDuplicateRisk, string? testProfile, CancellationToken token)
    {
       string path = operation switch
@@ -171,8 +230,3 @@ public sealed partial class PrintApiClient : IDisposable
       return result.RootElement.TryGetProperty("jobId", out JsonElement id) ? id.GetString() ?? "" : "";
    }
 }
-
-
-
-
-

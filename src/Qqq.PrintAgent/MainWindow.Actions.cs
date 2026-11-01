@@ -12,11 +12,22 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
 
+/// <summary>
+/// Operator actions part of the main window: confirmations, requests that change service state (test print, retry, cancel,
+/// review, settings), and the Windows service and sign-in startup controls. Each action runs only when no other one is
+/// running and always refreshes afterwards, so the screen shows what the service really did.
+/// </summary>
 public sealed partial class MainWindow
 {
    private bool _startupEnabled;
    private AgentServiceStatus? _serviceStatus;
 
+
+
+   /// <summary>
+   /// Asks the operator to confirm an action in a dialog whose default button is Back, so pressing Enter cancels rather than
+   /// proceeds. It declines without showing anything while another request is running or the window is closing.
+   /// </summary>
    private async Task<bool> ConfirmAsync(string title, string message, string action)
    {
       if(_updatesClosed || _busy)
@@ -27,6 +38,9 @@ public sealed partial class MainWindow
       return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
    }
 
+
+
+   /// <summary>Recognises the service's "Error:" reply, shows its text as feedback and reports true, so callers can stop instead of parsing an error as data.</summary>
    private bool IsActionError(string response)
    {
       if(!response.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
@@ -37,6 +51,13 @@ public sealed partial class MainWindow
       return true;
    }
 
+
+
+   /// <summary>
+   /// Sends one state-changing request to the service while the window is marked busy. A timeout or broken pipe is reported
+   /// as "result could not be confirmed" with advice to check Jobs and Logs, because the request may already have reached the
+   /// server or the printer and must not be blindly repeated. The list is refreshed afterwards either way.
+   /// </summary>
    private async Task RunActionAsync(PipeRequest request)
    {
       if(_updatesClosed || _busy)
@@ -70,6 +91,9 @@ public sealed partial class MainWindow
       await RefreshAsync();
    }
 
+
+
+   /// <summary>Lets the operator choose one built-in diagnostic (format and profile) for a printer and sends exactly one request when they confirm; Back is the default so nothing prints by accident.</summary>
    private async Task TestPrintAsync(PrinterSnapshot printer)
    {
       if(_updatesClosed || _busy)
@@ -87,6 +111,9 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Opens the Windows printer settings page, with written directions as a fallback when Windows will not launch it.</summary>
    private async void PrinterSettings_Click(object sender, RoutedEventArgs e)
    {
       if(!await global::Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:printers")))
@@ -95,6 +122,9 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Opens the Windows Services console so the operator can inspect the print service, and reports a failure to start it as feedback.</summary>
    private void Services_Click(object sender, RoutedEventArgs e)
    {
       try
@@ -107,6 +137,12 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>
+   /// Reads the Windows service and sign-in task state off the UI thread and updates the Settings controls. Controls stay
+   /// disabled while the read runs and when it fails, so no action is offered on an unknown state, and overlapping reads are ignored.
+   /// </summary>
    private async Task RefreshLifecycleAsync()
    {
       if(_loadingLifecycle)
@@ -147,8 +183,14 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Starts the Windows service from its button; the work is shared with restart in <c>ChangeServiceAsync</c>.</summary>
    private async void StartService_Click(object sender, RoutedEventArgs e) => await ChangeServiceAsync(restart: false);
 
+
+
+   /// <summary>Restarts the service only after the operator confirms, because a job being submitted could be left with an uncertain outcome.</summary>
    private async void RestartService_Click(object sender, RoutedEventArgs e)
    {
       if(await ConfirmAsync("Restart the print service?", "A job being submitted could have an uncertain outcome. Wait for active jobs to finish when possible.", "Restart service"))
@@ -157,6 +199,9 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Starts or restarts the Windows service with the window marked busy and both service buttons disabled, then re-reads the service state and the snapshot so the screen reflects the result.</summary>
    private async Task ChangeServiceAsync(bool restart)
    {
       if(_updatesClosed || _busy)
@@ -183,6 +228,13 @@ public sealed partial class MainWindow
       await RefreshAsync();
    }
 
+
+
+   /// <summary>
+   /// Turns the sign-in startup task on or off. It ignores changes made by the window itself while loading, applies the
+   /// choice through the startup helper, and always resets the switch to the real saved state afterwards, so the display never
+   /// shows a preference that was not actually applied.
+   /// </summary>
    private async void Startup_Toggled(object sender, RoutedEventArgs e)
    {
       if(_initializing || _loadingLifecycle || StartupToggle.IsOn == _startupEnabled)

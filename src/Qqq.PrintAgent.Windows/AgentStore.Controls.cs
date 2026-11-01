@@ -10,8 +10,14 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Remote-control part of the store: the server's desired state and the journal of control commands with their receipts.
+/// A command's intent is committed before it is carried out and its receipt before it is delivered, so a crash or lost
+/// acknowledgement can be recovered and reported without ever performing a physical action twice.
+/// </summary>
 public sealed partial class AgentStore
 {
+   /// <summary>Creates the control tables and their indexes when they do not exist yet; existing data is untouched.</summary>
    private void InitializeControls()
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -24,6 +30,9 @@ public sealed partial class AgentStore
       command.ExecuteNonQuery();
    }
 
+
+
+   /// <summary>Reads this connection's saved control state, or the initial (unrestricted-but-unsynchronized) state when none was saved or it cannot be read.</summary>
    public AgentControlState LoadControlState()
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -32,6 +41,13 @@ public sealed partial class AgentStore
       return command.ExecuteScalar() is string json ? JsonSerializer.Deserialize<AgentControlState>(json, PrintApiClient.JsonOptions) ?? AgentControlState.Initial : AgentControlState.Initial;
    }
 
+
+
+   /// <summary>
+   /// Saves this connection's control state in one transaction after discarding state of other connections older than 30
+   /// days that has no undelivered command. At most 128 other connections are kept; beyond that the call throws instead of
+   /// deleting evidence, so retained connection state is reviewed rather than silently dropped.
+   /// </summary>
    public void SaveControlState(AgentControlState state)
    {
       using SqliteTransaction transaction = _database.BeginTransaction();
@@ -53,7 +69,13 @@ public sealed partial class AgentStore
       transaction.Commit();
    }
 
-   /// <summary>Commit the execution marker before any effect. An existing marker must never be executed again.</summary>
+
+
+   /// <summary>
+   /// Commit the execution marker before any effect. An existing marker must never be executed again: it returns false for a
+   /// command already recorded with identical content and throws when the same identity arrives with different content. It
+   /// also removes expired acknowledged commands and refuses new ones once 4096 are held, so the journal stays bounded.
+   /// </summary>
    public bool BeginControlCommand(DeviceControlCommand value)
    {
       using SqliteTransaction transaction = _database.BeginTransaction();
@@ -87,6 +109,9 @@ public sealed partial class AgentStore
       return true;
    }
 
+
+
+   /// <summary>Returns the saved receipt for a command, or null when none was recorded; used to answer a repeated command with its original result instead of acting again.</summary>
    public DeviceControlReceipt? GetControlReceipt(string commandId)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -96,6 +121,9 @@ public sealed partial class AgentStore
       return command.ExecuteScalar() is string json ? JsonSerializer.Deserialize<DeviceControlReceipt>(json, PrintApiClient.JsonOptions) : null;
    }
 
+
+
+   /// <summary>Stores a command's receipt only if it has none yet, so the first recorded outcome is final and a later retry cannot rewrite it.</summary>
    public void SaveControlReceipt(string commandId, DeviceControlReceipt receipt)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -106,6 +134,9 @@ public sealed partial class AgentStore
       command.ExecuteNonQuery();
    }
 
+
+
+   /// <summary>Returns up to 20 receipts not yet acknowledged by the server, oldest expiry first, so delivery after an outage proceeds in bounded, ordered steps.</summary>
    public IReadOnlyList<(string CommandId, DeviceControlReceipt Receipt)> PendingControlReceipts()
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -120,6 +151,13 @@ public sealed partial class AgentStore
       return result;
    }
 
+
+
+   /// <summary>
+   /// Gives every command that has a recorded intent but no receipt an OUTCOME_UNKNOWN receipt (up to 20 per call). That is the
+   /// state after a crash between starting an action and recording its result; the action is not repeated, and the receipt
+   /// tells the server and the operator to inspect what happened.
+   /// </summary>
    public void RecoverInterruptedControlCommands()
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -138,6 +176,9 @@ public sealed partial class AgentStore
       }
    }
 
+
+
+   /// <summary>Marks a receipt as delivered, called only after the server accepted it, so an undelivered receipt stays pending and is retried.</summary>
    public void AcknowledgeControlReceipt(string commandId)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -147,7 +188,13 @@ public sealed partial class AgentStore
       command.ExecuteNonQuery();
    }
 
-   /// <summary>Transport retirement is not server acknowledgement; preserve the exact outcome locally.</summary>
+
+
+   /// <summary>
+   /// Transport retirement is not server acknowledgement; preserve the exact outcome locally. A receipt older than seven days
+   /// that the server no longer recognises is marked retired (a different value from acknowledged) so it stops being retried
+   /// while its recorded outcome remains available; the method returns whether anything was retired.
+   /// </summary>
    public bool RetireExpiredControlReceipt(string commandId)
    {
       using SqliteCommand command = _database.CreateCommand();

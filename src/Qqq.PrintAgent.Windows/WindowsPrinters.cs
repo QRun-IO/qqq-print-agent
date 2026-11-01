@@ -20,7 +20,13 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>Windows spooler discovery, RAW ZPL, and Windows PDF renderer to native GDI.</summary>
 public sealed partial class WindowsPrinters : IFilePrinterBackend
 {
-   /// <summary>Enumerate installed queues visible to this Windows identity.</summary>
+   /// <summary>
+   /// Enumerates the queues visible to this Windows identity (for the service, the machine-wide ones). A queue whose port
+   /// or driver needs a person at the keyboard (file output, print-to-PDF, XPS, fax, OneNote) is reported UNKNOWN with no
+   /// formats so it can never be exposed to unattended printing. ZPL is offered only for Zebra and ZDesigner queues, and
+   /// the queue's configured default media is attached when it can be read. The queue identifier is a hash of the name, so
+   /// the raw queue name is never used as an identifier on the wire.
+   /// </summary>
    public IReadOnlyList<PrinterInfo> Discover()
    {
       bool probeSucceeded = Native.EnumPrinters(6, null, 2, IntPtr.Zero, 0, out uint needed, out _);
@@ -54,7 +60,12 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       finally { Marshal.FreeHGlobal(memory); }
    }
 
-   /// <summary>Only an insufficient buffer is an expected unsuccessful sizing probe.</summary>
+
+
+   /// <summary>
+   /// Only an insufficient buffer (error 122) with a reported size is an expected unsuccessful sizing probe. Any other
+   /// failure is thrown, so a broken spooler can never be mistaken for an empty inventory that would withdraw every printer.
+   /// </summary>
    internal static void ValidateDiscoveryProbe(bool success, int error, uint needed)
    {
       if(!success && (error != 122 || needed == 0))
@@ -63,13 +74,24 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       }
    }
 
-   /// <summary>Session-zero workers cannot answer file-save or application prompts.</summary>
+
+
+   /// <summary>
+   /// Session-zero workers cannot answer file-save or application prompts, so ports and drivers that need one are
+   /// treated as interactive and kept out of unattended printing; an unattended job would otherwise hang the spooler.
+   /// </summary>
    internal static bool RequiresInteractiveOutput(string port, string driver) =>
       port.Contains("PORTPROMPT", StringComparison.OrdinalIgnoreCase) || port.Contains("FILE:", StringComparison.OrdinalIgnoreCase)
       || driver.Contains("Microsoft Print To PDF", StringComparison.OrdinalIgnoreCase) || driver.Contains("XPS", StringComparison.OrdinalIgnoreCase)
       || driver.Contains("OneNote", StringComparison.OrdinalIgnoreCase) || driver.Contains("Fax", StringComparison.OrdinalIgnoreCase);
 
-   /// <summary>Collapse Winspool flags into protocol health without treating activity as failure.</summary>
+
+
+   /// <summary>
+   /// Collapses Winspool status flags into the protocol's health words. Offline outranks paused, paused outranks error,
+   /// and unknown or undocumented bits are UNKNOWN rather than READY; busy, printing, warming and low-toner flags are
+   /// nonblocking, so a printer that is merely working is never reported as failing.
+   /// </summary>
    internal static string MapStatus(uint status)
    {
       const uint offline = 0x00000080 | 0x02000000;
@@ -100,7 +122,13 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       return "READY";
    }
 
-   /// <summary>Submit exactly one server job using its explicit queue and format.</summary>
+
+
+   /// <summary>
+   /// Submits exactly one server job to the queue and format the job names, after refusing anything the Windows queue
+   /// cannot honor: a copy count outside 1 to 32767, paper dimensions (configured in the queue in this version) or a
+   /// format the queue does not offer. Nothing is guessed or defaulted, because a wrong guess prints on the wrong stock.
+   /// </summary>
    public async Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
    {
       PrinterInfo printer = Discover().Single(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal));
@@ -126,7 +154,13 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       };
    }
 
-   /// <summary>Send printer-ready ZPL bytes, handling partial spooler writes.</summary>
+
+
+   /// <summary>
+   /// Sends printer-ready ZPL as one RAW spool document, repeating the bytes per copy and continuing after partial writes
+   /// until the spooler has taken them all. The queue's media is rechecked immediately before the document starts, and any
+   /// failure after it starts aborts the document so half a label is not left queued.
+   /// </summary>
    private static string PrintRaw(PrinterInfo selectedPrinter, PrintJob job, byte[] content)
    {
       Check(Native.OpenPrinter(selectedPrinter.Name, out IntPtr printer, IntPtr.Zero));
@@ -165,7 +199,12 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       finally { Native.ClosePrinter(printer); }
    }
 
-   /// <summary>Own the native document lifecycle while rendering its PDF pages.</summary>
+
+
+   /// <summary>
+   /// Loads PDF bytes into the Windows PDF renderer through an in-memory stream, so the document never touches disk, and
+   /// hands the loaded document to the shared page printer.
+   /// </summary>
    private static async Task<string> PrintPdfAsync(PrinterInfo printer, PrintJob job, byte[] content, CancellationToken cancellationToken)
    {
       using InMemoryRandomAccessStream pdfStream = new();
@@ -180,6 +219,14 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       return await PrintPdfDocumentAsync(printer, job, document, cancellationToken).ConfigureAwait(false);
    }
 
+
+
+   /// <summary>
+   /// Owns the native document lifecycle for a loaded PDF. It rechecks the selected media, prepares a job-only copy of the
+   /// driver settings, opens a device context and starts the document only after the context's size and resolution match
+   /// the selection. Pages are rendered and printed copy by copy; any failure after the document starts aborts it, and the
+   /// context is always released.
+   /// </summary>
    private static async Task<string> PrintPdfDocumentAsync(PrinterInfo printer, PrintJob job, PdfDocument document, CancellationToken cancellationToken)
    {
       QueueDefaultMedia? media = RequireCurrentMedia(printer, job);
@@ -229,7 +276,13 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       finally { Native.DeleteDC(dc); }
    }
 
-   /// <summary>Render a bounded bitmap and map its physical size onto the driver page.</summary>
+
+
+   /// <summary>
+   /// Renders one page to a bounded bitmap (at most 150 dpi equivalent and 5000 pixels on the long side, so a hostile PDF
+   /// cannot exhaust memory) and draws it at its true physical size on the driver page, or scaled to fit and centered
+   /// when the job asks for FIT. Invalid page dimensions are refused before any rendering.
+   /// </summary>
    private static async Task PrintPageAsync(IntPtr dc, PdfPage page, string scaleMode)
    {
       if(!double.IsFinite(page.Size.Width) || !double.IsFinite(page.Size.Height) || page.Size.Width <= 0 || page.Size.Height <= 0)
@@ -269,7 +322,9 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       Check(Native.EndPage(dc) > 0);
    }
 
-   /// <summary>Convert a Win32 failure to an error the worker can report.</summary>
+
+
+   /// <summary>Converts a failed Win32 call into an exception carrying the last error, so the worker reports the real cause instead of continuing.</summary>
    private static void Check(bool success)
    {
       if(!success)
@@ -278,14 +333,25 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       }
    }
 
+
+
+   /// <summary>
+   /// The Win32 spooler and GDI entry points this adapter calls. Every declaration mirrors the documented native
+   /// signature exactly; the layouts below are marshaled by the runtime, so field order and types must not change.
+   /// </summary>
    private static partial class Native
    {
+      /// <summary>PRINTER_INFO_2 as returned by EnumPrinters level 2: queue, driver and port names, status and the machine default settings pointer.</summary>
       [StructLayout(LayoutKind.Sequential)]
       internal struct PrinterInfo2
       {
          internal IntPtr ServerName, PrinterName, ShareName, PortName, DriverName, Comment, Location, DevMode, SepFile, PrintProcessor, DataType, Parameters, SecurityDescriptor;
          internal uint Attributes, Priority, DefaultPriority, StartTime, UntilTime, Status, Jobs, AveragePpm;
       }
+
+
+
+      /// <summary>DOC_INFO_1 for StartDocPrinter: the spool document's name and data type (RAW for ZPL).</summary>
       [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
       internal struct DocInfo1
       {
@@ -293,6 +359,10 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
          [MarshalAs(UnmanagedType.LPWStr)] internal string? OutputFile;
          [MarshalAs(UnmanagedType.LPWStr)] internal string DataType;
       }
+
+
+
+      /// <summary>DOCINFO for GDI StartDoc: the document name shown in the spooler for a rendered PDF.</summary>
       [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
       internal struct DocInfo
       {
@@ -302,6 +372,10 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
          [MarshalAs(UnmanagedType.LPWStr)] internal string? DataType;
          internal uint Type;
       }
+
+
+
+      /// <summary>BITMAPINFOHEADER used with StretchDIBits to draw the rendered page bitmap.</summary>
       [StructLayout(LayoutKind.Sequential)]
       internal struct BitmapInfo
       {
@@ -312,22 +386,90 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
          internal int XPelsPerMeter, YPelsPerMeter;
          internal uint ColorsUsed, ColorsImportant;
       }
+
+
+
+      /// <summary>Lists the installed queues (level 2) so discovery can read their names, drivers, ports and status.</summary>
       [DllImport("winspool.drv", EntryPoint = "EnumPrintersW", SetLastError = true, CharSet = CharSet.Unicode)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool EnumPrinters(uint flags, string? name, uint level, IntPtr buffer, uint size, out uint needed, out uint returned);
+
+
+
+      /// <summary>Opens a queue by name for a spool document or a settings read; the handle must be closed.</summary>
       [DllImport("winspool.drv", EntryPoint = "OpenPrinterW", SetLastError = true, CharSet = CharSet.Unicode)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool OpenPrinter(string name, out IntPtr handle, IntPtr defaults);
+
+
+
+      /// <summary>Starts one RAW spool document and returns its spooler job number, or zero on failure.</summary>
       [DllImport("winspool.drv", EntryPoint = "StartDocPrinterW", SetLastError = true, CharSet = CharSet.Unicode)] internal static extern uint StartDocPrinter(IntPtr printer, int level, ref DocInfo1 info);
+
+
+
+      /// <summary>Writes bytes into the open spool document; the written count can be less than requested.</summary>
       [DllImport("winspool.drv", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool WritePrinter(IntPtr printer, byte[] bytes, int count, out int written);
+
+
+
+      /// <summary>Finishes the spool document so the spooler may send it to the printer.</summary>
       [DllImport("winspool.drv", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool EndDocPrinter(IntPtr printer);
+
+
+
+      /// <summary>Releases a queue handle opened by OpenPrinter.</summary>
       [DllImport("winspool.drv", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool ClosePrinter(IntPtr printer);
+
+
+
+      /// <summary>Discards a spool document that failed part way, so a partial label is not printed.</summary>
       [DllImport("winspool.drv", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool AbortPrinter(IntPtr printer);
+
+
+
+      /// <summary>Creates a printer device context from the supplied settings so the real page size and resolution can be read and drawn on.</summary>
       [DllImport("gdi32.dll", EntryPoint = "CreateDCW", SetLastError = true, CharSet = CharSet.Unicode)] internal static extern IntPtr CreateDC(string driver, string device, string? output, IntPtr devMode);
+
+
+
+      /// <summary>Starts a GDI document on a device context and returns its spooler job number.</summary>
       [DllImport("gdi32.dll", EntryPoint = "StartDocW", SetLastError = true, CharSet = CharSet.Unicode)] internal static extern int StartDoc(IntPtr dc, ref DocInfo info);
+
+
+
+      /// <summary>Reads one capability of a device context, such as resolution, printable size or margins.</summary>
       [DllImport("gdi32.dll")] internal static extern int GetDeviceCaps(IntPtr dc, int index);
+
+
+
+      /// <summary>Starts a page in the open GDI document.</summary>
       [DllImport("gdi32.dll", SetLastError = true)] internal static extern int StartPage(IntPtr dc);
+
+
+
+      /// <summary>Ends the current page so the driver can emit it.</summary>
       [DllImport("gdi32.dll", SetLastError = true)] internal static extern int EndPage(IntPtr dc);
+
+
+
+      /// <summary>Ends the GDI document and submits it to the spooler.</summary>
       [DllImport("gdi32.dll", SetLastError = true)] internal static extern int EndDoc(IntPtr dc);
+
+
+
+      /// <summary>Cancels the GDI document after a failure, so nothing partial is printed.</summary>
       [DllImport("gdi32.dll", SetLastError = true)] internal static extern int AbortDoc(IntPtr dc);
+
+
+
+      /// <summary>Deletes a device context created by CreateDC.</summary>
       [DllImport("gdi32.dll")][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool DeleteDC(IntPtr dc);
+
+
+
+      /// <summary>Selects the stretch mode used when the page bitmap is scaled onto the driver page.</summary>
       [DllImport("gdi32.dll")] internal static extern int SetStretchBltMode(IntPtr dc, int mode);
+
+
+
+      /// <summary>Draws the rendered page bitmap onto the page at the computed position and size.</summary>
       [DllImport("gdi32.dll", SetLastError = true)] internal static extern int StretchDIBits(IntPtr dc, int x, int y, int width, int height, int sx, int sy, int sw, int sh, byte[] bits, ref BitmapInfo info, uint usage, uint operation);
    }
 }

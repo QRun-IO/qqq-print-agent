@@ -21,14 +21,27 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    private int _queuedFrames;
    private int _closed;
 
+
+
+   /// <summary>True only while the channel has not been closed locally and the socket itself is still open.</summary>
    public bool IsOpen => Volatile.Read(ref _closed) == 0 && socket.State == WebSocketState.Open;
 
+
+
+   /// <summary>Applies new server limits to messages sent from now on. They are validated first, so an out-of-range policy can never replace working limits.</summary>
    public void UpdateSettings(RealtimeSettings settings)
    {
       settings.Validate();
       Volatile.Write(ref _limits, settings);
    }
 
+
+
+   /// <summary>
+   /// Runs the reader and writer until either ends, then shuts the channel down in a fixed order: mark it closed, stop the
+   /// outgoing queue, cancel both loops, abort the socket, and fail every send still waiting for an acknowledgement so its
+   /// caller replays the durable record instead of waiting forever.
+   /// </summary>
    public async Task RunAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
       using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -52,6 +65,13 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       }
    }
 
+
+
+   /// <summary>
+   /// Queues one message. A frame over the negotiated size is refused before it is queued. For an acknowledged message the
+   /// caller waits (up to the negotiated timeout) for the server's ACK, and the same message identifier cannot be in flight
+   /// twice, so a replay after a lost acknowledgement is recognised by the server by its stable identity.
+   /// </summary>
    public async Task SendAsync(string type, object payload, string? messageId = null, bool acknowledged = false, CancellationToken token = default)
    {
       token.ThrowIfCancellationRequested();
@@ -81,6 +101,12 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       }
    }
 
+
+
+   /// <summary>
+   /// Adds a frame to the bounded outgoing queue, counting bytes and frames against the negotiated limits. Exceeding a limit
+   /// aborts the socket and throws, which forces a reconnect, because dropping a frame silently would lose a durable event.
+   /// </summary>
    private void Queue(byte[] bytes)
    {
       long queued = Interlocked.Add(ref _queuedBytes, bytes.Length);
@@ -94,6 +120,9 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       }
    }
 
+
+
+   /// <summary>The single writer: sends queued frames one at a time, counts them as upload only after the socket accepted them, and always releases the queue accounting, even when a send fails.</summary>
    private async Task WriteAsync(CancellationToken token)
    {
       await foreach(byte[] bytes in _outgoing.Reader.ReadAllAsync(token).ConfigureAwait(false))
@@ -107,6 +136,13 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       }
    }
 
+
+
+   /// <summary>
+   /// The single reader. It assembles text messages from fragments within the negotiated size, rejects any other message
+   /// type, parses each message with a depth limit and no duplicate fields, checks the envelope, and hands it to the
+   /// callback. A close frame or any protocol violation ends the loop, which closes the connection and triggers a reconnect.
+   /// </summary>
    private async Task ReadAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
       byte[] buffer = new byte[8192];
@@ -136,6 +172,9 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       }
    }
 
+
+
+   /// <summary>Rejects any object that repeats a field name, ignoring case, anywhere in the message; two parsers could otherwise read different values from the same text.</summary>
    private static void RejectDuplicateFields(JsonElement value)
    {
       if(value.ValueKind == JsonValueKind.Object)
@@ -155,6 +194,14 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       }
    }
 
+
+
+   /// <summary>
+   /// Routes one validated frame. An ACK completes the send waiting on that message. An ERROR for a message still awaiting
+   /// acknowledgement fails that send with an HTTP-like status the callers already handle; errors that mean authorization
+   /// is gone are also passed on so the runtime can stop. Everything else goes to the callback with its payload cloned,
+   /// because the parsed document is freed as soon as the reader moves on.
+   /// </summary>
    private void DispatchFrame(RealtimeEnvelope envelope, Action<RealtimeEnvelope> received)
    {
       if(string.Equals(envelope.Type, "ACK", StringComparison.Ordinal))
@@ -181,6 +228,9 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       received(envelope with { Payload = envelope.Payload.Clone() });
    }
 
+
+
+   /// <summary>Marks the channel closed, stops the queue, fails any send still waiting so its caller replays the durable record, and disposes the socket.</summary>
    public void Dispose()
    {
       Interlocked.Exchange(ref _closed, 1);

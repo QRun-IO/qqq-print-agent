@@ -12,6 +12,11 @@ namespace Qqq.PrintAgent.Cli;
 /// <summary>Scriptable setup, printer selection and foreground diagnostics.</summary>
 public static class Program
 {
+   /// <summary>
+   /// Entry point. Three argument shapes are internal and fixed: the isolated printer worker (a child process the service
+   /// starts for each native printer call), the MSI update helper, and the browser sign-in callback forwarder. Everything
+   /// else is an operator command.
+   /// </summary>
    public static Task<int> Main(string[] args) => args switch
    {
       ["--printer-worker"] => PrinterWorkerHost.RunAsync(),
@@ -24,6 +29,12 @@ public static class Program
       _ => ExecuteAsync(() => DispatchAsync(args)),
    };
 
+
+
+   /// <summary>
+   /// Runs a command and turns failures into a one-line message on standard error and exit code 1. A timeout or cancellation
+   /// also exits 1, so a script never mistakes an operation that did not finish for one that succeeded.
+   /// </summary>
    internal static async Task<int> ExecuteAsync(Func<Task<int>> command)
    {
       try
@@ -38,6 +49,13 @@ public static class Program
       catch(Exception exception) { Console.Error.WriteLine(exception.Message); return 1; }
    }
 
+
+
+   /// <summary>
+   /// Routes an operator command. Without the explicit legacy flag, printing commands go to the installed service over its
+   /// authenticated pipe, because the service owns the signed-in session; only with the flag do they use a separate
+   /// per-user data directory and the old device-token transport, and that is announced on every run.
+   /// </summary>
    internal static async Task<int> DispatchAsync(string[] args, Func<PipeRequest, Task<string>>? serviceCommand = null)
    {
       string command = args.FirstOrDefault() ?? "help";
@@ -72,6 +90,9 @@ public static class Program
       }
    }
 
+
+
+   /// <summary>Reports whether the legacy flag was given, and refuses it combined with --service, because legacy mode must never touch the installed service's state.</summary>
    internal static bool UseLegacyCompatibility(string[] args)
    {
       bool legacy = args.Contains("--legacy-compat", StringComparer.Ordinal);
@@ -82,6 +103,13 @@ public static class Program
       return legacy;
    }
 
+
+
+   /// <summary>
+   /// Sends a normal command to the installed service and prints its reply, exiting 1 when the reply is an error. Options
+   /// that only make sense for the isolated legacy mode (a data directory, run once) are refused here with an explanation,
+   /// so a script cannot silently run against the wrong state.
+   /// </summary>
    private static async Task<int> DispatchServiceAsync(string[] args, Func<PipeRequest, Task<string>> send)
    {
       if(args.Contains("--data-dir", StringComparer.Ordinal) || args.Contains("--once", StringComparer.Ordinal))
@@ -101,6 +129,9 @@ public static class Program
       return response.StartsWith("Error:", StringComparison.Ordinal) ? 1 : 0;
    }
 
+
+
+   /// <summary>Reads the one-time enrollment code from the environment, or prompts for it, so the code never appears in the command line or shell history.</summary>
    private static string ReadEnrollmentCode()
    {
       string? code = Environment.GetEnvironmentVariable("QQQ_PRINT_ENROLLMENT_CODE");
@@ -114,12 +145,19 @@ public static class Program
 
 
 
+   /// <summary>Returns the value following a named option, or null when the option is absent or has no value.</summary>
    private static string? Option(string[] args, string key)
    {
       int index = Array.IndexOf(args, key);
       return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
    }
 
+
+
+   /// <summary>
+   /// Chooses the data directory. --service selects the installed machine directory; otherwise a per-user directory is used,
+   /// and the machine directory is refused there, so a foreground command can never overwrite the service's credentials by accident.
+   /// </summary>
    internal static string ResolveDataDirectory(string[] args)
    {
       if(args.Contains("--service", StringComparer.Ordinal))
@@ -134,16 +172,26 @@ public static class Program
       return directory;
    }
 
+
+
+   /// <summary>Takes the exclusive lock on a data directory so two foreground commands (or one beside the service) cannot write the same journal at once.</summary>
    internal static FileStream AcquireWorkerLock(string directory)
    {
       Directory.CreateDirectory(directory);
       return new FileStream(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
    }
 
+
+
+   /// <summary>Creates the isolated printer backend that runs each native call in a child copy of this executable, bounding any blocking driver call.</summary>
    private static IsolatedPrinterBackend CreatePrinterBackend() => new(Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate the printer helper executable."));
 
 
 
+   /// <summary>
+   /// Runs one legacy diagnostic claim pass. Continuous legacy polling is gone, so only --once is accepted. Ctrl+C ends the
+   /// pass cleanly (exit 0); any other cancellation is a failure. It uses a separate data directory and the device token.
+   /// </summary>
    private static async Task<int> RunAsync(string[] args, string directory)
    {
       if(!args.Contains("--once", StringComparer.Ordinal))
@@ -165,6 +213,10 @@ public static class Program
       finally { Console.CancelKeyPress -= cancelHandler; }
       return 0;
    }
+
+
+
+   /// <summary>Shares or hides one printer, through the service when --service is given and otherwise in the separate legacy directory after validating against current discovery.</summary>
    private static async Task<int> SetExposureAsync(string[] args, string directory)
    {
       string id = Option(args, "--printer") ?? throw new ArgumentException("--printer is required.", nameof(args));
@@ -187,6 +239,11 @@ public static class Program
 
 
 
+   /// <summary>
+   /// Enrolls this computer with a one-time code read from the environment or a prompt, never from the command line. With
+   /// --service the installed service does it; otherwise the legacy path enrolls into a separate directory and saves the
+   /// device connection protected for the current user.
+   /// </summary>
    private static async Task<int> EnrollAsync(string[] args, string directory)
    {
       string server = Option(args, "--server") ?? throw new ArgumentException("--server is required.", nameof(args));
@@ -215,4 +272,3 @@ public static class Program
       return 0;
    }
 }
-

@@ -8,6 +8,11 @@ using System.Security.Principal;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Path and permission checks of the updater. The staged files later run with administrator rights, so each path must stay
+/// inside the protected folders, contain no link or junction, and be owned and writable only by trusted accounts. Every
+/// failure throws; nothing is repaired automatically.
+/// </summary>
 public static partial class MsiUpdateInstaller
 {
    /// <summary>Requires installed protected state; permits a not-yet-created staging child.</summary>
@@ -37,6 +42,9 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>Requires a staged file to sit in a validated staging folder, be free of links, exist, and have a trusted access list.</summary>
    private static void ValidateStagedFile(string path)
    {
       ValidateStagingDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
@@ -48,6 +56,9 @@ public static partial class MsiUpdateInstaller
       ValidateTrustedAcl(new FileInfo(path).GetAccessControl());
    }
 
+
+
+   /// <summary>Requires an installed program path to be inside Program Files, free of links, and trusted at every level up to Program Files, so a user-writable folder cannot supply the program that is run.</summary>
    private static void ValidateInstalledPath(string path)
    {
       ValidateNoReparseComponents(path);
@@ -61,6 +72,9 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>Requires a path to lie inside a root after full normalization, and optionally not be the root itself, so ".." segments or a different drive cannot escape the protected folder.</summary>
    internal static void ValidateContainedPath(string path, string root, bool allowRoot)
    {
       string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
@@ -71,6 +85,9 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>True when a path is the root or below it, compared on whole path segments so a sibling folder that merely shares the root's name as a prefix does not count.</summary>
    private static bool IsContained(string path, string root)
    {
       string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
@@ -79,6 +96,9 @@ public static partial class MsiUpdateInstaller
          || full.StartsWith(boundary + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
    }
 
+
+
+   /// <summary>Walks from the path up to the drive root and rejects any component that is a symbolic link or junction, since a link could redirect an elevated read or write elsewhere.</summary>
    internal static void ValidateNoReparseComponents(string path)
    {
       string? current = Path.GetFullPath(path);
@@ -92,6 +112,9 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>Refuses to continue unless the caller is an elevated administrator, and says no installer was started so the operator knows nothing changed.</summary>
    private static void RequireAdministrator()
    {
       using var identity = WindowsIdentity.GetCurrent();
@@ -101,12 +124,22 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>Checks a path's security against trusted accounts, treating the current administrator as one of them.</summary>
    private static void ValidateTrustedAcl(FileSystemSecurity security)
    {
       using var identity = WindowsIdentity.GetCurrent();
       ValidateTrustedAcl(security, identity.User?.Value);
    }
 
+
+
+   /// <summary>
+   /// Requires an explicit access list, a trusted owner, and no allow rule that lets an untrusted account write, delete, change
+   /// permissions or take ownership (inherit-only rules for other objects are ignored). Trusted accounts are SYSTEM,
+   /// Administrators, the Windows installer service and, optionally, the given administrator.
+   /// </summary>
    internal static void ValidateTrustedAcl(FileSystemSecurity security, string? administratorSid)
    {
       var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
@@ -130,6 +163,9 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>True for SYSTEM, Administrators, the Windows installer service, or the supplied administrator's own SID.</summary>
    private static bool TrustedPrincipal(string sid, string? administratorSid)
       => sid is "S-1-5-18" or "S-1-5-32-544" or "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
          || administratorSid is not null && string.Equals(sid, administratorSid, StringComparison.Ordinal);
