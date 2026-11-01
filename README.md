@@ -11,9 +11,9 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Published prerelease: [0.3.1-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.1-rc.1).** Its published assets and attestations were verified, and the exact MSI was installed with pairing, printer profiles and local history preserved. The operator confirmed successful test prints with a responsive window. The installer remains unsigned. See [acceptance notes](docs/ACCEPTANCE.md) for the scope of that evidence.
+> **Published and installed prerelease: [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1).** All four assets, checksums and provenance attestations were verified. The real in-app update completed with matching app/service/CLI builds, retained identity and history, and an automatically reopened Connected app. The installer remains unsigned.
 
-The upcoming **0.3.2-rc.1** checks the app, service and CLI for the same complete
+**0.3.2-rc.1** checks the app, service and CLI for the same complete
 build version after an update, reports an inconsistent installation explicitly,
 and corrects the SDK license credit. Its native test host now uses production's
 PerMonitorV2 DPI declaration. The original 0.3.0 layout-cycle cause remains
@@ -21,7 +21,14 @@ unproven; current operator acceptance and repeated native replays pass. The
 existing fatal-error handling is a mitigation, not an underlying layout fix.
 See [changelog](CHANGELOG.md) and [session state](docs/SESSION-STATE.md).
 
-The 0.3 client requires discovered printing extension `>=2.0.0 <3.0.0` and standard QQQ sign-in. Upgrade the server before adopting it; a 1.0 server cannot provide realtime printing. The service opens authenticated WSS for controls, receipts, status and job notifications, while documents stream separately over HTTPS. There is no job/control polling or fallback. Existing unbound pairings require explicit account association, not automatic replacement. See [realtime operation](docs/REALTIME.md) and [sign-in and migration](docs/QQQ-SIGN-IN.md). Configured Authentik/provider renewal and installed browser-callback acceptance remain separate qualification work.
+The operator used **Help → Check for updates**, chose **Not now** and confirmed
+the app remained responsive, then selected **Update and restart**. Independent
+before/after reports verified the published 0.3.2 bytes and preserved earlier
+jobs, pairing and profiles; the operator confirmed the reopened Connected app
+and both printers. Successful paper output was previously confirmed on
+**0.3.1-rc.1** and remains separate evidence; see [acceptance notes](docs/ACCEPTANCE.md).
+
+The 0.3 client requires discovered printing extension `>=2.0.0 <3.0.0` and standard QQQ sign-in. Upgrade the server before adopting it; a 1.0 server cannot provide realtime printing. The service opens authenticated WSS for controls, receipts, status and job notifications, while documents stream separately over HTTPS. There is no job/control polling or fallback. Existing unbound pairings require explicit account association, not automatic replacement. See [realtime operation](docs/REALTIME.md) and [sign-in and migration](docs/QQQ-SIGN-IN.md). Real Authentik login and renewal passed in isolated development containers against an unreleased QQQ API 1.9 candidate. Released RC.20 lacks that native-session grant; installed browser/private-callback acceptance still requires a compatible published runtime and configured HTTPS provider.
 
 ## Current source features
 
@@ -87,7 +94,17 @@ A printer visible only in a signed-in user's profile may not be available to the
 
 ## Validation so far
 
-The realtime contract and Jobs UI are included in the 0.3 release candidate. Focused application/UI-test builds passed with zero warnings/errors; three headless request-generation tests passed. They do not execute the desktop assertions or qualify installed realtime behavior. Full consumer, slow-transfer/control, reconnect/replay and installed acceptance are tracked separately in [session state](docs/SESSION-STATE.md).
+The 0.3.2 Release gate passed **426 tests** with zero warnings/errors/skips.
+[Release workflow 41324312106](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41324312106)
+completed all nine jobs and published the release for the signed tag at protected main
+`268f951b6728b0e69fedaf46769785c3f5ae55f4`. All four release assets and their
+attestations passed verification. Static MSI inspection confirmed product
+version `0.3.2`, matching app/service/CLI source versions, WinUI resources,
+service configuration and callback registration. The separately observed
+0.3.1-to-0.3.2 in-app update returned MSI exit 0, restored the service's WebSocket
+and automatically reopened the companion. Actual failed/canceled updates,
+restart-required/reboot behavior and installed provider-browser acceptance
+remain open. See [session state](docs/SESSION-STATE.md).
 
 ### Installed published 0.2.0 — 2026-10-31
 

@@ -1,6 +1,52 @@
 # Acceptance evidence
 
-## Installed published 0.3.1 and next updater candidate — 2026-11-01
+## Installed 0.3.2 through the real in-app update — 2026-11-01
+
+The [0.3.2 release](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1)
+was verified against signed tag source
+`268f951b6728b0e69fedaf46769785c3f5ae55f4`, all four assets/checksums and
+GitHub attestations. [Release run 41324312106](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41324312106)
+completed all nine jobs. Published and installed MSI SHA-256:
+`1191C337265469EB06136AF232DB57FAC6BC5014357521D80B35E5CCA5AF6E18`.
+The MSI remains unsigned; source signatures and build attestations are separate
+from publisher code signing.
+
+The user operated the installed companion's **Help → Check for updates**, chose
+**Not now** and confirmed continued responsiveness, then chose **Update and
+restart**. The actual coordinator handed off to the copied installed 0.3.1 CLI
+helper, MSI returned 0, and the companion automatically reopened. The user
+confirmed its **Connected** state and both printers.
+
+Independent before/after observations verified each App, Service and CLI
+executable against the published payload bytes and identical full ProductVersion
+`0.3.2-rc.1+268f951b6728b0e69fedaf46769785c3f5ae55f4`. The retained update request
+matched the original companion identity, copied helper and published MSI. The
+new service was Running with automatic LocalSystem configuration and restored
+the native QQQ session and connected WebSocket. Stable identity, pairing,
+printer exposure and profiles were preserved. All 38 prior local job rows and
+37 prior server job rows retained their recorded field digests; one additional
+row in each view was accounted for separately, with no missing or changed old
+rows. The observers submitted no jobs and did not repeat the installation.
+
+The diagnostic launcher's final summary failed after its observer child exited
+successfully: reading stdout while its writer remained open caused a Windows
+file-sharing violation. The original failed launcher record was preserved.
+Both original child reports passed, and their hash chain, published-byte matches
+and preservation comparisons were independently revalidated. This acceptance
+uses those independent reports and the operator's UI confirmation; it does not
+claim that the diagnostic launcher passed.
+
+The old 0.3.1 helper executed this update. The new three-component guard is
+covered by source regressions and protects future updates. Actual download or
+installer failure/cancellation, restart-required reporting and reboot recovery
+remain separate cases. Successful paper output was confirmed on 0.3.1 below;
+this update check does not claim new 0.3.2 physical-output qualification. The
+historical layout-cycle cause remains unproven. Real Authentik container checks
+use an unreleased QQQ API 1.9 candidate and an HTTPS probe callback; installed
+Windows browser/private-callback acceptance still requires a compatible
+published QQQ runtime and configured HTTPS provider. No stable 1.0 claim is made.
+
+## Installed published 0.3.1 — 2026-11-01
 
 The [0.3.1 release](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.1-rc.1)
 was verified against its signed tag, source
@@ -26,12 +72,10 @@ outer window size. The original layout-cycle cause remains unproven. The exact
 fatal-error mitigation was separately qualified with a real induced native
 exception; this is not an underlying layout fix.
 
-The next updater candidate rejects missing, old, unreadable and mixed full build
-versions across app, service and CLI. It passed 73 focused updater cases and the
-integrated 426-test Release gate. Direct MSI evidence does not qualify the actual
-AppKit update confirmation, helper handoff or automatic reopen. Real provider
-native-session acceptance also remains separate; the frozen QQQ RC.20 runtime
-does not advertise the required API 1.9 grant. No 1.0 sign-off is claimed here.
+This 0.3.1 checkpoint used a direct MSI installation. The subsequent real AppKit
+transition to 0.3.2 is recorded above. Its new component-coherence guard passed
+73 focused updater cases and the integrated 426-test Release gate. The frozen
+QQQ RC.20 runtime does not advertise the required API 1.9 native-session grant.
 
 ## Installed published 0.2.0 and confirmed output — 2026-10-31
 

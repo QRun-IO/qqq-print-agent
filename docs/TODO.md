@@ -13,15 +13,17 @@
 - [x] Install the attested published 0.3.1 MSI; verify all three exact component versions, automatic WebSocket restoration and preserved local receipts, pairing and profiles.
 - [x] Record operator-confirmed test prints and responsive installed 0.3.1 window; verify repeated native dialog/refresh/banner/status replays at observed 125% DPI.
 - [x] Reject a successful MSI outcome when the app, service or CLI has a missing, old or different full build version; pass the integrated 426-test gate.
-- [ ] Qualify the actual AppKit in-app update to the next published candidate, including decline, helper handoff and reopen; direct MSI installation is separate evidence.
-- [ ] Finish real-provider native-session qualification against a compatible QQQ API 1.9 runtime and the local Docker reference environment.
+- [x] Publish [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1); verify all nine [release jobs](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41324312106), four assets/attestations and static MSI version, resources, service/callback registration and notices. The MSI remains unsigned.
+- [x] Qualify the actual AppKit 0.3.1-to-0.3.2 update: operator-confirmed Not now/responsiveness, Update and restart, verified old-helper handoff, MSI exit 0, exact published component bytes, preserved identity/profiles/earlier jobs, restored WebSocket and automatic visible reopen.
+- [x] Pass isolated real Authentik native-session login, permission, logout, expiry/renewal and revocation checks with production client code against unreleased QQQ API 1.9 candidate `ecf0f550` in the local Docker reference environment.
+- [ ] Qualify the installed Windows browser/private callback against a compatible published QQQ runtime and configured HTTPS provider; the container HTTPS callback does not establish this installed flow.
 - [x] Publish and verify all three 0.3.0-rc.1 releases; install the matched local server/client and verify retained state and service restart recovery.
 - [x] Capture the operator's post-print LayoutCycleException and recover only the companion; retain existing print receipts.
 - [ ] Reproduce and fix the native post-print layout cycle with a nonprinting host and verify the actual dialog/action/refresh path.
 - [x] Verify actual native fatal-layout exception logging, handler order and natural diagnostic termination; keep this mitigation distinct from fixing the original trigger.
 - [x] Accept scheduler-normalized account names only when they resolve to the exact expected startup SID; verify rejection of other identities and the unchanged actual task.
 - [x] Show explicit WebSocket state, server endpoint, live upload/download rates and service-lifetime application-traffic totals in the footer; verify actual native presentation with synthetic traffic.
-- [ ] Publish and install the verified client follow-up, then complete UI and remaining physical acceptance without resubmitting old intents.
+- [x] Preserve the original diagnostic launcher's finalization failure and independently validate both passing child reports; no installer retry or observer print was needed. Keep 0.3.1 physical acceptance separate.
 
 ## Realtime and Jobs UI — 0.3.0-rc.1 release candidate
 
@@ -117,7 +119,7 @@ The following entries preserve earlier implementation checkpoints.
 
 ## Remaining installed qualification
 
-- [ ] Qualify real in-app update: consent, failed/canceled download or elevation, retained state, helper handoff, coherent versions, relaunch and restart-required reporting.
+- [ ] Qualify actual update download/installer failure and cancellation, restart-required reporting and reboot recovery; the successful 0.3.2 update above does not establish these cases.
 - [ ] Review completed protected update stages/logs manually; no automatic completed-stage retention policy is implemented.
 - [ ] Qualify remaining input-dependent selection/focus, long-value and metadata synchronization scenarios; passing UI checks do not cover every interaction.
 - [ ] Qualify installed credential recovery, queued/retry/cancel job controls, stale service state and bounded SCM recovery.
