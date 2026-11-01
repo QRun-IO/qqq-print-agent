@@ -2,8 +2,8 @@
 
 The project's MIT license applies to this project's code. Microsoft Windows
 SDK packages retain their separate terms; they are not relicensed as MIT.
-The maintainer must review and satisfy applicable redistribution and end-user
-protection obligations. Copying notices and passing these checks does not
+The maintainer remains responsible for satisfying applicable redistribution
+and end-user protection obligations. Copying notices and passing these checks does not
 certify that those obligations have been fulfilled or create a customer EULA.
 
 The exact inventory is recorded in
@@ -66,7 +66,17 @@ creating the MSI. Only the exact reference-pack runtime projection bytes and
 legal text are exempt from this payload exclusion. This check does not grant a
 license exemption.
 
-No license-check exemption is granted by these files. Standards approval
-and maintainer acceptance of the exact terms remain required before applying
-an automated package-specific license exception. Other dependency license,
-security, provenance and release gates remain in force.
+The maintainer accepted this exact 15-package scope on 2026-11-01.
+[EX-0014](https://github.com/KofTwentyTwo/standards/blob/fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152/exceptions/register.md#ex-0014)
+is the approved record, merged through the normal protected workflow in
+[standards PR 56](https://github.com/KofTwentyTwo/standards/pull/56). The caller
+allows only these 15 package names through the automated license check.
+
+EX-0014 is limited to these exact package/version/artifact tuples through
+2027-04-30 UTC inclusive. The required CI and pre-MSI guard rejects use from
+2027-05-01 UTC, any change to the pinned inventory manifest, and any expansion
+of the finite package-name allowance. The dependency-review action does not
+enforce PURL versions, so the separate version, content-hash and archive-hash
+checks remain mandatory. A changed version, license or payload scope requires
+renewed approval. AppKit receives no exception. All other dependency license,
+vulnerability, provenance and release gates remain in force.

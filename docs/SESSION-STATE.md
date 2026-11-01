@@ -33,10 +33,28 @@ The corrected startup validator also accepted the unchanged actual Windows task.
 Independent review added a guard around native exception metadata access. The
 fatal-layout policy leaves AppKit's existing decision untouched if inspection
 fails; only the exact native LayoutCycleException permits normal termination.
-Native fatal-termination execution remains unqualified because investigative
-probes encountered an unrelated Windows activation failure. Those experimental
-probe modes are excluded from the committed regression host. Publication,
-installation and actual in-app update acceptance of 0.3.1 are still pending.
+Native fatal-policy execution was verified on November 1 in a private, nonprinting
+host using the same policy source. An intentionally cycling native Panel raised
+the actual LayoutCycleException: AppKit logged it and set Handled=true, the policy
+set Handled=false, and WinUI terminated the diagnostic process naturally without
+a timeout. The host ran asInvoker in the actual desktop user context, with no
+Windows elevation or installed-state changes. This establishes the handler order
+and fatal outcome only; the original post-print trigger remains unreproduced.
+A second private nonprinting run used protected, authenticated native QQQ
+presentation data for the two current printers and 27 jobs. The real dialog,
+five-second refresh, simulated confirmation, feedback and navigation passed at
+a 1084 by 721 client viewport with scale 1. It used no service IPC or printing.
+Local unexposed queues, original timing and incident geometry were unavailable;
+authentication, transport and contact time remained explicitly synthetic. This
+passing partial replay does not establish that the original cause was fixed.
+Experimental probe modes remain excluded from the committed regression host.
+The maintainer accepted the exact Microsoft SDK closure on November 1.
+[EX-0014](https://github.com/KofTwentyTwo/standards/blob/fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152/exceptions/register.md#ex-0014)
+merged through the protected standards PR after its checks passed. The client
+allowance retains exact inventory, notice and payload guards, adds an inclusive
+April 30, 2027 UTC expiry, and passes 31 focused guard tests. Other license and
+security checks remain enabled. Publication, installation and actual in-app
+update acceptance of 0.3.1 remain pending.
 
 The candidate notes below preserve the implementation history.
 

@@ -29,8 +29,9 @@ Describe 'Exact Windows SDK inventory guard' `
 {
    BeforeEach `
    {
+      Mock Get-Date { [DateTimeOffset]::Parse('2026-11-01T00:00:00Z').UtcDateTime }
       $script:Fixture = Join-Path $TestDrive ([Guid]::NewGuid().ToString('N'))
-      foreach($relative in @('Directory.Packages.props', $script:AppLock, $script:HostLock,
+      foreach($relative in @('Directory.Packages.props', '.github/workflows/pr-gates.yml', $script:AppLock, $script:HostLock,
             'src/Qqq.PrintAgent/Qqq.PrintAgent.csproj', 'tests/Qqq.PrintAgent.LayoutTests/Qqq.PrintAgent.LayoutTests.csproj'))
       {
          $destination = Join-Path $script:Fixture $relative
@@ -56,6 +57,43 @@ Describe 'Exact Windows SDK inventory guard' `
    It 'accepts the reviewed central pins and all selected lock entries' `
    {
       { & $script:Guard -RepositoryRoot $script:Fixture -VerifyResolvedAssets } | Should -Not -Throw
+   }
+
+   It 'accepts the last UTC day of the recorded exception' `
+   {
+      Mock Get-Date { [DateTimeOffset]::Parse('2027-04-30T23:59:59.999Z').UtcDateTime }
+      { & $script:Guard -RepositoryRoot $script:Fixture } | Should -Not -Throw
+   }
+
+   It 'rejects use at the first instant after the recorded expiry' `
+   {
+      Mock Get-Date { [DateTimeOffset]::Parse('2027-05-01T00:00:00Z').UtcDateTime }
+      { & $script:Guard -RepositoryRoot $script:Fixture } | Should -Throw '*EX-0014 expired*'
+   }
+
+   It 'rejects an expanded, duplicate or wildcard license allowance: <Replacement>' -ForEach @(
+      @{ Replacement = 'pkg:nuget/KofTwentyTwo.AppKit' },
+      @{ Replacement = 'pkg:nuget/Microsoft.WindowsAppSDK.AI' },
+      @{ Replacement = 'pkg:nuget/Microsoft.WindowsAppSDK.*' }
+   ) `
+   {
+      $path = Join-Path $script:Fixture '.github/workflows/pr-gates.yml'
+      $text = [IO.File]::ReadAllText($path).Replace('pkg:nuget/Microsoft.WindowsAppSDK,', "$Replacement,")
+      [IO.File]::WriteAllText($path, $text)
+      { & $script:Guard -RepositoryRoot $script:Fixture } | Should -Throw '*only the 15 exact reviewed package names*'
+   }
+
+   It 'rejects a changed manifest even when locks are changed to match' `
+   {
+      ($script:Manifest.packages | Where-Object id -EQ 'Microsoft.WindowsAppSDK.ML').version = '2.1.95'
+      Set-FixtureLock 'licenses/windows-sdk-packages.json' $script:Manifest
+      foreach($relative in @($script:AppLock, $script:HostLock))
+      {
+         $lock = Get-Content -LiteralPath (Join-Path $script:Fixture $relative) -Raw | ConvertFrom-Json -AsHashtable
+         $lock.dependencies[$script:BaseTarget]['Microsoft.WindowsAppSDK.ML'].resolved = '2.1.95'
+         Set-FixtureLock $relative $lock
+      }
+      { & $script:Guard -RepositoryRoot $script:Fixture } | Should -Throw '*inventory manifest changed*'
    }
 
    It 'rejects an older or newer central version: <Version>' -ForEach @(@{ Version = '2.5.0' }, @{ Version = '2.5.2' }) `

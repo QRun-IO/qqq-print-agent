@@ -10,7 +10,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-# Exact inventory, not a license exception or a wildcard package allowance.
+# EX-0014 allows only this exact inventory, through 2027-04-30 UTC inclusive.
+# The required CI and pre-MSI guard must fail when that recorded scope expires.
+if([DateTimeOffset](Get-Date -AsUTC) -ge [DateTimeOffset]::Parse('2027-05-01T00:00:00Z', [Globalization.CultureInfo]::InvariantCulture))
+{ throw 'Windows SDK exception EX-0014 expired after 2027-04-30 UTC; renewed approval is required.' }
 $expectedIds = @(
    'Microsoft.Windows.AI.MachineLearning', 'Microsoft.Windows.SDK.BuildTools',
    'Microsoft.Windows.SDK.BuildTools.MSIX', 'Microsoft.Windows.SDK.NET.Ref',
@@ -51,6 +54,19 @@ foreach($package in $manifest.packages)
    }
    $packages[$package.id] = $package
 }
+# Pin the approved authored LF manifest as well as its individual values. A
+# coordinated manifest/lock change must not silently broaden the recorded scope.
+if((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -cne '1411401F7BD70842EB4A40220261DD1009482D47064CCBFBC0061AC4E79DDA2E')
+{ throw 'Reviewed SDK inventory manifest changed; renewed scope approval is required.' }
+$workflow = [IO.File]::ReadAllText((Join-Path $root '.github/workflows/pr-gates.yml'))
+$allowanceKeys = [regex]::Matches($workflow, '(?m)^\s*allow-dependencies-licenses:')
+$allowanceBlock = [regex]::Matches($workflow, '(?m)^      allow-dependencies-licenses: >-\r?\n((?:        [^\r\n]+(?:\r?\n|$))+)')
+if($allowanceKeys.Count -ne 1 -or $allowanceBlock.Count -ne 1)
+{ throw 'Exactly one explicit SDK license allowance block is required.' }
+$allowed = @($allowanceBlock[0].Groups[1].Value.Split(',') | ForEach-Object Trim | Sort-Object -CaseSensitive)
+$expectedAllowances = @($expectedIds | ForEach-Object { "pkg:nuget/$_" } | Sort-Object -CaseSensitive)
+if(($allowed -join ',') -cne ($expectedAllowances -join ','))
+{ throw 'SDK license allowance must contain only the 15 exact reviewed package names.' }
 [string[]]$lockedIds = @($expectedIds | Where-Object { $_ -cne $referenceId })
 [xml]$central = Get-Content -LiteralPath (Join-Path $root 'Directory.Packages.props') -Raw
 foreach($id in $directIds)
