@@ -1,0 +1,15 @@
+{
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.13",
+  "include": [
+    "scripts/*.py"
+  ],
+  "reportMissingTypeStubs": "error",
+  "reportUnnecessaryTypeIgnoreComment": "error",
+  "reportImplicitOverride": "error",
+  "exclude": [
+    "**/__pycache__"
+  ],
+  "venvPath": "..",
+  "venv": ".venv"
+}

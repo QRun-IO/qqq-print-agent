@@ -1,5 +1,10 @@
 # TODO
 
+## Script quality gates
+
+- [x] Pin Ruff, strict Pyright, ESLint/Stylistic and strict checkJs with locked restores; reject untracked-scope Python/JavaScript and zero-file Pyright runs; negative tool probes pass locally; virtual-agent Downloads/identity behavior preserved.
+- [ ] Observe the new `virtual-agent` job steps pass on hosted CI before relying on them.
+
 ## Candidate Echo printer media
 
 - [x] Discover truthful machine-default dimensions/DPI and expose an opaque, revision-bound profile.
@@ -10,6 +15,7 @@
 - [ ] Resolve the local Core test-assembly quarantine through the normal security review; obtain a complete clean gate without disabling protections.
 - [ ] Qualify the matching server/consumer catalog, immutable selection and authorized retained-document submission.
 - [ ] Perform separately authorized installed/profile-selected physical acceptance; available alternative stock is not current queue configuration.
+
 ## Query in About
 
 - [x] Place the official mascot and dogfooding/Query links directly below the

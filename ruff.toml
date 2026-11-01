@@ -1,0 +1,56 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+# Based on K22 fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152.
+# KofTwentyTwo Python lint + format configuration (K22-CODE-PY). Copy to the repo root
+# (or merge into [tool.ruff] in pyproject.toml). `ruff format --check` and `ruff check`
+# run in CI and pre-commit with zero findings allowed.
+target-version = "py313"
+include = [".github/scripts/*.py"]
+extend-exclude = [".venv", "node_modules", "dist", "target", "bin", "obj"]
+# Kingsrook: no practical line-length limit (ruff's maximum is 320).
+line-length = 320
+# Kingsrook: 3-space indentation. Ruff's formatter supports it fully; pycodestyle's
+# "multiple of four" rules (E111/E114) are therefore not selected.
+indent-width = 3
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+
+[lint]
+select = [
+   "F",     # pyflakes
+   "E4", "E7", "E9", "W",  # pycodestyle errors that are layout-independent
+   "I",     # isort: no wildcard imports, ordered
+   "N",     # pep8-naming
+   "UP",    # pyupgrade
+   "B",     # bugbear
+   "S",     # bandit security
+   "BLE",   # blind except
+   "T20",   # print statements: use logging (Kingsrook logging rule)
+   "ERA",   # commented-out code (Kingsrook: no zombie code)
+   "FIX",   # FIXME/TODO must be resolved or tracked
+   "TD",    # TODO format: author and issue link
+   "PTH",   # pathlib over os.path
+   "RET", "SIM", "C4", "PIE", "PL", "RUF",
+   "ANN",   # type annotations on every function
+   "D",     # docstrings on modules, classes, functions
+   "LOG", "G",  # logging hygiene
+]
+ignore = [
+   "D203",  # conflicts with D211
+   "D213",  # conflicts with D212
+   "TD003", # issue link is enforced by review, not regex
+]
+
+[lint.per-file-ignores]
+".github/scripts/check-*.py" = ["T201"] # CLI diagnostics are the public stdout contract, not application logging.
+".github/scripts/test-*.py" = ["S101", "PLR2004"] # Synthetic assertions and explicit boundary values.
+
+[lint.pydocstyle]
+convention = "pep257"
+
+[lint.flake8-tidy-imports]
+ban-relative-imports = "all"
