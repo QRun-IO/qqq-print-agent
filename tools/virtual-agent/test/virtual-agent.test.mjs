@@ -4,12 +4,12 @@
  */
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { Agent, LIMITS, backoff, checkTransport, compareVersions, frame, outputName, parseArgs, requirePrinting, sessionCookie, verifyDocument } from '../virtual-agent.mjs'
+import { Agent, LIMITS, defaultOutDir, defaultStateFile, backoff, checkTransport, compareVersions, frame, outputName, parseArgs, requirePrinting, sessionCookie, verifyDocument } from '../virtual-agent.mjs'
 
 // Stable native-major boundary from qqq-print-protocol/tools/verify-realtime.mjs.
 test('discovery accepts stable compatible minors and rejects noncanonical versions', () => {
@@ -63,7 +63,8 @@ test('native cookie POSTs carry exact Origin; foreign targets and redirects rece
   })
   const directory = mkdtempSync(join(tmpdir(), 'qqq-virtual-http-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
-  const agent = new Agent(parseArgs(['--server', origin, '--out', directory], {}), () => {})
+  // the home directory is the temporary one too, so the identity never lands in the real home
+  const agent = new Agent(parseArgs(['--server', origin, '--out', directory], {}, directory), () => {})
   agent.cookie = 'sessionUUID=synthetic-only'
   for (const badOrigin of [undefined, foreign]) {
     const headers = { Cookie: agent.cookie }
@@ -121,11 +122,27 @@ test('frames, cookies, backoff, limits and arguments', () => {
   assert.equal(backoff(0, {}, () => 0.5), 1000)
   assert.equal(backoff(10, {}, () => 1), 30000)
   assert.equal(LIMITS.maxConcurrentPrints, 1)
-  const o = parseArgs(['--server', 'http://localhost:8078/x', '--out', '/tmp/out', '--enroll', '--formats', 'pdf'], {})
+  const o = parseArgs(['--server', 'http://localhost:8078/x', '--out', '/tmp/qqq-va-no-such-dir', '--enroll', '--formats', 'pdf'], {}, '/home/u')
   assert.equal(o.server, 'http://localhost:8078')
-  assert.equal(o.state, join(o.out, '.agent-state.json'))
+  assert.equal(o.state, '/home/u/.qqq-print-agent/state.json')
   assert.deepEqual(o.formats, ['PDF'])
   assert.ok(o.enroll && !o.approve)
   assert.throws(() => parseArgs(['--formats', 'PS'], {}), /PDF/)
   assert.throws(() => parseArgs(['--bogus'], {}), /unknown/)
+})
+
+test('documents go to ~/Downloads unless --out or QQQ_PRINT_OUT says otherwise; an older identity next to the output is still used', () => {
+  assert.equal(defaultOutDir('/home/u'), join('/home/u', 'Downloads'))
+  assert.equal(defaultStateFile('/home/u'), join('/home/u', '.qqq-print-agent', 'state.json'))
+  assert.equal(parseArgs([], {}, '/home/u').out, join('/home/u', 'Downloads'))
+  assert.equal(parseArgs([], { QQQ_PRINT_OUT: '' }, '/home/u').out, join('/home/u', 'Downloads'))
+  assert.equal(parseArgs([], { QQQ_PRINT_OUT: '/srv/printed' }, '/home/u').out, '/srv/printed')
+  assert.equal(parseArgs(['--out', '/x/y'], { QQQ_PRINT_OUT: '/srv/printed' }, '/home/u').out, '/x/y')
+  const directory = mkdtempSync(join(tmpdir(), 'qqq-va-legacy-'))
+  try {
+    writeFileSync(join(directory, '.agent-state.json'), '{}')
+    assert.equal(parseArgs(['--out', directory], {}, '/home/u').state, join(directory, '.agent-state.json'))
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
