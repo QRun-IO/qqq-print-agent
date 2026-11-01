@@ -45,7 +45,7 @@ public sealed partial class MainWindow
       SetBusy(true);
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("get-log-settings"));
+         string response = await _sendRequest(new PipeRequest("get-log-settings"));
          return IsActionError(response) ? null : JsonSerializer.Deserialize<LogSettings>(response, PrintApiClient.JsonOptions);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)

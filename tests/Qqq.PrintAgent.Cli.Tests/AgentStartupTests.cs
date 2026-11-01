@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Security.Principal;
 using System.Xml.Linq;
 using Qqq.PrintAgent.Windows;
 
@@ -11,6 +12,38 @@ namespace Qqq.PrintAgent.Cli.Tests;
 
 public sealed class AgentStartupTests
 {
+   [Theory]
+   [InlineData(true, false)]
+   [InlineData(false, true)]
+   [InlineData(true, true)]
+   public void SchedulerNormalizedAccountNamesRetainTheExactTaskIdentity(bool namedPrincipal, bool namedTrigger)
+   {
+      using var identity = WindowsIdentity.GetCurrent();
+      string sid = identity.User!.Value;
+      var document = XDocument.Parse(AgentStartup.CreateTaskXml(sid));
+      XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+      if(namedPrincipal)
+      {
+         Assert.Single(document.Descendants(ns + "Principal")).Element(ns + "UserId")!.Value = identity.Name;
+      }
+      if(namedTrigger)
+      {
+         Assert.Single(document.Descendants(ns + "LogonTrigger")).Element(ns + "UserId")!.Value = identity.Name;
+      }
+      Assert.True(AgentStartup.IsOwnedTaskDefinition("\\QQQ Print Agent " + sid, document.ToString()));
+   }
+
+   [Fact]
+   public void ResolvableAccountForADifferentSidCannotAuthorizeTaskOwnership()
+   {
+      const string OtherSid = "S-1-5-21-100-200-300-1001";
+      using var identity = WindowsIdentity.GetCurrent();
+      var document = XDocument.Parse(AgentStartup.CreateTaskXml(OtherSid));
+      XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+      Assert.Single(document.Descendants(ns + "LogonTrigger")).Element(ns + "UserId")!.Value = identity.Name;
+      Assert.False(AgentStartup.IsOwnedTaskDefinition("\\QQQ Print Agent " + OtherSid, document.ToString()));
+   }
+
    [Fact]
    public void SignInTaskUsesOnlyTheInstalledExecutableAndCurrentInteractiveIdentity()
    {

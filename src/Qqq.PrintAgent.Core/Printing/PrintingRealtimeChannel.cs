@@ -2,11 +2,12 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading.Channels;
+using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>One continuously active reader and one bounded writer. Callbacks must only dispatch work, never await it.</summary>
-public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings limits) : IDisposable
+public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings limits, ApplicationTrafficMeter? traffic = null) : IDisposable
 {
    private readonly Channel<byte[]> _outgoing = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
    private RealtimeSettings _limits = limits;
@@ -14,6 +15,8 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    private long _queuedBytes;
    private int _queuedFrames;
    private int _closed;
+
+   public bool IsOpen => Volatile.Read(ref _closed) == 0 && socket.State == WebSocketState.Open;
 
    public void UpdateSettings(RealtimeSettings settings)
    {
@@ -91,7 +94,10 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       await foreach(byte[] bytes in _outgoing.Reader.ReadAllAsync(token).ConfigureAwait(false))
       {
          try
-         { await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, token).ConfigureAwait(false); }
+         {
+            await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, token).ConfigureAwait(false);
+            traffic?.RecordUpload(bytes.Length);
+         }
          finally { Interlocked.Add(ref _queuedBytes, -bytes.Length); Interlocked.Decrement(ref _queuedFrames); }
       }
    }
@@ -103,6 +109,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       while(!token.IsCancellationRequested)
       {
          ValueWebSocketReceiveResult result = await socket.ReceiveAsync(buffer.AsMemory(), token).ConfigureAwait(false);
+         traffic?.RecordDownload(result.Count);
          if(result.MessageType == WebSocketMessageType.Close)
          { throw new IOException("Server closed the realtime connection."); }
          if(result.MessageType != WebSocketMessageType.Text || message.Length + result.Count > _limits.MaxFrameBytes)

@@ -31,6 +31,8 @@ public sealed partial class AgentRuntime
       {
          _realtimeSettings = store.LoadRealtimeSettings();
          _controlState = store.LoadControlState();
+         if(Uri.TryCreate(store.LoadConfiguration()?.ServerUrl, UriKind.Absolute, out Uri? origin))
+         { _transportOrigin = origin; }
          foreach((string id, string previous) in store.Incomplete())
          {
             store.Record(id, new PrintEvent(Guid.NewGuid().ToString("N"), string.Equals(previous, "SUBMITTING", StringComparison.Ordinal) ? "OUTCOME_UNKNOWN" : "FAILED",
@@ -47,6 +49,8 @@ public sealed partial class AgentRuntime
       { await Task.WhenAny(connection, jobs, pipe, queue).ConfigureAwait(false); }
       finally
       {
+         lock(_stateLock)
+         { _transportStopped = true; }
          await lifetime.CancelAsync().ConfigureAwait(false);
          await Task.WhenAll(connection, jobs, pipe, queue).ConfigureAwait(false);
       }
@@ -111,7 +115,7 @@ public sealed partial class AgentRuntime
       using var handshake = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
       handshake.CancelAfter(settings.WebSocketHandshakeTimeoutMillis);
       WebSocket socket = await ConnectRealtimeSocketAsync(settings, lifetime, handshake.Token).ConfigureAwait(false);
-      using var channel = new PrintingRealtimeChannel(socket, settings);
+      using var channel = new PrintingRealtimeChannel(socket, settings, _traffic);
       var updates = Channel.CreateBounded<RealtimeStateUpdate>(4096);
       var commands = Channel.CreateBounded<RealtimeEnvelope>(4096);
       _inboundBytes = 0;
@@ -291,6 +295,7 @@ public sealed partial class AgentRuntime
             if(generation == _connectionGeneration && update.Sequence == _stateSequence && saved.DesiredState.Revision == _controlState.DesiredState.Revision)
             {
                _realtimeReady = true;
+               _transportConnectedBefore = true;
                _controlReady = true;
                _controlFailure = null;
                _failure = null;

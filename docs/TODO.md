@@ -1,5 +1,14 @@
 # TODO
 
+## Companion layout, live transport status and startup follow-up
+
+- [x] Publish and verify all three 0.3.0-rc.1 releases; install the matched local server/client and verify retained state and service restart recovery.
+- [x] Capture the operator's post-print LayoutCycleException and recover only the companion; retain existing print receipts.
+- [ ] Reproduce and fix the native post-print layout cycle with a nonprinting host and verify the actual dialog/action/refresh path.
+- [x] Accept scheduler-normalized account names only when they resolve to the exact expected startup SID; verify rejection of other identities and the unchanged actual task.
+- [x] Show explicit WebSocket state, server endpoint, live upload/download rates and service-lifetime application-traffic totals in the footer; verify actual native presentation with synthetic traffic.
+- [ ] Publish and install the verified client follow-up, then complete UI and remaining physical acceptance without resubmitting old intents.
+
 ## Realtime and Jobs UI — 0.3.0-rc.1 release candidate
 
 - [x] Adopt protocol commit `df3729ac632d4a34a3fb8423acef465042a624fc` for printing extension 2.0 and its complete configurable policy.

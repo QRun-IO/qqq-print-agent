@@ -15,7 +15,7 @@ public sealed partial class AgentRuntime
    internal TimeSpan SessionResumeInterval { get; init; } = TimeSpan.FromMinutes(5);
 
    private IQqqSessionClient NewSession(Uri origin) => sessionFactory?.Invoke(origin)
-      ?? new QqqSessionClient(origin, allowLoopbackHttp: origin.IsLoopback);
+      ?? new QqqSessionClient(origin, allowLoopbackHttp: origin.IsLoopback, traffic: _traffic);
 
    private async Task<bool> EnsureAuthorizationAsync(CancellationToken token)
    {
@@ -36,6 +36,8 @@ public sealed partial class AgentRuntime
          if(saved?.Credential is null || (saved.Binding.HasApprovedDevice
             && (configuration is null || !SameOrigin(saved.Binding.Origin, configuration.ServerUrl))))
          {
+            lock(_stateLock)
+            { _transportNeedsSignIn = true; }
             return false;
          }
          if(_sessionClient is null)
@@ -98,6 +100,8 @@ public sealed partial class AgentRuntime
       {
          _sessionClient = client;
          _sessionBinding = binding;
+         _transportOrigin = binding.Origin;
+         _transportNeedsSignIn = false;
          _authorizationReady = configuration is not null && SameOrigin(binding.Origin, configuration.ServerUrl)
             && string.Equals(binding.DeviceId, configuration.DeviceId, StringComparison.Ordinal);
          _authorizationBlocked = false;

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1-rc.1 — unreleased
+
+- Show explicit WebSocket connection state and server authority in the footer, with live upload/download rates and service-lifetime application-payload totals. A lightweight local observation refresh adds no QQQ job/control polling.
+- Recognize Windows-normalized startup account names only when they resolve to the exact expected SID; preserve the remaining task ownership checks. Rename the tray startup section to distinguish it from the automatic print service.
+- Leave the exact fatal native `LayoutCycleException` unhandled after AppKit logs it, allowing normal WinUI termination instead of retaining a corrupted companion window. The service continues; the operator can reopen the companion. This is failure-handling mitigation, not a fix for the original layout trigger.
+- Add an isolated native WinUI regression host using actual dialog/action/refresh code and synthetic IPC, with no printing or installed-state changes.
+
+The installed 0.3.0 companion's post-print LayoutCycleException remains under
+investigation. Nonprinting geometry and modal-refresh scenarios have not
+reproduced it; these changes do not yet establish a layout-cycle fix.
+
 ## 0.3.0-rc.1 — 2026-10-31
 
 Upgrade the server before this client: native printing API 2.0 requires a

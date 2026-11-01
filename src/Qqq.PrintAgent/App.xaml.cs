@@ -23,6 +23,7 @@ public partial class App : Application
    {
       InitializeComponent();
       WinUIShell.InstallCrashNet(this, () => Log);
+      UnhandledException += UiExceptionPolicy.HandleUnhandledException;
       WinUIShell.ApplyTheme(this, AppIdentity.SettingsStore.Load().ThemeKind);
    }
 

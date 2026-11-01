@@ -13,6 +13,14 @@ The native setup and status application uses the same [KofTwentyTwo AppKit](http
 
 > **Current release candidate: [0.3.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.0-rc.1).** It adds a persistent outbound WebSocket, streamed documents and the expanded Jobs view. Source checks and publication do not establish installed or physical-output acceptance. The previous [v0.2.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.2.0-rc.1) has verified release assets, checksums and exact-tag attestations; its tagged build passed 365 tests with zero warnings/errors/skips. The MSI remains unsigned. See [acceptance notes](docs/ACCEPTANCE.md) for version-specific evidence.
 
+The upcoming **0.3.1-rc.1** client adds explicit WebSocket/endpoint status and live
+QQQ service traffic measurements in the footer, plus a startup-task identity
+correction. The startup preference controls the tray companion; the print
+service starts automatically and operates independently. A native post-print
+layout-cycle failure observed in 0.3.0 remains under investigation; the follow-up
+logs that fatal failure and permits normal companion termination rather than
+claiming recovery. See [changelog](CHANGELOG.md) and [session state](docs/SESSION-STATE.md).
+
 The 0.3 client requires discovered printing extension `>=2.0.0 <3.0.0` and standard QQQ sign-in. Upgrade the server before adopting it; a 1.0 server cannot provide realtime printing. The service opens authenticated WSS for controls, receipts, status and job notifications, while documents stream separately over HTTPS. There is no job/control polling or fallback. Existing unbound pairings require explicit account association, not automatic replacement. See [realtime operation](docs/REALTIME.md) and [sign-in and migration](docs/QQQ-SIGN-IN.md). Configured Authentik/provider renewal and installed browser-callback acceptance remain separate qualification work.
 
 ## Current source features
@@ -106,7 +114,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.3.0 -ReleaseVersion 0.3.0-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.3.1 -ReleaseVersion 0.3.1-rc.1
 ```
 
 [Realtime architecture and settings](docs/REALTIME.md) · [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

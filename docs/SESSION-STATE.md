@@ -1,5 +1,45 @@
 # Session state — 2026-10-31
 
+## Installed realtime release and companion follow-up
+
+All three 0.3.0-rc.1 releases are published from protected main. The Windows
+release at `213ba02769378a9f82881d7f0abd0012a8747e5c` passed 402 tests and
+the required build, packaging, security and provenance checks. The published
+MSI was installed with paired identity, history, printer choices, metadata and
+settings preserved; automatic restoration after a service restart passed.
+Fresh native QQQ laser PDF and Zebra ZPL tests reached SPOOLED. The pending
+Zebra PDF intent must not be confused with a submitted job or paper confirmation.
+
+The operator then encountered a whole-window freeze after a successful test
+print. A captured AppKit log confirms a WinUI LayoutCycleException; the managed
+stack shows no blocked pipe call. Companion-only recovery restored navigation
+without restarting the service. Saving printer settings without changes also
+remained responsive. The exact layout trigger is still under investigation with
+an isolated, nonprinting native WinUI test host; no layout fix is yet claimed.
+
+The active follow-up branch adds explicit WebSocket connection/traffic status
+and corrects startup-task identity comparison: Windows can return an account
+name for a trigger registered with a SID. Acceptance must resolve to that same
+SID, preserving all other ownership checks. The startup section controls the
+tray companion; the automatic background print service is independent.
+
+The 0.3.1-rc.1 source gate passed 414 Release tests (145 Core, 269 Windows/CLI),
+12 headless presentation tests, and a zero-warning/error WinUI build. Branding
+dry-run and local MSI packaging also passed. The isolated native host passed
+the real expanded-row/dialog/timer/feedback/navigation flow, live meter decay,
+retained totals and the server-settings link using synthetic traffic only.
+The corrected startup validator also accepted the unchanged actual Windows task.
+
+Independent review added a guard around native exception metadata access. The
+fatal-layout policy leaves AppKit's existing decision untouched if inspection
+fails; only the exact native LayoutCycleException permits normal termination.
+Native fatal-termination execution remains unqualified because investigative
+probes encountered an unrelated Windows activation failure. Those experimental
+probe modes are excluded from the committed regression host. Publication,
+installation and actual in-app update acceptance of 0.3.1 are still pending.
+
+The candidate notes below preserve the implementation history.
+
 ## Realtime and Jobs UI source — 0.3.0-rc.1 release candidate
 
 Current source adopts printing extension 2.0 and immutable protocol commit

@@ -19,6 +19,7 @@ namespace Qqq.PrintAgent;
 /// <summary>AppKit companion for enrollment and diagnostics of the machine print service.</summary>
 public sealed partial class MainWindow : Window, IDisposable
 {
+   private readonly Func<PipeRequest, Task<string>> _sendRequest;
    private readonly AppSettings _settings = AppIdentity.SettingsStore.Load();
    private bool _busy;
    private bool _refreshing;
@@ -37,8 +38,14 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
    /// <summary>Initialize the shared shell and the printing setup screen.</summary>
-   public MainWindow()
+   public MainWindow() : this(AgentPipeClient.SendAsync)
    {
+   }
+
+   /// <summary>Allows the native regression host to use synthetic service responses without printing.</summary>
+   internal MainWindow(Func<PipeRequest, Task<string>> sendRequest)
+   {
+      _sendRequest = sendRequest ?? throw new ArgumentNullException(nameof(sendRequest));
       InitializeComponent();
       ApplyBranding();
       this.ResizeForDpi(1100, 760);
@@ -111,6 +118,7 @@ public sealed partial class MainWindow : Window, IDisposable
       InvalidateJobDetails();
       DisposeUpdates();
       _refreshTimer.Stop();
+      _transportTimer.Stop();
       _activationRegistration?.Unregister(null);
       _tray.Dispose();
       foreach(System.Drawing.Icon icon in _trayIcons.Values)
@@ -126,7 +134,8 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Read service status once the window has loaded.</summary>
    private async void Root_Loaded(object sender, RoutedEventArgs e)
    {
-      await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync(), CheckUpdatesAfterStartupAsync());
+      InitializeTransportStatus();
+      await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync(), CheckUpdatesAfterStartupAsync(), RefreshTransportAsync());
    }
 
    private void Navigation_Loaded(object sender, RoutedEventArgs e)
@@ -216,7 +225,7 @@ public sealed partial class MainWindow : Window, IDisposable
       try
       {
          Feedback("Connecting", "The service is enrolling this device with the server…", InfoBarSeverity.Informational);
-         string result = await AgentPipeClient.SendAsync(new PipeRequest("enroll", address.TrimEnd('/'), EnrollmentBox.Password.Trim()));
+         string result = await _sendRequest(new PipeRequest("enroll", address.TrimEnd('/'), EnrollmentBox.Password.Trim()));
          if(!result.StartsWith("Enrolled device ", StringComparison.Ordinal))
          {
             Feedback("Enrollment failed", result + " If the code expired or was already used, generate a fresh code in the server. Your previous connection is retained unless enrollment completes.", InfoBarSeverity.Error);
@@ -255,7 +264,7 @@ public sealed partial class MainWindow : Window, IDisposable
       SetBusy(true);
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("reconnect"));
+         string response = await _sendRequest(new PipeRequest("reconnect"));
          Feedback("Reconnect requested", response, InfoBarSeverity.Informational);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
@@ -282,7 +291,7 @@ public sealed partial class MainWindow : Window, IDisposable
       int mutationVersion = _mutationVersion;
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("snapshot"));
+         string response = await _sendRequest(new PipeRequest("snapshot"));
          if(_updatesClosed || _busy || mutationVersion != _mutationVersion)
          {
             return;
@@ -328,6 +337,7 @@ public sealed partial class MainWindow : Window, IDisposable
       SetHealth("RED");
       StatusText.Text = "Local print service unavailable";
       FooterContact.Text = "Local service unavailable · retrying automatically; shown data may be stale";
+      RenderTransport(null);
       Feedback("Service unavailable", (_serviceStatus?.Guidance ?? "The local service could not be reached.") + " Open Settings for service controls, Windows Services or the installer. This administration window needs administrator access.", InfoBarSeverity.Error);
    }
 
@@ -426,6 +436,10 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       SetHealth(snapshot.Health);
+      RenderTransport(snapshot.Transport);
+      FooterServerLabel.Text = TransportFormatting.Server(snapshot.ServerUrl);
+      ToolTipService.SetToolTip(FooterServer, "Open connection settings: " + FooterServerLabel.Text);
+      Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(FooterServer, "Open connection settings: " + FooterServerLabel.Text);
       ConnectionButton.Content = snapshot.Enrolled ? "Sign in again" : "Connect this device";
       ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to the server";
       FooterContact.Text = $"Last server contact: {FormatTime(snapshot.LastSuccessfulPoll)} · Local status refreshes every 5 seconds";
@@ -445,7 +459,7 @@ public sealed partial class MainWindow : Window, IDisposable
          }
       }
       ConnectionText.Text = snapshot.Enrolled
-         ? $"Server: {snapshot.ServerUrl}\nDevice: {snapshot.DeviceId}\nLast successful poll: {FormatTime(snapshot.LastSuccessfulPoll)}"
+         ? $"Server: {snapshot.ServerUrl}\nDevice: {snapshot.DeviceId}\nLast server contact: {FormatTime(snapshot.LastSuccessfulPoll)}"
          : "This device has not been enrolled. Open Connection settings to connect it to the server.";
       AuthenticationText.Text = snapshot.Authentication is { } authentication
          ? authentication.SignedIn ? $"Signed in as {authentication.PrincipalId} · Tenant {authentication.TenantId}\n{authentication.Message}" : authentication.Message
@@ -454,6 +468,8 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          FooterStatus.Text = "QQQ authorization required";
       }
+      ToolTipService.SetToolTip(FooterStatus, FooterStatus.Text);
+      ToolTipService.SetToolTip(FooterContact, FooterContact.Text);
       if(string.IsNullOrWhiteSpace(ServerBox.Text) && snapshot.ServerUrl is not null)
       {
          ServerBox.Text = snapshot.ServerUrl;
@@ -505,7 +521,7 @@ public sealed partial class MainWindow : Window, IDisposable
       SetBusy(true);
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("set-exposure", PrinterId: printer.PrinterId, Exposed: exposed));
+         string response = await _sendRequest(new PipeRequest("set-exposure", PrinterId: printer.PrinterId, Exposed: exposed));
          AgentSnapshot snapshot = JsonSerializer.Deserialize<AgentSnapshot>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions)
             ?? throw new JsonException("Missing snapshot.");
          RenderSnapshot(snapshot);

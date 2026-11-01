@@ -52,7 +52,7 @@ public sealed partial class MainWindow
       bool refreshDetails = false;
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("query-jobs", JobQuery: query));
+         string response = await _sendRequest(new PipeRequest("query-jobs", JobQuery: query));
          if(version != _jobQueryVersion || _updatesClosed || _busy || mutationVersion != _mutationVersion)
          {
             return;
@@ -173,7 +173,7 @@ public sealed partial class MainWindow
       JobDetailsSnapshot? details = null;
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("job-details", JobId: job.JobId));
+         string response = await _sendRequest(new PipeRequest("job-details", JobId: job.JobId));
          if(IsActionError(response))
          {
             return;
