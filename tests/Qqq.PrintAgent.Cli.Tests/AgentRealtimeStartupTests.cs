@@ -9,14 +9,23 @@ public sealed class AgentRealtimeStartupTests
    [InlineData(true)]
    public async Task InitialAcknowledgementDelayUsesNegotiatedPolicyAndReportsFailureStage(bool minimumDeadline)
    {
-      // Model a delayed server/test continuation, without CPU starvation or global
-      // thread-pool changes that would contaminate concurrently running tests.
+      // Do not race a 1200 ms ACK against a 1000 ms timer: under scheduler load
+      // their continuations can run in either order. For the timeout case, keep
+      // the ACK withheld until the runtime has actually reported that timeout.
       RealtimeSettings? settings = minimumDeadline ? new RealtimeSettings(Revision: 1, AckTimeoutMillis: 1000) : null;
       await using var fixture = new RealtimeRuntimeFixture(settings: settings);
       fixture.BeforeAcknowledgement = async message =>
       {
          if(message.Type is "STATE_APPLIED")
-         { await Task.Delay(1200); }
+         {
+            if(minimumDeadline)
+            {
+               Assert.False(fixture.Runtime.GetSnapshot().Connected);
+               await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("timed out", StringComparison.OrdinalIgnoreCase)));
+            }
+            else
+            { await Task.Delay(1200); }
+         }
       };
       if(minimumDeadline)
       {
