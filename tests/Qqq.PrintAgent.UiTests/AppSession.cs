@@ -77,6 +77,8 @@ public sealed class AppSession : IDisposable
 
    public Window MainWindow { get; }
 
+
+
    /// <summary>Requires the same live native window and process, including while its UIA provider is hidden.</summary>
    public void WaitForWindowVisibility(nint window, bool visible)
    {
@@ -88,6 +90,8 @@ public sealed class AppSession : IDisposable
          throw new TimeoutException($"The original HWND did not remain alive and become {(visible ? "visible" : "hidden")}. App exited: {App.HasExited}.");
       }
    }
+
+
 
    /// <summary>Launches the same executable and presentation profile to exercise instance forwarding.</summary>
    public Process Relaunch()
@@ -147,6 +151,8 @@ public sealed class AppSession : IDisposable
    public AutomationElement WaitForElement(string automationId, TimeSpan? timeout = null)
        => WaitFor(() => FindInApp(cf => cf.ByAutomationId(automationId)), $"element '{automationId}'", timeout);
 
+
+
    /// <summary>Finds visible text by its native UIA peer rather than a layout container without a peer.</summary>
    public AutomationElement WaitForVisibleText(string text)
        => WaitFor(() => MainWindow.FindAllDescendants(cf => cf.ByControlType(ControlType.Text).And(cf.ByName(text)))
@@ -168,6 +174,8 @@ public sealed class AppSession : IDisposable
    /// </summary>
    public void InvokeMenuItem(string menuName, string itemAutomationId)
       => Invoke(OpenMenuAndFindItem(menuName, itemAutomationId));
+
+
 
    /// <summary>Opens a native menu and returns an item without invoking its action.</summary>
    public AutomationElement OpenMenuAndFindItem(string menuName, string itemAutomationId)

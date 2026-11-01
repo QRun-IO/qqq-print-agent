@@ -10,8 +10,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The transport status (protocol, connection state and traffic totals) shown in the footer must be truthful: separate from the dispatch on/off setting, durable across reconnects, cheap to read, and honest when unavailable.</summary>
 public sealed class AgentTransportTests
 {
+   /// <summary>
+   /// Turning dispatch off at the server does not close the WebSocket: the channel stays CONNECTED even though the agent reports
+   /// itself disconnected. After an actual network drop the state shows RECONNECTING, and once reconnected the byte totals have
+   /// grown and still count from the original start time, so reconnects never reset the counters or cause HTTP polling or printing.
+   /// </summary>
    [Fact]
    public async Task DispatchDisconnectKeepsWebSocketConnectedAndReconnectPreservesTrafficTotals()
    {
@@ -39,6 +45,9 @@ public sealed class AgentTransportTests
       Assert.Equal(0, fixture.Printer.Prints);
    }
 
+
+
+   /// <summary>The pipe's transport request returns only the connection and traffic figures: an idle agent reports NONE/DISCONNECTED with zero bytes, no printer or job data appears in the reply, and the printer backend is never asked to discover queues (the fake throws if it is).</summary>
    [Fact]
    public async Task TransportPipeOperationDoesNotDiscoverPrintersAndReturnsOnlyTrafficStatus()
    {
@@ -74,6 +83,9 @@ public sealed class AgentTransportTests
       }
    }
 
+
+
+   /// <summary>A snapshot written by an older service has no transport section; it reads back as null (unavailable) instead of an invented zero, so the screen can say the figure is unknown.</summary>
    [Fact]
    public void OldSnapshotHasUnavailableTelemetryRatherThanFabricatedZero()
    {
@@ -82,9 +94,17 @@ public sealed class AgentTransportTests
       Assert.Null(snapshot.Transport);
    }
 
+
+
+   /// <summary>A printer backend that throws on any use, so a test fails if transport observation touches printers or prints.</summary>
    private sealed class ForbiddenPrinters : IPrinterBackend
    {
+      /// <summary>Always throws: transport observation must not discover printers.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => throw new InvalidOperationException("Transport observation must not discover printers.");
+
+
+
+      /// <summary>Always throws: physical printing is forbidden here.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Physical printing is forbidden in this test.");
    }

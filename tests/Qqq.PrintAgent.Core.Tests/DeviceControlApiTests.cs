@@ -10,8 +10,10 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
+/// <summary>The client side of the device control poll: it accepts the server's published sample reply, tells the server which control version and capabilities it supports, and refuses any reply that does not state the device's desired state.</summary>
 public sealed class DeviceControlApiTests
 {
+   /// <summary>The shared sample reply from the server project parses (paused state, two commands), and the request the client sends names control version 1 and exactly two capabilities, so both sides agree on the wire format.</summary>
    [Fact]
    public async Task SharedControlFixtureIsAcceptedAndCapabilitiesAdvertised()
    {
@@ -26,6 +28,9 @@ public sealed class DeviceControlApiTests
       Assert.Equal(2, request.RootElement.GetProperty("capabilities").GetArrayLength());
    }
 
+
+
+   /// <summary>An empty object, a null body, or an unsupported control version is rejected as invalid data; a missing desired state must never be read as "connected, not paused", which would let a paused device print.</summary>
    [Theory]
    [InlineData("{}")]
    [InlineData("null")]
@@ -36,9 +41,16 @@ public sealed class DeviceControlApiTests
       await Assert.ThrowsAsync<InvalidDataException>(() => api.ControlPollAsync(0, CancellationToken.None));
    }
 
+
+
+   /// <summary>Fake server that replies with the configured body and remembers the request body it received.</summary>
    private sealed class Handler(string body) : HttpMessageHandler
    {
       internal string? RequestBody { get; private set; }
+
+
+
+      /// <summary>Stores the request text, then returns the configured JSON with status 200.</summary>
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          RequestBody = await request.Content!.ReadAsStringAsync(cancellationToken);

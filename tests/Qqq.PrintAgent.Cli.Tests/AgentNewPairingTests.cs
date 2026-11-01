@@ -10,8 +10,18 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// Starting a new pairing must never destroy the old one until the new device is actually enrolled. These tests cover the guarded
+/// transition: the old configuration and journal are retained and restorable, a revoked or mismatched device proof blocks resuming,
+/// and a rejected enrollment changes nothing on disk.
+/// </summary>
 public sealed class AgentNewPairingTests
 {
+   /// <summary>
+   /// After an explicit "start new pairing" sign-in, the agent waits (signed in, not authorized, no server requests) even across a
+   /// restart, whether the old pairing file was replaced by a different pairing or became unreadable. Enrolling then creates the
+   /// replacement device and a fresh journal while the old file bytes are preserved, so restoring them brings the old history back.
+   /// </summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]
@@ -53,6 +63,9 @@ public sealed class AgentNewPairingTests
       Assert.Equal("SPOOLED", originalStore.GetState("job"));
    }
 
+
+
+   /// <summary>A saved sign-in bound to one device cannot be used when the stored device proof now belongs to a different device or cannot be read: no session is created, nothing is sent, and the pairing file is left unchanged.</summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]
@@ -72,6 +85,9 @@ public sealed class AgentNewPairingTests
       Assert.Equal(retained, File.ReadAllBytes(path));
    }
 
+
+
+   /// <summary>Makes the stored pairing differ from the signed-in device: either a saved configuration for another server and device, or garbage bytes that cannot be decrypted.</summary>
    private static void ChangeOldConfiguration(SessionFixture fixture, bool unreadable)
    {
       if(unreadable)
@@ -85,6 +101,13 @@ public sealed class AgentNewPairingTests
       }
    }
 
+
+
+   /// <summary>
+   /// When the server has revoked this device, an ordinary sign-in is refused without touching the stored pairing or session
+   /// files; only an explicit new-pairing sign-in is accepted, and it still sends nothing. A rejected enrollment (403) leaves
+   /// everything unchanged, and a later accepted one replaces the device while the original file can still be restored.
+   /// </summary>
    [Fact]
    public async Task RevokedPairingNeedsExplicitNewSetupAndSurvivesRestartBeforeEnrollment()
    {
@@ -136,6 +159,9 @@ public sealed class AgentNewPairingTests
       Assert.Equal("SPOOLED", originalStore.GetState("job"));
    }
 
+
+
+   /// <summary>A fake session for a user with no device bound that treats the existing device id as revoked, which is what the server reports after a pairing is withdrawn.</summary>
    private static SessionFixture.FakeSession UnboundSession()
    {
       SessionFixture.FakeSession session = new() { RevokedDeviceId = "device" };

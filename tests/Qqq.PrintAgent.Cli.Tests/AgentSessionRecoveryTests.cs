@@ -9,8 +9,13 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// Recovery from damaged protected files. An unreadable saved session or device proof is never silently overwritten or deleted: it
+/// is kept as a recovery copy, the user must sign in (and, where needed, enroll) again, and the job journal is preserved.
+/// </summary>
 public sealed class AgentSessionRecoveryTests
 {
+   /// <summary>Six structurally invalid saved sessions (missing or blank identity, a non-secure remote origin, a credential for another origin) are each rejected on load. A fresh sign-in then replaces the session, keeps the damaged bytes as a recovery copy, and leaves the job history intact.</summary>
    [Fact]
    public async Task StructurallyInvalidProtectedSessionCanBeReplacedAfterSignIn()
    {
@@ -44,6 +49,9 @@ public sealed class AgentSessionRecoveryTests
       }
    }
 
+
+
+   /// <summary>An unreadable session file is replaced only after the server has accepted the new sign-in: while binding is denied the damaged file stays exactly as it was and no recovery copy exists; once binding succeeds the old bytes are preserved as a recovery copy and pairing, journal and sharing are untouched.</summary>
    [Fact]
    public async Task ExplicitSignInReplacesUnreadableSessionAfterServerBinding()
    {
@@ -68,6 +76,13 @@ public sealed class AgentSessionRecoveryTests
       Assert.NotNull(store.LoadAuthentication()!.Credential);
    }
 
+
+
+   /// <summary>
+   /// If the device proof file is unreadable, signing in does not authorize the device and sends nothing; the user must enroll
+   /// explicitly. Enrolling keeps the damaged file as a recovery copy and starts a new device with a fresh journal, and restoring
+   /// the original proof shows its old journal was kept rather than reassigned to the new device.
+   /// </summary>
    [Fact]
    public async Task LostDeviceProofRequiresExplicitEnrollmentAfterFreshSignIn()
    {
@@ -101,6 +116,9 @@ public sealed class AgentSessionRecoveryTests
       Assert.Equal("SPOOLED", originalStore.GetState("job"));
    }
 
+
+
+   /// <summary>Signing out with an unreadable session file moves the file aside as a recovery copy (and tells the operator to revoke the old session in QQQ, since this machine cannot), while the device pairing, job history and shared printers are kept.</summary>
    [Fact]
    public async Task ExplicitSignOutQuarantinesUnreadableSessionWithoutLosingPairing()
    {

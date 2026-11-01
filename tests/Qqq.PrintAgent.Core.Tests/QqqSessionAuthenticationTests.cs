@@ -579,10 +579,20 @@ public sealed class QqqSessionAuthenticationTests
       AssertPublic(Assert.Single(handler.Requests));
    }
 
+
+
+   /// <summary>Builds the provider's redirect back to the app: the attempt's own redirect address plus a one-time code and the given state.</summary>
    private static Uri Callback(QqqBrowserLogin attempt, string state) => new(attempt.RedirectUri.AbsoluteUri + "?code=one-time-code&state=" + Uri.EscapeDataString(state));
+
+
+
+   /// <summary>Splits a URL's query string into decoded name/value pairs so tests can assert individual authorization parameters.</summary>
    private static Dictionary<string, string> Query(Uri uri) => uri.Query[1..].Split('&').Select(part => part.Split('=', 2))
       .ToDictionary(part => Uri.UnescapeDataString(part[0]), part => Uri.UnescapeDataString(part[1]), StringComparer.Ordinal);
 
+
+
+   /// <summary>A fake server pre-loaded with discovery and a table-based (password) authentication description, the first two public replies of a password sign-in.</summary>
    private static Handler TableHandler()
    {
       var handler = new Handler();
@@ -591,6 +601,9 @@ public sealed class QqqSessionAuthenticationTests
       return handler;
    }
 
+
+
+   /// <summary>A fake server pre-loaded with discovery, the native browser-login description and the provider's discovery document, the three public replies before a browser sign-in starts.</summary>
    private static Handler OAuthHandler()
    {
       var handler = new Handler();
@@ -600,6 +613,9 @@ public sealed class QqqSessionAuthenticationTests
       return handler;
    }
 
+
+
+   /// <summary>Asserts a request was anonymous: no Authorization header, cookie, device id or device token, as every request made before credentials are allowed must be.</summary>
    private static void AssertPublic(Request request)
    {
       Assert.Null(request.Authorization);
@@ -608,6 +624,9 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Null(request.DeviceToken);
    }
 
+
+
+   /// <summary>A JSON response with the given status, optionally carrying a Set-Cookie header.</summary>
    private static HttpResponseMessage Response(string body, HttpStatusCode status = HttpStatusCode.OK, string? cookie = null)
    {
       var response = new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
@@ -616,15 +635,37 @@ public sealed class QqqSessionAuthenticationTests
       return response;
    }
 
+
+
+   /// <summary>What the fake server saw for one request: URL, body and the credential-bearing headers, so tests can prove where each secret was and was not sent.</summary>
    private sealed record Request(Uri Uri, string? Body, string? Authorization, string? Cookie, string? DeviceId, string? DeviceToken, string? ClientChannel, string? Origin);
 
+
+
+   /// <summary>Scripted fake server: it records every request and answers them in the order replies were queued, so a test fixes the exact conversation and fails if the client deviates.</summary>
    private sealed class Handler : HttpMessageHandler
    {
       private readonly Queue<Func<CancellationToken, Task<HttpResponseMessage>>> _responses = new();
       internal List<Request> Requests { get; } = [];
+
+
+
+      /// <summary>Queues a JSON reply with the given status and optional cookie.</summary>
       internal void Add(string body, HttpStatusCode status = HttpStatusCode.OK, string? cookie = null) => AddResponse(() => Response(body, status, cookie));
+
+
+
+      /// <summary>Queues a reply built on demand, for responses that need custom headers.</summary>
       internal void AddResponse(Func<HttpResponseMessage> response) => AddAsync(_ => Task.FromResult(response()));
+
+
+
+      /// <summary>Queues an asynchronous reply, for responses a test wants to hold open and release later.</summary>
       internal void AddAsync(Func<CancellationToken, Task<HttpResponseMessage>> response) => _responses.Enqueue(response);
+
+
+
+      /// <summary>Records the request, including body and credential headers, then returns the next queued reply.</summary>
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -635,11 +676,26 @@ public sealed class QqqSessionAuthenticationTests
       }
    }
 
+
+
+   /// <summary>A clock that moves only when told to, so the five-minute sign-in expiry can be tested without waiting.</summary>
    private sealed class FakeTime : TimeProvider
    {
       private long _timestamp;
+
+
+
+      /// <summary>One tick per timestamp unit, so timestamps and TimeSpan ticks are the same scale.</summary>
       public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+
+
+      /// <summary>The current fake timestamp.</summary>
       public override long GetTimestamp() => _timestamp;
+
+
+
+      /// <summary>Moves the fake clock forward.</summary>
       internal void Advance(TimeSpan amount) => _timestamp += amount.Ticks;
    }
 }

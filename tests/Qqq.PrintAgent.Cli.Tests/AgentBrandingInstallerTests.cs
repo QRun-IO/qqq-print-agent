@@ -9,8 +9,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// The installer's branded Start Menu shortcut is created and removed by a privileged component, so the folder permissions it
+/// trusts, the file names it generates and the shortcuts it is willing to delete are all validated here. The rules must let
+/// ordinary users keep a delete-only grant without weakening the stricter protection the updater requires.
+/// </summary>
 public sealed class AgentBrandingInstallerTests
 {
+   /// <summary>A Start Menu folder that gives ordinary users read/execute, and one user delete-only rights, is acceptable for shortcuts, yet the same permissions still fail the stricter updater check, so relaxing one rule does not relax the other.</summary>
    [Fact]
    public void StartMenuDeleteOnlyRulesAreAllowedWithoutRelaxingUpdaterProtection()
    {
@@ -20,6 +26,9 @@ public sealed class AgentBrandingInstallerTests
       Assert.Throws<UnauthorizedAccessException>(() => MsiUpdateInstaller.ValidateTrustedAcl(security, "S-1-5-18"));
    }
 
+
+
+   /// <summary>Rights that let an untrusted user add content, change permissions or take ownership of the Start Menu folder (write-data, append, write-DAC, write-owner and the generic write/all rights) are refused, because they could be used to plant or redirect a shortcut.</summary>
    [Theory]
    [InlineData("0x2")]
    [InlineData("0x4")]
@@ -34,6 +43,9 @@ public sealed class AgentBrandingInstallerTests
       Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingInstaller.ValidateShortcutSecurity(security));
    }
 
+
+
+   /// <summary>An inherit-only write grant to an untrusted user is refused too: it grants nothing on the folder itself but would give that user write access to every shortcut file created inside it.</summary>
    [Fact]
    public void StartMenuCannotPassUntrustedWritePermissionsToItsShortcutFiles()
    {
@@ -42,6 +54,9 @@ public sealed class AgentBrandingInstallerTests
       Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingInstaller.ValidateShortcutSecurity(security));
    }
 
+
+
+   /// <summary>A normal customer label becomes its own .lnk name. An over-long label is shortened to at most 120 characters in a repeatable way, with a suffix that differs when only the last character differs, so two long names never collide.</summary>
    [Fact]
    public void FriendlyShortcutKeepsItsLabelAndLongNamesHaveStableDistinctSuffixes()
    {
@@ -53,6 +68,9 @@ public sealed class AgentBrandingInstallerTests
       Assert.True(first.Length <= 120);
    }
 
+
+
+   /// <summary>A customer-supplied label can contain path separators, drive letters, reserved device names or illegal characters; each is turned into a single safe .lnk file name that resolves directly inside the shortcut folder and nowhere else.</summary>
    [Theory]
    [InlineData("../outside")]
    [InlineData("C:\\outside")]
@@ -69,6 +87,9 @@ public sealed class AgentBrandingInstallerTests
       Assert.EndsWith(".lnk", filename, StringComparison.Ordinal);
    }
 
+
+
+   /// <summary>The shortcut file name read back from the registry is untrusted: a parent-directory path, a drive path, a non-.lnk extension or an alternate data stream is rejected, so removal can never be steered outside the folder the installer owns.</summary>
    [Theory]
    [InlineData("..\\outside.lnk")]
    [InlineData("C:\\outside.lnk")]
@@ -79,6 +100,9 @@ public sealed class AgentBrandingInstallerTests
       Assert.Throws<InvalidDataException>(() => AgentBrandingInstaller.ShortcutPath(Path.GetTempPath(), filename));
    }
 
+
+
+   /// <summary>Uninstall deletes a shortcut only if it points at the installed companion, has no extra arguments and carries the product's ownership description; a user's own shortcut with the same name, or one aimed elsewhere, is left alone.</summary>
    [Fact]
    public void CleanupRequiresExactTargetArgumentsAndOwnershipMarker()
    {

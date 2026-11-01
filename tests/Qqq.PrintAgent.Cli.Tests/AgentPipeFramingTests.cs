@@ -9,8 +9,10 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The management pipe exchanges one newline-terminated message per command. These tests hold the framing to its limits: bounded size, complete frames only, correct Unicode, and no waiting forever on a client that stalls.</summary>
 public sealed class AgentPipeFramingTests
 {
+   /// <summary>Reading with a 100-character limit from a 100,000-character stream with no newline fails with invalid data after reading only a small part of it, so an oversized message cannot make the service consume the whole stream.</summary>
    [Fact]
    public async Task Read_RejectsOversizedUnterminatedInputBeforeReadingWholeStream()
    {
@@ -19,6 +21,9 @@ public sealed class AgentPipeFramingTests
       Assert.True(input.Position < input.Length);
    }
 
+
+
+   /// <summary>A message that crosses the 4,096-character read buffer and contains multi-byte and surrogate-pair characters comes back intact with its line ending removed; a message that ends without a newline is an I/O error, never silently accepted as complete.</summary>
    [Fact]
    public async Task Read_RequiresCompleteFrame_AndPreservesUnicodeAcrossBuffers()
    {
@@ -29,6 +34,9 @@ public sealed class AgentPipeFramingTests
       await Assert.ThrowsAsync<IOException>(() => AgentPipeFraming.ReadAsync(incomplete, 100, CancellationToken.None));
    }
 
+
+
+   /// <summary>Writing a 4 MiB reply to a connected client that never reads stops when its token is cancelled (after 100 ms here) instead of blocking the service indefinitely.</summary>
    [Fact]
    public async Task Write_CancelsWhenConnectedClientDoesNotRead()
    {
@@ -45,6 +53,9 @@ public sealed class AgentPipeFramingTests
       Assert.True(write.IsCanceled);
    }
 
+
+
+   /// <summary>A client that sends part of a command and never ends the line does not hold the service: the read is cancelled by its own deadline (100 ms here) rather than waiting for the rest.</summary>
    [Fact]
    public async Task Read_CancelsWhenConnectedClientNeverTerminatesCommand()
    {
