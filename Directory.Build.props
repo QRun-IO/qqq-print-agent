@@ -61,7 +61,7 @@
         CLI's version output show as a short hash. -->
    <PropertyGroup>
       <VersionPrefix>0.4.0</VersionPrefix>
-      <VersionSuffix>rc.1</VersionSuffix>
+      <VersionSuffix>rc.2</VersionSuffix>
    </PropertyGroup>
 
    <!-- Product metadata stamped into every assembly. -->

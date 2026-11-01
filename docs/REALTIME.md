@@ -1,11 +1,13 @@
 # Realtime architecture and operation
 
-This describes release candidate [0.3.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.0-rc.1). The published `0.2.0-rc.1`
-transport and its acceptance evidence remain historical. The authoritative
-[contract at the consumer pin](https://github.com/QRun-IO/qqq-print-protocol/blob/f3cbc02e9b0fb4fdfefaa59d976c04df747cc589/docs/REALTIME.md)
-defines exact fields, bounds and required cross-runtime tests.
+The realtime transport was introduced in release candidate [0.3.0-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.0-rc.1) as native printing 2.0, and the published `0.2.0-rc.1`
+polling transport and its acceptance evidence remain historical. The current candidate speaks native printing 2.3 with
+wire payload v1 and the same realtime model; media negotiation is offered only to a stable 2.3+ server. The authoritative
+[contract at the consumer pin](https://git.kof22.com/QRun-IO/qqq-print-protocol/src/commit/42c0d249f81395f00408ec0f92638dcbbf5deb03/docs/REALTIME.md)
+(commit `42c0d249f81395f00408ec0f92638dcbbf5deb03`, [Gitea PR 2](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/2))
+defines exact fields, bounds and required cross-runtime tests. The earlier 0.3.0 pin was `f3cbc02e9b0fb4fdfefaa59d976c04df747cc589`, kept as history.
 
-Native printing is version 2.0 because claiming now requires a synchronized
+The 2.0 transport origin: native printing became version 2.0 because claiming then required a synchronized
 authenticated WebSocket; published 1.0 clients could claim using HTTP alone.
 This is a breaking behavioral change even though the route and domain payloads
 are retained. Product version 0.3, framework `/qqq/v1`, wire payload v1 and the

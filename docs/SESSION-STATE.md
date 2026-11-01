@@ -27,11 +27,54 @@ Observed locally (no hosted result for the final heads yet):
   lifecycle defect (realtime channel workers outliving the stopped host).
 
 Pending, not claimed: hosted CI on the final signed heads (including Core.Tests and
-the MSI build), installer and upgrade-preservation qualification
-([UPGRADE-QUALIFICATION.md](UPGRADE-QUALIFICATION.md)), profile-selected physical
-output, the unexplained 5–7 s ZPL test-print latency (measure first), and installed
-browser/private-callback sign-in against a published API 1.9+ server. No 1.0 claim.
-See [RELEASE-READINESS.md](RELEASE-READINESS.md).
+the MSI build), profile-selected physical output, and installed browser/private-callback
+sign-in against a published API 1.9+ server. The earlier plans for repeat Auth/S3
+qualification, ZPL test-print latency measurement and installer/MSI analysis were
+cancelled by the user and are not active work; the evidence recorded earlier in this
+file and in [UPGRADE-QUALIFICATION.md](UPGRADE-QUALIFICATION.md) is historical and kept.
+No 1.0 claim. See [RELEASE-READINESS.md](RELEASE-READINESS.md).
+
+## Final pin and release identity — 2026-11-01
+
+The final protocol pin is `42c0d249f81395f00408ec0f92638dcbbf5deb03`
+([Gitea PR 2](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/2)); root updated
+`.github/workflows/ci.yml` and the Gitea standards-exception (EX-0015) citation. The
+[standards PR 54](https://github.com/KofTwentyTwo/standards/pull/54) is recorded as
+merged after CI 777778 passed. The earlier pins (`a26c18c9…`, `df3729ac…`, `f3cbc02e…`)
+are historical evidence. Because a 0.4.0-rc.1 build is already installed locally and the
+updater needs a strictly newer semantic version, the candidate identity moves to
+**0.4.0-rc.2**: `VersionSuffix` and the `Build-Installer.ps1` default change, while
+`VersionPrefix`/ProductVersion stay 0.4.0 (the installer already allows same-version
+upgrades, so RC to RC upgrades in place). No behavior, dependency or lock change. The
+`ci.yml` release-version defaults are protected and are proposed as a patch for root
+review. Server strict full verify (R31) passed; the merged UI build and 35 paper/media
+tests passed locally. Hosted Windows CI and the update-feed handoff await the migration
+owner; nothing is installed or tagged.
+
+## Release cohort integration — 2026-11-01
+
+Integration branch `release/printing-cohort-20261101` merges the completed C# source
+documentation cleanup (every type, method, constructor and non-auto property has a
+how/why header and the `.editorconfig` structural spacing, proven comment-and-blank-line
+only by the Roslyn token compare per batch) with the small test-print label change
+(4 × 6, 4 × 2 and 4 × 1 label stock at 203/300/600 dpi, job-only actual-size paper for
+short PDF labels, and the 2000 mm paper bound). The three merge conflicts
+(`PrintOptions.cs`, `TestPrintEditor.cs`, `TestPrintProfileTests.cs`) were resolved by
+keeping both: the new behavior and the headers. No behavior was rolled back.
+
+Observed locally on the merged tree (R39): the production UI build under strict XML and
+analyzers passed with zero warnings, and the 35 existing paper/media tests passed.
+Core.Tests is hosted-only (Defender quarantine unchanged). The prior protected base
+`0336d5f` had 477 hosted tests; this head still needs a normal Gitea Core, CLI and build
+run. Pending: that CI run, installation of the new label implementation, and a
+small-stock paper test. The label implementation is **not installed** and has produced no
+physical output; the user's 4 × 6 stock is still loaded and unchanged. Native printing
+stays 2.3 with wire payload v1; the protocol pin awaits root's final commit. The existing
+Auth/S3 qualification is accepted and no new desktop or provider proof is claimed. The product stays
+0.4.0-rc.1, unreleased; no version bump or new updater design is part of the Gitea
+migration. Publishing and update-feed dependency: the AppKit updater reads the fixed
+GitHub release channel, so a Gitea move needs a decision on where releases are published
+before any update is offered from there.
 
 ## Candidate Echo media discovery — 2026-11-01
 

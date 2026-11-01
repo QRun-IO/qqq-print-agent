@@ -136,10 +136,7 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       {
          throw new InvalidDataException("Copies must be between 1 and 32767.");
       }
-      if(job.Options.PaperWidthMm is not null || job.Options.PaperHeightMm is not null)
-      {
-         throw new InvalidDataException("Configure paper dimensions in the Windows queue for this version.");
-      }
+      RequireJobPaperSupport(job);
       if(!printer.Formats.Contains(job.Format, StringComparer.Ordinal))
       {
          throw new InvalidDataException("The queue does not support this document format.");
@@ -229,8 +226,9 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
    /// </summary>
    private static async Task<string> PrintPdfDocumentAsync(PrinterInfo printer, PrintJob job, PdfDocument document, CancellationToken cancellationToken)
    {
+      (int WidthMicrons, int HeightMicrons)? paper = job.Options.CustomPaperMicrons();
       QueueDefaultMedia? media = RequireCurrentMedia(printer, job);
-      byte[]? documentMode = media is null ? null : PreparePdfMode(printer, media);
+      byte[]? documentMode = paper is { } jobPaper ? PrepareCustomPdfMode(printer, jobPaper) : media is null ? null : PreparePdfMode(printer, media);
       IntPtr dc = CreateDocumentContext(printer.Name, documentMode);
       if(dc == IntPtr.Zero)
       {
@@ -240,7 +238,12 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       try
       {
          Native.DocInfo info = new() { Size = Marshal.SizeOf<Native.DocInfo>(), DocumentName = $"QQQ {job.JobId}" };
-         int jobId = StartValidatedPdfDocument(documentMode, media?.Profile,
+         // Explicit job paper is checked against the device context's physical size and dpi, so a driver that
+         // substitutes its 4 x 6 default fails before StartDoc instead of feeding the wrong length.
+         PrinterMediaProfile? expected = paper is { } requested
+            ? new PrinterMediaProfile("job-paper", "job-paper", "Job paper", requested.WidthMicrons, requested.HeightMicrons, Native.GetDeviceCaps(dc, 88), Native.GetDeviceCaps(dc, 90))
+            : media?.Profile;
+         int jobId = StartValidatedPdfDocument(documentMode, expected,
             capability => Native.GetDeviceCaps(dc, capability), () => Native.StartDoc(dc, ref info));
          if(jobId <= 0)
          {

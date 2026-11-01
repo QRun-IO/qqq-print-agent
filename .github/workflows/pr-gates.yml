@@ -118,7 +118,7 @@ jobs:
       # SDK guard pins versions, content/archive hashes, terms and this finite list.
       # EX-0015: development-only uri-js 4.4.1 (ESLint transitive). check-script-quality.py pins its version,
       # lock integrity and installed license bytes and rejects any other pkg:npm entry in this list.
-      # https://github.com/KofTwentyTwo/standards/blob/main/exceptions/register.md#ex-0015
+      # https://git.kof22.com/KofTwentyTwo/standards/src/commit/a18179e90f8e6d35ba9f5e583249885c066e52b8/exceptions/register.md#ex-0015
       allow-dependencies-licenses: >-
         pkg:nuget/Microsoft.Windows.AI.MachineLearning,
         pkg:nuget/Microsoft.Windows.SDK.BuildTools,

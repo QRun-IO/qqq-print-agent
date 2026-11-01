@@ -12,6 +12,9 @@
 - [x] Normalize supported job-only driver copies/scale and verify effective DC dimensions/DPI before StartDoc (24 focused Windows tests plus read-only actual driver/DC probe).
 - [x] Verify synthetic 4 × 1 / 4 × 2 / 4 × 6 profiles, driver-private drift, unknown DPI and isolated-worker refusal.
 - [x] Verify configured 4 × 6 / 300 DPI fingerprint stability across three read-only helper launches.
+- [x] Complete the C# source standards cleanup (how/why headers and structural spacing) and merge it with the short-label change; token-compared as comment/blank-line only per batch.
+- [x] Merged integration tree: production UI build (strict, 0 warnings) and the 35 existing paper/media tests passed locally (R39).
+- [ ] Observe the normal Gitea Core/CLI/build CI on the integration head (Core.Tests is hosted-only); install the new label implementation; run the small-stock paper test. Not installed yet.
 - [ ] Resolve the local Core test-assembly quarantine through the normal security review; obtain a complete clean gate without disabling protections.
 - [ ] Qualify the matching server/consumer catalog, immutable selection and authorized retained-document submission.
 - [ ] Perform separately authorized installed/profile-selected physical acceptance; available alternative stock is not current queue configuration.

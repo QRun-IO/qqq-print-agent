@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Current source prepares release candidate `0.3.0-rc.1`, with printing extension 2.0.
+Current source prepares release candidate `0.4.0-rc.2`, with native printing 2.3 (wire payload v1).
 See [realtime architecture](REALTIME.md) for worker separation, policy, streaming
 and reconnect rules. The service never falls back from WSS to job/control polling.
 
@@ -58,7 +58,7 @@ The worker persists receipt and SUBMITTING before invoking Windows. It records S
 ## Packaging
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 0.3.0 -ReleaseVersion 0.3.0-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.2
 ```
 
 MSI ProductVersion is numeric; assembly/package informational version may contain the prerelease suffix. Service, companion and CLI are published into separate self-contained runtime directories and shipped in one machine MSI. Do not reintroduce the template's per-user Velopack updater.

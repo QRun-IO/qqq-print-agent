@@ -4,11 +4,11 @@ QQQ Print Agent is developed in the [QRun-IO organization](https://github.com/QR
 
 ## Set up
 
-Use Windows x64, Git and the .NET 10 SDK selected by `global.json`. Check out `qqq-print-agent` and `qqq-print-protocol` into sibling directories. Check out the protocol commit pinned in `.github/workflows/ci.yml`; its JSON fixtures are linked into the contract tests.
+Use Windows x64, Git and the .NET 10 SDK selected by `global.json`. Check out `qqq-print-agent` and `qqq-print-protocol` into sibling directories. Check out the protocol commit pinned in `.github/workflows/ci.yml` (`42c0d249f81395f00408ec0f92638dcbbf5deb03`, [Gitea PR 2](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/2)); its JSON fixtures are linked into the contract tests.
 
 ```powershell
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.1.0 -ReleaseVersion 0.1.0-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.2
 ```
 
 Verification uses locked NuGet restore, a warnings-as-errors solution build, core tests, Windows/CLI tests and a coverage report. Packaging creates a self-contained x64 MSI. Neither command installs the service or prints a document.

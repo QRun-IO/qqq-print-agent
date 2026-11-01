@@ -295,7 +295,8 @@ public class AppTests
       ComboBox format = session.WaitForElement("TestPrintFormat").AsComboBox();
       ComboBox media = session.WaitForElement("TestPrintMedia").AsComboBox();
       Assert.Equal("Printer-ready label (ZPL)", format.SelectedItem?.Text);
-      string[] resolutions = ["4 × 6 in label — 203 dpi", "4 × 6 in label — 300 dpi", "4 × 6 in label — 600 dpi"];
+      string[] resolutions = ["4 × 6 in label — 203 dpi", "4 × 6 in label — 300 dpi", "4 × 6 in label — 600 dpi",
+         "4 × 2 in label — 300 dpi", "4 × 1 in label — 300 dpi", "4 × 6 in label — 203 dpi"];
       foreach(string resolution in resolutions)
       {
          media.Select(resolution);
@@ -303,7 +304,7 @@ public class AppTests
       }
       format.Select("Document (PDF)");
       session.WaitFor(() => string.Equals(media.SelectedItem?.Text, "US Letter — 8.5 × 11 in", StringComparison.Ordinal) ? media : null, "PDF stock choices");
-      string[] stocks = ["US Letter — 8.5 × 11 in", "A4 — 210 × 297 mm", "4 × 6 in label"];
+      string[] stocks = ["US Letter — 8.5 × 11 in", "A4 — 210 × 297 mm", "4 × 6 in label", "4 × 2 in label", "4 × 1 in label", "US Letter — 8.5 × 11 in"];
       foreach(string stock in stocks)
       {
          media.Select(stock);

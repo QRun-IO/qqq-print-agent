@@ -35,8 +35,8 @@ public sealed partial class WindowsPrinters
       }
       input.Position = 0;
       PrinterInfo printer = Discover().Single(item => string.Equals(item.PrinterId, job.PrinterId, StringComparison.Ordinal));
-      if(job.Options.Copies is < 1 or > 32767 || job.Options.PaperWidthMm is not null || job.Options.PaperHeightMm is not null
-         || !printer.Formats.Contains(job.Format, StringComparer.Ordinal))
+      RequireJobPaperSupport(job);
+      if(job.Options.Copies is < 1 or > 32767 || !printer.Formats.Contains(job.Format, StringComparer.Ordinal))
       {
          throw new InvalidDataException("The queue or print options are unsupported.");
       }
