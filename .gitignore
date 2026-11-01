@@ -492,3 +492,6 @@ testResults.xml
 journal.db*
 worker.lock
 
+# This vendor legal-file directory is not a generated .msix package.
+!licenses/Microsoft.Windows.SDK.BuildTools.MSIX/
+

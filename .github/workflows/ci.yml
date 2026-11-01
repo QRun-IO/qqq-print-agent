@@ -48,6 +48,8 @@ jobs:
           global-json-file: qqq-print-agent/global.json
       - name: Locked restore, build and test
         run: ./build/Verify.ps1
+      - name: Verify exact Windows SDK inventory and notice bytes
+        run: ./build/Test-WindowsSdkInventory.ps1 -VerifyPackages
       - name: Validate branded installer dry run
         run: |
           ./build/Test-BrandedInstaller.ps1

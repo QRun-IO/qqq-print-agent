@@ -24,6 +24,10 @@
       <PackageReference Include="KofTwentyTwo.AppKit.WinUI" />
       <PackageReference Include="H.NotifyIcon.WinUI" />
       <PackageReference Include="Microsoft.WindowsAppSDK" />
-      <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+      <PackageReference Include="Microsoft.Windows.SDK.BuildTools" PrivateAssets="all" />
+   </ItemGroup>
+   <ItemGroup>
+      <Content Include="../../LICENSE;../../NOTICE" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="../../licenses/**/*" Link="ThirdPartyNotices/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
    </ItemGroup>
 </Project>

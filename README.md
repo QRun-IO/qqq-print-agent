@@ -126,3 +126,5 @@ Realtime transport requires a matching server and network path that permits WSS;
 ## License and acknowledgments
 
 [MIT](LICENSE). The original Windows template and AppKit copyright notices are preserved. See [NOTICE](NOTICE) for the foundation and bundled dependency acknowledgments. QQQ and the printing QBit are separate projects with their own licenses.
+
+Microsoft Windows SDK components retain their [separate terms and distribution scope](docs/WINDOWS-SDK-LICENSES.md). The installed App directory includes all five distinct SDK license texts and their notices; these components are not relicensed as MIT.
