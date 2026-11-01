@@ -13,6 +13,8 @@ The native setup and status application uses the same [KofTwentyTwo AppKit](http
 
 > **Published and installed prerelease: [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1).** All four assets, checksums and provenance attestations were verified. The real in-app update completed with matching app/service/CLI builds, retained identity and history, and an automatically reopened Connected app. The installer remains unsigned.
 
+> **Candidate 0.4.0-rc.1 — unreleased, not installed, no tag.** Adds optional printer-media selection against printing extension 2.3+ servers (2.2 is rendering only and stays a three-capability peer), plus one phase-timing log line per job. The hosted gate on PR head 35ed93c passed 154 Core and 317 CLI/Windows tests with zero warnings (the timing line is newer and needs its own gate), but no installed, physical-output or published-cohort native-callback qualification exists yet. See [release readiness](docs/RELEASE-READINESS.md) and [upgrade qualification](docs/UPGRADE-QUALIFICATION.md). No 1.0 readiness is claimed.
+
 **0.3.2-rc.1** checks the app, service and CLI for the same complete
 build version after an update, reports an inconsistent installation explicitly,
 and corrects the SDK license credit. Its native test host now uses production's
@@ -131,7 +133,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.3.2 -ReleaseVersion 0.3.2-rc.1
+./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.1
 ```
 
 [Realtime architecture and settings](docs/REALTIME.md) · [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

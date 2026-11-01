@@ -119,7 +119,7 @@ public sealed partial class AgentRuntime
       RealtimeSettings settings = _realtimeSettings;
       using var handshake = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
       handshake.CancelAfter(settings.WebSocketHandshakeTimeoutMillis);
-      WebSocket socket = await ConnectRealtimeSocketAsync(settings, lifetime, handshake.Token).ConfigureAwait(false);
+      (WebSocket socket, bool supportsMedia) = await ConnectRealtimeSocketAsync(settings, lifetime, handshake.Token).ConfigureAwait(false);
       using var channel = new PrintingRealtimeChannel(socket, settings, _traffic);
       var updates = Channel.CreateBounded<RealtimeStateUpdate>(4096);
       var commands = Channel.CreateBounded<RealtimeEnvelope>(4096);
@@ -147,7 +147,7 @@ public sealed partial class AgentRuntime
          await channel.SendAsync("HELLO", new
          {
             agentVersion = PrintApiClient.AgentVersion,
-            capabilities = RealtimeCapabilities,
+            capabilities = supportsMedia ? [.. RealtimeCapabilities, "printer-media-v1"] : RealtimeCapabilities,
             lastAppliedRevision = _controlState.DesiredState.Revision,
             lastSettingsRevision = settings.Revision,
             limits = RealtimeSettings.ClientLimits,
@@ -168,12 +168,20 @@ public sealed partial class AgentRuntime
       }
    }
 
-   private async Task<WebSocket> ConnectRealtimeSocketAsync(RealtimeSettings settings, CancellationTokenSource lifetime, CancellationToken token)
+   /// <summary>Reads the discovery refreshed by this socket establishment, so server upgrades and downgrades change capabilities on reconnect without polling.</summary>
+   private async Task<(WebSocket Socket, bool SupportsMedia)> ConnectRealtimeSocketAsync(RealtimeSettings settings, CancellationTokenSource lifetime, CancellationToken token)
    {
       try
       {
-         return await (_sessionClient ?? throw new InvalidOperationException("Sign in is required.")).ConnectPrintingAsync(
+         IQqqSessionClient session = _sessionClient ?? throw new InvalidOperationException("Sign in is required.");
+         WebSocket socket = await session.ConnectPrintingAsync(
             TimeSpan.FromSeconds(settings.HeartbeatIntervalSeconds), TimeSpan.FromSeconds(settings.HeartbeatTimeoutSeconds), token).ConfigureAwait(false);
+         try
+         {
+            QqqApiDiscovery discovery = await session.DiscoverAsync(token).ConfigureAwait(false);
+            return (socket, discovery.SupportsPrinterMedia());
+         }
+         catch { socket.Dispose(); throw; }
       }
       catch
       {
