@@ -33,6 +33,8 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private bool _pollStarted;
    private DateTimeOffset ObservationTime => timeProvider?.GetUtcNow() ?? DateTimeOffset.UtcNow;
 
+
+
    /// <summary>No persistent database handles are held by the runtime.</summary>
    public void Dispose()
    {
@@ -75,6 +77,11 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
+   /// <summary>
+   /// Legacy claim loop used only with an injected HTTP API (fixtures); production sessions never enter it. It runs one
+   /// pass at a time under the connection gate so updates and enrollment are not starved, yields between jobs, records a
+   /// failure once instead of on every retry, and otherwise sleeps until the next interval or an explicit wake-up.
+   /// </summary>
    private async Task PollAsync(CancellationToken token)
    {
       lock(_stateLock)
@@ -117,6 +124,13 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       }
    }
 
+
+
+   /// <summary>
+   /// One legacy claim pass: skipped while an update pauses printing, authorization is missing or the server demands it.
+   /// It refreshes the queued-job preview only when traffic is allowed and discards the result if the queue generation
+   /// moved meanwhile, then lets the worker claim at most one job against the exposed printers and prunes history once a minute.
+   /// </summary>
    private async Task<bool> PollOnceAsync(CancellationToken token)
    {
       if(UpdatePaused || (apiFactory is null && !_authorizationReady))
@@ -167,6 +181,12 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       return processed;
    }
 
+
+
+   /// <summary>
+   /// Builds the API client for one unit of work: the injected one in tests, otherwise a client bound to the live QQQ
+   /// session and the current realtime channel. It fails when no channel exists, so no HTTP-only path can claim work.
+   /// </summary>
    private PrintApiClient CreateApi(AgentConfiguration configuration)
    {
       if(apiFactory is not null)
@@ -177,12 +197,24 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException("Sign in to QQQ before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
    }
 
+
+
+   /// <summary>
+   /// Returns the channel of the connection in force at call time. It is passed as a callback so a client built for one
+   /// connection reads the replacement after a reconnect instead of sending on a closed socket, and it throws while none exists.
+   /// </summary>
    private PrintingRealtimeChannel CurrentRealtime()
    {
       lock(_stateLock)
       { return _realtime ?? throw new IOException("Realtime connection unavailable; durable receipts are retained."); }
    }
 
+
+
+   /// <summary>
+   /// Wakes the claim loop. The single-slot semaphore coalesces repeated wake-ups into one pass, so a burst of job
+   /// notifications cannot queue unbounded work; the status and queue-preview refreshes are requested alongside.
+   /// </summary>
    private void WakePoll()
    {
       if(apiFactory is null)
@@ -241,6 +273,10 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
+   /// <summary>
+   /// Records a service message in the in-memory ring shown to the companion (newest 100) and in the shared activity log.
+   /// The text is redacted first and capped at 1000 characters, so credentials and document content cannot reach either sink.
+   /// </summary>
    private void WriteLog(string level, string message)
    {
       string sanitized = AgentActivityLog.Redact(message);
@@ -262,6 +298,12 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
+   /// <summary>
+   /// Serves the local administrator pipe one client at a time, each command under a timeout (longer for sign-in and
+   /// enrollment). A failing or vanished client gets a short, redacted error and never stops the pipe; an unreadable saved
+   /// connection gets the recovery instructions instead of a raw cryptographic message. The connection is always
+   /// disconnected afterwards so a peer that closed mid-command cannot leave the pipe broken.
+   /// </summary>
    private async Task ServePipeAsync(CancellationToken token)
    {
       await using NamedPipeServerStream pipe = pipeFactory?.Invoke() ?? NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 4096, 4096, CreatePipeSecurity());
@@ -301,6 +343,12 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       }
    }
 
+
+
+   /// <summary>
+   /// Access control for the management pipe: LocalSystem has full control and Administrators read and write, and nobody
+   /// else, so only an elevated operator can change exposure, enrollment or credentials.
+   /// </summary>
    internal static PipeSecurity CreatePipeSecurity()
    {
       PipeSecurity security = new();
@@ -311,6 +359,10 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
+   /// <summary>
+   /// Dispatches one management-pipe operation by name to its handler and returns the text sent back to the caller. An
+   /// unknown operation is refused, and exposure changes validate their arguments before touching the store.
+   /// </summary>
    private async Task<string> HandleCommandAsync(PipeRequest request, CancellationToken token)
    {
       switch(request.Operation)
@@ -368,6 +420,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
+   /// <summary>Compatibility entry point for enrollment; the native session path in <c>EnrollNativeAsync</c> does the work.</summary>
    private async Task<string> EnrollAsync(PipeRequest request, CancellationToken token)
    {
       return await EnrollNativeAsync(request, token).ConfigureAwait(false);
