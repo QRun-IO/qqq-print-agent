@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Core.Transport;
 
 /// <summary>Counts completed payload reads or writes without buffering or retaining their contents.</summary>

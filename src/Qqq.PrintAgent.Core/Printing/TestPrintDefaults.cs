@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>Suggested diagnostic defaults; the operator must still verify installed stock and resolution.</summary>

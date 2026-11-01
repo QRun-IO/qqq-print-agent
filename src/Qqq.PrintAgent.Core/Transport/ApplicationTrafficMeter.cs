@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Core.Transport;
 
 /// <summary>Application payload bytes only: no headers, framing, TLS, credentials or document contents.</summary>

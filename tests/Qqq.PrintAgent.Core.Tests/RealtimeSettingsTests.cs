@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Qqq.PrintAgent.Core.Printing;

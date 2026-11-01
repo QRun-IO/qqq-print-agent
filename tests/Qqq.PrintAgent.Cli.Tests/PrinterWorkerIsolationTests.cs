@@ -5,8 +5,8 @@
 
 using System.Diagnostics;
 using System.Globalization;
-using Qqq.PrintAgent.Windows;
 using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Windows;
 
 
 namespace Qqq.PrintAgent.Cli.Tests;

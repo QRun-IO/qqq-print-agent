@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent;
 
 /// <summary>Leaves a failed native layout unhandled after AppKit has recorded it.</summary>

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Safe companion status, with no cookie, password or device proof.</summary>

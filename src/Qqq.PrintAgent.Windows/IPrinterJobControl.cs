@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 James Maes
- * SPDX-license-Identifier: MIT
+ * SPDX-License-Identifier: MIT
  */
 
 namespace Qqq.PrintAgent.Windows;

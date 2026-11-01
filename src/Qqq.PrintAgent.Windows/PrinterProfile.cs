@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Customer-facing queue metadata; the Windows queue name and printer ID remain unchanged.</summary>
