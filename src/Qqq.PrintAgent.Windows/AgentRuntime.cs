@@ -235,7 +235,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             health = "RED";
             status = _authenticationMessage;
          }
-         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus());
+         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot());
       }
    }
 
@@ -330,6 +330,8 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             return GetSnapshot().Status;
          case "snapshot":
             return JsonSerializer.Serialize(GetSnapshot(), PrintApiClient.JsonOptions);
+         case "transport":
+            return JsonSerializer.Serialize(GetTransportSnapshot(), PrintApiClient.JsonOptions);
          case "printers":
             return JsonSerializer.Serialize(_printers.Discover(), PrintApiClient.JsonOptions);
          case "set-exposure":

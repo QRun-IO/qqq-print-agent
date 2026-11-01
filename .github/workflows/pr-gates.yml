@@ -13,8 +13,122 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolved-nuget-graph:
+    # Forks and Dependabot use static review without a write token. Dependabot
+    # reruns retain their original restricted privileges; never elevate via
+    # pull_request_target. Check both the actor and original PR author.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # GitHub's dependency submission API requires this scope.
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [base, head]
+    steps:
+      - name: Checkout exact comparison revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.revision == 'base' && github.event.pull_request.base.sha || github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Restore and verify every tracked NuGet project
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $projects = @(git ls-files '*.csproj' '*.wixproj')
+          if ($LASTEXITCODE -ne 0 -or $projects.Count -eq 0) { throw 'No tracked NuGet projects.' }
+          foreach ($project in $projects) {
+            dotnet restore $project -p:Platform=x64 --locked-mode
+            if ($LASTEXITCODE -ne 0) { throw "Locked restore failed: $project" }
+            $directory = Split-Path -Parent $project
+            $assets = Get-Content -LiteralPath "$directory/obj/project.assets.json" -Raw | ConvertFrom-Json -AsHashtable
+            $locked = Get-Content -LiteralPath "$directory/packages.lock.json" -Raw | ConvertFrom-Json -AsHashtable
+            if ($assets.libraries.Count -eq 0 -or $locked.dependencies.Count -eq 0) { throw "Empty resolved graph: $project" }
+            $count = 0
+            foreach ($framework in $locked.dependencies.Values) {
+              foreach ($entry in $framework.GetEnumerator()) {
+                if ($entry.Value.type -eq 'Project') { continue }
+                $identity = "$($entry.Key)/$($entry.Value.resolved)"
+                if (-not $assets.libraries.ContainsKey($identity)) { throw "Locked package missing from resolved graph: $project : $identity" }
+                $count++
+              }
+            }
+            if ($count -eq 0) { throw "No locked packages verified: $project" }
+            Write-Output "$project : $count locked framework/package entries verified."
+          }
+      - name: Submit resolved NuGet dependency graph
+        # Official detector reads project.assets.json, including transitive and
+        # centrally managed versions. Although this action is SHA-pinned, it
+        # downloads Microsoft's latest detector release internally (no version
+        # input); the scanner binary itself is upstream-managed, not pinned here.
+        uses: advanced-security/component-detection-dependency-submission-action@1dde438cd9ce3b680144e2c2e67c3ed8fc55d947
+        with:
+          detectorsCategories: NuGet
+          fail-on-empty: true
+          correlator: qqq-print-agent-resolved-nuget
+          snapshot-sha: ${{ matrix.revision == 'base' && github.event.pull_request.base.sha || github.event.pull_request.head.sha }}
+          snapshot-ref: refs/heads/${{ matrix.revision == 'base' && github.event.pull_request.base.ref || github.event.pull_request.head.ref }}
+  resolved-dependency-graph:
+    name: pr / resolved dependency graph
+    needs: resolved-nuget-graph
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require resolved graphs or the explicit read-only review path
+        env:
+          TRUSTED_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.user.login != 'dependabot[bot]' }}
+          SUBMISSION_RESULT: ${{ needs.resolved-nuget-graph.result }}
+        run: |
+          if [ "$TRUSTED_PR" = "true" ]; then
+            if [ "$SUBMISSION_RESULT" != "success" ]; then
+              echo 'Resolved base/head NuGet graph submission did not succeed.' >&2
+              exit 1
+            fi
+            echo 'Resolved base/head NuGet graphs submitted successfully.'
+          else
+            if [ "$SUBMISSION_RESULT" != "skipped" ]; then
+              echo 'Unexpected submission result for a read-only PR.' >&2
+              exit 1
+            fi
+            echo 'Fork or Dependabot PR: static dependency review remains required; no write-capable submission ran.'
+          fi
   pr:
+    needs: resolved-nuget-graph
+    # A failed submission must not turn existing required reviews into skipped
+    # (passing) checks. They still run; the submission job reports its own failure.
+    if: ${{ !cancelled() }}
     uses: KofTwentyTwo/standards/.github/workflows/pr.yml@fdf5ed029603c938615a32b1beca3628b8787945 # v0.1.2
+    with:
+      # EX-0014: exact reviewed SDK inventory, guarded through 2027-04-30 UTC.
+      # https://github.com/KofTwentyTwo/standards/blob/fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152/exceptions/register.md#ex-0014
+      # Package-name license exceptions do not constrain versions; the required
+      # SDK guard pins versions, content/archive hashes, terms and this finite list.
+      allow-dependencies-licenses: >-
+        pkg:nuget/Microsoft.Windows.AI.MachineLearning,
+        pkg:nuget/Microsoft.Windows.SDK.BuildTools,
+        pkg:nuget/Microsoft.Windows.SDK.BuildTools.MSIX,
+        pkg:nuget/Microsoft.Windows.SDK.NET.Ref,
+        pkg:nuget/Microsoft.WindowsAppSDK,
+        pkg:nuget/Microsoft.WindowsAppSDK.AI,
+        pkg:nuget/Microsoft.WindowsAppSDK.Base,
+        pkg:nuget/Microsoft.WindowsAppSDK.DWrite,
+        pkg:nuget/Microsoft.WindowsAppSDK.Foundation,
+        pkg:nuget/Microsoft.WindowsAppSDK.InteractiveExperiences,
+        pkg:nuget/Microsoft.WindowsAppSDK.ML,
+        pkg:nuget/Microsoft.WindowsAppSDK.Runtime,
+        pkg:nuget/Microsoft.WindowsAppSDK.Search,
+        pkg:nuget/Microsoft.WindowsAppSDK.Widgets,
+        pkg:nuget/Microsoft.WindowsAppSDK.WinUI
     permissions:
       contents: read      # read the commits being merged
       pull-requests: read # read the pull request title and dependency diff

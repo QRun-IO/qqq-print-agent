@@ -48,7 +48,7 @@ public sealed partial class MainWindow
       row.SetBusy(_busy);
       try
       {
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("job-details", JobId: requested.JobId));
+         string response = await _sendRequest(new PipeRequest("job-details", JobId: requested.JobId));
          if(!CanApplyJobDetails(row, requested, generation))
          {
             return;

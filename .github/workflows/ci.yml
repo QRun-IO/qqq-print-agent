@@ -9,10 +9,10 @@ on:
     inputs:
       product-version:
         type: string
-        default: '0.3.0'
+        default: '0.3.1'
       release-version:
         type: string
-        default: '0.3.0-rc.1'
+        default: '0.3.1-rc.1'
 
 permissions:
   contents: read
@@ -48,14 +48,16 @@ jobs:
           global-json-file: qqq-print-agent/global.json
       - name: Locked restore, build and test
         run: ./build/Verify.ps1
+      - name: Verify exact Windows SDK inventory and notice bytes
+        run: ./build/Test-WindowsSdkInventory.ps1 -VerifyPackages
       - name: Validate branded installer dry run
         run: |
           ./build/Test-BrandedInstaller.ps1
           ./build/Test-PackagingInputs.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '0.3.0' }}
-          RELEASE_VERSION: ${{ inputs.release-version || '0.3.0-rc.1' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '0.3.1' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '0.3.1-rc.1' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup>
+      <OutputType>WinExe</OutputType>
+      <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+      <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+      <RootNamespace>Qqq.PrintAgent</RootNamespace>
+      <UseWinUI>true</UseWinUI>
+      <WindowsPackageType>None</WindowsPackageType>
+      <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+      <Platforms>x64</Platforms>
+      <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+      <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+      <ApplicationManifest>app.manifest</ApplicationManifest>
+   </PropertyGroup>
+   <ItemGroup>
+      <!-- Compile the real views and event handlers; only startup and the service are synthetic. -->
+      <Compile Include="../../src/Qqq.PrintAgent/*.cs" Exclude="../../src/Qqq.PrintAgent/App.xaml.cs;../../src/Qqq.PrintAgent/Program.cs" Link="Product/%(Filename)%(Extension)" />
+      <ApplicationDefinition Include="../../src/Qqq.PrintAgent/App.xaml" Link="App.xaml" />
+      <Page Include="../../src/Qqq.PrintAgent/MainWindow.xaml" Link="MainWindow.xaml" />
+      <Content Include="../../src/Qqq.PrintAgent/Assets/Brand/*" Link="Assets/Brand/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+      <Using Include="Qqq.PrintAgent.Core" />
+      <ProjectReference Include="../../src/Qqq.PrintAgent.Core/Qqq.PrintAgent.Core.csproj" />
+      <ProjectReference Include="../../src/Qqq.PrintAgent.Windows/Qqq.PrintAgent.Windows.csproj" />
+      <PackageReference Include="KofTwentyTwo.AppKit.WinUI" />
+      <PackageReference Include="H.NotifyIcon.WinUI" />
+      <PackageReference Include="Microsoft.WindowsAppSDK" />
+      <PackageReference Include="Microsoft.Windows.SDK.BuildTools" PrivateAssets="all" />
+   </ItemGroup>
+   <ItemGroup>
+      <Content Include="../../LICENSE;../../NOTICE" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="../../licenses/**/*" Link="ThirdPartyNotices/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+   </ItemGroup>
+</Project>

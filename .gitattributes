@@ -4,3 +4,7 @@
 *.ico binary
 *.cmd text eol=crlf
 *.bat text eol=crlf
+# Preserve third-party legal files byte-for-byte, including vendor line endings.
+licenses/** -text -whitespace
+# The inventory is authored here; only upstream legal documents retain vendor formatting.
+licenses/windows-sdk-packages.json text eol=lf !whitespace

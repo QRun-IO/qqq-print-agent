@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Authentication;
 
@@ -20,6 +21,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = false };
    private readonly HttpClient _http;
    private readonly TimeProvider _timeProvider;
+   private readonly ApplicationTrafficMeter? _traffic;
    private readonly SemaphoreSlim _gate = new(1, 1);
    private CookieContainer _cookies = new();
    private QqqApiDiscovery? _discovery;
@@ -30,7 +32,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private QqqBrowserLogin? _browserLogin;
    private long _generation;
 
-   public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false)
+   public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null)
    {
       ArgumentNullException.ThrowIfNull(origin);
       if(!origin.IsAbsoluteUri || origin.UserInfo.Length != 0 || origin.Query.Length != 0 || origin.Fragment.Length != 0
@@ -42,6 +44,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
       Origin = new Uri(origin.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute);
       _timeProvider = timeProvider ?? TimeProvider.System;
+      _traffic = traffic;
       _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
       {
          Timeout = Timeout.InfiniteTimeSpan,
@@ -301,7 +304,10 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
       if(!boundedByCaller)
       { timeout.CancelAfter(TimeSpan.FromSeconds(20)); }
-      using var request = new HttpRequestMessage(method, uri) { Content = content };
+      using var request = new HttpRequestMessage(method, uri)
+      {
+         Content = !providerDiscovery && _traffic is not null && content is not null ? new TrafficHttpContent(content, _traffic.RecordUpload) : content,
+      };
       request.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
       if(!providerDiscovery)
       { request.Headers.Add("X-QQQ-Client", ClientChannel); }
@@ -323,6 +329,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       HttpResponseMessage response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
       try
       {
+         if(!providerDiscovery && _traffic is not null)
+         { response.Content = new TrafficHttpContent(response.Content, _traffic.RecordDownload); }
          if((int)response.StatusCode is >= 300 and < 400)
          {
             throw new QqqSessionException(QqqSessionException.FailureKind.TransportRefused, "Redirected authentication or API requests are refused.");

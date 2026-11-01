@@ -12,5 +12,17 @@ SQLitePCLRaw, CommunityToolkit.Mvvm and WiX. These projects retain their own
 licenses and copyright notices. Windows OS printing/PDF components and bundled
 Microsoft runtime binaries remain subject to their corresponding terms.
 
+The 15 pinned Microsoft Windows SDK packages retain their separate terms,
+not this project's MIT license. Their five distinct license texts and five
+distinct notices are preserved unmodified under licenses/ in this repository
+and ThirdPartyNotices/ in the installed App directory. The package-to-terms
+mapping and exact versions/hashes are in windows-sdk-packages.json there.
+See docs/WINDOWS-SDK-LICENSES.md for the exact package scope, including both
+ML packages' provider terms and the SDK reference-pack runtime projections.
+Microsoft.Windows.SDK.BuildTools and Microsoft.Windows.SDK.BuildTools.MSIX
+are build-only; their tooling is not part of the application payload.
+Preserving these notices does not establish fulfillment of every Microsoft
+redistribution or end-user protection obligation.
+
 The QQQ framework, qbit-printing and qqq-print-protocol are separate repositories;
 this notice does not change their licensing.

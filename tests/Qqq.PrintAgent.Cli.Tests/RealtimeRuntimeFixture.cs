@@ -57,7 +57,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       _run = Runtime.RunAsync(_stopping.Token);
    }
 
-   internal async Task<Connection> ConnectAsync(bool loseSpoolAck = false)
+   internal async Task<Connection> ConnectAsync(bool loseSpoolAck = false, DeviceDesiredState? desiredState = null)
    {
       WebSocket socket;
       try
@@ -68,7 +68,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       RealtimeEnvelope hello = await LoopbackWebSocketPeer.ReceiveAsync(socket, _stopping.Token);
       Assert.Equal("HELLO", hello.Type);
       LastHelloSettingsRevision = hello.Payload.GetProperty("lastSettingsRevision").GetInt64();
-      await connection.SendAsync("WELCOME", new { connectionId = Guid.NewGuid().ToString("N"), serverTime = Now(), desiredState = new DeviceDesiredState(1, false, "CONNECTED"), settings = Settings });
+      await connection.SendAsync("WELCOME", new { connectionId = Guid.NewGuid().ToString("N"), serverTime = Now(), desiredState = desiredState ?? new DeviceDesiredState(1, false, "CONNECTED"), settings = Settings });
       connection.Start();
       await WaitAsync(() =>
       {
@@ -155,6 +155,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       private readonly SemaphoreSlim _send = new(1, 1);
       private Task _pump = Task.CompletedTask;
       internal Task Completion => _pump;
+      internal void Abort() => socket.Abort();
       internal void Start() => _pump = PumpAsync();
       internal TaskCompletionSource LostSpoolAck { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       internal async Task SendAsync(string type, object payload)

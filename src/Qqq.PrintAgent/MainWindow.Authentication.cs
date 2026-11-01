@@ -72,7 +72,7 @@ public sealed partial class MainWindow
 
    private async Task TransferSignInAsync()
    {
-      string result = await AgentPipeClient.SendAsync(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(),
+      string result = await _sendRequest(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(),
          ClaimLegacyDevice: PairingChoice.SelectedIndex == 1, StartNewPairing: PairingChoice.SelectedIndex == 2));
       bool success = result.StartsWith("Signed in to QQQ.", StringComparison.Ordinal);
       Feedback(success ? "Signed in" : "Service authorization not completed", result, success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
@@ -85,7 +85,7 @@ public sealed partial class MainWindow
       SetBusy(true);
       try
       {
-         string result = await AgentPipeClient.SendAsync(new PipeRequest("sign-out"));
+         string result = await _sendRequest(new PipeRequest("sign-out"));
          _signInClient?.Dispose();
          _signInClient = null;
          Feedback("Account sign-out", result, result.StartsWith("Error:", StringComparison.Ordinal) ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);

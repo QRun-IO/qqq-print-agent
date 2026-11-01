@@ -23,6 +23,7 @@
    <ItemGroup>
       <ProjectReference Include="..\..\src\Qqq.PrintAgent.Core\Qqq.PrintAgent.Core.csproj" />
       <Compile Include="..\..\src\Qqq.PrintAgent\JobDetailsRequestTracker.cs" Link="Presentation\JobDetailsRequestTracker.cs" />
+      <Compile Include="..\..\src\Qqq.PrintAgent\TransportFormatting.cs" Link="Presentation\TransportFormatting.cs" />
    </ItemGroup>
 
    <ItemGroup>

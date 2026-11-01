@@ -2,9 +2,9 @@
 [CmdletBinding()]
 param(
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = '0.3.0',
+   [string] $ProductVersion = '0.3.1',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '0.3.0-rc.1',
+   [string] $ReleaseVersion = '0.3.1-rc.1',
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [string] $CertificateThumbprint,
@@ -37,6 +37,7 @@ if(-not $SkipPublish -and (Test-Path -LiteralPath $payloadRoot))
 {
    throw 'Publishing requires a new PayloadDirectory so stale files cannot enter the installer.'
 }
+& (Join-Path $PSScriptRoot 'Test-WindowsSdkInventory.ps1')
 $installerProject = Join-Path $projectRoot 'installer\Qqq.PrintAgent.Installer.wixproj'
 $outputDirectory = Join-Path $projectRoot 'artifacts\installer'
 $buildDirectory = Join-Path $outputDirectory $ProductVersion
@@ -80,6 +81,9 @@ foreach($resource in @('App.xbf', 'MainWindow.xbf', 'Qqq.PrintAgent.pri'))
       throw "Missing published WinUI resource: $resource"
    }
 }
+
+# Verify actual third-party terms and exclude build-only SDK payloads before WiX.
+& (Join-Path $PSScriptRoot 'Test-WindowsSdkInventory.ps1') -PayloadDirectory $payloadRoot
 
 # A supplied certificate opts into signing; unsigned local builds are clearly labelled.
 if($CertificateThumbprint)

@@ -179,16 +179,39 @@ public static partial class AgentStartup
          string sid = name.Groups["sid"].Value;
          return root?.Name == TaskNamespace + "Task" && principals.Length == 1 && triggers.Length == 1 && actions.Length == 1
             && principals[0].Name == TaskNamespace + "Principal"
-            && string.Equals(principals[0].Element(TaskNamespace + "UserId")?.Value, sid, StringComparison.Ordinal)
+            && MatchesUserSid(principals[0].Element(TaskNamespace + "UserId")?.Value, sid)
             && string.Equals(principals[0].Element(TaskNamespace + "LogonType")?.Value, "InteractiveToken", StringComparison.Ordinal)
             && string.Equals(principals[0].Element(TaskNamespace + "RunLevel")?.Value, "HighestAvailable", StringComparison.Ordinal)
             && triggers[0].Name == TaskNamespace + "LogonTrigger"
-            && string.Equals(triggers[0].Element(TaskNamespace + "UserId")?.Value, sid, StringComparison.Ordinal)
+            && MatchesUserSid(triggers[0].Element(TaskNamespace + "UserId")?.Value, sid)
             && actions[0].Name == TaskNamespace + "Exec"
             && string.Equals(actions[0].Element(TaskNamespace + "Command")?.Value, InstalledExecutable, StringComparison.OrdinalIgnoreCase)
             && string.Equals(actions[0].Element(TaskNamespace + "Arguments")?.Value, "--tray", StringComparison.Ordinal);
       }
       catch(XmlException)
+      {
+         return false;
+      }
+   }
+
+   private static bool MatchesUserSid(string? account, string expectedSid)
+   {
+      if(string.Equals(account, expectedSid, StringComparison.Ordinal))
+      {
+         return true;
+      }
+      if(string.IsNullOrWhiteSpace(account) || account.StartsWith("S-", StringComparison.OrdinalIgnoreCase))
+      {
+         return false;
+      }
+      try
+      {
+         // Task Scheduler may serialize an account name even when registration
+         // used its SID. Ownership still requires the exact original identity.
+         var resolved = (SecurityIdentifier)new NTAccount(account).Translate(typeof(SecurityIdentifier));
+         return string.Equals(resolved.Value, expectedSid, StringComparison.Ordinal);
+      }
+      catch(Exception exception) when(exception is IdentityNotMappedException or ArgumentException or System.Security.SecurityException)
       {
          return false;
       }

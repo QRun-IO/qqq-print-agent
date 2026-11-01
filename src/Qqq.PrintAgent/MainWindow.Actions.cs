@@ -46,7 +46,7 @@ public sealed partial class MainWindow
       SetBusy(true);
       try
       {
-         string response = await AgentPipeClient.SendAsync(request);
+         string response = await _sendRequest(request);
          if(!IsActionError(response))
          {
             string message = request.Operation switch
