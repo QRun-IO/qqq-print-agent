@@ -3,7 +3,9 @@
 
 """Fail closed unless every tracked owned script is covered by, and really analyzed by, the quality tools."""
 
+import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +16,12 @@ PYTHON_SUFFIXES = (".py", ".pyi", ".pyw")
 SCRIPT_PATTERN = ".github/scripts/*.py"
 PYRIGHT_CONFIG = ".github"
 JAVASCRIPT_SUFFIXES = (".js", ".cjs", ".mjs", ".jsx", ".ts", ".mts", ".cts", ".tsx")
+# EX-0015: the only npm package whose license classification the PR gate may exempt (the matcher ignores versions, so this guard pins it).
+URI_JS_PURL = "pkg:npm/uri-js"
+URI_JS_VERSION = "4.4.1"
+URI_JS_INTEGRITY = "sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg=="
+URI_JS_LICENSE_SHA256 = "0af366eff4c01ec147c9c61ea9e8ffad64a4294754c9d79355f3fd1b97cb2fb9"
+PR_GATES = ".github/workflows/pr-gates.yml"
 # Microsoft's official npm Pyright, restored from package-lock.json by `npm ci --ignore-scripts`.
 PYRIGHT_ENTRY = Path(__file__).resolve().parents[2] / "node_modules" / "pyright" / "index.js"
 
@@ -91,6 +99,29 @@ def run_ruff(root: Path, arguments: list[str], sources: list[str]) -> None:
       raise ValueError("Ruff " + " ".join(arguments) + " failed")
 
 
+def check_uri_js_exception(root: Path) -> None:
+   """Allow the EX-0015 license exception only for the reviewed, unmodified, development-only uri-js."""
+   packages: dict[str, dict[str, Any]] = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))["packages"]
+   copies = [entry for path, entry in packages.items() if path.rsplit("node_modules/", 1)[-1] == "uri-js"]
+   if len(copies) != 1:
+      raise ValueError(f"EX-0015 covers exactly one locked uri-js copy, found {len(copies)}")
+   if copies[0].get("version") != URI_JS_VERSION or copies[0].get("integrity") != URI_JS_INTEGRITY or copies[0].get("dev") is not True:
+      raise ValueError(f"EX-0015 covers only development-only uri-js {URI_JS_VERSION} with the reviewed integrity")
+   root_entry = packages.get("", {})
+   if "uri-js" in {*root_entry.get("dependencies", {}), *root_entry.get("devDependencies", {})}:
+      raise ValueError("EX-0015 covers uri-js only as a transitive tool dependency, not a direct one")
+   consumers = [path for path, entry in packages.items() if "uri-js" in entry.get("dependencies", {}) and entry.get("dev") is not True]
+   if consumers:
+      raise ValueError("uri-js is required by a non-development package: " + ", ".join(consumers))
+   digest = hashlib.sha256((root / "node_modules" / "uri-js" / "LICENSE").read_bytes()).hexdigest()
+   if digest != URI_JS_LICENSE_SHA256:
+      raise ValueError(f"Installed uri-js LICENSE bytes differ from the reviewed EX-0015 copy ({digest})")
+   caller = [line for line in (root / PR_GATES).read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")]
+   listed = re.findall(r"pkg:npm/[^\s,]+", "\n".join(caller))
+   if listed != [URI_JS_PURL]:
+      raise ValueError(f"EX-0015 permits only {URI_JS_PURL} in allow-dependencies-licenses, found {listed}")
+
+
 def main() -> None:
    """Verify scope, then Ruff format/lint and strict Pyright with a positive analyzed count."""
    root = Path(__file__).resolve().parents[2]
@@ -101,6 +132,7 @@ def main() -> None:
    run_ruff(root, ["check"], sources)
    report = run_pyright(root, PYRIGHT_CONFIG)
    check_pyright_report(report, len(sources))
+   check_uri_js_exception(root)
    print(f"Script quality verified: {len(sources)} Python scripts analyzed by Ruff and Pyright, {len(javascript)} JavaScript files in tsconfig scope")
 
 

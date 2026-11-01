@@ -116,6 +116,9 @@ jobs:
       # https://github.com/KofTwentyTwo/standards/blob/fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152/exceptions/register.md#ex-0014
       # Package-name license exceptions do not constrain versions; the required
       # SDK guard pins versions, content/archive hashes, terms and this finite list.
+      # EX-0015: development-only uri-js 4.4.1 (ESLint transitive). check-script-quality.py pins its version,
+      # lock integrity and installed license bytes and rejects any other pkg:npm entry in this list.
+      # https://github.com/KofTwentyTwo/standards/blob/main/exceptions/register.md#ex-0015
       allow-dependencies-licenses: >-
         pkg:nuget/Microsoft.Windows.AI.MachineLearning,
         pkg:nuget/Microsoft.Windows.SDK.BuildTools,
@@ -131,7 +134,8 @@ jobs:
         pkg:nuget/Microsoft.WindowsAppSDK.Runtime,
         pkg:nuget/Microsoft.WindowsAppSDK.Search,
         pkg:nuget/Microsoft.WindowsAppSDK.Widgets,
-        pkg:nuget/Microsoft.WindowsAppSDK.WinUI
+        pkg:nuget/Microsoft.WindowsAppSDK.WinUI,
+        pkg:npm/uri-js
     permissions:
       contents: read      # read the commits being merged
       pull-requests: read # read the pull request title and dependency diff
