@@ -44,6 +44,13 @@ $agent = '.\src\Qqq.PrintAgent.Cli\bin\x64\Debug\net10.0-windows10.0.19041.0\qqq
 
 Direct bearer diagnostics require explicit `--legacy-compat` and a separate private `--data-dir`; they cannot use `--service` and are never an automatic fallback. The exclusive `worker.lock` prevents simultaneous workers on one journal. Do not point a development worker at installed state.
 
+## Virtual file printer (macOS/Linux)
+
+`tools/virtual-agent/` holds a dependency-free Node.js agent that speaks the realtime contract and
+writes each verified job to a directory instead of a Windows queue. Use it to exercise a QQQ server
+with the printing QBit without Windows or hardware; it does not qualify this service. See
+[its README](../tools/virtual-agent/README.md).
+
 ## Reliability boundary
 
 The worker persists receipt and SUBMITTING before invoking Windows. It records SPOOLED and the spooler job ID afterward and replays pending cloud events. A crash between spool acceptance and recording cannot be made atomic. The worker uses OUTCOME_UNKNOWN rather than automatic reprint. Preserve that distinction when extending retry/cancellation logic.
