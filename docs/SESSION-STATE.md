@@ -1,5 +1,21 @@
 # Session state — 2026-10-31
 
+## Query in About — 2026-11-01
+
+The shared AppKit About dialog now places Query and its public links in a compact
+two-column section just after the brand header. The original header logo/text
+are reparented into an Auto/Star Grid so long customer names wrap without
+clipping; identity, version, license and credits remain supplied by AppKit.
+The PNG is bundled unmodified with provenance on a 128-pixel white card.
+
+The Release gate passes 426 tests (145 Core, 281 Windows/CLI), with zero build
+warnings/errors. The isolated native host passed image decoding, rendered
+contrast, initial mascot/link/name visibility, scrolling, keyboard focus and
+Close checks in both themes with a long synthetic customer name at observed
+125% DPI; full dialog captures verify the refinement. The private publish output contains
+the exact PNG, provenance and required WinUI resources. These About changes are
+not yet released or installed; the native host uses synthetic service responses.
+
 ## Installed 0.3.1 and 0.3.2 qualification — 2026-11-01
 
 The published 0.3.1 MSI was installed with exit 0 and no reboot. App, service and

@@ -1,5 +1,13 @@
 # TODO
 
+## Query in About
+
+- [x] Place the official mascot and dogfooding/Query links directly below the
+  shared About header, preserving customer logos, identity and credits.
+- [x] Verify both native themes, initial image/link visibility, unclipped names and
+  Close; pass the 426-test Release gate and exact publish-payload asset check.
+- [ ] Package, publish and verify the About change in an installed follow-up.
+
 ## Companion layout, live transport status and startup follow-up
 
 - [x] Install the attested published 0.3.1 MSI; verify all three exact component versions, automatic WebSocket restoration and preserved local receipts, pairing and profiles.

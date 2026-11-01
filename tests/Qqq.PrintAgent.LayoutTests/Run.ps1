@@ -61,6 +61,7 @@ try {
    $result = Get-Content -LiteralPath (Join-Path $evidence 'result.json') -Raw | ConvertFrom-Json
    if(-not $result.passed -or $result.Submissions -ne 1 -or $result.DialogSnapshots -lt 1 -or
       -not $result.trafficRateDecayVerified -or -not $result.serverLinkOpensSettingsOnly -or
+      -not $result.queryAboutNativeRenderingVerified -or
       (Test-Path -LiteralPath (Join-Path $evidence 'unhandled.txt'))) {
       throw 'The native host did not provide complete passing evidence.'
    }
