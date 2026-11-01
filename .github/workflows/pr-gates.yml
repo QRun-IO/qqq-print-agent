@@ -107,7 +107,7 @@ jobs:
     # A failed submission must not turn existing required reviews into skipped
     # (passing) checks. They still run; the submission job reports its own failure.
     if: ${{ !cancelled() }}
-    uses: KofTwentyTwo/standards/.github/workflows/pr.yml@fdf5ed029603c938615a32b1beca3628b8787945 # v0.1.2
+    uses: KofTwentyTwo/standards/.github/workflows/pr.yml@70b555bd5658273090769991bfc4c9b6681dde18 # v1.2.1
     with:
       # EX-0014: exact reviewed SDK inventory, guarded through 2027-04-30 UTC.
       # https://github.com/KofTwentyTwo/standards/blob/fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152/exceptions/register.md#ex-0014
