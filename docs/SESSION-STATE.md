@@ -1,5 +1,32 @@
 # Session state — 2026-10-31
 
+## Installed 0.3.1 and 0.3.2 qualification — 2026-11-01
+
+The published 0.3.1 MSI was installed with exit 0 and no reboot. App, service and
+CLI product versions exactly match source `346fc285198908c47a2ee9db7b9adb53d5e88c3c`.
+The service restored its native QQQ session and connected WebSocket. Pairing,
+printer exposure/profiles, log policy and all 28 existing local job receipts
+were preserved. A separate authenticated comparison proved that the original
+27 server jobs remained unchanged while new jobs arrived. The operator confirmed
+test prints and a responsive installed window.
+
+The next candidate checks all three installed components and identical complete
+build metadata after MSI success. Focused red/green regressions cover missing,
+old, unreadable and mixed-source builds; 73 focused cases pass. The integrated
+426-test Release gate passes with zero warnings/errors/skips. Actual in-app
+coordinator handoff remains unqualified until the next published update is used.
+
+The native test host now matches production's PerMonitorV2 declaration while
+retaining asInvoker. Original 0.3.0 and current 0.3.1 UI replays passed at observed
+125% DPI, including repeated banner dismissal and printer status transitions.
+These results and operator acceptance do not prove the historical cause fixed.
+No speculative product layout change was made.
+
+Local Docker development qualification is being added to the server repository.
+The frozen QQQ RC.20 runtime lacks the advertised native-session grant required
+for Windows OAuth. Real Authentik browser/session qualification needs the central
+API 1.9 implementation; the client must keep its HTTPS and typed-grant checks.
+
 ## Installed realtime release and companion follow-up
 
 All three 0.3.0-rc.1 releases are published from protected main. The Windows

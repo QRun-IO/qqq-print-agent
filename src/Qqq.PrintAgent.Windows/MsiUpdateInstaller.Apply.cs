@@ -41,9 +41,9 @@ public static partial class MsiUpdateInstaller
          using Process installer = Process.Start(start) ?? throw new InvalidOperationException("Windows Installer could not start.");
          await installer.WaitForExitAsync().ConfigureAwait(false);
          code = installer.ExitCode;
-         if(code == 0 && !InstalledVersionMatches(FileVersionInfo.GetVersionInfo(InstalledCompanion).ProductVersion, request.Version))
+         if(code == 0)
          {
-            throw new InvalidOperationException("Windows Installer returned success, but the installed companion version does not match the requested release. Inspect the installation log and repair the package.");
+            ValidateInstalledVersions(request.Version, path => FileVersionInfo.GetVersionInfo(path).ProductVersion);
          }
          message = DescribeExitCode(code);
       }
@@ -139,6 +139,38 @@ public static partial class MsiUpdateInstaller
 
    internal static bool InstalledVersionMatches(string? productVersion, string requestedVersion)
       => productVersion is not null && string.Equals(productVersion.Split('+')[0], requestedVersion, StringComparison.Ordinal);
+
+   /// <summary>Checks the installed payload after MSI success without assuming rollback on mismatch.</summary>
+   internal static void ValidateInstalledVersions(string requestedVersion, Func<string, string?> readProductVersion)
+   {
+      string? installedBuild = null;
+      foreach(string executable in new[]
+      {
+         InstalledCompanion,
+         Path.Combine(InstalledRoot, "Service", "Qqq.PrintAgent.Service.exe"),
+         Path.Combine(InstalledCli, "qqq-print-agent.exe"),
+      })
+      {
+         string? version;
+         try
+         {
+            version = readProductVersion(executable);
+         }
+         catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+         {
+            throw new InvalidOperationException("Windows Installer returned success, but the installed " + Path.GetFileName(executable) + " version could not be verified. Inspect the installation log and repair the package.", exception);
+         }
+         if(!InstalledVersionMatches(version, requestedVersion))
+         {
+            throw new InvalidOperationException("Windows Installer returned success, but the installed " + Path.GetFileName(executable) + " version does not match the requested release. Inspect the installation log and repair the package.");
+         }
+         if(installedBuild is not null && !string.Equals(version, installedBuild, StringComparison.Ordinal))
+         {
+            throw new InvalidOperationException("Windows Installer returned success, but the installed " + Path.GetFileName(executable) + " build version is incoherent with the companion. Inspect the installation log and repair the package.");
+         }
+         installedBuild ??= version;
+      }
+   }
 
    private static async Task CompleteAsync(string version, int code, string message)
    {

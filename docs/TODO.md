@@ -2,6 +2,11 @@
 
 ## Companion layout, live transport status and startup follow-up
 
+- [x] Install the attested published 0.3.1 MSI; verify all three exact component versions, automatic WebSocket restoration and preserved local receipts, pairing and profiles.
+- [x] Record operator-confirmed test prints and responsive installed 0.3.1 window; verify repeated native dialog/refresh/banner/status replays at observed 125% DPI.
+- [x] Reject a successful MSI outcome when the app, service or CLI has a missing, old or different full build version; pass the integrated 426-test gate.
+- [ ] Qualify the actual AppKit in-app update to the next published candidate, including decline, helper handoff and reopen; direct MSI installation is separate evidence.
+- [ ] Finish real-provider native-session qualification against a compatible QQQ API 1.9 runtime and the local Docker reference environment.
 - [x] Publish and verify all three 0.3.0-rc.1 releases; install the matched local server/client and verify retained state and service restart recovery.
 - [x] Capture the operator's post-print LayoutCycleException and recover only the companion; retain existing print receipts.
 - [ ] Reproduce and fix the native post-print layout cycle with a nonprinting host and verify the actual dialog/action/refresh path.
