@@ -10,6 +10,25 @@ on:
 permissions: {}
 
 jobs:
+  virtual-agent:
+    name: virtual-agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify virtual-agent protocol and HTTP boundaries
+        run: node --test tools/virtual-agent/test/virtual-agent.test.mjs
+
   powershell:
     name: powershell
     runs-on: windows-latest

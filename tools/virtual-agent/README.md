@@ -35,3 +35,8 @@ OAuth2 is not supported. Credentials, device tokens and enrollment codes are nev
 Supported commands: `REFRESH_INVENTORY` (answers `INVENTORY_REFRESHED`); others are `UNSUPPORTED`.
 
 Tests: `node --test tools/virtual-agent/test/virtual-agent.test.mjs`.
+The scripts workflow runs these tests with Node 24. HTTP tests use disposable
+loopback servers and synthetic cookies, without a QQQ deployment or printer.
+Discovery accepts only canonical stable three-part printing versions in major 2.
+Authenticated native HTTP requests remain on the configured origin; unsafe
+cookie requests include its exact Origin, and redirects are refused.
