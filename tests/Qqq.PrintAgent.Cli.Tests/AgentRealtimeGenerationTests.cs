@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.IO.Pipes;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;

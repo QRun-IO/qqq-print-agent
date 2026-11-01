@@ -1,4 +1,7 @@
 #Requires -Version 7.4
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 

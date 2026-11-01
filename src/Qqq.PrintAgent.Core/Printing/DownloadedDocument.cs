@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>Owns a verified staging file and prevents replacement until the native worker finishes.</summary>

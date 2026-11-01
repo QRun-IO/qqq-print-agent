@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # Categories for GitHub's auto-generated release notes (uses issue/PR labels).
 changelog:
   exclude:

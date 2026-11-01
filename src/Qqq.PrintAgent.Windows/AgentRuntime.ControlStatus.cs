@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Windows;
 
 public sealed partial class AgentRuntime

@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Qqq.PrintAgent.Core/Qqq.PrintAgent.Core.csproj" /></ItemGroup>

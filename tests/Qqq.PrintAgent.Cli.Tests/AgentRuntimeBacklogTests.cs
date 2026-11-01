@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.IO.Pipes;
 using System.Net;
 using System.Text.Json;

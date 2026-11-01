@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO.Pipes;

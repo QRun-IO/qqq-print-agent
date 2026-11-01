@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # Local copy of KofTwentyTwo/standards at fdf5ed029603c938615a32b1beca3628b8787945 (v0.1.2).
 # Scanner pins/checks retained; NuGet inventory and OSV evidence now fail closed.
 # Security scanning (K22-CI-20, K22-CI-21, K22-CI-23): secrets over full history,

@@ -1,8 +1,13 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
-using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 

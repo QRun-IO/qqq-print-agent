@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # OpenSSF Scorecard (K22-CI-24). Scorecard's publishing API only accepts results
 # from a workflow shaped exactly like this one: a single job, read-only top-level
 # permissions, no top-level env or defaults, and only the allowed steps.

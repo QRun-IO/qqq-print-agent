@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.UiTests;
 
 public sealed class TransportFormattingTests

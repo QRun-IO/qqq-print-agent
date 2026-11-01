@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Windows;

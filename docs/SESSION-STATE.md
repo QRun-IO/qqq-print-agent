@@ -1,5 +1,21 @@
 # Session state — 2026-11-01
 
+## Query in About — 2026-11-01
+
+The shared AppKit About dialog now places Query and its public links in a compact
+two-column section just after the brand header. The original header logo/text
+are reparented into an Auto/Star Grid so long customer names wrap without
+clipping; identity, version, license and credits remain supplied by AppKit.
+The PNG is bundled unmodified with provenance on a 128-pixel white card.
+
+The Release gate passes 426 tests (145 Core, 281 Windows/CLI), with zero build
+warnings/errors. The isolated native host passed image decoding, rendered
+contrast, initial mascot/link/name visibility, scrolling, keyboard focus and
+Close checks in both themes with a long synthetic customer name at observed
+125% DPI; full dialog captures verify the refinement. The private publish output contains
+the exact PNG, provenance and required WinUI resources. These About changes are
+not yet released or installed; the native host uses synthetic service responses.
+
 ## Published and installed 0.3.2 — 2026-11-01
 
 [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1)

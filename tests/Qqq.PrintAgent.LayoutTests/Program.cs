@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using Microsoft.UI.Dispatching;
 
 namespace Qqq.PrintAgent;

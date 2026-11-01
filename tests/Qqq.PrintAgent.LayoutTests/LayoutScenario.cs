@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -41,6 +46,7 @@ internal static class LayoutScenario
       await Task.Delay(250);
       root.UpdateLayout();
       await VerifyFooterAsync(root, service);
+      await QueryAboutScenario.RunAsync(root);
       var feedback = (InfoBar)root.FindName("FeedbackBar");
       if(!feedback.IsOpen || !string.Equals(feedback.Title, "Request completed", StringComparison.Ordinal))
       {
@@ -58,6 +64,7 @@ internal static class LayoutScenario
          service.TransportReads,
          trafficRateDecayVerified = true,
          serverLinkOpensSettingsOnly = true,
+         queryAboutNativeRenderingVerified = true,
          heldForTimerRefresh = Program.RefreshDuringDialog,
          width = root.XamlRoot.Size.Width,
          height = root.XamlRoot.Size.Height,

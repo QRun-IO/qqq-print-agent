@@ -662,6 +662,7 @@ public sealed partial class MainWindow : Window, IDisposable
          {
             body.Children.Insert(0, new Image { Source = CustomerLogo.Source, Width = 128, Height = 64, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left });
          }
+         QueryAboutSection.InsertAfterHeader(body);
       }
       await DialogGuard.ShowAsync(dialog);
    }

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # Pull request gates (K22-CI-01): Conventional Commit title, DCO sign-off, and
 # dependency review, from the shared KofTwentyTwo/standards workflow pinned by SHA
 # (K22-CI-11). Dependabot's github-actions ecosystem keeps the pin current.

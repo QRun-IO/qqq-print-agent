@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
 <Project>
 
    <!-- Central package management (K22-CODE-CS-08): every version lives here, so

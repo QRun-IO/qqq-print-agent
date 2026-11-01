@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # KofTwentyTwo pre-commit configuration. Works with pre-commit and prek.
 # Copy to the repository root as .pre-commit-config.yaml, then install both hook
 # types once per clone:

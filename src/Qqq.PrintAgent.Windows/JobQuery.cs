@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Queries durable local history; search matches the start of a job ID, title or printer name.</summary>

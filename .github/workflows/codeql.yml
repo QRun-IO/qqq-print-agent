@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # CodeQL static analysis (K22-CI-22): security-extended queries for C# (a manual x64
 # build of the solution) and for the workflows themselves, blocking high severity.
 name: codeql

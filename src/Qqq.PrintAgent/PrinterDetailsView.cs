@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Qqq.PrintAgent.Windows;

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 name: Feature request
 description: Suggest an improvement
 labels: [enhancement]
