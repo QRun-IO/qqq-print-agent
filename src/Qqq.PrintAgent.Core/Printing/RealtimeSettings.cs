@@ -22,6 +22,13 @@ public sealed record RealtimeSettings(
    private static readonly HashSet<string> RequiredFields = JsonSerializer.SerializeToElement(new RealtimeSettings(), PrintApiClient.JsonOptions)
       .EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
 
+
+
+   /// <summary>
+   /// Reads the server's settings object strictly: it must be an object whose fields are exactly the known set, each appearing
+   /// once with an integer value, with none missing, and the values must pass <c>Validate</c>. An incomplete, extended or
+   /// out-of-range policy is refused rather than partly applied or silently reduced.
+   /// </summary>
    public static RealtimeSettings Parse(JsonElement value)
    {
       if(value.ValueKind != JsonValueKind.Object)
@@ -38,6 +45,10 @@ public sealed record RealtimeSettings(
       settings.Validate();
       return settings;
    }
+
+
+
+   /// <summary>The ceilings this client can honor, sent in HELLO so the server never offers a policy larger than the agent supports; the agent rejects such a policy instead of clamping it.</summary>
    public static object ClientLimits => new
    {
       maxPdfBytes = int.MaxValue,
@@ -51,6 +62,9 @@ public sealed record RealtimeSettings(
       maxCopies = 32767,
    };
 
+
+
+   /// <summary>The largest document allowed for a format (PDF or ZPL); any other format is an error, so an unknown type can never bypass the size limit.</summary>
    public long MaximumDocumentBytes(string format) => format switch
    {
       "PDF" => MaxPdfBytes,
@@ -58,6 +72,13 @@ public sealed record RealtimeSettings(
       _ => throw new InvalidDataException("Unsupported document format."),
    };
 
+
+
+   /// <summary>
+   /// Requires every limit to be inside the range this client supports and consistent with the others: the queue holds at least
+   /// one frame, staging fits the largest document, the download limit is not shorter than the idle or connect timeout, and the
+   /// heartbeat timeout is at least twice the interval. A policy that fails is a configuration error the operator must resolve.
+   /// </summary>
    public void Validate()
    {
       if(Revision is < 0 or > 9007199254740991L || NativeSubmissionTimeoutMillis is < 1000 or > 86400000 || MaxCopies is < 1 or > 32767 || MaxPdfBytes is < 1 or > int.MaxValue || MaxZplBytes is < 1 or > int.MaxValue
@@ -79,5 +100,8 @@ public sealed record RealtimeSettings(
       }
    }
 
+
+
+   /// <summary>True for a timeout between one second and five minutes, the range allowed for request-style timeouts.</summary>
    private static bool RequestTimeout(int value) => value is >= 1000 and <= 300000;
 }

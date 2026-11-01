@@ -17,19 +17,33 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrint
    internal TimeSpan? OperationTimeoutOverride { get; init; }
    internal Func<ProcessStartInfo, Process>? StartProcess { get; init; }
 
+
+
+   /// <summary>Prints a staged document with the default two minute limit on the native submission.</summary>
    public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
       => PrintFileAsync(job, path, TimeSpan.FromMinutes(2), cancellationToken);
 
+
+
+   /// <summary>
+   /// Asks a disposable helper process to print the staged file at the given absolute path and returns the spooler receipt.
+   /// Only the path travels to the helper, never the document bytes. A timeout or helper failure after submission began
+   /// means the outcome is uncertain and is reported as such by the caller, never retried here.
+   /// </summary>
    public async Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
    {
       PrinterWorkerHost.Response response = await InvokeAsync(new PrinterWorkerHost.Request("print-file", job, ContentPath: Path.GetFullPath(path)), submissionTimeout, cancellationToken).ConfigureAwait(false);
       return response.SpoolerJobId ?? throw new InvalidDataException("Printer worker returned no spooler receipt.");
    }
 
+
+
    /// <summary>Discovery remains synchronous for the backend contract but cannot block beyond 20 seconds.</summary>
    public IReadOnlyList<PrinterInfo> Discover()
       => InvokeAsync(new PrinterWorkerHost.Request("discover"), TimeSpan.FromSeconds(20), CancellationToken.None).GetAwaiter().GetResult().Printers
          ?? throw new InvalidDataException("Printer worker returned no inventory.");
+
+
 
    /// <summary>Once invoked by the journaled worker, timeout or process failure means uncertain physical outcome.</summary>
    public async Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
@@ -38,12 +52,21 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrint
       return response.SpoolerJobId ?? throw new InvalidDataException("Printer worker returned no spooler receipt.");
    }
 
-   /// <inheritdoc/>
+
+
+   /// <summary>Cancels one spooler job through the helper process, with a 20 second limit; the helper confirms the job belongs to this QQQ job before it deletes anything.</summary>
    public async Task CancelAsync(string printerName, string jobId, string spoolerJobId, CancellationToken cancellationToken = default)
    {
       _ = await InvokeAsync(new PrinterWorkerHost.Request("cancel", PrinterName: printerName, JobId: jobId, SpoolerJobId: spoolerJobId), TimeSpan.FromSeconds(20), cancellationToken).ConfigureAwait(false);
    }
 
+
+
+   /// <summary>
+   /// Runs one native operation in a fresh helper process: the request goes in as one JSON line on standard input, the answer
+   /// comes back on standard output within the size limit, and the helper is killed with its process tree if it outlives the
+   /// limit. A timeout is reported as a timeout the operator must inspect, not as a clean failure.
+   /// </summary>
    private async Task<PrinterWorkerHost.Response> InvokeAsync(PrinterWorkerHost.Request request, TimeSpan limit, CancellationToken token)
    {
       token.ThrowIfCancellationRequested();
@@ -102,6 +125,9 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrint
       }
    }
 
+
+
+   /// <summary>Turns a failed helper response into the right exception: a proven media mismatch, a refused spool cancellation, or a generic failure, so callers can tell a known refusal from an uncertain outcome.</summary>
    private static void ThrowWorkerFailure(PrinterWorkerHost.Response response)
    {
       if(string.Equals(response.ErrorCode, "MEDIA_PROFILE_MISMATCH", StringComparison.Ordinal))

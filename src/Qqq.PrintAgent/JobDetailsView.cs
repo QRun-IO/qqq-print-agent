@@ -12,6 +12,11 @@ namespace Qqq.PrintAgent;
 /// <summary>Readable, bounded job summary and event table; all diagnostic values remain selectable.</summary>
 internal sealed class JobDetailsView : StackPanel
 {
+   /// <summary>
+   /// Builds the job details: a field summary, then the event history. The compact form used inline shows only the latest five
+   /// events in an expander; the full form shows up to 200. Text states that "sent to printer" is spool acceptance, not confirmed
+   /// paper output, and notes when retention removed older events.
+   /// </summary>
    internal JobDetailsView(JobDetailsSnapshot details, Func<string, string> state, Func<string?, string> time, bool compact = false)
    {
       Spacing = 20;
@@ -41,6 +46,9 @@ internal sealed class JobDetailsView : StackPanel
       Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(this, compact ? "JobInlineDetailsContent" : "JobDetailsContent");
    }
 
+
+
+   /// <summary>Builds the labelled summary rows for one job, shortening long values in the compact form and falling back to "Not recorded" for facts an older record never had.</summary>
    private static StackPanel Summary(JobSnapshot job, Func<string, string> state, Func<string?, string> time, bool compact)
    {
       StackPanel summary = new() { Spacing = 12 };
@@ -56,6 +64,9 @@ internal sealed class JobDetailsView : StackPanel
       return summary;
    }
 
+
+
+   /// <summary>Adds one label and value row. In the compact form the value is limited to three lines with the full text in a tooltip, so a long outcome message cannot push the rest of the table out of view.</summary>
    private static void AddField(Panel parent, string label, string value, bool compact = false)
    {
       Grid field = new() { ColumnSpacing = 16 };
@@ -75,6 +86,9 @@ internal sealed class JobDetailsView : StackPanel
       parent.Children.Add(field);
    }
 
+
+
+   /// <summary>Builds the event table: a heading row, then one row per event with its time, status and a message that also shows whether it was reported to the server and the Windows job number when there is one.</summary>
    private static StackPanel History(JobEventSnapshot[] events, Func<string, string> state, Func<string?, string> time)
    {
       StackPanel history = new() { Spacing = 12 };
@@ -95,6 +109,9 @@ internal sealed class JobDetailsView : StackPanel
       return history;
    }
 
+
+
+   /// <summary>Builds one three-column row (time, status, message) of the event table, bold for the heading row.</summary>
    private static Grid EventRow(string timestamp, string status, string message, bool heading = false)
    {
       Grid row = new() { ColumnSpacing = 16 };
@@ -111,6 +128,9 @@ internal sealed class JobDetailsView : StackPanel
       return row;
    }
 
+
+
+   /// <summary>Creates a wrapping text block that can be selected and copied, bold when it is a heading, so every diagnostic value stays copyable.</summary>
    private static TextBlock Text(string text, bool heading = false) => new()
    {
       Text = text,

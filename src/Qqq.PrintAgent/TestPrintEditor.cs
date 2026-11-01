@@ -18,9 +18,19 @@ internal sealed class TestPrintEditor : StackPanel
    private readonly TextBlock _guidance = new() { TextWrapping = TextWrapping.Wrap };
    private readonly string _driverName;
 
+
+
+   /// <summary>The chosen document format, defaulting to PDF when nothing is selected.</summary>
    internal string SelectedFormat => (_format.SelectedItem as ComboBoxItem)?.Tag as string ?? "PDF";
+
+
+
+   /// <summary>The chosen paper or label profile identifier, or null when none is selected, in which case nothing is sent.</summary>
    internal string? SelectedProfile => (_profile.SelectedItem as ComboBoxItem)?.Tag as string;
 
+
+
+   /// <summary>Builds the choices from the formats the printer actually supports and preselects the preferred format, then lists matching stock profiles; the text warns that the test uses real stock and needs local sharing and server approval.</summary>
    internal TestPrintEditor(PrinterSnapshot printer, string printerLabel)
    {
       _driverName = printer.DriverName;
@@ -41,8 +51,18 @@ internal sealed class TestPrintEditor : StackPanel
       UpdateProfiles();
    }
 
+
+
+   /// <summary>Rebuilds the stock list when the format changes, because label and paper formats offer different profiles.</summary>
    private void FormatChanged(object sender, SelectionChangedEventArgs e) => UpdateProfiles();
 
+
+
+   /// <summary>
+   /// Lists the stock profiles for the selected format (label sizes at three resolutions for ZPL, Letter, A4 or a label for PDF),
+   /// preselects the one suggested from the driver name, and shows guidance. The suggestion is only a hint: the operator must
+   /// confirm the printer's real resolution, because a wrong one changes the printed size.
+   /// </summary>
    private void UpdateProfiles()
    {
       _profile.Items.Clear();
@@ -67,5 +87,8 @@ internal sealed class TestPrintEditor : StackPanel
          : "Load stock matching the selected size and set the Windows queue to the same paper or label size. The diagnostic prints one copy at actual size; the stock selection does not change Windows printer defaults.";
    }
 
+
+
+   /// <summary>Adds one stock choice, showing its label and carrying its profile identifier as the tag.</summary>
    private void AddProfile(string label, string value) => _profile.Items.Add(new ComboBoxItem { Content = label, Tag = value });
 }

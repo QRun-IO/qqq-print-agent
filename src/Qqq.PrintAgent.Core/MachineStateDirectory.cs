@@ -15,8 +15,15 @@ public static class MachineStateDirectory
 {
    private static readonly Lock Gate = new();
    private static bool _validated;
+
+
+
+   /// <summary>The machine state folder under ProgramData, the only location whose contents are protected and validated before privileged code opens them.</summary>
    public static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "QqqPrintAgent");
-   private const string Error = "The machine print data directory is not trusted. Installation or startup was stopped without adopting its contents. Ask an administrator to inspect its owner, permissions and links before repairing the MSI.";
+
+
+
+   private const string Error ="The machine print data directory is not trusted. Installation or startup was stopped without adopting its contents. Ask an administrator to inspect its owner, permissions and links before repairing the MSI.";
 
    /// <summary>Private diagnostic paths remain independent; canonical machine state is always protected.</summary>
    public static void EnsureForPath(string path)
@@ -48,6 +55,8 @@ public static class MachineStateDirectory
       }
    }
 
+
+
    /// <summary>Validate existing branding without creating state merely to read optional settings.</summary>
    public static void ValidateExistingForPath(string path)
    {
@@ -57,11 +66,16 @@ public static class MachineStateDirectory
       }
    }
 
+
+
+   /// <summary>True when a path is the machine state folder or inside it, compared on whole path segments and ignoring case, so only canonical machine state is protected and private diagnostic folders are left alone.</summary>
    private static bool Contains(string path)
    {
       string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
       return string.Equals(full, Root, StringComparison.OrdinalIgnoreCase) || full.StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
    }
+
+
 
    /// <summary>Inspect every adopted descendant; never follow junctions or normalize hostile ownership.</summary>
    public static void ValidateTree(string directory)
@@ -86,6 +100,8 @@ public static class MachineStateDirectory
       }
    }
 
+
+
    /// <summary>Verify a newly created staging file before its privileged consumer opens it.</summary>
    public static void ValidateFile(string path)
    {
@@ -94,6 +110,9 @@ public static class MachineStateDirectory
       ValidateAcl(new FileInfo(path).GetAccessControl());
    }
 
+
+
+   /// <summary>Walks from the path up to the drive root and rejects any component that is a link or junction, because a redirected folder could make privileged code read or write somewhere else.</summary>
    private static void RejectLinks(string path)
    {
       for(string? current = Path.GetFullPath(path); current is not null; current = Path.GetDirectoryName(current))
@@ -105,6 +124,9 @@ public static class MachineStateDirectory
       }
    }
 
+
+
+   /// <summary>Requires an explicit access list, a trusted owner, and no allow rule (inherit-only ones included) for any account other than SYSTEM, Administrators or the Windows installer service, so no ordinary user can alter what the service later trusts.</summary>
    internal static void ValidateAcl(FileSystemSecurity security)
    {
       var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
@@ -122,5 +144,8 @@ public static class MachineStateDirectory
       }
    }
 
+
+
+   /// <summary>True only for the three accounts trusted to own or write machine state: SYSTEM, the Administrators group and the Windows installer service.</summary>
    private static bool Trusted(string? sid) => sid is "S-1-5-18" or "S-1-5-32-544" or "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
 }

@@ -8,11 +8,25 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Sign-in and sign-out part of the runtime. The companion signs the user in and hands over only the session credential; the
+/// service verifies the identity (and, for an existing pairing, the device), then swaps sessions inside a connection transition so
+/// printing never runs half-way between identities. Pairing and job history survive both operations.
+/// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>Runs sign-in as a connection transition, so it cannot overlap a claim or a printing job.</summary>
    internal async Task<string> SignInAsync(PipeRequest request, CancellationToken token)
       => await ConnectionTransitionAsync(() => SignInCoreAsync(request, token), token).ConfigureAwait(false);
 
+
+
+   /// <summary>
+   /// Verifies and adopts a session from the companion. The credential is restored on a fresh candidate client and its identity read.
+   /// A new pairing needs a session without device proof; an existing pairing is bound (optionally claiming a legacy device) and must
+   /// have the same identity as before, and any authorization demand is cleared. Only then is the candidate made current and the old
+   /// session disposed; on any failure the candidate is discarded and the previous session is left as it was.
+   /// </summary>
    private async Task<string> SignInCoreAsync(PipeRequest request, CancellationToken token)
    {
       QqqSessionCredential credential = request.SessionCredential ?? throw new InvalidOperationException("A QQQ sign-in session is required.");
@@ -58,9 +72,19 @@ public sealed partial class AgentRuntime
       finally { _authenticationGate.Release(); }
    }
 
+
+
+   /// <summary>Runs sign-out as a connection transition, so it cannot overlap a claim or a printing job.</summary>
    internal async Task<string> SignOutAsync(CancellationToken token)
       => await ConnectionTransitionAsync(() => SignOutCoreAsync(token), token).ConfigureAwait(false);
 
+
+
+   /// <summary>
+   /// Blocks printing first, then removes the saved session credential while keeping the identity, so pairing and history stay and a later
+   /// sign-in is checked against the same user. An unreadable saved session is moved aside, not deleted. The server session is ended when
+   /// it can be, and the local client and connection state are always cleared, even if ending it on the server fails.
+   /// </summary>
    private async Task<string> SignOutCoreAsync(CancellationToken token)
    {
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);
