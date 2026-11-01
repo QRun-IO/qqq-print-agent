@@ -13,6 +13,12 @@ public static class AgentPipeFraming
    public const int MaximumCommandCharacters = 65_536;
    public const int MaximumResponseCharacters = 8 * 1024 * 1024;
 
+
+
+   /// <summary>
+   /// Reads one newline-terminated message, stopping with an error if more than the allowed number of characters arrive before the
+   /// newline or the connection closes first. A trailing carriage return is removed, so the same framing works for both ends.
+   /// </summary>
    public static async Task<string> ReadAsync(Stream stream, int maximumCharacters, CancellationToken token)
    {
       ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCharacters);
@@ -44,6 +50,9 @@ public static class AgentPipeFraming
       }
    }
 
+
+
+   /// <summary>Writes one newline-terminated message after checking its size, in a single direct write, so there is no buffered writer whose disposal could block on a stalled peer.</summary>
    public static async Task WriteAsync(Stream stream, string message, int maximumCharacters, CancellationToken token)
    {
       if(message.Length > maximumCharacters)
@@ -54,6 +63,8 @@ public static class AgentPipeFraming
       byte[] bytes = Encoding.UTF8.GetBytes(message + "\n");
       await stream.WriteAsync(bytes, token).ConfigureAwait(false);
    }
+
+
 
    /// <summary>Keep a queued response alive until the one-command client closes or the server deadline expires.</summary>
    internal static async Task WriteResponseAsync(Stream stream, string message, CancellationToken token)

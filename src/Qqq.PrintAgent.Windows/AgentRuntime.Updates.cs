@@ -5,10 +5,17 @@
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Update maintenance part of the runtime: a bounded printing pause so the installer can replace files while no job is being submitted,
+/// and the resume that lifts it. The pause expires by itself, so an abandoned update can never leave printing off.
+/// </summary>
 public sealed partial class AgentRuntime
 {
    private DateTimeOffset _updatePauseUntil;
 
+
+
+   /// <summary>True while an update pause is in force; checked under the state lock before any claim or submission starts.</summary>
    private bool UpdatePaused
    {
       get
@@ -20,6 +27,9 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>Starts a ten minute printing pause and waits for submissions already in progress to finish, so the installer never replaces files under an active print; the caller is told the service is ready only after that.</summary>
    private async Task<string> PrepareUpdateAsync(CancellationToken token)
    {
       await _connectionGate.WaitAsync(token).ConfigureAwait(false);
@@ -49,6 +59,9 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>Lifts the update pause, wakes the claim loop and logs it; called by the update helper after the installer finishes, whatever its result.</summary>
    private string ResumeAfterUpdate()
    {
       lock(_stateLock)

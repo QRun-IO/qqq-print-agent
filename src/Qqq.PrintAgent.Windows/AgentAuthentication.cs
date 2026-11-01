@@ -12,6 +12,10 @@ public sealed class AgentAuthentication(QqqSessionBinding binding, QqqSessionCre
 {
    public QqqSessionBinding Binding { get; } = binding;
    public QqqSessionCredential? Credential { get; } = credential;
+
+
+
+   /// <summary>Returns a fixed label, so logging this state can never reveal the session secret.</summary>
    public override string ToString() => "Protected QQQ authorization state";
 }
 

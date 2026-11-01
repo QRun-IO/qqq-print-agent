@@ -50,6 +50,9 @@ public static class Program
       }
    }
 
+
+
+   /// <summary>Builds the per-user, per-session, per-profile name for the single-instance mutex and activation signal. It is hashed so the name is bounded and carries no account or path text, and scoping keeps one user's instance from blocking another's.</summary>
    private static string InstanceKey()
    {
       using var identity = WindowsIdentity.GetCurrent();

@@ -11,10 +11,14 @@ namespace Qqq.PrintAgent;
 /// <summary>Native bounded editor shared by computer and printer metadata dialogs.</summary>
 internal sealed class ProfileEditor : StackPanel
 {
+   /// <summary>The name field, limited to 512 characters like the service's own check.</summary>
    internal TextBox NameBox { get; } = new() { Header = "Name", MaxLength = 512 };
    internal TextBox LocationBox { get; } = new() { Header = "Location", MaxLength = 512 };
    internal TextBox DescriptionBox { get; } = new() { Header = "Description", MaxLength = 4096, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 140, MaxHeight = 240, HorizontalAlignment = HorizontalAlignment.Stretch };
 
+
+
+   /// <summary>Builds the three fields, filled from the current values and tagged with automation identifiers for tests and screen readers; the limits match what the service accepts, so a value that fits here is not refused later.</summary>
    internal ProfileEditor(string? name, string? description, string? location)
    {
       Spacing = 12;
@@ -29,6 +33,9 @@ internal sealed class ProfileEditor : StackPanel
       Children.Add(DescriptionBox);
    }
 
+
+
+   /// <summary>Adds a read-only block showing the Windows queue name and status, so the operator sees which printer is being described and that its queue name and sharing approval do not change.</summary>
    internal void AddPrinterContext(string queue, string status)
    {
       Children.Add(new TextBlock { Text = "Windows printer", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });

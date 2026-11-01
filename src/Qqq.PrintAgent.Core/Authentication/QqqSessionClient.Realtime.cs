@@ -7,6 +7,10 @@ using System.Net.WebSockets;
 
 namespace Qqq.PrintAgent.Core.Authentication;
 
+/// <summary>
+/// Realtime socket part of the session client. The socket is opened here, because only this class holds the session cookie and device
+/// proof, and they are sent to the discovered origin and nowhere else.
+/// </summary>
 public sealed partial class QqqSessionClient
 {
    /// <summary>Refreshes standard discovery once per socket establishment, then connects only to that origin with the current session and approved device proof.</summary>

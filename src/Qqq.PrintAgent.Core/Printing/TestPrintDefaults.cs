@@ -8,9 +8,13 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// <summary>Suggested diagnostic defaults; the operator must still verify installed stock and resolution.</summary>
 public static class TestPrintDefaults
 {
+   /// <summary>Prefers ZPL when the printer supports it and otherwise PDF, because a label printer is far more likely to be tested with a label than a letter page.</summary>
    public static string Format(IEnumerable<string> supportedFormats)
       => supportedFormats.Contains("ZPL", StringComparer.Ordinal) ? "ZPL" : "PDF";
 
+
+
+   /// <summary>Suggests a stock profile: LETTER for PDF, and for ZPL a 4x6 label at the resolution named in the driver (600, 300, otherwise 203 dpi). It is only a suggestion; the operator confirms the installed stock.</summary>
    public static string Profile(string format, string? driverName)
    {
       if(!string.Equals(format, "ZPL", StringComparison.Ordinal))

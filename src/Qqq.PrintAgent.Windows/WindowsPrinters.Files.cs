@@ -11,8 +11,17 @@ using Windows.Data.Pdf;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Staged-file part of the Windows adapter: printing a document that was already downloaded and verified into the protected staging
+/// folder, so large documents never have to be held in memory and are re-verified immediately before they are spooled.
+/// </summary>
 public sealed partial class WindowsPrinters
 {
+   /// <summary>
+   /// Prints a staged file. The path must be an absolute, regular file (no link), and its length and SHA-256 are checked against the job
+   /// again here, because it is the last step before the spooler. The queue and options are then validated (copies, no per-job paper
+   /// dimensions, a format the queue offers), and the document goes to the RAW ZPL or PDF path.
+   /// </summary>
    public async Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
    {
       if(!Path.IsPathFullyQualified(path) || File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
@@ -40,6 +49,9 @@ public sealed partial class WindowsPrinters
       return await PrintPdfDocumentAsync(printer, job, document, cancellationToken).ConfigureAwait(false);
    }
 
+
+
+   /// <summary>Spools a staged file as one RAW document, rechecking the selected media just before it starts, and aborts the document if anything fails after it began so no partial label stays queued.</summary>
    private static string PrintRawStream(PrinterInfo selectedPrinter, PrintJob job, Stream input, CancellationToken token)
    {
       Check(Native.OpenPrinter(selectedPrinter.Name, out IntPtr printer, IntPtr.Zero));
@@ -61,6 +73,9 @@ public sealed partial class WindowsPrinters
       finally { Native.ClosePrinter(printer); }
    }
 
+
+
+   /// <summary>Writes the staged bytes once per copy in 64 KiB pieces, continuing after partial spooler writes and refusing an impossible byte count, with cancellation checked between writes.</summary>
    private static void WriteRawCopies(IntPtr printer, int copies, Stream input, CancellationToken token)
    {
       byte[] buffer = new byte[65536];

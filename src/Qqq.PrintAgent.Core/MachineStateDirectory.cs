@@ -23,7 +23,9 @@ public static class MachineStateDirectory
 
 
 
-   private const string Error ="The machine print data directory is not trusted. Installation or startup was stopped without adopting its contents. Ask an administrator to inspect its owner, permissions and links before repairing the MSI.";
+   private const string Error = "The machine print data directory is not trusted. Installation or startup was stopped without adopting its contents. Ask an administrator to inspect its owner, permissions and links before repairing the MSI.";
+
+
 
    /// <summary>Private diagnostic paths remain independent; canonical machine state is always protected.</summary>
    public static void EnsureForPath(string path)

@@ -10,6 +10,9 @@ public sealed class DownloadedDocument(string path, FileStream lease) : IDisposa
 {
    public string Path { get; } = path;
 
+
+
+   /// <summary>Releases the lease and then deletes the staging file. Deletion problems are swallowed because cleanup must not change an already committed spool receipt, and leftovers are removed at the next service start.</summary>
    public void Dispose()
    {
       lease.Dispose();

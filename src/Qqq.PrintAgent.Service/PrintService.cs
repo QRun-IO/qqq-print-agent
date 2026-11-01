@@ -49,6 +49,10 @@ internal sealed partial class PrintService(ILogger<PrintService> logger) : Backg
    [LoggerMessage(Level = LogLevel.Information, Message = "{Message}")]
    private static partial void LogAgentStatus(ILogger logger, string message);
 
+
+
+
+   /// <summary>Records a fatal runtime stop at critical level without naming any machine state, so a rejected security check does not leak paths.</summary>
    [LoggerMessage(Level = LogLevel.Critical, Message = "The print runtime stopped. Machine state was not opened if its security validation failed.")]
    private static partial void LogFatalRuntime(ILogger logger, Exception exception);
 }

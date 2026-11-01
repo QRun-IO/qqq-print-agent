@@ -7,6 +7,10 @@ using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Transport observation part of the runtime: what the footer shows about the connection (protocol, state, payload bytes and rates). It
+/// reads only memory the runtime already holds.
+/// </summary>
 public sealed partial class AgentRuntime
 {
    private readonly ApplicationTrafficMeter _traffic = new(timeProvider);
@@ -14,6 +18,8 @@ public sealed partial class AgentRuntime
    private bool _transportConnectedBefore;
    private bool _transportNeedsSignIn;
    private bool _transportStopped;
+
+
 
    /// <summary>Memory-only observation: no printer discovery, journal access or cloud request.</summary>
    public AgentTransportSnapshot GetTransportSnapshot()
