@@ -12,7 +12,11 @@
     "typescript": "6.0.3",
     "@stylistic/eslint-plugin": "5.10.0",
     "eslint": "10.14.0",
-    "@types/node": "24.10.1"
+    "@types/node": "24.10.1",
+    "pyright": "1.1.414"
+  },
+  "overrides": {
+    "minimatch": "11.0.1"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from types import ModuleType
 from typing import Any, override
+from unittest import mock
 
 sys.dont_write_bytecode = True
 
@@ -170,6 +171,15 @@ class PyrightProbeTests(unittest.TestCase):
          probe.write_text(UNANNOTATED_PYTHON, encoding="utf-8", newline="\n")
          strict = guard.run_pyright(root, ".")
          self.assertIn("reportMissingParameterType", {item.get("rule") for item in strict["generalDiagnostics"]})
+
+   def test_missing_locked_pyright_or_node_is_rejected(self) -> None:
+      """Reject a missing locked Pyright entry or Node instead of silently skipping the type gate."""
+      with tempfile.TemporaryDirectory() as name:
+         root = Path(name)
+         with mock.patch.object(guard, "PYRIGHT_ENTRY", root / "missing.js"), self.assertRaisesRegex(ValueError, "Locked Pyright is missing"):
+            guard.run_pyright(root, ".")
+         with mock.patch.object(guard.shutil, "which", return_value=None), self.assertRaisesRegex(ValueError, "Node.js is required"):
+            guard.run_pyright(root, ".")
 
    def test_zero_analyzed_files_cannot_pass(self) -> None:
       """Reject an empty include and a hidden-directory root config in the wrapper."""

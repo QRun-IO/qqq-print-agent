@@ -4,6 +4,7 @@
 """Fail closed unless every tracked owned script is covered by, and really analyzed by, the quality tools."""
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
@@ -13,6 +14,8 @@ PYTHON_SUFFIXES = (".py", ".pyi", ".pyw")
 SCRIPT_PATTERN = ".github/scripts/*.py"
 PYRIGHT_CONFIG = ".github"
 JAVASCRIPT_SUFFIXES = (".js", ".cjs", ".mjs", ".jsx", ".ts", ".mts", ".cts", ".tsx")
+# Microsoft's official npm Pyright, restored from package-lock.json by `npm ci --ignore-scripts`.
+PYRIGHT_ENTRY = Path(__file__).resolve().parents[2] / "node_modules" / "pyright" / "index.js"
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -51,9 +54,14 @@ def javascript_scope(root: Path, tracked: list[str]) -> list[str]:
 
 
 def run_pyright(root: Path, config: str) -> dict[str, Any]:
-   """Run strict Pyright with JSON output and return its full report."""
-   # Fixed interpreter module invocation; the config is an argument, never shell input.
-   completed = subprocess.run([sys.executable, "-m", "pyright", "-p", config, "--outputjson"], cwd=root, check=False, capture_output=True, text=True, encoding="utf-8")  # noqa: S603 -- Fixed interpreter and module; no shell.
+   """Run the locked npm Pyright through Node with JSON output and return its full report."""
+   node = shutil.which("node")
+   if node is None:
+      raise ValueError("Node.js is required to run the locked Pyright")
+   if not PYRIGHT_ENTRY.is_file():
+      raise ValueError(f"Locked Pyright is missing; run npm ci --ignore-scripts ({PYRIGHT_ENTRY})")
+   # Resolved Node and locked entry script; the config is an argument, never shell input.
+   completed = subprocess.run([node, str(PYRIGHT_ENTRY), "-p", config, "--outputjson"], cwd=root, check=False, capture_output=True, text=True, encoding="utf-8")  # noqa: S603 -- Resolved Node and locked entry script; no shell.
    try:
       report: dict[str, Any] = json.loads(completed.stdout[completed.stdout.index("{") :])
       int(report["summary"]["filesAnalyzed"])  # Fail here when the summary shape is missing.
