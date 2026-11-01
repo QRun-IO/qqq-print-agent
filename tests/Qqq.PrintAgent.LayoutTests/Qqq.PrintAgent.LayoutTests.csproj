@@ -23,6 +23,7 @@
       <ApplicationDefinition Include="../../src/Qqq.PrintAgent/App.xaml" Link="App.xaml" />
       <Page Include="../../src/Qqq.PrintAgent/MainWindow.xaml" Link="MainWindow.xaml" />
       <Content Include="../../src/Qqq.PrintAgent/Assets/Brand/*" Link="Assets/Brand/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+      <Content Include="../../src/Qqq.PrintAgent/Assets/Query/*" Link="Assets/Query/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
       <Using Include="Qqq.PrintAgent.Core" />
       <ProjectReference Include="../../src/Qqq.PrintAgent.Core/Qqq.PrintAgent.Core.csproj" />
       <ProjectReference Include="../../src/Qqq.PrintAgent.Windows/Qqq.PrintAgent.Windows.csproj" />

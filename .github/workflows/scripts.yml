@@ -29,6 +29,10 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Verify owned source notices and rejection paths
+        run: |
+          python3 .github/scripts/test-source-headers.py
+          python3 .github/scripts/check-source-headers.py
       - name: Verify virtual-agent protocol and HTTP boundaries
         run: node --test tools/virtual-agent/test/virtual-agent.test.mjs
 

@@ -1,0 +1,126 @@
+{
+  "description": "Scope of the reviewed 2026-11-01 owned-source notice pass. Python fnmatch patterns match slash-containing relative paths. Native C# IDE0073 and full Java Apache conventions remain in force.",
+  "includes": [
+    ".github/*.yml",
+    ".github/*.yaml",
+    ".github/scripts/*.py",
+    ".pre-commit-config.yaml",
+    "Directory.Build.props",
+    "Directory.Packages.props",
+    "PSScriptAnalyzerSettings.psd1",
+    "build/*.ps1",
+    "installer/*.props",
+    "installer/*.wxs",
+    "installer/*.wixproj",
+    "src/*.cs",
+    "src/*.xaml",
+    "src/*.csproj",
+    "tests/*.cs",
+    "tests/*.csproj",
+    "tests/*.ps1",
+    "tools/virtual-agent/*.mjs"
+  ],
+  "exclusions": [
+    {
+      "pattern": "*.json",
+      "reason": "Schema, fixtures, manifests and lock data: repository LICENSE/NOTICE, no comments."
+    },
+    {
+      "pattern": "*.lock",
+      "reason": "Dependency lock data, not owned executable source."
+    },
+    {
+      "pattern": "*/generated/*",
+      "reason": "Explicit generated-code directory."
+    },
+    {
+      "pattern": "*/bin/*",
+      "reason": "Generated build output."
+    },
+    {
+      "pattern": "*/obj/*",
+      "reason": "Generated build output."
+    },
+    {
+      "pattern": "*/node_modules/*",
+      "reason": "Third-party dependency output."
+    },
+    {
+      "pattern": ".mvn/*",
+      "reason": "Upstream Maven wrapper provenance."
+    },
+    {
+      "pattern": "mvnw*",
+      "reason": "Upstream Maven wrapper provenance."
+    },
+    {
+      "pattern": "Assets/Legal/*",
+      "reason": "Byte-exact third-party legal files."
+    },
+    {
+      "pattern": "src/main/resources/*",
+      "reason": "Bundled font/legal assets and OpenAPI schema data."
+    },
+    {
+      "pattern": "src/test/resources/openapi/*",
+      "reason": "Historical contract schema fixtures."
+    },
+    {
+      "pattern": "*.slnx",
+      "reason": "Solution metadata outside the completed source-header pass; root LICENSE/NOTICE applies."
+    },
+    {
+      "pattern": "*.manifest",
+      "reason": "Application activation metadata outside this pass; root LICENSE/NOTICE applies."
+    },
+    {
+      "pattern": "*.runsettings",
+      "reason": "Test runner metadata outside this pass; root LICENSE/NOTICE applies."
+    },
+    {
+      "pattern": ".editorconfig",
+      "reason": "Style configuration outside this pass; root LICENSE/NOTICE applies."
+    }
+  ],
+  "styles": {
+    ".py": "hash",
+    ".ps1": "powershell",
+    ".psd1": "powershell",
+    ".sh": "hash",
+    ".yml": "hash",
+    ".yaml": "hash",
+    ".cs": "slash",
+    ".java": "slash",
+    ".mjs": "slash",
+    ".js": "slash",
+    ".xml": "xml",
+    ".props": "xml",
+    ".csproj": "xml",
+    ".wxs": "xml",
+    ".wixproj": "xml",
+    ".xaml": "xml"
+  },
+  "notices": [
+    {
+      "paths": [
+        ".github/*",
+        ".pre-commit-config.yaml",
+        "Directory.*.props",
+        "PSScriptAnalyzerSettings.psd1",
+        "build/*",
+        "installer/*",
+        "src/*",
+        "tests/*"
+      ],
+      "license": "MIT",
+      "holder": "James Maes"
+    },
+    {
+      "paths": [
+        "tools/virtual-agent/*"
+      ],
+      "license": "MIT",
+      "holder": "QRun.IO, Inc."
+    }
+  ]
+}

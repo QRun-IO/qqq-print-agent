@@ -26,3 +26,7 @@ redistribution or end-user protection obligation.
 
 The QQQ framework, qbit-printing and qqq-print-protocol are separate repositories;
 this notice does not change their licensing.
+
+The About dialog bundles Query, the QQQ and QRun.IO dog mascot, supplied by
+QRun.IO. The unmodified artwork and provenance are in Assets/Query in the
+application payload and src/Qqq.PrintAgent/Assets/Query in this repository.
