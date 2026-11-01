@@ -35,3 +35,17 @@ A passing unit suite does not establish printer compatibility. Record Windows ve
 ## Issues and releases
 
 Open ordinary bugs or proposals in [Issues](https://github.com/QRun-IO/qqq-print-agent/issues). Use [private security reporting](SECURITY.md) for vulnerabilities. Release authorization and tagging belong to maintainers; see [RELEASING.md](docs/RELEASING.md).
+
+## Script quality
+
+Owned scripts follow the KofTwentyTwo standard at revision `fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152` (configs adapted from its `python` and `typescript` profiles): three-space indentation, Ruff 0.17.3 format/lint and strict Pyright 1.1.414 for `.github/scripts/*.py`, and ESLint 10 with Stylistic (Allman) plus strict `tsc` over JSDoc for `tools/**/*.mjs` and `eslint.config.mjs`. Restore with `uv sync --locked` and `npm ci --ignore-scripts`, then run:
+
+```text
+uv run --locked --no-sync python .github/scripts/test-script-quality.py
+uv run --locked --no-sync python .github/scripts/check-script-quality.py
+npm run typecheck
+npm run lint
+npm test
+```
+
+`check-script-quality.py` fails for any tracked Python outside `.github/scripts/` or JavaScript outside the `tsconfig.json` include list, and requires Pyright's analyzed-file count to equal the selected scripts. Pyright must run as `pyright -p .github`: it silently skips dot directories from a root config. Documented exceptions: CLI `print`/`console.log` only in `check-*.py` and `tools/`; synthetic test assertions and boundary constants; narrow inline `noqa` comments for fixed no-shell Git/interpreter calls and ordered fail-closed validators. Do not loosen a rule or add a type waiver to pass. The virtual agent's existing QRun.IO attribution is unchanged.
