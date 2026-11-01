@@ -1,6 +1,18 @@
-# Session state — 2026-10-31
+# Session state — 2026-11-01
 
-## Installed 0.3.1 and 0.3.2 qualification — 2026-11-01
+## Published 0.3.2 and installed 0.3.1 — 2026-11-01
+
+[0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1)
+is published from protected main `268f951b6728b0e69fedaf46769785c3f5ae55f4`.
+[Release workflow 41324312106](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41324312106)
+completed all nine jobs. The signed tag, all four assets, checksums and GitHub
+provenance attestations were verified. Read-only MSI inspection passed for
+product version `0.3.2`, coherent app/service/CLI ProductVersion
+`0.3.2-rc.1+268f951b6728b0e69fedaf46769785c3f5ae55f4`, WinUI resources,
+service/callback registration and packaged notices. Published MSI SHA-256:
+`1191C337265469EB06136AF232DB57FAC6BC5014357521D80B35E5CCA5AF6E18`.
+It remains unsigned by the existing prerelease decision. No 0.3.2 installation
+or actual in-app update acceptance is claimed yet.
 
 The published 0.3.1 MSI was installed with exit 0 and no reboot. App, service and
 CLI product versions exactly match source `346fc285198908c47a2ee9db7b9adb53d5e88c3c`.
@@ -10,11 +22,13 @@ were preserved. A separate authenticated comparison proved that the original
 27 server jobs remained unchanged while new jobs arrived. The operator confirmed
 test prints and a responsive installed window.
 
-The next candidate checks all three installed components and identical complete
+The published 0.3.2 checks all three installed components and identical complete
 build metadata after MSI success. Focused red/green regressions cover missing,
 old, unreadable and mixed-source builds; 73 focused cases pass. The integrated
-426-test Release gate passes with zero warnings/errors/skips. Actual in-app
-coordinator handoff remains unqualified until the next published update is used.
+426-test Release gate passes with zero warnings/errors/skips. Actual 0.3.1 to
+0.3.2 in-app coordinator handoff remains pending. The installed 0.3.1 helper
+performs that transition; the new guard protects subsequent updates. Fresh
+independent version and additive-history checks are required for this update.
 
 The native test host now matches production's PerMonitorV2 declaration while
 retaining asInvoker. Original 0.3.0 and current 0.3.1 UI replays passed at observed
@@ -22,10 +36,14 @@ retaining asInvoker. Original 0.3.0 and current 0.3.1 UI replays passed at obser
 These results and operator acceptance do not prove the historical cause fixed.
 No speculative product layout change was made.
 
-Local Docker development qualification is being added to the server repository.
-The frozen QQQ RC.20 runtime lacks the advertised native-session grant required
-for Windows OAuth. Real Authentik browser/session qualification needs the central
-API 1.9 implementation; the client must keep its HTTPS and typed-grant checks.
+The repository-owned local Docker reference environment passed real Authentik
+login, permission checks, logout replay denial, server renewal after expiry and
+provider revocation denial using production client session code. This isolated
+proof uses unreleased QQQ API 1.9 candidate `ecf0f550` and an HTTPS probe callback,
+with trust confined to containers. Released RC.20 lacks the required native grant.
+Installed Windows browser/private-callback acceptance still needs a compatible
+published QQQ runtime and properly configured HTTPS provider; no installed OAuth
+or long-running production qualification is claimed.
 
 ## Installed realtime release and companion follow-up
 

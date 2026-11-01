@@ -5,15 +5,17 @@
 - [x] Install the attested published 0.3.1 MSI; verify all three exact component versions, automatic WebSocket restoration and preserved local receipts, pairing and profiles.
 - [x] Record operator-confirmed test prints and responsive installed 0.3.1 window; verify repeated native dialog/refresh/banner/status replays at observed 125% DPI.
 - [x] Reject a successful MSI outcome when the app, service or CLI has a missing, old or different full build version; pass the integrated 426-test gate.
-- [ ] Qualify the actual AppKit in-app update to the next published candidate, including decline, helper handoff and reopen; direct MSI installation is separate evidence.
-- [ ] Finish real-provider native-session qualification against a compatible QQQ API 1.9 runtime and the local Docker reference environment.
+- [x] Publish [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1); verify all nine [release jobs](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41324312106), four assets/attestations and static MSI version, resources, service/callback registration and notices. The MSI remains unsigned.
+- [ ] Qualify the actual AppKit 0.3.1 to published 0.3.2 in-app update, including decline, helper handoff, fresh version/history preservation and reopen; 0.3.2 is not yet installed.
+- [x] Pass isolated real Authentik native-session login, permission, logout, expiry/renewal and revocation checks with production client code against unreleased QQQ API 1.9 candidate `ecf0f550` in the local Docker reference environment.
+- [ ] Qualify the installed Windows browser/private callback against a compatible published QQQ runtime and configured HTTPS provider; the container HTTPS callback does not establish this installed flow.
 - [x] Publish and verify all three 0.3.0-rc.1 releases; install the matched local server/client and verify retained state and service restart recovery.
 - [x] Capture the operator's post-print LayoutCycleException and recover only the companion; retain existing print receipts.
 - [ ] Reproduce and fix the native post-print layout cycle with a nonprinting host and verify the actual dialog/action/refresh path.
 - [x] Verify actual native fatal-layout exception logging, handler order and natural diagnostic termination; keep this mitigation distinct from fixing the original trigger.
 - [x] Accept scheduler-normalized account names only when they resolve to the exact expected startup SID; verify rejection of other identities and the unchanged actual task.
 - [x] Show explicit WebSocket state, server endpoint, live upload/download rates and service-lifetime application-traffic totals in the footer; verify actual native presentation with synthetic traffic.
-- [ ] Publish and install the verified client follow-up, then complete UI and remaining physical acceptance without resubmitting old intents.
+- [ ] Install published 0.3.2 through the real in-app update flow and confirm its reopened UI; retain 0.3.1 physical acceptance as separate evidence and never resubmit old intents.
 
 ## Realtime and Jobs UI — 0.3.0-rc.1 release candidate
 
