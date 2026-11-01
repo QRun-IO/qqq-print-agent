@@ -1,8 +1,8 @@
 # Windows queue-default media profiles
 
 The candidate client advertises `printer-media-v1` only when standard discovery
-reports a stable printing extension version of at least 2.2.0 within major two.
-Printing 2.0/2.1 servers retain the original three realtime capabilities and
+reports a stable printing extension version of at least 2.3.0 within major two.
+Printing 2.0, 2.1 and 2.2 (rendering, no media negotiation) servers retain the original three realtime capabilities and
 legacy unselected jobs. Each WebSocket establishment refreshes standard discovery
 once under the authenticated session gate, then uses that refreshed snapshot
 for HELLO. This handles same-session server upgrades and downgrades without an

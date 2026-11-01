@@ -90,6 +90,31 @@ public sealed class PrintWorkerTests
       Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "SPOOLED" }, handler.Events, StringComparer.Ordinal);
    }
 
+   /// <summary>
+   /// Proves each processed job logs exactly one phase-timing line naming every phase and only the job identifier, so a slow print can be
+   /// attributed from the service log without exposing document content or adding any request.
+   /// </summary>
+   [Fact]
+   public async Task RunOnce_LogsOnePhaseTimingLinePerJobWithoutDocumentContent()
+   {
+      byte[] content = Encoding.UTF8.GetBytes("^XA^FO10,10^FDprivate label text^FS^XZ");
+      PrintJob job = new("timing-job", "printer1", "Test", "ZPL", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), content.Length, new PrintOptions(), "2026-10-29T00:00:00Z", "CLAIMED");
+      using FixtureHandler handler = new(job, content);
+      using PrintApiClient api = new("http://localhost", "test-device", handler);
+      List<string> lines = [];
+      PrintWorker worker = new(api, new FakePrinter(), new MemoryJournal(), lines.Add);
+      Assert.True(await worker.RunOnceAsync());
+      string timing = Assert.Single(lines, line => line.Contains(": timing ", StringComparison.Ordinal));
+      Assert.StartsWith("timing-job: timing ", timing, StringComparison.Ordinal);
+      foreach(string phase in new[] { "inventory=", "claim=", "download=", "revalidate=", "gate=", "submit=" })
+      {
+         Assert.Contains(phase, timing, StringComparison.Ordinal);
+      }
+      Assert.DoesNotContain(lines, line => line.Contains("private label text", StringComparison.Ordinal));
+   }
+
+
+
    [Theory]
    [InlineData("Dispatch labels", "Dispatch labels")]
    [InlineData("", "Test")]

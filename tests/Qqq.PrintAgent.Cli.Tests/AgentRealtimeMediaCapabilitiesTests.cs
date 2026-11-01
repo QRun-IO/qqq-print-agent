@@ -15,8 +15,10 @@ public sealed class AgentRealtimeMediaCapabilitiesTests
    [Theory]
    [InlineData("2.0.0", false)]
    [InlineData("2.1.9", false)]
-   [InlineData("2.2.0", true)]
+   [InlineData("2.2.0", false)]
+   [InlineData("2.2.9", false)]
    [InlineData("2.3.0", true)]
+   [InlineData("2.4.0", true)]
    public async Task HelloAdvertisesMediaOnlyAfterStandardDiscoveryConfirmsSupport(string version, bool media)
    {
       await using var fixture = new RealtimeRuntimeFixture(printingVersion: version);
@@ -38,8 +40,10 @@ public sealed class AgentRealtimeMediaCapabilitiesTests
 
    /// <summary>Changes a running server's version and proves capabilities change only on the next socket, with the existing session retained.</summary>
    [Theory]
-   [InlineData("2.0.0", "2.2.0", true)]
-   [InlineData("2.2.0", "2.1.0", false)]
+   [InlineData("2.0.0", "2.3.0", true)]
+   [InlineData("2.2.0", "2.3.0", true)]
+   [InlineData("2.3.0", "2.2.0", false)]
+   [InlineData("2.3.0", "2.1.0", false)]
    public async Task SameSessionReconnectTracksServerUpgradeAndDowngrade(string initial, string replacement, bool mediaAfter)
    {
       await using var fixture = new RealtimeRuntimeFixture(printingVersion: initial);
@@ -62,16 +66,17 @@ public sealed class AgentRealtimeMediaCapabilitiesTests
 
    /// <summary>Rejects ambiguous or nonstable discovery claims even when a test transport bypasses the production discovery validator.</summary>
    [Theory]
-   [InlineData("2.2.0-rc.1")]
-   [InlineData("2.2")]
-   [InlineData("2.2.0.1")]
-   [InlineData("02.2.0")]
+   [InlineData("2.3.0-rc.1")]
+   [InlineData("2.3")]
+   [InlineData("2.3.0.1")]
+   [InlineData("02.3.0")]
+   [InlineData("2.2.0")]
    [InlineData("3.0.0")]
    public void UnverifiedSemanticVersionsCannotClaimMedia(string version)
    {
       var discovery = new QqqApiDiscovery { Extensions = [new("printing", version, "/qbit/printing")] };
       Assert.False(discovery.SupportsPrinterMedia());
       Assert.False(new QqqApiDiscovery().SupportsPrinterMedia());
-      Assert.False(new QqqApiDiscovery { Extensions = [new("printing", "2.2.0", "/wrong")] }.SupportsPrinterMedia());
+      Assert.False(new QqqApiDiscovery { Extensions = [new("printing", "2.3.0", "/wrong")] }.SupportsPrinterMedia());
    }
 }

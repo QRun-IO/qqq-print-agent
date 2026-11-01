@@ -1,6 +1,32 @@
 # Changelog
 
-## 0.3.2-rc.1 — unreleased
+## 0.4.0-rc.1 — unreleased candidate
+
+Not tagged, not installed. Upgrade the server first: selected-media jobs require
+printing extension 2.3.0 (wire payload v1 unchanged). Against a 2.0, 2.1 or 2.2
+(rendering) server the client keeps its three-capability HELLO and offers no media
+profiles, so existing behavior is unchanged.
+
+- Report each queue's machine-default paper dimensions and resolution as an opaque, revision-bound media profile, and advertise `printer-media-v1` only when the discovered server supports it. Defaults are configured facts, not physical stock sensing.
+- Refuse a selected-media job before spooling when the profile is unknown or its revision has drifted, and again at the native submission boundary. A proven pre-submit refusal is recorded as FAILED and is never treated as an uncertain outcome.
+- Normalize job-only driver copies and scale for selected PDFs and verify the effective device-context dimensions and resolution before StartDoc. ZPL (RAW) only rechecks the profile immediately before StartDocPrinter.
+- Log one phase-timing line per processed job (inventory, claim and receipt, download, revalidation, submit gate, native submit) with the job identifier only, to attribute print latency from the service log. No new request, payload or printer access.
+- Pin the printing protocol to the reviewed media contract (`a26c18c9…`). Later protocol compatibility documentation is an unmerged draft and changes no pin.
+- Split `PrintWorker` job processing into named submission, revalidation, dispatch-gate and native-submit steps (analyzer MA0051 rejected the first form of the timing instrumentation). Behavior, state order and lease release are unchanged.
+
+Observed so far, all local: after the extraction the focused negotiation/runtime run
+passed 16 of 16 with no warnings or analyzer errors, and a token comparison against
+the merge base showed only the four intended semantic files changed. The hosted gate
+on the earlier PR head 35ed93c (154 Core, 317 CLI/Windows, zero warnings) is
+historical: that head predates protected main's changes, the timing line and the
+printing 2.3 negotiation, so the final candidate head needs its own hosted gate, which
+has not run. The local Core test assembly remains blocked by a Defender quarantine
+and was not rebuilt; hosted results will not clear that detection. Installer and
+upgrade preservation, profile-selected physical output, and installed
+browser/private-callback acceptance against a published API 1.9+ server are not yet
+qualified. No 1.0 claim.
+
+## 0.3.2-rc.1 — 2026-11-01
 
 - Verify that the app, service and CLI all have the requested release and identical full build versions before recording MSI update success. Report missing, unreadable or mixed builds without claiming rollback.
 - Correct the Windows App SDK credit to reference its Microsoft terms and installed third-party notices.
