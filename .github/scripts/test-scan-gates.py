@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 """Exercise the exact CI guards using synthetic evidence only."""
 import contextlib
 import copy

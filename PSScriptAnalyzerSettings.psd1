@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # KofTwentyTwo PowerShell analysis (K22-CODE-SH-05). CI runs:
 #   ./build/Analyze-Scripts.ps1 (serial rule execution avoids upstream metadata races)
 # and `Invoke-Formatter` with the same settings for layout. PowerShell supports the

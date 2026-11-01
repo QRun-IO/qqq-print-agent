@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 """Require scanner evidence for every resolved NuGet lock-file dependency."""
 import json
 from pathlib import Path

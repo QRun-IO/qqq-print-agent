@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
 <Project Sdk="Microsoft.NET.Sdk">
 
    <!-- The WinUI 3 shell: views, dialogs, and startup plumbing only; everything testable

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 """Reject missing/malformed CodeQL evidence before enforcing the severity gate."""
 import json
 import math

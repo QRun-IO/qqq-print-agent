@@ -1,4 +1,7 @@
 #requires -Version 7.4
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 [CmdletBinding()]
 param()
 

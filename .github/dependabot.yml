@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # Dependabot for a KofTwentyTwo repository: copy to .github/dependabot.yml and keep
 # the ecosystems the repository uses. Updates are grouped weekly. A 7-day cooldown
 # lets the community catch a compromised release before it reaches us; security

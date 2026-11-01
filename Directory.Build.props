@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
 <Project>
 
    <!-- KofTwentyTwo .NET quality gate (standards: K22-CODE-CS, from

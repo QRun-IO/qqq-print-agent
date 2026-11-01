@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 <#
 .SYNOPSIS
 Builds and runs the isolated native WinUI regression host without printing.
