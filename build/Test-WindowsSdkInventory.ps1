@@ -67,9 +67,11 @@ $allowanceBlock = [regex]::Matches($workflow, '(?m)^      allow-dependencies-lic
 if($allowanceKeys.Count -ne 1 -or $allowanceBlock.Count -ne 1)
 { throw 'Exactly one explicit SDK license allowance block is required.' }
 $allowed = @($allowanceBlock[0].Groups[1].Value.Split(',') | ForEach-Object Trim | Sort-Object -CaseSensitive)
-$expectedAllowances = @($expectedIds | ForEach-Object { "pkg:nuget/$_" } | Sort-Object -CaseSensitive)
+# EX-0015 adds exactly one development-only npm purl; check-script-quality.py pins its version,
+# lock integrity and license bytes. Any other ecosystem, package or versioned purl stays rejected here.
+$expectedAllowances = @(@($expectedIds | ForEach-Object { "pkg:nuget/$_" }) + 'pkg:npm/uri-js' | Sort-Object -CaseSensitive)
 if(($allowed -join ',') -cne ($expectedAllowances -join ','))
-{ throw 'SDK license allowance must contain only the 15 exact reviewed package names.' }
+{ throw 'SDK license allowance must contain only the 15 exact reviewed package names plus the EX-0015 pkg:npm/uri-js entry.' }
 [string[]]$lockedIds = @($expectedIds | Where-Object { $_ -cne $referenceId })
 [xml]$central = Get-Content -LiteralPath (Join-Path $root 'Directory.Packages.props') -Raw
 foreach($id in $directIds)

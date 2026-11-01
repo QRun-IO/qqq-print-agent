@@ -86,6 +86,26 @@ Describe 'Exact Windows SDK inventory guard' `
       { & $script:Guard -RepositoryRoot $script:Fixture } | Should -Throw '*only the 15 exact reviewed package names*'
    }
 
+   It 'rejects any other npm or versioned entry beside the reviewed EX-0015 uri-js: <Replacement>' -ForEach @(
+      @{ Replacement = 'pkg:npm/other' },
+      @{ Replacement = 'pkg:npm/uri-js@4.4.1' },
+      @{ Replacement = 'pkg:pypi/uri-js' },
+      @{ Replacement = "pkg:npm/uri-js,`n        pkg:npm/uri-js" },
+      @{ Replacement = "pkg:npm/uri-js,`n        pkg:npm/other" }
+   ) `
+   {
+      $path = Join-Path $script:Fixture '.github/workflows/pr-gates.yml'
+      [IO.File]::WriteAllText($path, [IO.File]::ReadAllText($path).Replace('        pkg:npm/uri-js', "        $Replacement"))
+      { & $script:Guard -RepositoryRoot $script:Fixture } | Should -Throw '*plus the EX-0015 pkg:npm/uri-js entry*'
+   }
+
+   It 'rejects the SDK allowance without the reviewed EX-0015 entry' `
+   {
+      $path = Join-Path $script:Fixture '.github/workflows/pr-gates.yml'
+      [IO.File]::WriteAllText($path, [regex]::Replace([IO.File]::ReadAllText($path), ',\s*pkg:npm/uri-js\b', ''))
+      { & $script:Guard -RepositoryRoot $script:Fixture } | Should -Throw '*plus the EX-0015 pkg:npm/uri-js entry*'
+   }
+
    It 'rejects a changed manifest even when locks are changed to match' `
    {
       ($script:Manifest.packages | Where-Object id -EQ 'Microsoft.WindowsAppSDK.ML').version = '2.1.95'
