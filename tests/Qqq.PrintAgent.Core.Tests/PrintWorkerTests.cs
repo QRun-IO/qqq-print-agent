@@ -13,6 +13,27 @@ namespace Qqq.PrintAgent.Core.Tests;
 public sealed class PrintWorkerTests
 {
    [Theory]
+   [InlineData(true, false, "FAILED", 0)]
+   [InlineData(false, true, "FAILED", 0)]
+   [InlineData(false, false, "SPOOLED", 1)]
+   public async Task SelectedMediaDriftCannotSpoolAndKnownNativeRefusalIsNotUncertain(bool discoveryDrift, bool nativeDrift, string expected, int spoolCount)
+   {
+      byte[] content = [1];
+      PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
+      PrintOptions options = new(MediaProfile: new(profile.Id, profile.Revision));
+      PrintJob job = new("job1", "printer1", "Test", "ZPL", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), 1, options, "", "CLAIMED");
+      using FixtureHandler handler = new(job, content);
+      using PrintApiClient api = new("http://localhost", "fixture", handler);
+      MemoryJournal journal = new();
+      FakePrinter printer = new(profile: profile, discoveryDrift: discoveryDrift, nativeDrift: nativeDrift);
+      await new PrintWorker(api, printer, journal).RunOnceAsync();
+      Assert.Equal(spoolCount, printer.PrintCount);
+      Assert.Equal(expected, journal.GetState(job.JobId));
+      if(discoveryDrift)
+      { Assert.DoesNotContain("SUBMITTING", handler.Events, StringComparer.Ordinal); }
+   }
+
+   [Theory]
    [InlineData(true)]
    [InlineData(false)]
    public async Task PausedOrDisconnectedDrainsReceiptsWithoutClaiming(bool synchronize)
@@ -185,11 +206,24 @@ public sealed class PrintWorkerTests
       }
    }
 
-   private sealed class FakePrinter(string? displayName = null) : IPrinterBackend
+   private sealed class FakePrinter(string? displayName = null, PrinterMediaProfile? profile = null, bool discoveryDrift = false, bool nativeDrift = false) : IPrinterBackend
    {
+      private int _discoveries;
       public int PrintCount { get; private set; }
-      public IReadOnlyList<PrinterInfo> Discover() => [new("printer1", "Test", "Zebra", "USB", "READY", ["ZPL"], DisplayName: displayName)];
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) { PrintCount++; return Task.FromResult("123"); }
+      public IReadOnlyList<PrinterInfo> Discover()
+      {
+         PrinterMediaProfile? current = profile;
+         if(discoveryDrift && _discoveries++ > 0 && current is not null)
+         { current = current with { Revision = new string('b', 64) }; }
+         return [new("printer1", "Test", "Zebra", "USB", "READY", ["ZPL"], DisplayName: displayName, MediaProfiles: current is null ? null : [current])];
+      }
+      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
+      {
+         if(nativeDrift)
+         { throw new PrinterMediaMismatchException("Fixture default changed before native submission."); }
+         PrintCount++;
+         return Task.FromResult("123");
+      }
    }
 
    private sealed class MemoryJournal : IJobJournal

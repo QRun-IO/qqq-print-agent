@@ -1,5 +1,16 @@
 # TODO
 
+## Candidate Echo printer media
+
+- [x] Discover truthful machine-default dimensions/DPI and expose an opaque, revision-bound profile.
+- [x] Reject stale/unknown selection before spool; pass captured validated defaults to selected PDF DCs.
+- [x] Normalize supported job-only driver copies/scale and verify effective DC dimensions/DPI before StartDoc (24 focused Windows tests plus read-only actual driver/DC probe).
+- [x] Verify synthetic 4 × 1 / 4 × 2 / 4 × 6 profiles, driver-private drift, unknown DPI and isolated-worker refusal.
+- [x] Verify configured 4 × 6 / 300 DPI fingerprint stability across three read-only helper launches.
+- [ ] Resolve the local Core test-assembly quarantine through the normal security review; obtain a complete clean gate without disabling protections.
+- [ ] Qualify the matching server/consumer catalog, immutable selection and authorized retained-document submission.
+- [ ] Perform separately authorized installed/profile-selected physical acceptance; available alternative stock is not current queue configuration.
+
 ## Companion layout, live transport status and startup follow-up
 
 - [x] Install the attested published 0.3.1 MSI; verify all three exact component versions, automatic WebSocket restoration and preserved local receipts, pairing and profiles.

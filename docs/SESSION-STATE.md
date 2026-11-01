@@ -1,5 +1,41 @@
 # Session state — 2026-10-31
 
+## Candidate Echo media discovery — 2026-11-01
+
+The isolated candidate implements `printer-media-v1`, machine-wide queue-default
+profiles, immutable media selection and pre-spool drift refusal. Selected PDFs
+use a driver-normalized job-only copy of the captured DEVMODE; RAW's physical-stock limitation is explicit
+in `docs/PRINTER-MEDIA.md`. Read-only native discovery produced a stable configured
+4 × 6 inch, 300 × 300 DPI profile across three helper launches. No live component
+was changed and no physical output was submitted.
+
+Core/Windows/CLI and synthetic test projects compile without warnings. Seven
+initial adapter cases and one isolated-worker refusal case passed. Review added
+driver-normalized copies/scale overrides and effective DC geometry/DPI validation
+before StartDoc; all 24 focused Windows adapter cases now pass with zero build
+warnings. The original queue fingerprint remains unchanged, and the driver may
+update private settings only in the job's in-memory buffer. Unsupported override
+fields stay absent. A read-only probe of the corrected production adapter passed
+on the configured label driver, including its absent native-scale flag and an
+effective 1,200 × 1,800 pixel DC at 300 DPI, without StartDoc or queue changes.
+A Core run executed
+150 cases, with 147 passing (including the new media/worker cases) and three
+failing because the new worktree's linked fixtures were missing. The subsequent
+full rerun is blocked by local Defender quarantine of the Core test assembly;
+no protection changes, exclusions or quarantine restoration were performed.
+This is not a clean full-suite or release qualification. Parent review owns the
+security provenance investigation and the remaining server/hardware gates.
+The shared selection validator also enforces protocol IDs of at most 128 ASCII
+URL-safe characters, profile names of 1–512 characters and at most 32 profiles.
+New Core boundary regressions are present for hosted validation and were not
+locally compiled or run after the quarantine.
+Capability negotiation requires discovered stable printing 2.2+ within major
+two; older 2.0/2.1 servers retain the original three-capability HELLO. The real
+session/loopback-WebSocket compatibility tests cover same-session upgrade and
+downgrade, refreshing discovery once per socket (separate from initial sign-in
+discovery), with zero forbidden HTTP polls. The combined focused Windows gate
+passed 40 cases with zero build warnings/errors.
+
 ## Installed 0.3.1 and 0.3.2 qualification — 2026-11-01
 
 The published 0.3.1 MSI was installed with exit 0 and no reboot. App, service and

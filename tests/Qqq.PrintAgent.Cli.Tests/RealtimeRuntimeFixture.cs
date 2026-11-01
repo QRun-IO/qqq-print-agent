@@ -37,14 +37,30 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
    internal TaskCompletionSource? StateAppliedRelease { get; set; }
    internal Func<RealtimeEnvelope, Task>? BeforeAcknowledgement { get; set; }
    internal long LastHelloSettingsRevision;
+
+
+
+   /// <summary>Captures the actual HELLO payload so compatibility tests observe the wire rather than duplicating capability selection.</summary>
+   internal string[] LastHelloCapabilities { get; private set; } = [];
+
+
+
+   /// <summary>Counts discovery requests to distinguish reconnect reuse from an added HTTP polling schedule.</summary>
+   internal int DiscoveryRequests;
+
+
+
+   /// <summary>Controls advertised discovery across a server upgrade or downgrade while retaining the same authenticated client session.</summary>
+   internal string PrintingVersion { get; set; }
    private readonly Lock _claimLock = new();
    private PrintJob? _claimed;
    private readonly CancellationTokenSource _stopping = new(TimeSpan.FromSeconds(30));
    private readonly Task _run;
    private readonly List<Connection> _connections = [];
 
-   internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null, bool cacheSettings = false)
+   internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null, bool cacheSettings = false, string printingVersion = "2.0.0")
    {
+      PrintingVersion = printingVersion;
       Settings = (settings ?? Settings) with { MaxConcurrentDownloads = downloads };
       using(var store = new AgentStore(DirectoryPath))
       {
@@ -73,6 +89,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       RealtimeEnvelope hello = await LoopbackWebSocketPeer.ReceiveAsync(socket, _stopping.Token);
       Assert.Equal("HELLO", hello.Type);
       LastHelloSettingsRevision = hello.Payload.GetProperty("lastSettingsRevision").GetInt64();
+      LastHelloCapabilities = hello.Payload.GetProperty("capabilities").EnumerateArray().Select(item => item.GetString()!).ToArray();
       await connection.SendAsync("WELCOME", new { connectionId = Guid.NewGuid().ToString("N"), serverTime = Now(), desiredState = desiredState ?? new DeviceDesiredState(1, false, "CONNECTED"), settings = Settings });
       connection.Start();
       await WaitAsync(() =>
@@ -217,6 +234,17 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;
+         if(string.Equals(path, "/qqq/v1/version", StringComparison.Ordinal))
+         {
+            Interlocked.Increment(ref fixture.DiscoveryRequests);
+            return Response(JsonSerializer.Serialize(new
+            {
+               apiVersion = "1.9.0",
+               features = new[] { "version", "metaData", "processes", "processCancel", "extensions", "widgets", "nativeSessionLogin" },
+               clientChannels = new[] { "api" },
+               extensions = new[] { new { name = "printing", version = fixture.PrintingVersion, pathPrefix = "/qbit/printing" } },
+            }));
+         }
          if(path.EndsWith("/content", StringComparison.Ordinal))
          {
             string id = path.Split('/')[^2];
@@ -246,7 +274,6 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
          }
          return Response(path switch
          {
-            "/qqq/v1/version" => """{"apiVersion":"1.9.0","features":["version","metaData","processes","processCancel","extensions","widgets","nativeSessionLogin"],"clientChannels":["api"],"extensions":[{"name":"printing","version":"2.0.0","pathPrefix":"/qbit/printing"}]}""",
             "/qqq/v1/manageSession" => """{"uuid":"synthetic-session"}""",
             "/qqq/v1/metaData/authentication" => """{"name":"local","type":"TABLE_BASED"}""",
             "/qqq/v1/qbit/printing/session" => """{"principalId":"user","tenantId":"tenant","deviceId":"device"}""",

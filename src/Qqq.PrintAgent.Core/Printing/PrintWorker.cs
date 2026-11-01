@@ -106,10 +106,12 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          await using IAsyncDisposable? reservation = options?.ReserveDocumentAsync is null ? null : await options.ReserveDocumentAsync(job, token).ConfigureAwait(false);
          using DownloadedDocument? file = options?.StagingDirectory is null ? null : await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, token, options.ThrottleDownloadAsync).ConfigureAwait(false);
          byte[]? content = file is null ? await api.DownloadAsync(job, token).ConfigureAwait(false) : null;
-         if(!printers.Discover().Any(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal) && p.Formats.Contains(job.Format, StringComparer.Ordinal)))
+         PrinterInfo? currentPrinter = printers.Discover().SingleOrDefault(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal) && p.Formats.Contains(job.Format, StringComparer.Ordinal));
+         if(currentPrinter is null)
          {
             throw new InvalidOperationException("Assigned printer or document format is unavailable.");
          }
+         PrinterMediaProfile.RequireMatch(job.Options, currentPrinter.MediaProfiles);
 
          await using IAsyncDisposable? submission = options?.AcquireSubmissionAsync is null ? null : await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
          if((options?.CanSubmit ?? canDispatch)?.Invoke() == false)
@@ -131,7 +133,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       }
       catch(Exception exception)
       {
-         Record(job, submitting ? "OUTCOME_UNKNOWN" : "FAILED", exception.Message);
+         Record(job, submitting && exception is not PrinterMediaMismatchException ? "OUTCOME_UNKNOWN" : "FAILED", exception.Message);
       }
       if(!token.IsCancellationRequested)
       { await FlushAsync(token).ConfigureAwait(false); }
