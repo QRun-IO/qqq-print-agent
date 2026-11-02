@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Current source prepares release candidate `0.4.0-rc.3`, with native printing 2.3 (wire payload v1).
+Current source prepares release candidate `0.4.0-rc.4`, with native printing 2.3 (wire payload v1).
 See [realtime architecture](REALTIME.md) for worker separation, policy, streaming
 and reconnect rules. The service never falls back from WSS to job/control polling.
 
@@ -58,12 +58,12 @@ The worker persists receipt and SUBMITTING before invoking Windows. It records S
 ## Packaging
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.3
+./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.4
 ```
 
 MSI ProductVersion is numeric; assembly/package informational version may contain the prerelease suffix. Service, companion and CLI are published into separate self-contained runtime directories and shipped in one machine MSI. Do not reintroduce the template's per-user Velopack updater.
 
-`./build/Package-Release.ps1` (defaults `0.4.0` / `0.4.0-rc.3`) is the repository entry point for the unsigned prerelease package. It runs the same packaging checks as `.github/workflows/ci.yml` (`Test-WindowsSdkInventory.ps1 -VerifyPackages`, `Test-BrandedInstaller.ps1`, `Test-PackagingInputs.ps1`, `Build-Installer.ps1`) and assembles `artifacts/release` with the versioned MSI, `Install-Branded.ps1`, `branding.example.json` and `SHA256SUMS`. It does not build or run Core.Tests.
+`./build/Package-Release.ps1` (defaults `0.4.0` / `0.4.0-rc.4`) is the repository entry point for the unsigned prerelease package. It runs the same packaging checks as `.github/workflows/ci.yml` (`Test-WindowsSdkInventory.ps1 -VerifyPackages`, `Test-BrandedInstaller.ps1`, `Test-PackagingInputs.ps1`, `Build-Installer.ps1`) and assembles `artifacts/release` with the versioned MSI, `Install-Branded.ps1`, `branding.example.json` and `SHA256SUMS`. It does not build or run Core.Tests.
 
 `Qqq.PrintAgent.NativeCI.slnx` is `Qqq.PrintAgent.slnx` without the `Core.Tests` project, for hosts that must not build that assembly (for example `dotnet build Qqq.PrintAgent.NativeCI.slnx --configuration Release '-p:Platform=x64' -warnaserror`, then `dotnet test tests/Qqq.PrintAgent.Cli.Tests`). `Qqq.PrintAgent.slnx` and the test projects are unchanged, so `Verify.ps1` still covers Core.Tests; run those tests on a clean CI runner.
 

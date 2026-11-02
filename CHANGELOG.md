@@ -1,6 +1,22 @@
 # Changelog
 
-## 0.4.0-rc.3 — unreleased candidate
+## 0.4.0-rc.4 — unsigned prerelease candidate
+
+Release identity only: rc.4 is strictly newer than the local, unpublished 0.4.0-rc.3
+build and ships the same cohort, so the updater accepts it over an installed rc.3. The
+MSI ProductVersion and `VersionPrefix` stay 0.4.0; `VersionSuffix` and the packaging
+defaults move to `rc.4`, and the ordered numeric file version becomes `0.4.0.4`. There is
+no code, test or dependency change. Everything described under rc.3 below (media
+selection, 4 × 2 and 4 × 1 test labels, phase-timing log, ordered file version) applies.
+The rc.4 head is version metadata and docs on top of pre-release product source
+`5c2bfc9`, whose full hosted CI run 41381287355 passed 499 tests (166 Core + 333 CLI) with
+zero warnings and errors. rc.4 itself is not yet tested or published; its tag pipeline
+must pass all gates afresh before publication. Earlier operator acceptance covers 4 × 6
+and Letter output, and the 4 × 1 layout was confirmed on the local rc.3 build of the same
+product code; 4 × 2 is deferred. The MSI is unsigned and no GA or 1.0 readiness is
+claimed.
+
+## 0.4.0-rc.3 — local candidate (superseded by rc.4)
 
 Release identity: this is a strictly newer semantic version than 0.4.0-rc.1 and
 0.4.0-rc.2 with the same numeric core, so the MSI ProductVersion (0.4.0) and

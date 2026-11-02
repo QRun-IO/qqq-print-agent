@@ -7,7 +7,7 @@ param(
    [ValidatePattern('^\d+\.\d+\.\d+$')]
    [string] $ProductVersion = '0.4.0',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '0.4.0-rc.3',
+   [string] $ReleaseVersion = '0.4.0-rc.4',
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [string] $CertificateThumbprint,

@@ -5,7 +5,7 @@
 [CmdletBinding()]
 param(
    [string] $ProductVersion = '0.4.0',
-   [string] $ReleaseVersion = '0.4.0-rc.3'
+   [string] $ReleaseVersion = '0.4.0-rc.4'
 )
 
 # Repository entry point for the unsigned prerelease package: the same packaging checks and
