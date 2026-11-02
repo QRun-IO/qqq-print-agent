@@ -1,17 +1,23 @@
 # Changelog
 
-## 0.4.0-rc.2 — unreleased candidate
+## 0.4.0-rc.3 — unreleased candidate
 
-Release identity: this is a strictly newer semantic version than 0.4.0-rc.1 with the
-same numeric core, so the MSI ProductVersion (0.4.0) and `VersionPrefix` are unchanged,
-`VersionSuffix` and the packaging defaults move to `rc.2`, and the updater (which needs
-a strictly newer version) and the installer's same-version upgrade support both accept
-it over an installed 0.4.0-rc.1. No behavior, dependency or lock change comes with the
-suffix. The protocol package `0.4.0rc1` is an independent wire-compatibility version and
-is unchanged. Older notes below that name 0.4.0-rc.1 describe the same cohort.
+Release identity: this is a strictly newer semantic version than 0.4.0-rc.1 and
+0.4.0-rc.2 with the same numeric core, so the MSI ProductVersion (0.4.0) and
+`VersionPrefix` are unchanged, `VersionSuffix` and the packaging defaults move to `rc.3`,
+and the updater (which needs a strictly newer version) and the installer's same-version
+upgrade support both accept it. The rc.2 MSI was installed, but Windows Installer skipped
+its executables because rc.1 and rc.2 shared the numeric file version 0.4.0.0 ("existing
+file is of an equal version"). Packaging now stamps each executable with an ordered
+numeric file version: `X.Y.Z-rc.N` becomes `X.Y.Z.N` (N 1..65534) and stable `X.Y.Z`
+becomes `X.Y.Z.65535`, and any other prerelease label is refused. Future upgrades replace
+files automatically. No behavior, dependency or lock change otherwise. The protocol
+package `0.4.0rc1` is an independent wire-compatibility version and is unchanged. Older
+notes below that name 0.4.0-rc.1 or rc.2 describe the same cohort.
 
-This cohort goes beyond the older installed CI 0.4.0-rc.1 build and is not yet installed
-or tagged. Hosted Windows CI and the update-feed handoff await the migration owner.
+This cohort goes beyond the older installed CI 0.4.0-rc.1 build. The rc.3 candidate is
+not yet built, installed or tagged; a local 0.4.0-rc.2 (unpublished) is installed, and
+rc.3 only adds the ordered file version. Hosted Windows CI and the update-feed handoff await the migration owner.
 Upgrade the server first: selected-media jobs require
 printing extension 2.3.0 (wire payload v1 unchanged). Against a 2.0, 2.1 or 2.2
 (rendering) server the client keeps its three-capability HELLO and offers no media

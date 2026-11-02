@@ -26,6 +26,9 @@ function Assert-PackageRejected([string] $Product, [string] $Release, [string] $
 Assert-PackageRejected -Product $current -Release '999.0.0-rc.1' -Expected 'numeric core'
 Assert-PackageRejected -Product '256.0.0' -Release '256.0.0-rc.1' -Expected 'Windows Installer limits'
 Assert-PackageRejected -Product '0.0.0' -Release '0.0.0-rc.1' -Expected 'reviewed source VersionPrefix'
+Assert-PackageRejected -Product $current -Release "$current-beta.1" -Expected 'Unsupported ReleaseVersion'
+Assert-PackageRejected -Product $current -Release "$current-rc.65535" -Expected 'Unsupported ReleaseVersion'
+Assert-PackageRejected -Product $current -Release "$current-rc.0" -Expected 'Unsupported ReleaseVersion'
 Assert-PackageRejected -Product $current -Release "$current-rc.1" -Expected 'explicit reviewed PayloadDirectory'
 $message = ''
 try { & $builder -ProductVersion $current -ReleaseVersion "$current-rc.1" -PayloadDirectory $PSScriptRoot }

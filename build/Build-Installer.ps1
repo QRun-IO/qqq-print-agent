@@ -7,7 +7,7 @@ param(
    [ValidatePattern('^\d+\.\d+\.\d+$')]
    [string] $ProductVersion = '0.4.0',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '0.4.0-rc.2',
+   [string] $ReleaseVersion = '0.4.0-rc.3',
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [string] $CertificateThumbprint,
@@ -31,6 +31,16 @@ if($versionProperties.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').I
 {
    throw 'ProductVersion must match the reviewed source VersionPrefix in Directory.Build.props.'
 }
+# Windows Installer replaces a versioned file only when its numeric file version is higher, and the
+# .NET SDK would give every 0.4.0-rc.N the same 0.4.0.0. Only rc.N (revision N, 1..65534) and stable
+# (revision 65535, above every rc) have an ordered mapping; any other label is refused, never guessed.
+$releaseMatch = [regex]::Match($ReleaseVersion, '^\d+\.\d+\.\d+(?:-rc\.(?<revision>[1-9][0-9]{0,4}))?$')
+$revision = if($releaseMatch.Success -and $releaseMatch.Groups['revision'].Success) { [int]$releaseMatch.Groups['revision'].Value } else { 65535 }
+if(-not $releaseMatch.Success -or $revision -gt 65535 -or ($releaseMatch.Groups['revision'].Success -and $revision -gt 65534))
+{
+   throw 'Unsupported ReleaseVersion: use X.Y.Z-rc.N (N 1..65534) or stable X.Y.Z so the numeric file version orders upgrades.'
+}
+$fileVersion = "$ProductVersion.$revision"
 if($SkipPublish -and -not $PayloadDirectory)
 {
    throw 'SkipPublish requires an explicit reviewed PayloadDirectory.'
@@ -55,7 +65,7 @@ if(-not $SkipPublish)
    }
    foreach($entry in $projects.GetEnumerator())
    {
-      & dotnet publish (Join-Path $projectRoot $entry.Value) --configuration Release --runtime win-x64 --self-contained true --output (Join-Path $payloadRoot $entry.Key) '-p:Platform=x64' '-p:RestoreLockedMode=true' "-p:Version=$ReleaseVersion"
+      & dotnet publish (Join-Path $projectRoot $entry.Value) --configuration Release --runtime win-x64 --self-contained true --output (Join-Path $payloadRoot $entry.Key) '-p:Platform=x64' '-p:RestoreLockedMode=true' "-p:Version=$ReleaseVersion" "-p:FileVersion=$fileVersion"
       if($LASTEXITCODE -ne 0) { throw "Publishing $($entry.Key) failed." }
    }
 }
@@ -72,6 +82,10 @@ foreach($executable in $executables)
    if(-not $payloadVersion -or $payloadVersion.Split('+')[0] -cne $ReleaseVersion)
    {
       throw "Published executable version does not match ReleaseVersion: $executable"
+   }
+   if((Get-Item -LiteralPath $executable).VersionInfo.FileVersion -cne $fileVersion)
+   {
+      throw "Published executable file version does not match $fileVersion; Windows Installer would not replace an older equal file: $executable"
    }
 }
 

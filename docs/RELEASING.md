@@ -13,6 +13,10 @@ Source contents are read-only outside the publication job. That final job receiv
 
 The MSI remains explicitly unsigned. GitHub provenance identifies the build workflow and artifact digest; it is not Authenticode publisher signing or production qualification. Verify attestations for the exact published files using `gh attestation verify <asset-path> --repo QRun-IO/qqq-print-agent`, and record the result. Older releases may lack attestations; the current workflow does not retroactively attest them. No signing secret, winget submission or completed in-app upgrade qualification is implied. The final job refuses to overwrite an existing GitHub release; use a new prerelease tag for changed binaries.
 
+## Version identity constraint
+
+Windows Installer replaces a versioned file only when its numeric file version is higher, and the .NET SDK would give every `X.Y.Z-rc.N` the same `X.Y.Z.0`. `build/Build-Installer.ps1` therefore stamps all three executables with `X.Y.Z.N` for `X.Y.Z-rc.N` (N from 1 to 65534) and `X.Y.Z.65535` for stable `X.Y.Z`, and fails if an executable reports a different file version. Only `rc.N` and stable are supported; any other prerelease label (for example `beta.1`) is refused rather than mapped to an unordered number, so a new label scheme needs a reviewed mapping first. The MSI ProductVersion stays `X.Y.Z`, and the updater still compares the semantic version string.
+
 ## Maintainer checklist
 
 1. Update CHANGELOG.md, acceptance evidence and version inputs. Ensure no local enrollment/journal/payload files are tracked.

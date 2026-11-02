@@ -11,9 +11,9 @@ Print from **QQQ 4.1+** to printers at a local facility without opening inbound 
 
 The native setup and status application uses the same [KofTwentyTwo AppKit](https://github.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows.
 
-> **Published and installed prerelease: [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1).** All four assets, checksums and provenance attestations were verified. The real in-app update completed with matching app/service/CLI builds, retained identity and history, and an automatically reopened Connected app. The installer remains unsigned.
+> **Latest published prerelease: [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1).** All four assets, checksums and provenance attestations were verified. The real in-app update completed with matching app/service/CLI builds, retained identity and history, and an automatically reopened Connected app. The installer remains unsigned.
 
-> **Candidate 0.4.0-rc.2 — unreleased, not yet installed, no tag.** A strictly newer release candidate of the same 0.4.0 MSI core, so the updater accepts it over an installed 0.4.0-rc.1 and Windows Installer upgrades in place. The cohort goes beyond the older installed CI 0.4.0-rc.1 build: optional printer-media selection against printing extension 2.3+ servers (2.2 is rendering only and stays a three-capability peer), the 4 × 2 and 4 × 1 test labels, one phase-timing log line per job, and the completed source documentation. Native printing is 2.3 with wire payload v1. Locally, the merged UI build passed under strict analyzers and the 35 paper/media tests passed; Core.Tests runs on hosted CI only. Hosted Windows CI and the update-feed handoff await the migration owner. See [release readiness](docs/RELEASE-READINESS.md). No 1.0 readiness is claimed.
+> **Local 0.4.0-rc.2 is installed but unpublished:** the app, service and CLI were installed successfully with `msiexec /fa`. **Candidate 0.4.0-rc.3 — unreleased, not yet built or installed, no tag.** A strictly newer release candidate of the same 0.4.0 MSI core; packaging now gives each executable an ordered numeric file version (rc.N is revision N, stable is 65535), so Windows Installer replaces the files of an earlier 0.4.0 candidate in place. The cohort goes beyond the older installed CI 0.4.0-rc.1 build: optional printer-media selection against printing extension 2.3+ servers (2.2 is rendering only and stays a three-capability peer), the 4 × 2 and 4 × 1 test labels, one phase-timing log line per job, and the completed source documentation. Native printing is 2.3 with wire payload v1. Locally, the merged UI build passed under strict analyzers and the 35 paper/media tests passed; Core.Tests runs on hosted CI only. Hosted Windows CI and the update-feed handoff await the migration owner. See [release readiness](docs/RELEASE-READINESS.md). No 1.0 readiness is claimed.
 
 **0.3.2-rc.1** checks the app, service and CLI for the same complete
 build version after an update, reports an inconsistent installation explicitly,
@@ -133,7 +133,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.2
+./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.3
 ```
 
 [Realtime architecture and settings](docs/REALTIME.md) · [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
