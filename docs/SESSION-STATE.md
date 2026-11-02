@@ -1,5 +1,24 @@
 # Session state — 2026-11-01
 
+## Current source status: rc.3 ordered file version — 2026-11-01
+
+Source `e10d251` implements the standard ordered numeric PE FileVersion: `X.Y.Z-rc.N`
+becomes `X.Y.Z.N` and stable becomes `X.Y.Z.65535` (details in
+[RELEASING.md](RELEASING.md)). The packaging-input checks and the actual rc.3
+production packaging passed: all three payloads report file version `0.4.0.3` and
+semantic version `0.4.0-rc.3+e10d251`. The local rc.2 installation was verified. The
+rc.3 normal MSI upgrade completed with exit 0; all three installed executables match
+the rc.3 source and report numeric file version `0.4.0.3`, with no repair required. The
+server was updated to printing 2.3.0 with pairing and history preserved.
+
+Printing observation: a single 4 × 1 label job reached SPOOLED, but the operator reports
+the layout spans the gap between two labels. Physical qualification has **not** passed
+and calibration confirmation is pending; 4 × 2 stock has not been loaded or tested.
+
+Not claimed: no GA. The Gitea release artifact, update feed and shared Windows CI stay
+with the migration owner. Core.Tests is not built or run on this host, which includes the
+Gitea runner 6; it is not scheduled here.
+
 ## Candidate 0.4.0-rc.1 integration with protected main — 2026-11-01
 
 Protected main advanced during qualification (client virtual-agent behavior; server

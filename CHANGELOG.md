@@ -15,9 +15,10 @@ files automatically. No behavior, dependency or lock change otherwise. The proto
 package `0.4.0rc1` is an independent wire-compatibility version and is unchanged. Older
 notes below that name 0.4.0-rc.1 or rc.2 describe the same cohort.
 
-This cohort goes beyond the older installed CI 0.4.0-rc.1 build. The rc.3 candidate is
-not yet built, installed or tagged; a local 0.4.0-rc.2 (unpublished) is installed, and
-rc.3 only adds the ordered file version. Hosted Windows CI and the update-feed handoff await the migration owner.
+This cohort goes beyond the older installed CI 0.4.0-rc.1 build. The rc.3 candidate
+was built and installed locally with a normal MSI upgrade (exit 0), matching all three
+components; no repair was needed. It is not publicly released or tagged. Hosted Windows
+CI and the update-feed handoff await the migration owner.
 Upgrade the server first: selected-media jobs require
 printing extension 2.3.0 (wire payload v1 unchanged). Against a 2.0, 2.1 or 2.2
 (rendering) server the client keeps its three-capability HELLO and offers no media
