@@ -9,7 +9,7 @@ namespace Qqq.PrintAgent.Core.Authentication;
 
 public sealed partial class QqqSessionClient
 {
-   /// <summary>Connects only to the discovered origin, using the current native session and approved device proof.</summary>
+   /// <summary>Refreshes standard discovery once per socket establishment, then connects only to that origin with the current session and approved device proof.</summary>
    public async Task<WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
    {
       var invoker = new HttpMessageInvoker(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
@@ -21,12 +21,7 @@ public sealed partial class QqqSessionClient
          try
          {
             RequireAuthenticated();
-            QqqApiDiscovery discovery = _discovery ?? throw QqqApiDiscovery.Configuration();
-            QqqApiDiscovery.Extension extension = discovery.Extensions.Single(item => string.Equals(item.Name, "printing", StringComparison.Ordinal));
-            if(!Version.TryParse(extension.Version, out Version? version) || version.Major != 2)
-            {
-               throw new QqqSessionException(QqqSessionException.FailureKind.ConfigurationRequired, "Upgrade the server to printing extension 2.x for realtime printing.");
-            }
+            await RefreshPrintingDiscoveryAsync(cancellationToken).ConfigureAwait(false);
             if(_device is null || _binding?.HasApprovedDevice != true)
             {
                throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "An approved device binding is required.");
@@ -69,6 +64,20 @@ public sealed partial class QqqSessionClient
          socket.Dispose();
          invoker.Dispose();
          throw;
+      }
+   }
+
+
+
+   /// <summary>Refreshes discovery under the caller-held session gate and rejects incompatible printing majors before sending any WebSocket credentials.</summary>
+   private async Task RefreshPrintingDiscoveryAsync(CancellationToken token)
+   {
+      _discovery = null;
+      QqqApiDiscovery discovery = await DiscoverCoreAsync(token).ConfigureAwait(false);
+      QqqApiDiscovery.Extension extension = discovery.Extensions.Single(item => string.Equals(item.Name, "printing", StringComparison.Ordinal));
+      if(!Version.TryParse(extension.Version, out Version? version) || version.Major != 2)
+      {
+         throw new QqqSessionException(QqqSessionException.FailureKind.ConfigurationRequired, "Upgrade the server to printing extension 2.x for realtime printing.");
       }
    }
 }

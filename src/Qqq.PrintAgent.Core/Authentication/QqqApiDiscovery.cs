@@ -15,6 +15,19 @@ public sealed class QqqApiDiscovery
    public IReadOnlyList<string> ClientChannels { get; init; } = [];
    public IReadOnlyList<Extension> Extensions { get; init; } = [];
 
+
+
+   /// <summary>
+   /// Enables additive media negotiation only for one standard-path stable printing 2.3-or-newer extension within major two. Printing 2.2 is
+   /// the rendering extension and carries no media negotiation, so a 2.2 server must keep this client a three-capability peer.
+   /// </summary>
+   public bool SupportsPrinterMedia() => Extensions is not null
+      && Extensions.Count(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal)) == 1
+      && Extensions.Any(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal)
+         && string.Equals(extension.PathPrefix, "/qbit/printing", StringComparison.Ordinal) && SupportedVersion(extension.Version, 3, "2"));
+
+
+
    public sealed record Extension(string Name, string Version, string PathPrefix);
 
    internal void Validate(bool nativeSession = false)

@@ -29,6 +29,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 export const AGENT_VERSION = '0.3.1-virtual'
@@ -50,10 +51,20 @@ export const LIMITS = {
   maxStagedBytes: 9007199254740991,
 }
 
-export function parseArgs(argv, env = process.env) {
+/** Where printed documents go by default: the user's Downloads folder, as browser downloads and qqq exports do. */
+export function defaultOutDir(home = homedir()) {
+  return join(home, 'Downloads')
+}
+
+/** The device identity and revisions: kept in a dot folder of the home directory, not among the printed files. */
+export function defaultStateFile(home = homedir()) {
+  return join(home, '.qqq-print-agent', 'state.json')
+}
+
+export function parseArgs(argv, env = process.env, home = homedir()) {
   const options = {
     server: env.QQQ_PRINT_SERVER ?? 'http://localhost:8078',
-    out: env.QQQ_PRINT_OUT ?? './virtual-printer-output',
+    out: env.QQQ_PRINT_OUT || defaultOutDir(home),
     state: env.QQQ_PRINT_STATE,
     name: env.QQQ_PRINT_PRINTER_NAME ?? 'Virtual PDF printer',
     deviceName: env.QQQ_PRINT_DEVICE_NAME ?? 'Virtual print agent',
@@ -89,7 +100,9 @@ export function parseArgs(argv, env = process.env) {
   }
   options.server = new URL(options.server).origin
   options.out = resolve(options.out)
-  options.state = resolve(options.state ?? join(options.out, '.agent-state.json'))
+  // an identity kept next to the output by earlier versions is still used; new ones go to the home dot folder
+  const legacy = join(options.out, '.agent-state.json')
+  options.state = resolve(options.state ?? (existsSync(legacy) ? legacy : defaultStateFile(home)))
   if (!options.formats.length || options.formats.some((f) => f !== 'PDF' && f !== 'ZPL')) throw new Error('--formats takes PDF and/or ZPL')
   return options
 }

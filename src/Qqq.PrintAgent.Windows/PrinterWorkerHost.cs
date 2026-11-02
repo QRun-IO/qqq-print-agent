@@ -70,7 +70,7 @@ public static class PrinterWorkerHost
       }
       catch(Exception exception)
       {
-         await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new Response(false, Error: AgentActivityLog.Redact(exception.Message), ErrorCode: (exception as SpoolCancellationException)?.Outcome), PrintApiClient.JsonOptions)).ConfigureAwait(false);
+         await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new Response(false, Error: AgentActivityLog.Redact(exception.Message), ErrorCode: exception is PrinterMediaMismatchException ? "MEDIA_PROFILE_MISMATCH" : (exception as SpoolCancellationException)?.Outcome), PrintApiClient.JsonOptions)).ConfigureAwait(false);
          return 1;
       }
       finally
