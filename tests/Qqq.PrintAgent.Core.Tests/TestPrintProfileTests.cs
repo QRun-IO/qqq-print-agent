@@ -120,11 +120,11 @@ public sealed class TestPrintProfileTests
       IReadOnlyList<(string Label, string Profile)> zpl = TestPrintDefaults.Choices("ZPL");
       Assert.Equal(
          new[] { "LABEL_4X6_203", "LABEL_4X6_300", "LABEL_4X6_600", "LABEL_4X2_203", "LABEL_4X2_300", "LABEL_4X2_600", "LABEL_4X1_203", "LABEL_4X1_300", "LABEL_4X1_600" },
-         zpl.Select(choice => choice.Profile));
+         zpl.Select(choice => choice.Profile), StringComparer.Ordinal);
       Assert.Equal("4 × 6 in label — 203 dpi", zpl[0].Label);
       Assert.Equal("4 × 1 in label — 600 dpi", zpl[^1].Label);
       IReadOnlyList<(string Label, string Profile)> pdf = TestPrintDefaults.Choices("PDF");
-      Assert.Equal(new[] { "LETTER", "A4", "LABEL_4X6_300", "LABEL_4X2_300", "LABEL_4X1_300" }, pdf.Select(choice => choice.Profile));
+      Assert.Equal(new[] { "LETTER", "A4", "LABEL_4X6_300", "LABEL_4X2_300", "LABEL_4X1_300" }, pdf.Select(choice => choice.Profile), StringComparer.Ordinal);
       Assert.Equal("4 × 6 in label", pdf[2].Label);
       Assert.All(zpl.Concat(pdf), choice => Assert.DoesNotContain("LABEL_", choice.Label, StringComparison.Ordinal));
    }
