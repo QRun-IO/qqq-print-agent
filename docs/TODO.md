@@ -4,7 +4,8 @@
 
 - [x] Implement ordered numeric FileVersion (rc.N revision N, stable 65535) in packaging; source `e10d251`, packaging-input checks and rc.3 production packaging passed (all payloads `0.4.0.3`, `0.4.0-rc.3+e10d251`).
 - [x] Complete the local rc.3 installation: normal MSI upgrade exit 0; app, service and CLI match rc.3 and numeric file version `0.4.0.3`, with no repair required.
-- [ ] Confirm printer calibration and requalify the 4 × 1 label layout (the spooled job printed across the gap between labels); load and test 4 × 2 stock. Physical qualification has not passed.
+- [x] Confirm the 4 × 1 label prints correctly after media alignment; operator reports it printed perfectly.
+- [ ] Physical 4 × 2 test deferred by the operator, who chose to keep 4 × 1 loaded. The test option is implemented; do not send another label until requested.
 - [ ] Gitea release artifact, update feed and shared Windows CI remain a migration-owner handoff; no GA claim. Core.Tests is not run on this host (including Gitea runner 6).
 
 ## Script quality gates

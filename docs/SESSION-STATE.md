@@ -11,9 +11,10 @@ rc.3 normal MSI upgrade completed with exit 0; all three installed executables m
 the rc.3 source and report numeric file version `0.4.0.3`, with no repair required. The
 server was updated to printing 2.3.0 with pairing and history preserved.
 
-Printing observation: a single 4 × 1 label job reached SPOOLED, but the operator reports
-the layout spans the gap between two labels. Physical qualification has **not** passed
-and calibration confirmation is pending; 4 × 2 stock has not been loaded or tested.
+Printing observation: the operator confirmed the 4 × 1 test printed perfectly after
+the initial media-alignment issue. The operator chose to keep 4 × 1 stock loaded;
+the implemented 4 × 2 test option is awaiting a future stock change, with no physical
+result claimed for that size. No further test jobs will be sent until requested.
 
 Not claimed: no GA. The Gitea release artifact, update feed and shared Windows CI stay
 with the migration owner. Core.Tests is not built or run on this host, which includes the
