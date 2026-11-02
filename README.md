@@ -13,7 +13,7 @@ The native setup and status application uses the same [KofTwentyTwo AppKit](http
 
 > **Earlier published prerelease (historical evidence): [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1).** All four assets, checksums and provenance attestations were verified. The real in-app update completed with matching app/service/CLI builds, retained identity and history, and an automatically reopened Connected app. The installer remains unsigned.
 
-> **Version 1.0.0.** Stable releases are built by the release workflow, which signs the service, companion and CLI binaries and the MSI with Azure Artifact Signing and publishes checksums and provenance generated after signing ([signing](docs/RELEASE-SIGNING.md)). Earlier release candidates were unsigned. 1.0 is a product version only: native printing stays 2.3 with wire payload v1. The cohort adds optional printer-media selection against printing extension 2.3+ servers (2.2 is rendering only and stays a three-capability peer), the 4 × 2 and 4 × 1 test labels, one phase-timing log line per job, and the completed source documentation. Physical acceptance covers 4 × 6, Letter and 4 × 1; 4 × 2 is deferred. See [release readiness](docs/RELEASE-READINESS.md).
+> **Version 1.0.1.** A packaging fix: the first stable release run (1.0.0) stopped before signing because the signing action's tool installer conflicted with the repository's NuGet source mapping, so no signed 1.0.0 installer was published. 1.0.1 preinstalls that tool through the repository configuration. Stable releases are built by the release workflow, which signs the service, companion and CLI binaries and the MSI with Azure Artifact Signing and publishes checksums and provenance generated after signing ([signing](docs/RELEASE-SIGNING.md)). Earlier release candidates were unsigned. 1.x is a product version only: native printing stays 2.3 with wire payload v1. The cohort adds optional printer-media selection against printing extension 2.3+ servers (2.2 is rendering only and stays a three-capability peer), the 4 × 2 and 4 × 1 test labels, one phase-timing log line per job, and the completed source documentation. Physical acceptance covers 4 × 6, Letter and 4 × 1; 4 × 2 is deferred. See [release readiness](docs/RELEASE-READINESS.md).
 
 **0.3.2-rc.1** checks the app, service and CLI for the same complete
 build version after an update, reports an inconsistent installation explicitly,
@@ -133,7 +133,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 1.0.0 -ReleaseVersion 1.0.0
+./build/Build-Installer.ps1 -ProductVersion 1.0.1 -ReleaseVersion 1.0.1
 ```
 
 [Realtime architecture and settings](docs/REALTIME.md) · [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)

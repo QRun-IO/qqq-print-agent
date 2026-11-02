@@ -60,7 +60,7 @@
         commit as "+<sha>" on AssemblyInformationalVersion, which the About dialog and the
         CLI's version output show as a short hash. -->
    <PropertyGroup>
-      <VersionPrefix>1.0.0</VersionPrefix>
+      <VersionPrefix>1.0.1</VersionPrefix>
       <VersionSuffix></VersionSuffix>
    </PropertyGroup>
 

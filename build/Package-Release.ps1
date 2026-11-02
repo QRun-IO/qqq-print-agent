@@ -4,8 +4,8 @@
 
 [CmdletBinding()]
 param(
-   [string] $ProductVersion = '1.0.0',
-   [string] $ReleaseVersion = '1.0.0',
+   [string] $ProductVersion = '1.0.1',
+   [string] $ReleaseVersion = '1.0.1',
    # Assemble artifacts/release from an already built MSI (the signed stable flow builds and signs it in
    # separate workflow steps). With ExpectedPublisherSubject the MSI must carry that publisher's signature.
    [switch] $AssembleOnly,
