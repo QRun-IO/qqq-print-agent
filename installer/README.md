@@ -14,7 +14,7 @@ For a signing certificate already installed in the Windows certificate store:
 ./build/Build-Installer.ps1 -ProductVersion 0.1.3 -ReleaseVersion 0.1.3-rc.1 -CertificateThumbprint '<thumbprint>' -TimestampServer 'https://your-approved-timestamp-service'
 ```
 
-Signing needs `signtool.exe` on PATH. The script signs the first-party executables before packaging and signs/verifies the resulting MSI. Use the existing organization signing workflow for distribution; never store signing secrets here.
+Signing needs `signtool.exe` on PATH. The script signs the first-party executables before packaging and signs/verifies the resulting MSI. Stable releases are signed by the release workflow with Azure Artifact Signing instead; see [RELEASE-SIGNING.md](../docs/RELEASE-SIGNING.md). Never store signing secrets here.
 
 Install the resulting MSI through an elevated Windows Installer session. It installs `QqqPrintAgent` as an automatic LocalSystem service, depends on the Windows Spooler, starts the service, and adds the companion to the Start menu. Configure and test printers accessible to LocalSystem; user-only network printer mappings are not sufficient. The current companion's management pipe requires local administrator access.
 

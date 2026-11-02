@@ -34,4 +34,36 @@ $message = ''
 try { & $builder -ProductVersion $current -ReleaseVersion "$current-rc.1" -PayloadDirectory $PSScriptRoot }
 catch { $message = $_.Exception.Message }
 if($message -notlike '*requires a new PayloadDirectory*') { throw 'Packaging did not reject an existing publish directory.' }
+$message = ''
+try { & $builder -ProductVersion $current -ReleaseVersion "$current-rc.1" -PublishOnly }
+catch { $message = $_.Exception.Message }
+if($message -notlike '*PublishOnly requires a new PayloadDirectory*') { throw 'Packaging did not reject PublishOnly without a payload directory.' }
+$message = ''
+try { & (Join-Path $PSScriptRoot 'Sign-Release.ps1') -Operation Verify -Kind Payload -Root $PSScriptRoot }
+catch { $message = $_.Exception.Message }
+if($message -notlike '*ExpectedSubject*required*') { throw 'Signature verification did not require the verified publisher subject.' }
+# Stage synthetic file names only: the owned set includes the hyphenated CLI managed DLL and excludes third-party files.
+$fake = Join-Path ([IO.Path]::GetTempPath()) ('qqq-sign-stage-' + [Guid]::NewGuid().ToString('N'))
+try
+{
+   foreach($name in @('service/Qqq.PrintAgent.Service.exe', 'app/Qqq.PrintAgent.exe', 'cli/qqq-print-agent.exe', 'cli/qqq-print-agent.dll', 'cli/Third.Party.dll'))
+   {
+      $path = Join-Path (Join-Path $fake 'payload') $name
+      New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+      Set-Content -LiteralPath $path -Value 'synthetic'
+   }
+   & (Join-Path $PSScriptRoot 'Sign-Release.ps1') -Operation Stage -Kind Payload -Root (Join-Path $fake 'payload') -Stage (Join-Path $fake 'stage') | Out-Null
+   $staged = @(Get-ChildItem -LiteralPath (Join-Path $fake 'stage') -Recurse -File | ForEach-Object { [IO.Path]::GetRelativePath((Join-Path $fake 'stage'), $_.FullName).Replace('\', '/') } | Sort-Object)
+   if(($staged -join '|') -cne 'app/Qqq.PrintAgent.exe|cli/qqq-print-agent.dll|cli/qqq-print-agent.exe|service/Qqq.PrintAgent.Service.exe')
+   { throw 'Signing stage must include the hyphenated CLI managed DLL and exclude third-party files.' }
+}
+finally
+{
+   # Delete only a resolved absolute path strictly beneath the resolved temp directory; otherwise keep it and fail.
+   $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+   $resolved = [IO.Path]::GetFullPath($fake)
+   if(-not $resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or $resolved.Length -le $tempRoot.Length)
+   { throw "Refusing to delete a synthetic stage outside the temp directory: $resolved" }
+   if(Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
+}
 Write-Output 'Packaging rejects inconsistent source/release/MSI versions before publishing payloads.'

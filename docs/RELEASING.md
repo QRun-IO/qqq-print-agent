@@ -1,5 +1,9 @@
 # Release process
 
+## Stable releases
+
+The same workflow also runs on a stable `vX.Y.Z` tag. After every gate below it signs the service, companion and CLI binaries, builds the MSI from them, signs the MSI with the project's Azure Artifact Signing identity, verifies the exact publisher, and publishes a non-prerelease with checksums computed after signing. Prerelease tags are unaffected and stay unsigned. Setup, ordering and required variables are in [RELEASE-SIGNING.md](RELEASE-SIGNING.md).
+
 ## Prereleases
 
 The [`prerelease` workflow](../.github/workflows/release.yml) runs on tags matching `vX.Y.Z-rc.N`, or can be dispatched against an existing matching tag. It validates the tag and requires the Windows build/test/package, security, CodeQL and PowerShell script gates. It then downloads that run's installer artifact, verifies every packaged checksum, attests the artifacts and creates a GitHub prerelease containing:

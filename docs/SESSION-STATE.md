@@ -1,6 +1,35 @@
-# Session state — 2026-11-01
+# Session state — 2026-11-02
 
-## Current source status: rc.3 ordered file version — 2026-11-01
+## Current status: stable 1.0 closeout — 2026-11-02
+
+The official 0.4.0-rc.4 build is installed with all three components; the normal MSI
+upgrade exited 0 and the service is Running. The latest full release run 41384467500
+on source `b5eb5d73420630533d98b0c837e0d549745e4f3f` passed all 499 tests and the
+security/CodeQL scripts. Core.Tests is never built on the local host; that clean hosted
+pass is its evidence. The primary Gitea feed and the public feed carry all three
+prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1), with nine assets
+checked and provenance verified. The source-header inventory (289 tracked files, 231
+C#) reported zero issues.
+
+Physical output: the operator confirmed the 4 × 1 label on RC3 with the same relevant
+printing runtime; 4 × 6 and Letter were accepted earlier. Physical 4 × 2 was deferred by
+the operator and is not a stable blocker.
+
+Active stable-release work is only: (1) the Windows release branch protected merge and
+shared native CI; (2) stable tag publication with Azure Artifact Signing, as for
+MarkdownViewr Windows (in progress in another lane); (3) a supported, published QQQ
+native-authentication cohort (another lane). No stable tag exists yet and this file makes
+no 1.0 claim.
+
+Accepted known limitation: the post-print WinUI `LayoutCycleException` recorded under
+"Installed realtime release and companion follow-up" was removed from the 1.0 blocker
+list by the user on 2026-11-02. It is not fixed, and that history is preserved. The repeat
+Auth/S3 qualification, the latency investigation and the MSI comparison analysis were
+cancelled by the user and must not be resumed; their evidence is historical. All sections
+below are historical checkpoints; where they list work as pending they are superseded by
+this section. See [RELEASE-READINESS.md](RELEASE-READINESS.md).
+
+## Historical: rc.3 ordered file version — 2026-11-01
 
 Source `e10d251` implements the standard ordered numeric PE FileVersion: `X.Y.Z-rc.N`
 becomes `X.Y.Z.N` and stable becomes `X.Y.Z.65535` (details in
@@ -20,7 +49,7 @@ Not claimed: no GA. The Gitea release artifact, update feed and shared Windows C
 with the migration owner. Core.Tests is not built or run on this host, which includes the
 Gitea runner 6; it is not scheduled here.
 
-## Candidate 0.4.0-rc.1 integration with protected main — 2026-11-01
+## Historical: candidate 0.4.0-rc.1 integration with protected main — 2026-11-01
 
 Protected main advanced during qualification (client virtual-agent behavior; server
 printing 2.2.0 rendering), so the earlier green PR heads are historical evidence
@@ -54,7 +83,7 @@ cancelled by the user and are not active work; the evidence recorded earlier in 
 file and in [UPGRADE-QUALIFICATION.md](UPGRADE-QUALIFICATION.md) is historical and kept.
 No 1.0 claim. See [RELEASE-READINESS.md](RELEASE-READINESS.md).
 
-## Final pin and release identity — 2026-11-01
+## Historical: final pin and release identity — 2026-11-01
 
 The final protocol pin is `42c0d249f81395f00408ec0f92638dcbbf5deb03`
 ([Gitea PR 2](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/2)); root updated
@@ -71,7 +100,7 @@ review. Server strict full verify (R31) passed; the merged UI build and 35 paper
 tests passed locally. Hosted Windows CI and the update-feed handoff await the migration
 owner; nothing is installed or tagged.
 
-## Release cohort integration — 2026-11-01
+## Historical: release cohort integration — 2026-11-01
 
 Integration branch `release/printing-cohort-20261101` merges the completed C# source
 documentation cleanup (every type, method, constructor and non-auto property has a

@@ -1,12 +1,27 @@
 # TODO
 
-## Current rc.3 status
+## Stable 1.0 closeout — 2026-11-02
+
+Active stable-release work is only the three open items below. Every other unchecked item in this file is historical or unscheduled backlog, not a stable-1.0 blocker.
+
+- [x] Official 0.4.0-rc.4 installed (all three components); normal MSI upgrade exit 0 and the service Running.
+- [x] Latest full release run 41384467500 on `b5eb5d73420630533d98b0c837e0d549745e4f3f`: all 499 tests and the security/CodeQL scripts passed. Core.Tests is never built locally; this hosted pass is its evidence.
+- [x] Primary Gitea feed and public feed carry all three prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1); nine assets checked and provenance verified.
+- [x] Physical 4 × 1 passed by the operator on RC3 (same relevant printing runtime); 4 × 6 and Letter accepted earlier. Physical 4 × 2 is deferred by the operator and is not a stable blocker.
+- [x] Source-header inventory (289 tracked files, 231 C#) reported zero issues.
+- [ ] Windows release branch: protected merge and the shared native CI.
+- [ ] Stable tag publication with Azure Artifact Signing, as for MarkdownViewr Windows (implementation in progress in another lane).
+- [ ] Supported, published QQQ native-authentication cohort (another lane).
+- Accepted known limitation (user decision 2026-11-02, not a blocker, not fixed): the post-print native UI layout exception; see the historical entries below.
+- Cancelled by the user, do not resume: repeat Auth/S3 qualification, the latency investigation and MSI comparison analysis.
+
+## Historical rc.3 status (superseded by rc.4 and the closeout above)
 
 - [x] Implement ordered numeric FileVersion (rc.N revision N, stable 65535) in packaging; source `e10d251`, packaging-input checks and rc.3 production packaging passed (all payloads `0.4.0.3`, `0.4.0-rc.3+e10d251`).
 - [x] Complete the local rc.3 installation: normal MSI upgrade exit 0; app, service and CLI match rc.3 and numeric file version `0.4.0.3`, with no repair required.
 - [x] Confirm the 4 × 1 label prints correctly after media alignment; operator reports it printed perfectly.
-- [ ] Physical 4 × 2 test deferred by the operator, who chose to keep 4 × 1 loaded. The test option is implemented; do not send another label until requested.
-- [ ] Gitea release artifact, update feed and shared Windows CI remain a migration-owner handoff; no GA claim. Core.Tests is not run on this host (including Gitea runner 6).
+- [ ] Physical 4 × 2 test deferred by the operator, who chose to keep 4 × 1 loaded. The test option is implemented; do not send another label until requested. Not a stable blocker.
+- [x] Gitea release artifact and update feed: published for rc.4 (see the closeout above). Shared Windows CI remains the active protected-merge item; no GA claim. Core.Tests is not run on this host (including Gitea runner 6).
 
 ## Script quality gates
 
@@ -22,8 +37,8 @@
 - [x] Verify configured 4 × 6 / 300 DPI fingerprint stability across three read-only helper launches.
 - [x] Complete the C# source standards cleanup (how/why headers and structural spacing) and merge it with the short-label change; token-compared as comment/blank-line only per batch.
 - [x] Merged integration tree: production UI build (strict, 0 warnings) and the 35 existing paper/media tests passed locally (R39).
-- [ ] Observe the normal Gitea Core/CLI/build CI on the integration head (Core.Tests is hosted-only); install the new label implementation; run the small-stock paper test. Not installed yet.
-- [ ] Resolve the local Core test-assembly quarantine through the normal security review; obtain a complete clean gate without disabling protections.
+- [x] Hosted CI passed (499 tests, run 41384467500), the label implementation is installed in rc.4, and the 4 × 1 stock printed correctly (4 × 2 deferred, not a blocker). Earlier text here said "not installed yet"; that is historical.
+- [x] Local Core test-assembly quarantine: not pursued. Core.Tests is never built locally; the clean hosted pass is the evidence and no protection was disabled.
 - [ ] Qualify the matching server/consumer catalog, immutable selection and authorized retained-document submission.
 - [ ] Perform separately authorized installed/profile-selected physical acceptance; available alternative stock is not current queue configuration.
 
@@ -46,7 +61,7 @@
 - [ ] Qualify the installed Windows browser/private callback against a compatible published QQQ runtime and configured HTTPS provider; the container HTTPS callback does not establish this installed flow.
 - [x] Publish and verify all three 0.3.0-rc.1 releases; install the matched local server/client and verify retained state and service restart recovery.
 - [x] Capture the operator's post-print LayoutCycleException and recover only the companion; retain existing print receipts.
-- [ ] Reproduce and fix the native post-print layout cycle with a nonprinting host and verify the actual dialog/action/refresh path.
+- [ ] Native post-print layout cycle: reproduce and fix with a nonprinting host. **Accepted known limitation for 1.0 (user decision 2026-11-02): not fixed and not a blocker.** Left unchecked as history.
 - [x] Verify actual native fatal-layout exception logging, handler order and natural diagnostic termination; keep this mitigation distinct from fixing the original trigger.
 - [x] Accept scheduler-normalized account names only when they resolve to the exact expected startup SID; verify rejection of other identities and the unchanged actual task.
 - [x] Show explicit WebSocket state, server endpoint, live upload/download rates and service-lifetime application-traffic totals in the footer; verify actual native presentation with synthetic traffic.

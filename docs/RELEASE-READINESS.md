@@ -1,6 +1,38 @@
-# Release readiness matrix — candidate 0.4.0-rc.1 (unreleased)
+# Release readiness — stable 1.0 closeout
 
-Updated 2026-11-01 to the observed results below. This is a working matrix, not a release claim: **no 1.0 or production-readiness statement is made**, and nothing here has been installed. Installed baseline stays 0.3.2-rc.1 against the local QQQ API 1.8 / printing 2.0 server.
+Updated 2026-11-02. This replaces the stale candidate matrix, which is kept below as a clearly historical section. No stable tag exists yet and **no 1.0 or production-readiness statement is made** by this file.
+
+## Current truth
+
+- **Installed:** the official 0.4.0-rc.4 build is installed with all three components (companion, service, CLI). The normal MSI upgrade exited 0 and the service is Running.
+- **Hosted gate:** the latest full release run 41384467500 on source `b5eb5d73420630533d98b0c837e0d549745e4f3f` passed all 499 tests and the security/CodeQL scripts. This clean hosted pass is the Core.Tests evidence; Core.Tests is never built on the local host.
+- **Published:** the primary Gitea feed and the public feed carry all three prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1). Nine assets were checked and their provenance verified.
+- **Physical output:** the operator confirmed the 4 × 1 label on RC3 with the same relevant printing runtime; 4 × 6 and Letter were accepted earlier. Physical 4 × 2 was deferred by the operator and is **not** a stable-release blocker.
+- **Source standards:** the source-header inventory (289 tracked files, 231 C# files) reported zero issues; that work is done.
+
+## Active stable-release work (only these)
+
+1. Windows release branch: protected merge and the shared native CI.
+2. Stable tag publication with Azure Artifact Signing, as for MarkdownViewr Windows (implementation in progress in another lane).
+3. A supported, published QQQ native-authentication cohort (another lane).
+
+## Accepted known limitation
+
+The post-print native UI layout exception (WinUI `LayoutCycleException` after a print, recovered by the existing mitigation) was removed from the 1.0 blocker list by the user on 2026-11-02 and is accepted as a known limitation. It is **not fixed**, and the history below is preserved unchanged. It is not carried as another mandatory qualification.
+
+## Cancelled, not active
+
+Repeat Auth/S3 qualification, the print-latency investigation, and the MSI comparison/install-free upgrade analysis were cancelled by the user. Their recorded evidence is historical; do not resume them.
+
+## Not claimed
+
+Authenticode signing of the rc builds (signing belongs to the stable-tag work above), a published native-authentication cohort result, 4 × 2 physical output, a broad driver matrix, and any 1.0 readiness until the stable tag is published and verified.
+
+---
+
+# Historical matrix — candidate 0.4.0-rc.1 (superseded 2026-11-02)
+
+The sections below were the working matrix on 2026-11-01. They are kept as evidence only and are **stale** where they list work as pending; the current truth is above.
 
 ## Observed gates
 
@@ -45,6 +77,6 @@ Status words are strict. **Proven** names evidence that was observed for the sta
 5. Normal Gitea Core/CLI/build CI on the integration head, then installation of the new label implementation and a small-stock paper test.
 6. Historical, no longer active: the install-free upgrade plan in [UPGRADE-QUALIFICATION.md](UPGRADE-QUALIFICATION.md) and the latency diagnostic plan were cancelled by the user; their recorded evidence is kept.
 
-## Not claimed
+## Not claimed (historical, 2026-11-01)
 
 Authenticode signing, physical-stock sensing, installed profile-selected printing, desktop/native OAuth callback or long-lived grant on a published cohort, remote cloud deployment, broad driver matrix, and any 1.0 readiness.

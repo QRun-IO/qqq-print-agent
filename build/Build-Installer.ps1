@@ -10,6 +10,7 @@ param(
    [string] $ReleaseVersion = '0.4.0-rc.4',
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
+   [switch] $PublishOnly,
    [string] $CertificateThumbprint,
    [string] $TimestampServer
 )
@@ -44,6 +45,10 @@ $fileVersion = "$ProductVersion.$revision"
 if($SkipPublish -and -not $PayloadDirectory)
 {
    throw 'SkipPublish requires an explicit reviewed PayloadDirectory.'
+}
+if($PublishOnly -and ($SkipPublish -or -not $PayloadDirectory -or $CertificateThumbprint))
+{
+   throw 'PublishOnly requires a new PayloadDirectory and cannot be combined with SkipPublish or a local signing certificate.'
 }
 $payloadRoot = if($PayloadDirectory) { [IO.Path]::GetFullPath($PayloadDirectory) } else { Join-Path $projectRoot ('artifacts\package\' + [Guid]::NewGuid().ToString('N')) }
 if(-not $SkipPublish -and (Test-Path -LiteralPath $payloadRoot))
@@ -101,6 +106,14 @@ foreach($resource in @('App.xbf', 'MainWindow.xbf', 'Qqq.PrintAgent.pri'))
 
 # Verify actual third-party terms and exclude build-only SDK payloads before WiX.
 & (Join-Path $PSScriptRoot 'Test-WindowsSdkInventory.ps1') -PayloadDirectory $payloadRoot
+
+# The release workflow signs the published owned binaries between this stage and the MSI build,
+# then reruns this script with -SkipPublish so every check above also covers the signed payload.
+if($PublishOnly)
+{
+   Write-Output "Published and checked payload for signing: $payloadRoot"
+   return
+}
 
 # A supplied certificate opts into signing; unsigned local builds are clearly labelled.
 if($CertificateThumbprint)
