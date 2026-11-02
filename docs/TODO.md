@@ -2,16 +2,16 @@
 
 ## Stable 1.0 closeout — 2026-11-02
 
-Active stable-release work is only the three open items below. Every other unchecked item in this file is historical or unscheduled backlog, not a stable-1.0 blocker.
+Active stable-release work is only the two open items below. Every other unchecked item in this file is historical or unscheduled backlog, not a stable-1.0 blocker.
 
 - [x] Official 0.4.0-rc.4 installed (all three components); normal MSI upgrade exit 0 and the service Running.
-- [x] Latest full release run 41384467500 on `b5eb5d73420630533d98b0c837e0d549745e4f3f`: all 499 tests and the security/CodeQL scripts passed. Core.Tests is never built locally; this hosted pass is its evidence.
+- [x] Clean hosted Windows CI run 41442796961 on source `53fe1b8281806eda7adc314f92c8205aefcb51ce`: 499 tests (166 Core + 333 CLI), zero failures and skips; build and MSI zero warnings and errors. Core.Tests is never built locally; this hosted pass is its evidence. (Earlier run 41384467500 on `b5eb5d73` is historical.)
+- [x] Stable signing implemented (workflow, `Sign-Release.ps1`, packaging). All 19 first-party binary copies of an installed RC4 payload, including `Cli/qqq-print-agent.dll`, and a disposable official RC4 MSI were Azure-signed and strictly verified; this is a local administrator proof and the new CI OIDC identity is not yet exercised. Installed and published remains RC4; no new stable tag.
 - [x] Primary Gitea feed and public feed carry all three prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1); nine assets checked and provenance verified.
 - [x] Physical 4 × 1 passed by the operator on RC3 (same relevant printing runtime); 4 × 6 and Letter accepted earlier. Physical 4 × 2 is deferred by the operator and is not a stable blocker.
 - [x] Source-header inventory (289 tracked files, 231 C#) reported zero issues.
-- [ ] Windows release branch: protected merge and the shared native CI.
-- [ ] Stable tag publication with Azure Artifact Signing, as for MarkdownViewr Windows (implementation in progress in another lane).
-- [ ] Supported, published QQQ native-authentication cohort (another lane).
+- [ ] Windows release branch (Gitea PR 2): normal protected merge, awaiting the central native 1725 repair for Windows ACL and file sharing on Linux.
+- [ ] Supported, published QQQ core with native session login (the last official release, RC20, does not have it); stable tag publication, including the first CI OIDC signing run, follows it.
 - Accepted known limitation (user decision 2026-11-02, not a blocker, not fixed): the post-print native UI layout exception; see the historical entries below.
 - Cancelled by the user, do not resume: repeat Auth/S3 qualification, the latency investigation and MSI comparison analysis.
 

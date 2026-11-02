@@ -84,16 +84,20 @@ and gclo's identities must not be reused for this repository without separate ap
   were checked against the `action.yml` of the pinned commit (`c7ab2a86…`, v2.0.0) supplied by root. The action
   filters by extension, which is why only owned files are staged, and it authenticates through the Azure CLI
   credential left by `azure/login` (the Azure CLI credential type is not excluded by default).
-- Proof so far (local, existing Azure client): 18 first-party binaries of an installed, published RC4 payload were
-  signed and each passed the strict `Sign-Release.ps1 -Operation Verify` (exact publisher subject, SHA256, timestamp,
-  one signature, zero warnings and errors); the source payload was untouched. The actual recursive inventory found
-  19 owned files; the 19th, `Cli/qqq-print-agent.dll`, is covered by the new exact pattern and root is verifying it
-  next. A disposable copy of the published RC4 MSI was also Azure-signed and passed `Apply`/`Verify` for the exact
-  publisher, SHA256 and timestamp. This proves the local signer and the MSI verification path only. It does **not**
-  prove the CI identity's OIDC exchange, nor signed payload files inside the old MSI.
+- Proof so far (local, existing Azure client): the signing code and configuration are implemented, and the source head
+  `53fe1b8281806eda7adc314f92c8205aefcb51ce` passed clean hosted Windows CI run 41442796961 (499 tests, zero failures and
+  skips; build and MSI zero warnings and errors). All 19 first-party binary copies of an installed, published RC4 payload,
+  including `Cli/qqq-print-agent.dll`, were Azure-signed and each passed the strict `Sign-Release.ps1 -Operation Verify`
+  (exact publisher subject, SHA256, timestamp, one signature, zero warnings and errors); the source payload was
+  untouched. A disposable copy of the official RC4 MSI was also Azure-signed and passed `Apply`/`Verify`. This is a
+  local administrator proof of the signer and the verification path. It does **not** prove the CI identity's OIDC
+  exchange, nor signed payload files inside the old MSI; that is shown only by the first hosted stable-tag run.
+  Installed and published remains RC4; no new stable tag exists.
 - `Install-Branded.ps1` and `branding.example.json` are not Authenticode-signed; their integrity rests on the
   checksums in `SHA256SUMS` and the release provenance attestation.
-- The latest published core is RC20 on API 1.8; a stable tag waits for the owner's core handoff.
+- A published QQQ core with native session login is still awaited; the last official release, RC20 (API 1.8), does
+  not have it, and a stable tag waits for it. The Windows release branch (Gitea PR 2) awaits a normal protected merge
+  after the central native 1725 repair for Windows ACL and file sharing on Linux.
 - `Apply` requires the signed stage to contain exactly the staged files, and fails closed otherwise.
 - The subject comparison is an exact string match against the signer certificate; a formatting difference (for
   example `S=` versus `ST=`) fails the release rather than weakening the check.

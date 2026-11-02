@@ -3,10 +3,12 @@
 ## Current status: stable 1.0 closeout — 2026-11-02
 
 The official 0.4.0-rc.4 build is installed with all three components; the normal MSI
-upgrade exited 0 and the service is Running. The latest full release run 41384467500
-on source `b5eb5d73420630533d98b0c837e0d549745e4f3f` passed all 499 tests and the
-security/CodeQL scripts. Core.Tests is never built on the local host; that clean hosted
-pass is its evidence. The primary Gitea feed and the public feed carry all three
+upgrade exited 0 and the service is Running. The latest source is
+`53fe1b8281806eda7adc314f92c8205aefcb51ce`: clean hosted Windows CI run 41442796961 on
+that exact head passed 499 tests (166 Core + 333 CLI) with zero failures and skips, and the
+build and MSI had zero warnings and errors. Core.Tests is never built on the local host;
+that clean hosted pass is its evidence. The earlier run 41384467500 on `b5eb5d73` (499
+tests) is historical. The primary Gitea feed and the public feed carry all three
 prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1), with nine assets
 checked and provenance verified. The source-header inventory (289 tracked files, 231
 C#) reported zero issues.
@@ -15,11 +17,18 @@ Physical output: the operator confirmed the 4 × 1 label on RC3 with the same re
 printing runtime; 4 × 6 and Letter were accepted earlier. Physical 4 × 2 was deferred by
 the operator and is not a stable blocker.
 
-Active stable-release work is only: (1) the Windows release branch protected merge and
-shared native CI; (2) stable tag publication with Azure Artifact Signing, as for
-MarkdownViewr Windows (in progress in another lane); (3) a supported, published QQQ
-native-authentication cohort (another lane). No stable tag exists yet and this file makes
-no 1.0 claim.
+Stable signing is implemented (not in progress): the release workflow signs the owned
+binaries and the MSI with Azure Artifact Signing, as for MarkdownViewr Windows. All 19
+first-party binary copies of an installed RC4 payload, including `Cli/qqq-print-agent.dll`,
+and a disposable official RC4 MSI were Azure-signed and strictly verified (exact publisher,
+SHA256, timestamp). That is a local administrator proof; the new CI OIDC identity has not
+been exercised. See [RELEASE-SIGNING.md](RELEASE-SIGNING.md).
+
+Remaining stable-release work: (1) the Windows release branch (Gitea PR 2) normal protected
+merge, which awaits the central native 1725 repair for Windows ACL and file sharing on
+Linux; (2) a supported, published QQQ core with native session login, still awaited (the
+last official release, RC20, does not have it). Installed and published remains RC4, not
+1.0. No new stable tag exists and this file makes no 1.0 claim.
 
 Accepted known limitation: the post-print WinUI `LayoutCycleException` recorded under
 "Installed realtime release and companion follow-up" was removed from the 1.0 blocker
