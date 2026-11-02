@@ -1,18 +1,15 @@
 # Changelog
 
-## 1.0.0 — source prepared; not yet published
+## 1.0.0
 
-Product version 1.0.0 for the same cohort as 0.4.0-rc.4, which remains the latest published
-release. A stable `v1.0.0` tag runs the release workflow: after every existing gate it signs
-the service, companion and CLI binaries and then the MSI with Azure Artifact Signing, verifies
-the exact publisher, and publishes a non-prerelease with checksums and provenance generated
-after signing (see docs/RELEASE-SIGNING.md). Nothing is published until that run succeeds.
-`VersionPrefix` and the packaging defaults are 1.0.0, the numeric file version is
-`1.0.0.65535` (above every 1.0.0 candidate), and the updater offers it over an installed
-0.4.0-rc.4. Native printing stays 2.3 with wire payload v1; 1.0 is not a wire change. No
-code or dependency change comes with the version. A supported QQQ core with native session
-login is still awaited for the matching server release. Physical acceptance covers 4 × 6,
-Letter and 4 × 1; 4 × 2 is deferred.
+Product version 1.0.0 for the same cohort as 0.4.0-rc.4. A stable `v1.0.0` tag runs the
+release workflow: after every existing gate it signs the service, companion and CLI binaries
+and then the MSI with Azure Artifact Signing, verifies the exact publisher, and publishes a
+non-prerelease with checksums and provenance generated after signing (see
+docs/RELEASE-SIGNING.md). The numeric file version is `1.0.0.65535`, above every earlier
+candidate, so the updater offers it over an installed 0.4.0-rc.4. Native printing stays 2.3
+with wire payload v1; 1.0 is not a wire change. No code or dependency change comes with the
+version. Physical acceptance covers 4 × 6, Letter and 4 × 1; 4 × 2 is deferred.
 
 ## 0.4.0-rc.4 — unsigned prerelease candidate
 
