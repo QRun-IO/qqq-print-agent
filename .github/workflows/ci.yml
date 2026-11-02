@@ -12,10 +12,10 @@ on:
     inputs:
       product-version:
         type: string
-        default: '1.0.0'
+        default: '1.0.1'
       release-version:
         type: string
-        default: '1.0.0'
+        default: '1.0.1'
 
 permissions:
   contents: read
@@ -59,8 +59,8 @@ jobs:
           ./build/Test-PackagingInputs.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '1.0.0' }}
-          RELEASE_VERSION: ${{ inputs.release-version || '1.0.0' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '1.0.1' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '1.0.1' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

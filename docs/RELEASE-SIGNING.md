@@ -77,8 +77,14 @@ and gclo's identities must not be reused for this repository without separate ap
 - Azure setup is configured: existing account `kof22signing`, profile `releases` (Active, PublicTrust), a
   printing-only client `083a3874-ebbb-453f-b625-71bbfefd3227` with the exact immutable subject
   `repo:QRun-IO@93010898/qqq-print-agent@1438820325:environment:release`, a profile-scoped signer role and the
-  seven environment variables, with no secret. The real CI OIDC exchange and signing are **not yet proven**; only a
-  hosted stable-tag run will show that; a local administrator signing proof cannot.
+  seven environment variables, with no secret. The first hosted stable run (`v1.0.0`) passed every build, test,
+  security, CodeQL and script gate and the Azure OIDC login (so the CI identity exchange works), then stopped before
+  signing: the action's SignCLI installer uses `dotnet tool install --add-source`, which the repository's NuGet
+  package source mapping rejects. No signed installer was published. The `sign` job now preinstalls only the
+  pinned SignCLI (`0.9.1-beta.26227.3`) through the mapped `nuget.config` into
+  `%LOCALAPPDATA%\ArtifactSigning\sign\sign.<version>` (the layout the action expects, checked for
+  `tools\net8.0\any\sign.dll`) before the first signing step. Signing itself in CI is **not yet proven**; a local
+  administrator proof cannot show it, only the next hosted stable run (1.0.1) will.
 - The `azure/artifact-signing-action` inputs used (`endpoint`, `signing-account-name`, `certificate-profile-name`,
   `files-folder`, `files-folder-filter`, `files-folder-recurse`, `file-digest`, `timestamp-rfc3161`, `timestamp-digest`)
   were checked against the `action.yml` of the pinned commit (`c7ab2a86…`, v2.0.0) supplied by root. The action
@@ -101,5 +107,5 @@ and gclo's identities must not be reused for this repository without separate ap
 - `Apply` requires the signed stage to contain exactly the staged files, and fails closed otherwise.
 - The subject comparison is an exact string match against the signer certificate; a formatting difference (for
   example `S=` versus `ST=`) fails the release rather than weakening the check.
-- No stable version is set here; the `VersionPrefix`/ProductVersion are finalized separately. Signing proves
+- The current source version is 1.0.1 (the `v1.0.0` tag is unchanged and published nothing signed). Signing proves
   publisher identity, not product qualification; it is not production hardware or server acceptance.

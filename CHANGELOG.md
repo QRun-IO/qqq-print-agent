@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.1
+
+Packaging fix; no application, wire or dependency change. The `v1.0.0` release run passed
+every build, test, security, CodeQL and script gate and the Azure OIDC login, then stopped
+before signing: the Artifact Signing action installs its SignCLI tool with
+`dotnet tool install --add-source`, which the repository's NuGet package source mapping
+rejects. No signed 1.0.0 installer was published and that tag is unchanged. The release
+workflow now installs only the pinned SignCLI (`0.9.1-beta.26227.3`) through the mapped
+repository `nuget.config` into the exact folder the action expects, before the first signing
+step, so the action finds it and the mapping is not weakened. Native printing stays 2.3 with
+wire payload v1.
+
 ## 1.0.0
 
 Product version 1.0.0 for the same cohort as 0.4.0-rc.4. A stable `v1.0.0` tag runs the

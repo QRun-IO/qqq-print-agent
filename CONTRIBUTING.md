@@ -8,7 +8,7 @@ Use Windows x64, Git and the .NET 10 SDK selected by `global.json`. Check out `q
 
 ```powershell
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 1.0.0 -ReleaseVersion 1.0.0
+./build/Build-Installer.ps1 -ProductVersion 1.0.1 -ReleaseVersion 1.0.1
 ```
 
 Verification uses locked NuGet restore, a warnings-as-errors solution build, core tests, Windows/CLI tests and a coverage report. Packaging creates a self-contained x64 MSI. Neither command installs the service or prints a document.
