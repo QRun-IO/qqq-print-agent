@@ -9,14 +9,34 @@ using System.Runtime.InteropServices;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// A release version of the form X.Y.Z or X.Y.Z-rc.N, ordered the way semantic versioning orders them: a release candidate
+/// sorts before the final release with the same numbers. The updater uses this to offer only strictly newer releases.
+/// </summary>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct MsiReleaseVersion(int Major, int Minor, int Patch, int? Candidate) : IComparable<MsiReleaseVersion>
 {
+   /// <summary>True when this version sorts before the other, so versions can be compared with the usual operators.</summary>
    public static bool operator <(MsiReleaseVersion left, MsiReleaseVersion right) => left.CompareTo(right) < 0;
+
+
+
+   /// <summary>True when this version sorts after the other.</summary>
    public static bool operator >(MsiReleaseVersion left, MsiReleaseVersion right) => left.CompareTo(right) > 0;
+
+
+
+   /// <summary>True when this version sorts before or equal to the other.</summary>
    public static bool operator <=(MsiReleaseVersion left, MsiReleaseVersion right) => left.CompareTo(right) <= 0;
+
+
+
+   /// <summary>True when this version sorts after or equal to the other.</summary>
    public static bool operator >=(MsiReleaseVersion left, MsiReleaseVersion right) => left.CompareTo(right) >= 0;
 
+
+
+   /// <summary>Orders by major, minor and patch, then puts a release candidate before the final release and orders candidates by their number.</summary>
    public int CompareTo(MsiReleaseVersion other)
    {
       int result = Major.CompareTo(other.Major);
@@ -35,8 +55,18 @@ internal readonly record struct MsiReleaseVersion(int Major, int Minor, int Patc
       return Candidate is null ? other.Candidate is null ? 0 : 1 : other.Candidate is null ? -1 : Candidate.Value.CompareTo(other.Candidate.Value);
    }
 
+
+
+   /// <summary>True for 0.1.3 and later, the first version whose updater and installer layout can be updated in place; older installs are not offered updates.</summary>
    internal bool MeetsMinimum => Major > 0 || Minor > 1 || Minor == 1 && Patch >= 3;
 
+
+
+   /// <summary>
+   /// Parses the running build's informational version, tolerating a leading "v" and build metadata after "+" (a source
+   /// revision) when that metadata is made only of dot-separated letters, digits and hyphens. Anything else throws, so a
+   /// malformed installed version is reported rather than guessed.
+   /// </summary>
    internal static MsiReleaseVersion ParseCurrent(string text)
    {
       string value = text.StartsWith('v') ? text[1..] : text;
@@ -52,6 +82,9 @@ internal readonly record struct MsiReleaseVersion(int Major, int Minor, int Patc
       return version;
    }
 
+
+
+   /// <summary>Parses X.Y.Z or X.Y.Z-rc.N with canonical numbers only (no signs, spaces or leading zeros), returning false instead of throwing for any other text.</summary>
    internal static bool TryParse(string text, out MsiReleaseVersion version)
    {
       version = default;
@@ -78,6 +111,9 @@ internal readonly record struct MsiReleaseVersion(int Major, int Minor, int Patc
       return true;
    }
 
+
+
+   /// <summary>Accepts a non-negative integer only when printing it back gives the same text, which rejects leading zeros and any variant spelling that two parsers could read differently.</summary>
    private static bool Number(string text, out int value)
       => int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && string.Equals(text, value.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
 }

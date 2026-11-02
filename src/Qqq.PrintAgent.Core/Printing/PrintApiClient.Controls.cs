@@ -10,11 +10,23 @@ using System.Text.Json;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
+/// <summary>
+/// Device control part of the API client: polling for desired state and commands over HTTP (the compatibility path), the
+/// strict validation applied to every command whatever its transport, and delivery of command receipts. Responses are
+/// bounded and every command's identity, action, lifetime and target are checked before anything acts on it.
+/// </summary>
 public sealed partial class PrintApiClient
 {
    private static readonly string[] ControlCapabilities = ["REFRESH_INVENTORY", "CANCEL_SPOOL"];
+
+
+
+   /// <summary>Applies the same validation to a single command that arrived over the realtime channel as an HTTP poll response would get, so both transports accept exactly the same commands.</summary>
    public static void ValidateRealtimeCommand(DeviceControlCommand command)
       => ValidateControlPoll(new DeviceControlPoll(1, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture), 5, new DeviceDesiredState(0, false, "CONNECTED"), [command]));
+
+
+
    /// <summary>A 404 means legacy only before this connection has negotiated control support.</summary>
    public async Task<DeviceControlPoll?> ControlPollAsync(long revision, CancellationToken token)
    {
@@ -46,6 +58,13 @@ public sealed partial class PrintApiClient
       return poll;
    }
 
+
+
+   /// <summary>
+   /// Checks a control response in full: version 1, a poll interval of 1 to 300 seconds, a valid desired state and server time, at
+   /// most 20 commands, and for each command a safe unique identifier, a bounded action, a lifetime of at most 15 minutes, and a
+   /// job identifier when the action cancels a spool job. Anything else is rejected as an invalid response, not partly applied.
+   /// </summary>
    private static void ValidateControlPoll(DeviceControlPoll poll)
    {
       if(poll.ControlVersion != 1 || poll.PollIntervalSeconds is < 1 or > 300 || poll.DesiredState is null
@@ -69,8 +88,18 @@ public sealed partial class PrintApiClient
       }
    }
 
+
+
+   /// <summary>True for a non-empty identifier of at most 200 characters made only of letters, digits and the characters - _ . :, so it cannot carry path or markup characters into later use.</summary>
    private static bool ValidControlId(string? value) => !string.IsNullOrEmpty(value) && value.Length <= 200 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':');
 
+
+
+   /// <summary>
+   /// Delivers one command receipt: over the realtime channel with a stable message identity and the server's acknowledgement
+   /// when attached, otherwise by HTTP, where the server must answer that it accepted the receipt. A receipt the server did not
+   /// accept throws, so the caller keeps it pending and sends it again instead of treating it as delivered.
+   /// </summary>
    public async Task ControlReceiptAsync(string commandId, DeviceControlReceipt receipt, CancellationToken token)
    {
       if(_realtime is not null)

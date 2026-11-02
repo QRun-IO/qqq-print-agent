@@ -12,8 +12,16 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
 
+/// <summary>
+/// Log settings part of the main window: retention and daily size limits for the shared diagnostic log, and clearing it. The values are
+/// applied by the service, which owns the log files, so the service and companion always share one policy.
+/// </summary>
 public sealed partial class MainWindow
 {
+   /// <summary>
+   /// Shows the current retention and daily size limits (with how much of today's limit is used and whether it was reached) in a dialog and,
+   /// if the operator saves valid numbers, sends them to the service. Rotation happens at the start of the next local day.
+   /// </summary>
    private async void LogSettings_Click(object sender, RoutedEventArgs e)
    {
       LogSettings? settings = await ReadLogSettingsAsync();
@@ -41,6 +49,9 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Asks the service for the current log settings while the window is busy; a failure shows a message and returns null so the dialog never opens with made-up numbers.</summary>
    private async Task<LogSettings?> ReadLogSettingsAsync()
    {
       if(_busy)
@@ -64,6 +75,9 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Clears the diagnostic logs only after the operator confirms; the prompt states that job history, printer settings and print jobs are kept.</summary>
    private async void ClearLogs_Click(object sender, RoutedEventArgs e)
    {
       if(await ConfirmAsync("Clear local diagnostic logs?", "This permanently deletes retained service and companion diagnostic logs. Print jobs, printer settings and job history are preserved. New events will start a fresh log.", "Clear logs"))

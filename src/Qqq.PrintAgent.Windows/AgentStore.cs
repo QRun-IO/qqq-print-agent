@@ -11,15 +11,32 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// The service's durable local state in one SQLite journal plus a DPAPI-protected connection file. It records every job
+/// event before it is reported (so a crash never loses an outcome), keeps events and job summaries scoped to the server and
+/// device they belong to, and holds the printer exposure choices. Other parts of this class add controls, metadata,
+/// authentication, paging and retention. One instance owns one connection and is not shared across threads.
+/// </summary>
 public sealed partial class AgentStore : IJobJournal, IDisposable
 {
+   /// <summary>Selects the Windows system SQLite library once, so the agent ships no native SQLite binary of its own.</summary>
    static AgentStore() => SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_winsqlite3());
+
+
+
    private readonly SqliteConnection _database;
    private readonly string _directory;
    private static readonly Lock SchemaLock = new();
    private string _connectionScope = "unenrolled";
    private bool _configurationRecoveryRequired;
 
+
+
+   /// <summary>
+   /// Opens (creating if needed) the journal under the protected state directory and brings its schema up to date. With
+   /// recovery enabled, an unreadable saved connection no longer blocks opening: the store switches to an isolated scope so
+   /// old evidence is kept but never attached to a replacement identity. On any failure the connection is closed.
+   /// </summary>
    public AgentStore(string directory, bool recoverUnreadableConfiguration = false)
    {
       _directory = Path.GetFullPath(directory);
@@ -38,6 +55,13 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       }
    }
 
+
+
+   /// <summary>
+   /// Creates or migrates the schema under a process-wide lock: events, exposure, per-job summaries, and the added
+   /// timestamp and scope columns, with legacy rows assigned to the current scope. Job summaries are rebuilt from the latest
+   /// event only the first time that table appears. The migration runs in a transaction so a failure leaves the old schema usable.
+   /// </summary>
    private void InitializeDatabase(bool recoverUnreadableConfiguration)
    {
       lock(SchemaLock)
@@ -91,8 +115,18 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       }
    }
 
+
+
+   /// <summary>The machine-wide state directory under ProgramData that the service uses; the companion never writes here directly.</summary>
    public static string DefaultDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "QqqPrintAgent");
 
+
+
+   /// <summary>
+   /// Saves the device connection protected for the service account with DPAPI, writing a temporary file and moving it into
+   /// place so a crash cannot leave a half-written secret. When recovery was needed, the unreadable file is copied aside
+   /// first, so nothing is destroyed. The plaintext buffer is zeroed on every path.
+   /// </summary>
    public void SaveConfiguration(AgentConfiguration config)
    {
       byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(config, PrintApiClient.JsonOptions);
@@ -113,6 +147,13 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       finally { CryptographicOperations.ZeroMemory(plaintext); }
    }
 
+
+
+   /// <summary>
+   /// Reads and decrypts the saved connection, or returns null when none exists or recovery is pending. Loading also sets
+   /// the connection scope that every later event and job query uses, so history can never cross to another server or
+   /// device. A file that cannot be decrypted throws; the caller decides whether recovery is allowed.
+   /// </summary>
    public AgentConfiguration? LoadConfiguration()
    {
       if(_configurationRecoveryRequired)
@@ -135,6 +176,9 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       finally { CryptographicOperations.ZeroMemory(plaintext); }
    }
 
+
+
+   /// <summary>The last recorded state of a job on this connection, or null when it is unknown; the worker uses it to refuse reprinting a finished job.</summary>
    public string? GetState(string jobId)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -144,6 +188,12 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       return command.ExecuteScalar() as string;
    }
 
+
+
+   /// <summary>
+   /// Appends an event and updates the job summary in one transaction, so the delivery outbox and the visible state never
+   /// disagree. A new state clears any earlier operator review and the history-pruned mark, and the first event fixes the job's creation time.
+   /// </summary>
    public void Record(string jobId, PrintEvent printEvent)
    {
       using SqliteTransaction transaction = _database.BeginTransaction();
@@ -160,6 +210,12 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       transaction.Commit();
    }
 
+
+
+   /// <summary>
+   /// Stores the job's display facts (printer, bounded title, format) when it is claimed, so history stays readable even
+   /// after the printer or server record changes. The server's creation time is kept once and never overwritten later.
+   /// </summary>
    public void TrackJob(PrintJob job, string? printerName)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -174,6 +230,9 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       command.ExecuteNonQuery();
    }
 
+
+
+   /// <summary>The next batch (at most 200, oldest first) of events not yet acknowledged by the server, so an outage is drained in order and in bounded steps.</summary>
    public IReadOnlyList<(string JobId, PrintEvent Event)> Pending()
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -189,6 +248,9 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       return events;
    }
 
+
+
+   /// <summary>Marks one event delivered. Called only after the server accepted it, so a failed delivery stays pending and is retried.</summary>
    public void Acknowledge(string eventId)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -198,6 +260,9 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       command.ExecuteNonQuery();
    }
 
+
+
+   /// <summary>Closes the journal connection; stores are short-lived and opened per unit of work rather than held open.</summary>
    public void Dispose() => _database.Dispose();
 
 
@@ -248,6 +313,12 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       return jobs;
    }
 
+
+
+   /// <summary>
+   /// Returns one job with up to its latest 200 events in time order, or null when the job is not on this connection. It
+   /// also reports whether older detail was pruned by retention, so the window can say that history was trimmed rather than missing.
+   /// </summary>
    public JobDetailsSnapshot? GetJobDetails(string jobId)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -277,7 +348,12 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       return new JobDetailsSnapshot(job, events, pruned);
    }
 
-   /// <summary>Operator review is independent from successful delivery of status to QQQ.</summary>
+
+
+   /// <summary>
+   /// Records the operator's review of a failed or uncertain job. Review is independent from delivery of status to QQQ and
+   /// never changes the printing result; only FAILED and OUTCOME_UNKNOWN jobs of this connection can be reviewed.
+   /// </summary>
    public void AcknowledgeFailure(string jobId)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -290,6 +366,9 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       }
    }
 
+
+
+   /// <summary>Counts failed or uncertain jobs the operator has not reviewed; it drives the health color so an old failure is not hidden by newer successes.</summary>
    public int NeedsAttentionCount()
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -298,6 +377,9 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       return Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
    }
 
+
+
+   /// <summary>Builds a job summary from the standard job column order; a missing state reads as CLAIMED and a missing time as an earlier session.</summary>
    private static JobSnapshot ReadJob(SqliteDataReader reader)
    {
       PrintEvent? item = reader.IsDBNull(3) ? null : JsonSerializer.Deserialize<PrintEvent>(reader.GetString(3), PrintApiClient.JsonOptions);
@@ -305,9 +387,17 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
          NullableString(reader, 4), NullableString(reader, 5), NullableString(reader, 6), NullableString(reader, 7), reader.GetInt32(8) != 0, NullableString(reader, 10));
    }
 
+
+
+   /// <summary>Reads a text column that may be NULL.</summary>
    private static string? NullableString(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
+
+
+   /// <summary>Caps stored text at 1024 characters so an oversized title or name from the server cannot bloat the journal.</summary>
    private static string? Bounded(string? text) => text is null ? null : text[..Math.Min(text.Length, 1024)];
+
+
 
    /// <summary>Latest unfinished submissions for this connection, including acknowledged states.</summary>
    public IReadOnlyList<(string JobId, string State)> Incomplete()
@@ -324,6 +414,12 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       return incomplete;
    }
 
+
+
+   /// <summary>
+   /// Derives the scope key from the normalized server address and device identifier. Hashing both keeps each server and
+   /// device's history separate on disk, so re-enrolling elsewhere cannot send old events under the new credential.
+   /// </summary>
    private static string ConnectionScope(AgentConfiguration? configuration)
    {
       if(configuration is null)

@@ -7,14 +7,30 @@ using Microsoft.UI.Dispatching;
 
 namespace Qqq.PrintAgent;
 
+/// <summary>
+/// Entry point of the layout harness. It validates the evidence folder and optional window size, writes an isolated settings
+/// profile that skips the splash screen and update check, and starts the real application so the layout scenario can drive it
+/// against synthetic data.
+/// </summary>
 internal static class Program
 {
+   /// <summary>No activation signal exists in the harness, so single-instance forwarding is disabled.</summary>
    internal static EventWaitHandle? ActivationSignal => null;
+
+
+
    internal static string EvidenceDirectory { get; private set; } = string.Empty;
    internal static int WindowWidth { get; private set; } = 1100;
    internal static int WindowHeight { get; private set; } = 760;
    internal static bool RefreshDuringDialog { get; private set; }
 
+
+
+   /// <summary>
+   /// Arguments are an absolute evidence folder, optionally followed by a width (800 to 1400), a height (560 to 1000) and
+   /// --refresh-during-dialog. Anything else returns exit code 2 before any file is written. The app then starts with an isolated
+   /// data folder under the evidence directory.
+   /// </summary>
    [STAThread]
    private static int Main(string[] args)
    {

@@ -19,14 +19,14 @@ def selected(name: str, policy: dict[str, Any]) -> bool:
    return any(fnmatch.fnmatchcase(name, pattern) for pattern in policy["includes"])
 
 
-def leading_comments(text: str, style: str) -> str:
+def leading_comments(text: str, style: str) -> str:  # noqa: PLR0912 -- Each recognized leading-comment syntax has a distinct fail-closed branch.
    """Read comments only, preserving required interpreter/XML directive ordering."""
    text = text.removeprefix("\ufeff")
    if text.startswith("<?xml"):
       declaration = re.match(r"<\?xml[^?]*\?>", text)
       if style != "xml" or declaration is None:
          raise ValueError("Invalid XML declaration")
-      text = text[declaration.end():]
+      text = text[declaration.end() :]
    elif text.startswith("#!"):
       if style not in ("hash", "powershell", "slash"):
          raise ValueError("Unexpected interpreter directive")
@@ -35,7 +35,7 @@ def leading_comments(text: str, style: str) -> str:
       if style != "powershell":
          raise ValueError("Unexpected PowerShell directive")
       text = text.partition("\n")[2]
-   comments = []
+   comments: list[str] = []
    while text.strip():
       text = text.lstrip()
       if text.startswith("<?xml") or re.match(r"#!|#Requires\b", text, re.IGNORECASE):
@@ -46,11 +46,9 @@ def leading_comments(text: str, style: str) -> str:
       elif style == "slash" and text.startswith("//"):
          line, _, text = text.partition("\n")
          comments.append(line[2:])
-      elif ((style == "slash" and text.startswith("/*"))
-            or (style == "xml" and text.startswith("<!--"))
-            or (style == "powershell" and text.startswith("<#"))):
+      elif (style == "slash" and text.startswith("/*")) or (style == "xml" and text.startswith("<!--")) or (style == "powershell" and text.startswith("<#")):
          opening, closing = {"slash": ("/*", "*/"), "xml": ("<!--", "-->"), "powershell": ("<#", "#>")}[style]
-         body, separator, rest = text[len(opening):].partition(closing)
+         body, separator, rest = text[len(opening) :].partition(closing)
          if not separator:
             raise ValueError("Unterminated leading comment")
          comments.append(body)
@@ -72,19 +70,22 @@ def check_notice(name: str, text: str, policy: dict[str, Any]) -> None:
    approved = [item for item in policy["notices"] if any(fnmatch.fnmatchcase(name, pattern) for pattern in item["paths"])]
    for notice in approved:
       holder = re.escape(notice["holder"])
-      copyright_pattern = rf"(?m)^Copyright\s+(?:\([cC]\)\s*)?\d{{4}}(?:[-–]\d{{4}})?\.?\s+{holder}(?:\s+\(KofTwentyTwo\))?\.?(?:\s+Licensed under the MIT License \(see LICENSE\)\.)?$"
+      copyright_pattern = rf"(?m)^Copyright\s+(?:\([cC]\)\s*)?\d{{4}}(?:[-\u2013]\d{{4}})?\.?\s+{holder}(?:\s+\(KofTwentyTwo\))?\.?(?:\s+Licensed under the MIT License \(see LICENSE\)\.)?$"
       if re.search(copyright_pattern, comments) is None:
          continue
       spdx = re.findall(r"(?m)^SPDX-License-Identifier:\s*(\S+)\s*$", comments)
       if spdx and any(value != notice["license"] for value in spdx):
          continue
-      apache = all(phrase in comments for phrase in (
-         "Licensed under the Apache License, Version 2.0",
-         "you may not use this file except in compliance with the License.",
-         "https://www.apache.org/licenses/LICENSE-2.0",
-         "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND",
-         "limitations under the License.",
-      ))
+      apache = all(
+         phrase in comments
+         for phrase in (
+            "Licensed under the Apache License, Version 2.0",
+            "you may not use this file except in compliance with the License.",
+            "https://www.apache.org/licenses/LICENSE-2.0",
+            "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND",
+            "limitations under the License.",
+         )
+      )
       if suffix == ".java" and not apache:
          continue
       if notice["license"] in spdx or (notice["license"] == "Apache-2.0" and apache):
@@ -94,8 +95,9 @@ def check_notice(name: str, text: str, policy: dict[str, Any]) -> None:
 
 def check_repository(root: Path, policy: dict[str, Any]) -> int:
    """Check tracked sources without scanning build outputs or executing source."""
-   tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], check=True, capture_output=True).stdout.decode("utf-8").split("\u0000")
-   failures = []
+   # Fixed Git inventory operation; paths are arguments, never shell input.
+   tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], check=True, capture_output=True).stdout.decode("utf-8").split("\u0000")  # noqa: S603, S607 -- Resolve Git from the developer/CI PATH; no shell or user-supplied command.
+   failures: list[str] = []
    count = 0
    for name in tracked:
       if not name or not selected(name, policy):

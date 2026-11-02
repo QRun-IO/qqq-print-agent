@@ -7,8 +7,13 @@ using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
+/// <summary>Unit tests of the traffic meter's arithmetic, with a controllable clock: exact totals under concurrency, rates that fall to zero when idle, and counters that saturate instead of wrapping.</summary>
 public sealed class ApplicationTrafficMeterTests
 {
+   /// <summary>
+   /// A thousand concurrent uploads and downloads add up exactly with no lost updates. Rates reflect the recent window and drop
+   /// to zero after two idle seconds while totals stay, and the "since" timestamp does not change when traffic resumes.
+   /// </summary>
    [Fact]
    public void ConcurrentPayloadsHaveExactTotalsAndIdleRatesReturnToZero()
    {
@@ -32,6 +37,9 @@ public sealed class ApplicationTrafficMeterTests
       Assert.Equal(active.TotalsSinceUtc, meter.GetSnapshot().TotalsSinceUtc);
    }
 
+
+
+   /// <summary>Totals that would exceed the 64-bit maximum stay at the maximum instead of wrapping negative, rates stay finite, and a negative byte count is rejected.</summary>
    [Fact]
    public void CounterOverflowSaturatesWithoutNegativeOrInfiniteObservations()
    {
@@ -48,12 +56,31 @@ public sealed class ApplicationTrafficMeterTests
       Assert.Throws<ArgumentOutOfRangeException>(() => meter.RecordDownload(-1));
    }
 
+
+
+   /// <summary>A thread-safe clock that moves only when advanced, so rate windows can be crossed without sleeping.</summary>
    private sealed class TrafficClock : TimeProvider
    {
       private long _ticks;
+
+
+
+      /// <summary>One timestamp unit per tick, so timestamps and TimeSpan ticks share a scale.</summary>
       public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+
+
+      /// <summary>The current fake timestamp, read atomically.</summary>
       public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+
+
+
+      /// <summary>The fake time as a UTC instant counted from the Unix epoch.</summary>
       public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch.AddTicks(GetTimestamp());
+
+
+
+      /// <summary>Moves the fake clock forward.</summary>
       internal void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
    }
 }

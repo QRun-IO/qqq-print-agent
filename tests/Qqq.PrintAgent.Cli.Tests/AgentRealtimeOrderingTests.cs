@@ -7,8 +7,18 @@ using System.Text;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// Ordering guarantees of the realtime print path: the agent applies server instructions in the order the server sent them, claims
+/// one job at a time per queue, and uses the policy in force when a document is submitted rather than the one it started with.
+/// Gated fake documents hold a download open so these windows can be hit deterministically.
+/// </summary>
 public sealed class AgentRealtimeOrderingTests
 {
+   /// <summary>
+   /// A state acknowledgement from before a new settings revision must not release a held submission. The server sends the new
+   /// settings (which shrink the PDF limit) ahead of that acknowledgement, so the held job is still RECEIVED, nothing has printed,
+   /// and the agent has not yet reported itself connected. Once released, the job fails against the new limit.
+   /// </summary>
    [Fact]
    public async Task OlderStateAckCannotReleaseSubmissionBeforeNewSettingsAreAcknowledged()
    {
@@ -48,6 +58,9 @@ public sealed class AgentRealtimeOrderingTests
       finally { slow.Release.TrySetResult(); }
    }
 
+
+
+   /// <summary>With two downloads allowed, a claimed job stays claimed until its RECEIVED receipt is acknowledged, so the agent does not claim again (and risk being handed the same job) while that acknowledgement is pending. Both jobs then print once each.</summary>
    [Fact]
    public async Task StickyClaimIsNotRequestedAgainBeforeReceivedAcknowledgement()
    {
@@ -67,6 +80,13 @@ public sealed class AgentRealtimeOrderingTests
       Assert.DoesNotContain(fixture.Logs, line => line.Contains("same key", StringComparison.OrdinalIgnoreCase));
    }
 
+
+
+   /// <summary>
+   /// Settings and a pause that arrive while a document is still downloading take effect at submission: a smaller size limit
+   /// fails the job, otherwise it prints with the new submission timeout. A pause stops new claims only and never abandons work
+   /// already in flight.
+   /// </summary>
    [Theory]
    [InlineData(true)]
    [InlineData(false)]
@@ -90,6 +110,9 @@ public sealed class AgentRealtimeOrderingTests
       { Assert.Equal(TimeSpan.FromMilliseconds(2345), fixture.Printer.LastSubmissionTimeout); }
    }
 
+
+
+   /// <summary>A job waiting for a download slot on another printer starts as soon as the server raises the concurrent-download limit, even though the first download is still in progress.</summary>
    [Fact]
    public async Task IncreasingConcurrencyStartsWaitingOtherPrinterDuringAnActiveDownload()
    {
@@ -113,6 +136,12 @@ public sealed class AgentRealtimeOrderingTests
       finally { slow.Release.TrySetResult(); }
    }
 
+
+
+   /// <summary>
+   /// Two downloads run in parallel, but output order is preserved per printer: for the same printer a fast job waits behind the
+   /// slower one that was queued first, while a job for a different printer prints at once. No HTTP polling route is used.
+   /// </summary>
    [Theory]
    [InlineData(true)]
    [InlineData(false)]
@@ -149,10 +178,17 @@ public sealed class AgentRealtimeOrderingTests
       finally { slow.Release.TrySetResult(); }
    }
 
+
+
+   /// <summary>A document body that signals when the agent starts reading it and then withholds its bytes until the test releases it, holding a download open at a precise point.</summary>
    private sealed class GatedDocument(byte[] bytes) : MemoryStream(bytes)
    {
       internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>Signals the first read, waits for release, then reads normally.</summary>
       public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
       {
          Entered.TrySetResult();

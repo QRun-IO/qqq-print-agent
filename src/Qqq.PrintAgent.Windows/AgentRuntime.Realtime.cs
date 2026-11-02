@@ -11,6 +11,11 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Realtime transport part of the runtime. It owns the WebSocket's lifetime: reconnect with jittered backoff, the
+/// HELLO and WELCOME handshake, ordered application of server settings and desired state, and the wake-ups that start
+/// claim drains. Nothing here polls the server for jobs or controls.
+/// </summary>
 public sealed partial class AgentRuntime
 {
    private static readonly string[] RealtimeCapabilities = ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL"];
@@ -28,8 +33,24 @@ public sealed partial class AgentRuntime
    private readonly SemaphoreSlim _queueRefreshRequested = new(0, 1);
    private bool _inventoryReady;
    private long _stateSequence;
+
+
+
+   /// <summary>
+   /// A state frame tagged with an increasing sequence number, so that when several updates are applied in order only the
+   /// newest one on the current connection can mark the runtime ready.
+   /// </summary>
    private sealed record RealtimeStateUpdate(RealtimeEnvelope Envelope, long Sequence);
 
+
+
+   /// <summary>
+   /// Entry point of the realtime service loop. Before connecting it loads the persisted settings, control state and
+   /// server origin, and records any job a previous run left incomplete as FAILED (submission never started) or
+   /// OUTCOME_UNKNOWN (it was submitting), because only an operator can tell whether paper came out. It then runs the
+   /// reconnect loop, claim drain, management pipe and queued-job refresh together; whichever ends first stops the
+   /// others and the transport is marked stopped.
+   /// </summary>
    private async Task RunRealtimeAsync(CancellationToken token)
    {
       using(var store = new AgentStore(directory, recoverUnreadableConfiguration: true))
@@ -61,6 +82,15 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Keeps one authenticated socket alive for the current connection generation. Each failure marks realtime and
+   /// control not ready and records a reason the operator can read; when the server says sign-in or permission is gone
+   /// it blocks further attempts, because reconnecting cannot repair that. A generation change (sign-out, re-pairing)
+   /// abandons the attempt without touching newer state. Between attempts it waits the backoff delay, cut short by an
+   /// explicit reconnect request.
+   /// </summary>
    private async Task RealtimeReconnectAsync(CancellationToken token)
    {
       while(!token.IsCancellationRequested)
@@ -100,6 +130,13 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Exponential backoff from the configured minimum, capped at the maximum, with symmetric jitter of the configured
+   /// percentage so many agents do not reconnect in lockstep after a server restart. The caller supplies the random
+   /// sample so the schedule can be tested exactly; the result always stays inside the configured bounds.
+   /// </summary>
    internal static TimeSpan ReconnectDelay(RealtimeSettings settings, int attempt, double sample)
    {
       double delay = Math.Min(settings.ReconnectMaxDelayMillis, settings.ReconnectMinDelayMillis * Math.Pow(2, Math.Clamp(attempt, 0, 12)));
@@ -107,6 +144,13 @@ public sealed partial class AgentRuntime
       return TimeSpan.FromMilliseconds(Math.Clamp(delay, settings.ReconnectMinDelayMillis, settings.ReconnectMaxDelayMillis));
    }
 
+
+
+   /// <summary>
+   /// Runs one socket from upgrade to close. The reader, state applier, command worker, heartbeat, synchronizer and
+   /// handshake watchdog start together, HELLO carries the capabilities discovered for this socket, and the first task to
+   /// finish ends the connection. Teardown clears readiness before cancelling, so no claim can start on a dying socket.
+   /// </summary>
    private async Task RealtimeConnectionAsync(long generation, CancellationToken token)
    {
       using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -168,6 +212,8 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
    /// <summary>Reads the discovery refreshed by this socket establishment, so server upgrades and downgrades change capabilities on reconnect without polling.</summary>
    private async Task<(WebSocket Socket, bool SupportsMedia)> ConnectRealtimeSocketAsync(RealtimeSettings settings, CancellationTokenSource lifetime, CancellationToken token)
    {
@@ -190,6 +236,14 @@ public sealed partial class AgentRuntime
          throw;
       }
    }
+
+
+
+   /// <summary>
+   /// Fails the connection when the server does not make the channel ready within the handshake timeout: it waits for
+   /// readiness on the pipeline signal under the handshake token, and once ready idles until the connection's own
+   /// lifetime ends so the connection is not torn down by this watchdog finishing.
+   /// </summary>
    private async Task AwaitRealtimeHandshakeAsync(CancellationToken handshake, CancellationToken lifetime)
    {
       while(true)
@@ -206,6 +260,14 @@ public sealed partial class AgentRuntime
       await Task.Delay(Timeout.InfiniteTimeSpan, lifetime).ConfigureAwait(false);
    }
 
+
+
+   /// <summary>
+   /// Handles one inbound frame on the reader's thread. It records contact, tracks the server clock offset from WELCOME
+   /// and PONG, and routes state to the ordered applier, commands to the command worker and job notifications to a
+   /// claim wake-up. The queues are bounded and overflow closes the connection rather than silently dropping a frame,
+   /// and an ERROR frame that means authorization is gone blocks further attempts.
+   /// </summary>
    private void ReceiveRealtime(RealtimeEnvelope envelope, ChannelWriter<RealtimeStateUpdate> updates, ChannelWriter<RealtimeEnvelope> commands)
    {
       lock(_stateLock)
@@ -250,6 +312,13 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Applies the safe half of a state change the moment it arrives, before it is persisted: new settings or a new
+   /// desired state make the channel not ready, so no new claim starts until the update is durably applied and
+   /// acknowledged. A regressed or invalid revision is a protocol violation and throws rather than being ignored.
+   /// </summary>
    private void ApplyImmediateRestriction(RealtimeEnvelope envelope)
    {
       if(string.Equals(envelope.Type, "SETTINGS", StringComparison.Ordinal))
@@ -273,6 +342,14 @@ public sealed partial class AgentRuntime
       SignalPipeline();
    }
 
+
+
+   /// <summary>
+   /// Persists and acknowledges server state in order. Settings and control state are saved under the connection gate,
+   /// STATE_APPLIED reports the revisions now in force, and only the newest update on the current generation marks the
+   /// runtime ready and resets the backoff. The status, queue preview and (for WELCOME and DESIRED_STATE) claim drain
+   /// are then woken.
+   /// </summary>
    private async Task ApplyRealtimeUpdatesAsync(ChannelReader<RealtimeStateUpdate> updates, PrintingRealtimeChannel channel, long generation, CancellationToken token)
    {
       await foreach(RealtimeStateUpdate update in updates.ReadAllAsync(token).ConfigureAwait(false))

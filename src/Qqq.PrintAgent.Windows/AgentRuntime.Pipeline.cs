@@ -7,6 +7,11 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Claim pipeline part of the runtime. A wave of lanes drains the server queue, and each job passes through ordered
+/// gates: a download slot, a staging reservation, then a print slot for its printer. A ticket per job keeps jobs for one
+/// printer in order. Shared counters change only under the state lock, and every release signals the lanes waiting on a change.
+/// </summary>
 public sealed partial class AgentRuntime
 {
    private TaskCompletionSource _pipelineChanged = NewSignal();
@@ -24,8 +29,18 @@ public sealed partial class AgentRuntime
    private CancellationTokenSource? _pipelineLifetime;
    private Task _pipelineTask = Task.CompletedTask;
 
+
+
+   /// <summary>Creates a one-shot signal whose continuations run asynchronously, so completing it under a lock never runs waiter code inside that lock.</summary>
    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+
+
+   /// <summary>
+   /// Wakes everything waiting for a change, such as freed capacity or changed readiness. A fresh signal is swapped in
+   /// under the state lock and the old one completed, so a waiter holding the old signal is released and a later arrival
+   /// waits for the next change instead of missing it.
+   /// </summary>
    private void SignalPipeline()
    {
       lock(_stateLock)
@@ -36,6 +51,13 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Long-running claim loop. At start it removes staging files a crash left behind, refusing reparse points. Each
+   /// wake-up then starts a wave of 16 drain lanes that share the work until the queue is empty or capacity is full. The
+   /// wave is cancelled when the connection is replaced, after which the loop waits for the next wake-up.
+   /// </summary>
    private async Task RealtimeDrainAsync(CancellationToken token)
    {
       string staging = Path.Combine(directory, "staging");
@@ -74,6 +96,14 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// One lane of a wave: acquire a download slot, then run the worker once to claim and process a single job with fresh
+   /// store and API objects. Realtime lanes neither recover journal leftovers nor resynchronize inventory, because the
+   /// runtime does that once. The first lane to find the queue empty marks the wave drained so the others stop claiming,
+   /// and a failing lane logs and ends without stopping the service.
+   /// </summary>
    private async Task DrainLaneAsync(string staging, PipelineWave wave, CancellationToken token)
    {
       while(!token.IsCancellationRequested && !_transitioning)
@@ -135,6 +165,12 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Waits for one of the configured concurrent download slots and returns a lease for it, or null when the wave has
+   /// drained or the runtime is transitioning. It waits on the pipeline signal, not a timer, and takes a slot only while ready.
+   /// </summary>
    private async Task<IAsyncDisposable?> AcquireDownloadLaneAsync(PipelineWave wave, CancellationToken token)
    {
       while(true)
@@ -155,11 +191,20 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>State shared by the lanes of one wave: set when a lane found no more work, read by the others so they stop claiming.</summary>
    private sealed class PipelineWave
    {
       public volatile bool Drained;
    }
 
+
+
+   /// <summary>
+   /// Shares one bandwidth limit across every download. Each chunk reserves the time it should take at the configured
+   /// rate on a single schedule, so the aggregate rate holds however many lanes download at once. A rate of zero means unlimited.
+   /// </summary>
    private Task ThrottleDownloadAsync(int bytes, CancellationToken token)
    {
       double delay;
@@ -175,6 +220,13 @@ public sealed partial class AgentRuntime
       return Task.Delay(TimeSpan.FromSeconds(delay), token);
    }
 
+
+
+   /// <summary>
+   /// Reserves staging space for a document before it is downloaded. It first waits for the previous job on the same
+   /// printer to have reserved, which keeps one printer's jobs in order. A document larger than its format limit or the whole
+   /// staging area is refused outright; otherwise the lane waits until enough space is free. The returned lease frees the bytes.
+   /// </summary>
    private async Task<IAsyncDisposable> ReserveDocumentAsync(PrintJob job, CancellationToken token)
    {
       JobTicket ticket;
@@ -202,6 +254,13 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Admits one job to native printing. It waits for the previous job on the same printer to complete, then for traffic
+   /// to be allowed, no update or transition, a free print slot and no other job printing on that queue. The lease frees
+   /// the slot and queue and records the job as no longer submitting.
+   /// </summary>
    private async Task<IAsyncDisposable> AcquireSubmissionAsync(PrintJob job, CancellationToken token)
    {
       Task predecessor;
@@ -230,6 +289,9 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>Links a new job behind the newest job for the same printer, so its reservation and completion wait for that one.</summary>
    private void RegisterTicket(PrintJob job)
    {
       _printerTails.TryGetValue(job.PrinterId, out JobTicket? previous);
@@ -238,6 +300,9 @@ public sealed partial class AgentRuntime
       _printerTails[job.PrinterId] = ticket;
    }
 
+
+
+   /// <summary>Releases both of the job's signals so its successor is never left waiting, and clears the printer's tail only when this job was still the newest.</summary>
    private void CompleteTicket(PrintJob job)
    {
       if(_jobTickets.Remove(job.JobId, out JobTicket? ticket))
@@ -249,15 +314,25 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>A job's place in its printer's order: the previous job's reservation and completion to wait for, and this job's own signals for its successor.</summary>
    private sealed record JobTicket(Task PreviousReservation, Task PreviousCompletion)
    {
       public TaskCompletionSource Reserved { get; } = NewSignal();
       public TaskCompletionSource Completed { get; } = NewSignal();
    }
 
+
+
+   /// <summary>Runs its release action exactly once however many times it is disposed, so a normal path and an error path cannot double-count a freed resource.</summary>
    private sealed class PipelineLease(Action release) : IAsyncDisposable
    {
       private Action? _release = release;
+
+
+
+      /// <summary>Atomically takes the release action and runs it; later calls do nothing.</summary>
       public ValueTask DisposeAsync()
       {
          Interlocked.Exchange(ref _release, null)?.Invoke();

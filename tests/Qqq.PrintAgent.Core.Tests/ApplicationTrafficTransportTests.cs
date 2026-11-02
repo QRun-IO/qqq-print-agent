@@ -15,8 +15,18 @@ using Qqq.PrintAgent.Testing;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
+/// <summary>
+/// The traffic counter shown in the footer must count real application payload bytes as they move, not buffered or queued data
+/// and not protocol overhead. These tests drive a document download and a WebSocket exchange through the real clients and compare
+/// the counter with exact byte counts.
+/// </summary>
 public sealed class ApplicationTrafficTransportTests
 {
+   /// <summary>
+   /// A document download counts bytes as each chunk is read: while the stream is paused only the first 1,024 bytes are counted,
+   /// not the unread remainder, and cancelling leaves that count and an empty staging folder. A completed download counts the full
+   /// length, and uploads never change during the download.
+   /// </summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]
@@ -67,6 +77,13 @@ public sealed class ApplicationTrafficTransportTests
       }
    }
 
+
+
+   /// <summary>
+   /// Over a WebSocket, nothing is counted when a frame is merely queued or during the handshake; an outbound message is counted
+   /// once actually sent, at its exact UTF-8 size. An inbound message split across two frames, with a multi-byte character, is
+   /// counted once at its full byte length.
+   /// </summary>
    [Fact]
    public async Task WebSocketCountsSentAndFragmentedUtf8PayloadsWithoutCountingQueuedFramesOrHandshake()
    {
@@ -108,10 +125,17 @@ public sealed class ApplicationTrafficTransportTests
       }
    }
 
+
+
+   /// <summary>Fake native QQQ server that tallies request-body and JSON-response bytes itself, giving the test an independent total to compare with the meter, and serves the supplied document stream for content requests.</summary>
    private sealed class NativeHandler(Stream document) : HttpMessageHandler
    {
       internal long Uploaded { get; private set; }
       internal long Downloaded { get; private set; }
+
+
+
+      /// <summary>Adds the request body to the upload tally, serves discovery, login and identity JSON (adding its size to the download tally), or returns the document body.</summary>
       protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          if(request.Content is not null)
@@ -135,11 +159,22 @@ public sealed class ApplicationTrafficTransportTests
       }
    }
 
+
+
+   /// <summary>A forward-only document body delivered in 1,024-byte reads that pauses after the first chunk until released, so a test can inspect the counter mid-download.</summary>
    private sealed class PausedDocument(byte[] bytes) : MemoryStream(bytes)
    {
       internal TaskCompletionSource Paused { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
       internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>Not seekable, as a network body is not.</summary>
       public override bool CanSeek => false;
+
+
+
+      /// <summary>Reads at most 1,024 bytes; after the first 1,024 it signals the pause and waits for release before continuing.</summary>
       public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
       {
          if(Position >= 1024)

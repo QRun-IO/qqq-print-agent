@@ -10,8 +10,10 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Starting up when the saved device proof is damaged: the service must still come up and answer on its management pipe so the operator can repair it, while the damaged file and the job history stay untouched.</summary>
 public sealed class AgentRealtimeRecoveryTests
 {
+   /// <summary>With an unreadable device proof file the runtime keeps running and serves a snapshot reporting "not enrolled, not connected", leaves the damaged bytes as they are, and after the original file is restored the job journal and shared printers are intact, so a recoverable fault never costs the history.</summary>
    [Fact]
    public async Task UnreadableOldProofStillStartsManagementPipeAndPreservesOriginalJournal()
    {

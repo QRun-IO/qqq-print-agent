@@ -13,6 +13,9 @@ public sealed class QqqAuthenticationMetadata
    public string Type { get; init; } = "";
    public ProviderValues? Values { get; init; }
 
+
+
+   /// <summary>The provider settings the server publishes: client identifier, scopes, base address and, when the server supports it, the native browser sign-in grant.</summary>
    public sealed class ProviderValues
    {
       public string ClientId { get; init; } = "";
@@ -21,6 +24,9 @@ public sealed class QqqAuthenticationMetadata
       public NativeGrant? NativeSessionLogin { get; init; }
    }
 
+
+
+   /// <summary>The server's declaration that a native app may sign a user in through the browser with PKCE and receive a server-managed session: flow name, challenge method, prompt, issuer, discovery address and the approved redirect addresses.</summary>
    public sealed class NativeGrant
    {
       public string Flow { get; init; } = "";

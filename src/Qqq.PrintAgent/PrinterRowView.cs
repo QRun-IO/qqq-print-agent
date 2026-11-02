@@ -27,6 +27,13 @@ internal sealed class PrinterRowView : Grid
    internal PrinterSnapshot? Snapshot { get; private set; }
    internal CheckBox Exposure { get; } = new() { VerticalAlignment = VerticalAlignment.Center };
 
+
+
+   /// <summary>
+   /// Builds a printer row once and reuses it across refreshes, so focus and selection survive. It lays out the name,
+   /// status, location, formats and the share checkbox in five columns; the callbacks come from the window, and each reads
+   /// the row's current snapshot when invoked, so the row never acts on a printer it no longer shows.
+   /// </summary>
    internal PrinterRowView(Func<PrinterSnapshot, bool, Task> exposure, Func<PrinterSnapshot, Task> settings, Func<PrinterSnapshot, Task> test, Action<PrinterRowView> toggle)
    {
       ColumnSpacing = 12;
@@ -51,6 +58,9 @@ internal sealed class PrinterRowView : Grid
       InitializeDetails(settings, test);
    }
 
+
+
+   /// <summary>Builds the first cell: the disclosure button beside the printer name, so expanding details is available from the keyboard and by pointer.</summary>
    private Grid NameCell()
    {
       Grid name = new() { ColumnSpacing = 4 };
@@ -62,6 +72,9 @@ internal sealed class PrinterRowView : Grid
       return name;
    }
 
+
+
+   /// <summary>Creates the expandable area with the Settings and Print test actions above the read-only printer details; both actions use the row's current snapshot.</summary>
    private void InitializeDetails(Func<PrinterSnapshot, Task> settings, Func<PrinterSnapshot, Task> test)
    {
       _settings.Command = new AsyncRelayCommand(() => Snapshot is PrinterSnapshot printer ? settings(printer) : Task.CompletedTask);
@@ -78,6 +91,13 @@ internal sealed class PrinterRowView : Grid
       Children.Add(_details);
    }
 
+
+
+   /// <summary>
+   /// Applies a refreshed snapshot in place: the friendly name falls back to the Windows queue name, the status and
+   /// formats are shown as text (never color alone), the share checkbox follows the service, and tooltips carry the full
+   /// values and the unattended-printing explanation. The expanded or collapsed state is preserved.
+   /// </summary>
    internal void Update(PrinterSnapshot printer, string status, bool busy)
    {
       Snapshot = printer;
@@ -94,6 +114,12 @@ internal sealed class PrinterRowView : Grid
       SetSelected(_details.Visibility == Visibility.Visible);
    }
 
+
+
+   /// <summary>
+   /// Enables sharing only for a printer that supports unattended printing (or one already shared, so it can be turned off),
+   /// and the test print only for a shared printer that has a format. Everything is disabled while a request is running.
+   /// </summary>
    internal void SetBusy(bool busy)
    {
       Exposure.IsEnabled = !busy && Snapshot is PrinterSnapshot printer && (printer.Formats.Length > 0 || printer.Exposed);
@@ -101,6 +127,9 @@ internal sealed class PrinterRowView : Grid
       _test.IsEnabled = !busy && Snapshot is { Exposed: true } selected && selected.Formats.Length > 0;
    }
 
+
+
+   /// <summary>Expands or collapses the inline details and keeps the disclosure button's glyph, accessible name, status and tooltip in step with that state.</summary>
    internal void SetSelected(bool selected)
    {
       _details.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
@@ -111,11 +140,23 @@ internal sealed class PrinterRowView : Grid
       ToolTipService.SetToolTip(_disclosure, $"{action} printer details");
    }
 
+
+
+   /// <summary>
+   /// The status word shown for a printer. A printer with no usable format cannot print unattended, so it reads "Offline" when
+   /// the spooler says so and otherwise "Interactive only" instead of a misleading ready state.
+   /// </summary>
    internal static string StatusLabel(PrinterSnapshot printer) => printer.Formats.Length > 0 ? JobLabels.Status(printer.Status)
       : string.Equals(printer.Status, "OFFLINE", StringComparison.Ordinal) ? "Offline" : "Interactive only";
 
+
+
+   /// <summary>Creates one single-line, centered, ellipsized text cell.</summary>
    private static TextBlock Cell() => new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 };
 
+
+
+   /// <summary>Sets a cell's text and its tooltip together, so a value cut off by ellipsis can still be read in full.</summary>
    private static void SetCell(TextBlock cell, string text)
    {
       cell.Text = text;

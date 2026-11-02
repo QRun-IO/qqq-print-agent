@@ -9,8 +9,17 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Realtime housekeeping part of the runtime: liveness pings, inventory publishing, delivery of receipts that were
+/// recorded locally, execution of server commands, and the bounds on queued inbound frames. None of it polls for jobs.
+/// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>
+   /// Keeps the connection visibly alive while it is ready: a transport ping every interval, a heartbeat with the computer
+   /// profile only when ordinary traffic is allowed (a paused or disconnected device pings but does not claim to be working),
+   /// session renewal when it is due, and a status refresh request so the footer stays current.
+   /// </summary>
    private async Task RealtimeHeartbeatAsync(PrintingRealtimeChannel channel, CancellationToken token)
    {
       while(!token.IsCancellationRequested)
@@ -31,6 +40,13 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Publishes the exposed printers whenever they change, and delivers pending receipts. It waits for a status request
+   /// rather than a timer, sends inventory only when the serialized list differs from the last one sent, re-checks that traffic
+   /// is still allowed before sending, and marks inventory ready (which lets claims start) only after the server accepted it.
+   /// </summary>
    private async Task RealtimeSynchronizeAsync(CancellationToken token)
    {
       string? previousInventory = null;
@@ -66,6 +82,12 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Redelivers receipts that were recorded but not yet acknowledged: job events first, then control receipts, each under its
+   /// own gate so the same receipt is never sent twice at once. An event is marked delivered only after the server accepted it.
+   /// </summary>
    private async Task ReconcileRealtimeReceiptsAsync(AgentStore store, CancellationToken token)
    {
       AgentConfiguration? configuration = store.LoadConfiguration();
@@ -88,6 +110,13 @@ public sealed partial class AgentRuntime
       finally { _controlExecutionGate.Release(); }
    }
 
+
+
+   /// <summary>
+   /// Runs server commands one at a time in arrival order. Each waits until the connection is ready, executes under the control
+   /// gate with the server's clock offset applied to its expiry, and has its receipt delivered straight afterwards. The command's
+   /// inbound-queue reservation is released as soon as it is taken off the queue.
+   /// </summary>
    private async Task RealtimeCommandsAsync(ChannelReader<RealtimeEnvelope> commands, CancellationToken token)
    {
       await foreach(RealtimeEnvelope envelope in commands.ReadAllAsync(token).ConfigureAwait(false))
@@ -120,18 +149,27 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>Asks the synchronizer to run once. The single-slot semaphore coalesces repeated requests, so a burst of events causes one pass.</summary>
    private void RequestStatusSynchronization()
    {
       lock(_stateLock)
       { if(_statusRequested.CurrentCount == 0) { _statusRequested.Release(); } }
    }
 
+
+
+   /// <summary>Asks the queued-job preview to refresh once, coalescing repeated requests the same way.</summary>
    private void RequestQueueRefresh()
    {
       lock(_stateLock)
       { if(_queueRefreshRequested.CurrentCount == 0) { _queueRefreshRequested.Release(); } }
    }
 
+
+
+   /// <summary>Counts an inbound frame against the queued-bytes and queued-frames limits from the server's settings and throws when either is exceeded, which closes the connection instead of letting memory grow without bound.</summary>
    private void ReserveInbound(RealtimeEnvelope envelope)
    {
       if(Interlocked.Add(ref _inboundBytes, envelope.WireLength) > _realtimeSettings.MaxQueuedFrameBytes
@@ -141,6 +179,9 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>Returns a frame's bytes and slot to the inbound limits once it has been taken off its queue.</summary>
    private void ReleaseInbound(RealtimeEnvelope envelope)
    {
       Interlocked.Add(ref _inboundBytes, -envelope.WireLength);

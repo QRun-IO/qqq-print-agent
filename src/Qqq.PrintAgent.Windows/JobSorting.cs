@@ -13,12 +13,21 @@ internal static class JobSorting
 {
    internal static readonly string[] Fields = ["createdAt", "title", "printerName", "status", "format"];
 
+
+
+   /// <summary>Builds the ORDER BY text for a page query from a whitelisted column plus the job identifier as a tie-break, in the same direction, so equal rows keep a stable order across pages. Only whitelisted names reach the SQL.</summary>
    public static string SqlOrder(JobQuery query)
    {
       string direction = query.Descending ? " DESC" : " ASC";
       return SqlColumn(query.SortBy) + " COLLATE NOCASE" + direction + ",job_id COLLATE BINARY" + direction;
    }
 
+
+
+   /// <summary>
+   /// Maps a sort field name to the SQL expression for it, rejecting any other name. The status expression reproduces the
+   /// labels people see (including the reviewed suffix), so sorting by status orders by what is displayed rather than by the stored state word.
+   /// </summary>
    internal static string SqlColumn(string field) => field switch
    {
       "createdAt" => "created_at",
@@ -29,6 +38,9 @@ internal static class JobSorting
       _ => throw new ArgumentException("Unknown job sort field.", nameof(field)),
    };
 
+
+
+   /// <summary>Orders two in-memory jobs the way the SQL order does (same field, same byte-wise folding, job identifier as tie-break), so the cloud queue preview merges into local history in one consistent order.</summary>
    public static int Compare(JobSnapshot left, JobSnapshot right, JobQuery query)
    {
       int comparison = CompareText(Value(left, query.SortBy), Value(right, query.SortBy), noCase: true);
@@ -39,10 +51,16 @@ internal static class JobSorting
       return query.Descending ? -comparison : comparison;
    }
 
+
+
+   /// <summary>Converts a server timestamp to UTC round-trip form so creation times from different sources sort as text; an unparsable value becomes null (unknown) rather than an invented date.</summary>
    public static string? NormalizeCreatedAt(string? value)
       => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset instant)
          ? instant.ToString("O", CultureInfo.InvariantCulture) : null;
 
+
+
+   /// <summary>Tests whether a value starts with a prefix using the same ASCII-only case folding as the SQLite index, so the in-memory preview and the database agree on what matches.</summary>
    public static bool MatchesPrefix(string? value, string prefix)
    {
       if(value is null)
@@ -65,6 +83,9 @@ internal static class JobSorting
       return true;
    }
 
+
+
+   /// <summary>Reads the field a job is sorted by, using the same fallbacks the SQL expressions use (title or identifier, printer name or identifier, displayed status), so the two orders cannot drift apart.</summary>
    private static string? Value(JobSnapshot job, string sortBy) => sortBy switch
    {
       "createdAt" => job.CreatedAt,
@@ -75,6 +96,9 @@ internal static class JobSorting
       _ => throw new ArgumentException("Unknown job sort field.", nameof(sortBy)),
    };
 
+
+
+   /// <summary>Compares two strings byte by byte in UTF-8, optionally folding ASCII letters, with a missing value sorting first and the shorter string first on a tie, which is how the SQLite collation orders text.</summary>
    // SQLite's built-in NOCASE folds ASCII only and compares UTF-8 bytes. .NET's
    // OrdinalIgnoreCase folds additional Unicode characters and orders UTF-16 instead.
    private static int CompareText(string? left, string? right, bool noCase)
@@ -103,5 +127,8 @@ internal static class JobSorting
       return leftBytes.Length.CompareTo(rightBytes.Length);
    }
 
+
+
+   /// <summary>Lowercases one ASCII letter byte and leaves every other byte alone, matching SQLite's NOCASE, which never folds non-ASCII characters.</summary>
    private static byte FoldAscii(byte value) => value is >= (byte)'A' and <= (byte)'Z' ? (byte)(value + 32) : value;
 }

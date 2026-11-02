@@ -1,5 +1,33 @@
 # TODO
 
+## Stable 1.0 closeout — 2026-11-02
+
+Active stable-release work is only the two open items below. Every other unchecked item in this file is historical or unscheduled backlog, not a stable-1.0 blocker.
+
+- [x] Official 0.4.0-rc.4 installed (all three components); normal MSI upgrade exit 0 and the service Running.
+- [x] Clean hosted Windows CI run 41442796961 on source `53fe1b8281806eda7adc314f92c8205aefcb51ce`: 499 tests (166 Core + 333 CLI), zero failures and skips; build and MSI zero warnings and errors. Core.Tests is never built locally; this hosted pass is its evidence. (Earlier run 41384467500 on `b5eb5d73` is historical.)
+- [x] Stable signing implemented (workflow, `Sign-Release.ps1`, packaging). All 19 first-party binary copies of an installed RC4 payload, including `Cli/qqq-print-agent.dll`, and a disposable official RC4 MSI were Azure-signed and strictly verified; this is a local administrator proof and the new CI OIDC identity is not yet exercised. Installed and published remains RC4; no new stable tag.
+- [x] Primary Gitea feed and public feed carry all three prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1); nine assets checked and provenance verified.
+- [x] Physical 4 × 1 passed by the operator on RC3 (same relevant printing runtime); 4 × 6 and Letter accepted earlier. Physical 4 × 2 is deferred by the operator and is not a stable blocker.
+- [x] Source-header inventory (289 tracked files, 231 C#) reported zero issues.
+- [ ] Windows release branch (Gitea PR 2): normal protected merge, awaiting the central native 1725 repair for Windows ACL and file sharing on Linux.
+- [ ] Supported, published QQQ core with native session login (the last official release, RC20, does not have it); stable tag publication, including the first CI OIDC signing run, follows it.
+- Accepted known limitation (user decision 2026-11-02, not a blocker, not fixed): the post-print native UI layout exception; see the historical entries below.
+- Cancelled by the user, do not resume: repeat Auth/S3 qualification, the latency investigation and MSI comparison analysis.
+
+## Historical rc.3 status (superseded by rc.4 and the closeout above)
+
+- [x] Implement ordered numeric FileVersion (rc.N revision N, stable 65535) in packaging; source `e10d251`, packaging-input checks and rc.3 production packaging passed (all payloads `0.4.0.3`, `0.4.0-rc.3+e10d251`).
+- [x] Complete the local rc.3 installation: normal MSI upgrade exit 0; app, service and CLI match rc.3 and numeric file version `0.4.0.3`, with no repair required.
+- [x] Confirm the 4 × 1 label prints correctly after media alignment; operator reports it printed perfectly.
+- [ ] Physical 4 × 2 test deferred by the operator, who chose to keep 4 × 1 loaded. The test option is implemented; do not send another label until requested. Not a stable blocker.
+- [x] Gitea release artifact and update feed: published for rc.4 (see the closeout above). Shared Windows CI remains the active protected-merge item; no GA claim. Core.Tests is not run on this host (including Gitea runner 6).
+
+## Script quality gates
+
+- [x] Pin Ruff, strict Pyright, ESLint/Stylistic and strict checkJs with locked restores; reject untracked-scope Python/JavaScript and zero-file Pyright runs; negative tool probes pass locally; virtual-agent Downloads/identity behavior preserved.
+- [ ] Observe the new `virtual-agent` job steps pass on hosted CI before relying on them.
+
 ## Candidate Echo printer media
 
 - [x] Discover truthful machine-default dimensions/DPI and expose an opaque, revision-bound profile.
@@ -7,9 +35,13 @@
 - [x] Normalize supported job-only driver copies/scale and verify effective DC dimensions/DPI before StartDoc (24 focused Windows tests plus read-only actual driver/DC probe).
 - [x] Verify synthetic 4 × 1 / 4 × 2 / 4 × 6 profiles, driver-private drift, unknown DPI and isolated-worker refusal.
 - [x] Verify configured 4 × 6 / 300 DPI fingerprint stability across three read-only helper launches.
-- [ ] Resolve the local Core test-assembly quarantine through the normal security review; obtain a complete clean gate without disabling protections.
+- [x] Complete the C# source standards cleanup (how/why headers and structural spacing) and merge it with the short-label change; token-compared as comment/blank-line only per batch.
+- [x] Merged integration tree: production UI build (strict, 0 warnings) and the 35 existing paper/media tests passed locally (R39).
+- [x] Hosted CI passed (499 tests, run 41384467500), the label implementation is installed in rc.4, and the 4 × 1 stock printed correctly (4 × 2 deferred, not a blocker). Earlier text here said "not installed yet"; that is historical.
+- [x] Local Core test-assembly quarantine: not pursued. Core.Tests is never built locally; the clean hosted pass is the evidence and no protection was disabled.
 - [ ] Qualify the matching server/consumer catalog, immutable selection and authorized retained-document submission.
 - [ ] Perform separately authorized installed/profile-selected physical acceptance; available alternative stock is not current queue configuration.
+
 ## Query in About
 
 - [x] Place the official mascot and dogfooding/Query links directly below the
@@ -29,7 +61,7 @@
 - [ ] Qualify the installed Windows browser/private callback against a compatible published QQQ runtime and configured HTTPS provider; the container HTTPS callback does not establish this installed flow.
 - [x] Publish and verify all three 0.3.0-rc.1 releases; install the matched local server/client and verify retained state and service restart recovery.
 - [x] Capture the operator's post-print LayoutCycleException and recover only the companion; retain existing print receipts.
-- [ ] Reproduce and fix the native post-print layout cycle with a nonprinting host and verify the actual dialog/action/refresh path.
+- [ ] Native post-print layout cycle: reproduce and fix with a nonprinting host. **Accepted known limitation for 1.0 (user decision 2026-11-02): not fixed and not a blocker.** Left unchecked as history.
 - [x] Verify actual native fatal-layout exception logging, handler order and natural diagnostic termination; keep this mitigation distinct from fixing the original trigger.
 - [x] Accept scheduler-normalized account names only when they resolve to the exact expected startup SID; verify rejection of other identities and the unchanged actual task.
 - [x] Show explicit WebSocket state, server endpoint, live upload/download rates and service-lifetime application-traffic totals in the footer; verify actual native presentation with synthetic traffic.

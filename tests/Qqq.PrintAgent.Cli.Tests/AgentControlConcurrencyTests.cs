@@ -8,8 +8,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Control polling and printing run side by side: a server disconnect or reconnect instruction must be applied while a print is still in progress, without interrupting that print.</summary>
 public sealed class AgentControlConcurrencyTests
 {
+   /// <summary>
+   /// With a print blocked inside the spooler, the server marks the device disconnected: control polls continue and the new state
+   /// is applied, heartbeats stop (no normal traffic while disconnected) and no further claim is made, yet the blocked job stays
+   /// SUBMITTING. Reconnecting restores normal state, and when the print is released the job completes as SPOOLED.
+   /// </summary>
    [Fact]
    public async Task RemoteDisconnectAndReconnectDoNotInterruptBlockedPrintOrControlPolling()
    {
@@ -45,6 +51,9 @@ public sealed class AgentControlConcurrencyTests
       }
    }
 
+
+
+   /// <summary>Polls a condition every 10 ms until it holds; the caller's token supplies the overall deadline.</summary>
    private static async Task UntilAsync(Func<bool> condition, CancellationToken token)
    {
       while(!condition())

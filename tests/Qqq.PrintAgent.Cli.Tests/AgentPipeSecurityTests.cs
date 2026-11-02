@@ -10,8 +10,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Security properties of the local management pipe and the startup task definition: administrators may connect but not create a competing server instance, a client refuses to talk to an impostor server, and the task file cannot be swapped while it is being read.</summary>
 public sealed class AgentPipeSecurityTests
 {
+   /// <summary>
+   /// The pipe's access list gives Administrators read/write but never the right to create a new server instance, so only the
+   /// service can host the pipe. With that access list a client connects twice in a row, and once a server instance exists a second
+   /// attempt to create one is refused, which stops another process from taking over the pipe name.
+   /// </summary>
    [Fact]
    public async Task ExplicitClientRightsConnectWithoutPermissionToCreateServerInstances()
    {
@@ -42,6 +48,9 @@ public sealed class AgentPipeSecurityTests
       }
    }
 
+
+
+   /// <summary>When the process serving the pipe is not the installed service, the client aborts and sends nothing: the substitute server sees the connection but reads zero request bytes, so an enrollment code or other command is never handed to an impostor.</summary>
    [Theory]
    [InlineData("enroll")]
    [InlineData("snapshot")]
@@ -58,6 +67,9 @@ public sealed class AgentPipeSecurityTests
       Assert.Equal(0, await fake.ReadAsync(buffer, timeout.Token));
    }
 
+
+
+   /// <summary>While the startup task definition is held open for the scheduler, it can still be read but not rewritten, deleted or moved, so the definition that was validated is the one Windows registers; once released the file is unchanged.</summary>
    [Fact]
    public void StartupDefinitionCannotBeReplacedWhileSchedulerReadsIt()
    {

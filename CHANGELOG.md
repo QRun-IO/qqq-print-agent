@@ -1,30 +1,76 @@
 # Changelog
 
-## 0.4.0-rc.1 — unreleased candidate
+## 1.0.0
 
-Not tagged, not installed. Upgrade the server first: selected-media jobs require
+Product version 1.0.0 for the same cohort as 0.4.0-rc.4. A stable `v1.0.0` tag runs the
+release workflow: after every existing gate it signs the service, companion and CLI binaries
+and then the MSI with Azure Artifact Signing, verifies the exact publisher, and publishes a
+non-prerelease with checksums and provenance generated after signing (see
+docs/RELEASE-SIGNING.md). The numeric file version is `1.0.0.65535`, above every earlier
+candidate, so the updater offers it over an installed 0.4.0-rc.4. Native printing stays 2.3
+with wire payload v1; 1.0 is not a wire change. No code or dependency change comes with the
+version. Physical acceptance covers 4 × 6, Letter and 4 × 1; 4 × 2 is deferred.
+
+## 0.4.0-rc.4 — unsigned prerelease candidate
+
+Release identity only: rc.4 is strictly newer than the local, unpublished 0.4.0-rc.3
+build and ships the same cohort, so the updater accepts it over an installed rc.3. The
+MSI ProductVersion and `VersionPrefix` stay 0.4.0; `VersionSuffix` and the packaging
+defaults move to `rc.4`, and the ordered numeric file version becomes `0.4.0.4`. There is
+no code, test or dependency change. Everything described under rc.3 below (media
+selection, 4 × 2 and 4 × 1 test labels, phase-timing log, ordered file version) applies.
+The rc.4 head is version metadata and docs on top of pre-release product source
+`5c2bfc9`, whose full hosted CI run 41381287355 passed 499 tests (166 Core + 333 CLI) with
+zero warnings and errors. rc.4 itself is not yet tested or published; its tag pipeline
+must pass all gates afresh before publication. Earlier operator acceptance covers 4 × 6
+and Letter output, and the 4 × 1 layout was confirmed on the local rc.3 build of the same
+product code; 4 × 2 is deferred. The MSI is unsigned and no GA or 1.0 readiness is
+claimed.
+
+## 0.4.0-rc.3 — local candidate (superseded by rc.4)
+
+Release identity: this is a strictly newer semantic version than 0.4.0-rc.1 and
+0.4.0-rc.2 with the same numeric core, so the MSI ProductVersion (0.4.0) and
+`VersionPrefix` are unchanged, `VersionSuffix` and the packaging defaults move to `rc.3`,
+and the updater (which needs a strictly newer version) and the installer's same-version
+upgrade support both accept it. The rc.2 MSI was installed, but Windows Installer skipped
+its executables because rc.1 and rc.2 shared the numeric file version 0.4.0.0 ("existing
+file is of an equal version"). Packaging now stamps each executable with an ordered
+numeric file version: `X.Y.Z-rc.N` becomes `X.Y.Z.N` (N 1..65534) and stable `X.Y.Z`
+becomes `X.Y.Z.65535`, and any other prerelease label is refused. Future upgrades replace
+files automatically. No behavior, dependency or lock change otherwise. The protocol
+package `0.4.0rc1` is an independent wire-compatibility version and is unchanged. Older
+notes below that name 0.4.0-rc.1 or rc.2 describe the same cohort.
+
+This cohort goes beyond the older installed CI 0.4.0-rc.1 build. The rc.3 candidate
+was built and installed locally with a normal MSI upgrade (exit 0), matching all three
+components; no repair was needed. It is not publicly released or tagged. Hosted Windows
+CI and the update-feed handoff await the migration owner.
+Upgrade the server first: selected-media jobs require
 printing extension 2.3.0 (wire payload v1 unchanged). Against a 2.0, 2.1 or 2.2
 (rendering) server the client keeps its three-capability HELLO and offers no media
 profiles, so existing behavior is unchanged.
 
+- Add 4 × 1 and 4 × 2 in test labels (ZPL at 203/300/600 dpi, one PDF choice each) to the existing Print test choices; the 4 × 6 choices and defaults are unchanged. These PDFs carry explicit actual-size job paper (101.6 × 25.4 / 50.8 mm) applied to a job-local copy of the queue defaults (so its Direct Thermal and other settings are kept) and checked against the device context before StartDoc. Needs the matching unreleased 0.4 server; older clients reject job paper. Load the correct stock first; nothing prints until the operator confirms.
 - Report each queue's machine-default paper dimensions and resolution as an opaque, revision-bound media profile, and advertise `printer-media-v1` only when the discovered server supports it. Defaults are configured facts, not physical stock sensing.
 - Refuse a selected-media job before spooling when the profile is unknown or its revision has drifted, and again at the native submission boundary. A proven pre-submit refusal is recorded as FAILED and is never treated as an uncertain outcome.
 - Normalize job-only driver copies and scale for selected PDFs and verify the effective device-context dimensions and resolution before StartDoc. ZPL (RAW) only rechecks the profile immediately before StartDocPrinter.
 - Log one phase-timing line per processed job (inventory, claim and receipt, download, revalidation, submit gate, native submit) with the job identifier only, to attribute print latency from the service log. No new request, payload or printer access.
-- Pin the printing protocol to the reviewed media contract (`a26c18c9…`). Later protocol compatibility documentation is an unmerged draft and changes no pin.
+- Pin the printing protocol to the final reviewed contract, commit `42c0d249f81395f00408ec0f92638dcbbf5deb03` ([Gitea PR 2](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/2)), in `.github/workflows/ci.yml`; native printing stays 2.3 with wire payload v1. The earlier pin `a26c18c9…` is historical.
 - Split `PrintWorker` job processing into named submission, revalidation, dispatch-gate and native-submit steps (analyzer MA0051 rejected the first form of the timing instrumentation). Behavior, state order and lease release are unchanged.
+- Document every type, method, constructor and non-auto property with how/why headers and apply the `.editorconfig` structural spacing. Each batch was token-compared as comment and blank-line only.
 
-Observed so far, all local: after the extraction the focused negotiation/runtime run
-passed 16 of 16 with no warnings or analyzer errors, and a token comparison against
-the merge base showed only the four intended semantic files changed. The hosted gate
-on the earlier PR head 35ed93c (154 Core, 317 CLI/Windows, zero warnings) is
-historical: that head predates protected main's changes, the timing line and the
-printing 2.3 negotiation, so the final candidate head needs its own hosted gate, which
-has not run. The local Core test assembly remains blocked by a Defender quarantine
-and was not rebuilt; hosted results will not clear that detection. Installer and
-upgrade preservation, profile-selected physical output, and installed
-browser/private-callback acceptance against a published API 1.9+ server are not yet
-qualified. No 1.0 claim.
+Evidence: this cohort includes changes beyond the installed CI 0.4 build, and the
+latest release head is neither installed nor tagged. On the merged integration tree the
+local gate passed: the production UI build under strict XML and analyzers with zero
+warnings, and the 35 existing paper/media tests; the server's strict full verify (R31)
+also passed. Core.Tests is not built locally
+because of a Defender quarantine and is verified only on hosted CI. The prior protected
+base `0336d5f` had 477 hosted tests; this source head still needs a normal Gitea
+Core, CLI and build run. The earlier PR-head result (35ed93c) is historical. The
+existing Auth/S3 qualification is accepted and no new desktop or provider proof is
+claimed. Still pending: hosted CI, installation of the new label implementation, and
+a small-stock paper test. No 1.0 claim.
 
 ## 0.3.2-rc.1 — 2026-11-01
 

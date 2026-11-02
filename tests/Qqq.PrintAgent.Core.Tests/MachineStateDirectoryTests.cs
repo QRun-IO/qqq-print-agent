@@ -9,9 +9,11 @@ using System.Security.Principal;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
+/// <summary>The protected machine data folder holds credentials and the job journal, so its permissions are checked strictly before the service uses it, and a bad folder is reported without being "fixed" behind the owner's back.</summary>
 [SupportedOSPlatform("windows")]
 public sealed class MachineStateDirectoryTests
 {
+   /// <summary>The folder is acceptable only if SYSTEM or Administrators own it and nobody else has any access that could be inherited by files inside; an ordinary-user owner, an inherit-only write grant, read access for users, or no access list at all is rejected.</summary>
    [Theory]
    [InlineData("O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", true)]
    [InlineData("O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", true)]
@@ -33,6 +35,9 @@ public sealed class MachineStateDirectoryTests
       }
    }
 
+
+
+   /// <summary>A pre-existing folder that gives the Users group read access is refused, and the check leaves the folder's permissions exactly as they were, so validation never silently rewrites an administrator's security settings.</summary>
    [Fact]
    public void UntrustedExistingDirectoryIsRejectedWithoutChangingItsPermissions()
    {

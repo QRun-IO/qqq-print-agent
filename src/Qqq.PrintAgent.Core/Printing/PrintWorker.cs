@@ -9,6 +9,14 @@ namespace Qqq.PrintAgent.Core.Printing;
 public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null,
    Func<bool>? canDispatch = null, Func<bool>? canSynchronize = null, PrintWorkerOptions? options = null)
 {
+   /// <summary>
+   /// One pass of the claim loop. It first reports work a previous run left half-done and drains the durable event
+   /// outbox, because the server never re-claims those jobs and an unreported outcome would stay invisible. Only when
+   /// nothing is pending, dispatch is allowed and the connection is synchronized does it discover printers and claim at
+   /// most one job. Returns true when a job was spooled, or, when recovery is switched off (realtime lanes, where the
+   /// runtime recovers once and each lane only drains), whenever a claimed job was processed whatever its outcome so
+   /// the lane keeps draining; false when idle, paused, blocked, or the claimed job was already final.
+   /// </summary>
    public async Task<bool> RunOnceAsync(CancellationToken token = default)
    {
       // A recovered job must be reported even when the server never claims it again.
@@ -54,6 +62,14 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       finally { options?.ActiveJobChanged?.Invoke(null); }
    }
 
+
+
+   /// <summary>
+   /// Claims one job under the shared claim gate and registers it locally before anything else can happen to it. The
+   /// server keeps replaying CLAIMED until RECEIVED commits, so admission is serialized through that acknowledgement; if
+   /// it is interrupted the job is recorded FAILED with no bytes submitted. A job the journal already holds in a final
+   /// state is dropped here so a replayed claim can never print twice.
+   /// </summary>
    private async Task<PrintJob?> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
       if(options?.ClaimGate is not null)
@@ -88,6 +104,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       finally { options?.ClaimGate?.Release(); }
    }
 
+
+
    /// <summary>
    /// Runs one claimed job and reports its outcome. The submission steps live in <see cref="SubmitJobAsync"/> so their
    /// disposal scope stays inside this method's try block, which keeps every failure, including one raised while
@@ -118,6 +136,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       { await FlushAsync(token).ConfigureAwait(false); }
       return attempt.Spooled || options?.RecoverIncomplete == false;
    }
+
+
 
    /// <summary>
    /// Downloads, revalidates and submits one job. The reservation, staged file and submission lease are declared here and
@@ -155,6 +175,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       attempt.Spooled = true;
    }
 
+
+
    /// <summary>
    /// Discovers the printers again after the download and requires the assigned queue to still offer the job's format and
    /// the selected media profile, so a queue or driver default that changed while the document streamed is refused before
@@ -170,6 +192,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       PrinterMediaProfile.RequireMatch(job.Options, currentPrinter.MediaProfiles);
    }
 
+
+
    /// <summary>
    /// Refuses the submission when dispatch is paused or stopped. It is checked before and after the SUBMITTING receipt is
    /// acknowledged, because a pause can arrive while that acknowledgement is in flight and no bytes may be sent after it.
@@ -179,6 +203,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       if((options?.CanSubmit ?? canDispatch)?.Invoke() == false)
       { throw new InvalidOperationException(refusal); }
    }
+
+
 
    /// <summary>
    /// Hands the verified staged file, or the in-memory content for a backend without file support, to the native printer
@@ -191,19 +217,41 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          : printers.PrintAsync(job, content ?? throw new InvalidOperationException("File printing is required."), token);
    }
 
+
+
+   /// <summary>
+   /// The limits in force right now. A live callback wins over the snapshot taken at construction so an administrator's
+   /// policy change reaches a job that is already past its first check; defaults apply when no settings were supplied.
+   /// </summary>
    private RealtimeSettings EffectiveSettings => options?.CurrentSettings?.Invoke() ?? options?.Settings ?? new();
 
+
+
+   /// <summary>Records a state transition for a claimed job, delegating to the identifier overload.</summary>
    private void Record(PrintJob job, string state, string? message = null, string? spoolerJobId = null)
    {
       Record(job.JobId, state, message, spoolerJobId);
    }
 
+
+
+   /// <summary>
+   /// Writes the event to the durable journal first and only then to the log. The journal row is what survives a crash
+   /// and is later delivered to the server, so a state is never reported before it is recorded locally.
+   /// </summary>
    private void Record(string jobId, string state, string? message = null, string? spoolerJobId = null)
    {
       journal.Record(jobId, new PrintEvent(Guid.NewGuid().ToString("N"), state, message, spoolerJobId));
       log?.Invoke($"{jobId}: {state}");
    }
 
+
+
+   /// <summary>
+   /// Delivers pending journal events to the server in order, acknowledging each locally only after the server accepted
+   /// it, so a failed delivery leaves the event pending and is retried instead of lost. The shared event gate keeps
+   /// concurrent lanes from sending the same event twice.
+   /// </summary>
    private async Task FlushAsync(CancellationToken token)
    {
       if(options?.EventGate is not null)
@@ -218,6 +266,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       }
       finally { options?.EventGate?.Release(); }
    }
+
+
 
    /// <summary>
    /// Progress and phase timing of one claimed job. Progress tells the caller whether native submission began, which
@@ -240,11 +290,15 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
       public TimeSpan Submit { get; set; }
 
+
+
       /// <summary>Starts the next phase now, discarding the time since the previous mark.</summary>
       public void Restart()
       {
          _mark = System.Diagnostics.Stopwatch.GetTimestamp();
       }
+
+
 
       /// <summary>Returns the time since the previous mark and starts the next phase at the same instant, so phases never overlap or leave a gap.</summary>
       public TimeSpan Lap()
@@ -254,6 +308,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          _mark = now;
          return elapsed;
       }
+
+
 
       /// <summary>Formats the one per-job log line: the job identifier and whole milliseconds per phase, nothing else.</summary>
       public string TimingMessage(string jobId)

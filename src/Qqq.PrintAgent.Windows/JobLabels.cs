@@ -8,6 +8,7 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>Shared visible job labels used by the companion and server-side local sorting.</summary>
 public static class JobLabels
 {
+   /// <summary>Turns a status code into the plain wording shown to the operator, with a "Reviewed" suffix when they have acknowledged it. An unknown code reads "Status unavailable" rather than echoing raw text, and the outcome-unknown wording tells them to check the printer before retrying.</summary>
    public static string Status(string state, bool reviewed = false)
    {
       string label = state switch

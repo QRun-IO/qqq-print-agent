@@ -32,6 +32,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private QqqBrowserLogin? _browserLogin;
    private long _generation;
 
+
+
+   /// <summary>
+   /// Creates a client bound to one server origin. The origin must be an absolute https URL with no credentials, path,
+   /// query or fragment (plain http only when explicitly allowed and loopback). The handler never follows redirects or
+   /// manages cookies, because redirects are refused and the session cookie is attached by hand to each request, and the
+   /// HTTP client has no overall timeout because every request sets its own bound.
+   /// </summary>
    public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null)
    {
       ArgumentNullException.ThrowIfNull(origin);
@@ -51,9 +59,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       };
    }
 
+
+
    public Uri Origin { get; }
    public bool IsAuthenticated => _sessionToken is not null;
 
+
+
+   /// <summary>Returns the validated discovery document, fetching it when none is cached; the client gate makes concurrent callers share one fetch.</summary>
    public async Task<QqqApiDiscovery> DiscoverAsync(CancellationToken cancellationToken = default)
    {
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -62,6 +75,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { _gate.Release(); }
    }
 
+
+
+   /// <summary>Returns the server's authentication type (table-based, or OAuth2 with a checked native grant), fetching and validating it on first use.</summary>
    public async Task<QqqAuthenticationMetadata> GetAuthenticationMetadataAsync(CancellationToken cancellationToken = default)
    {
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -70,6 +86,13 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { _gate.Release(); }
    }
 
+
+
+   /// <summary>
+   /// Signs in with a table-based user name and password. Input is validated first (bounded length, no control characters,
+   /// no colon in the name) because the pair travels as HTTP Basic. Only a TABLE_BASED server accepts it, any previous
+   /// session is cleared, and the password is used for this one request and never stored.
+   /// </summary>
    public async Task SignInWithPasswordAsync(string username, string password, CancellationToken cancellationToken = default)
    {
       ArgumentException.ThrowIfNullOrWhiteSpace(username);
@@ -98,6 +121,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { _gate.Release(); }
    }
 
+
+
+   /// <summary>
+   /// Re-adopts a saved session after a restart. The credential must belong to this origin and the server must confirm it
+   /// with a resume request; any failure clears the session so a stale token is never kept.
+   /// </summary>
    public async Task RestoreSessionAsync(QqqSessionCredential credential, CancellationToken cancellationToken = default)
    {
       ArgumentNullException.ThrowIfNull(credential);
@@ -119,6 +148,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { _gate.Release(); }
    }
 
+
+
+   /// <summary>Renews the current session with the server and, when an identity is bound, re-checks that it has not changed.</summary>
    public async Task ResumeSessionAsync(CancellationToken cancellationToken = default)
    {
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -127,6 +159,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { _gate.Release(); }
    }
 
+
+
+   /// <summary>Ends the session on the server when one exists and always clears it locally, even if the server call fails.</summary>
    public async Task SignOutAsync(CancellationToken cancellationToken = default)
    {
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -146,8 +181,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
    }
 
+
+
+   /// <summary>Returns the credential a later start can restore this session from; throws when not signed in.</summary>
    public QqqSessionCredential ExportCredential() => new(Origin, _sessionToken ?? throw AuthenticationRequired());
 
+
+
+   /// <summary>Asks the server who the session belongs to: user, tenant and, when a device is bound, that device.</summary>
    public async Task<QqqSessionBinding> GetSessionIdentityAsync(CancellationToken cancellationToken = default)
    {
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -156,6 +197,13 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { _gate.Release(); }
    }
 
+
+
+   /// <summary>
+   /// Binds the paired device to the signed-in session. A legacy device is first claimed on the server; the identity the
+   /// server then reports must name the same device or the bind is rejected. A successful bind advances the generation, so
+   /// requests started under the previous binding are refused instead of completing against the new one.
+   /// </summary>
    public async Task<QqqSessionBinding> BindDeviceAsync(QqqDeviceCredential credential, bool claimLegacyDevice = false, CancellationToken cancellationToken = default)
    {
       ArgumentNullException.ThrowIfNull(credential);
@@ -179,6 +227,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
       finally { _gate.Release(); }
    }
+
+
 
    /// <summary>Only native printing routes are accepted. Network I/O does not hold the state lock or delay control traffic behind printing.</summary>
    public async Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
@@ -230,6 +280,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       finally { if(acquired) { _gate.Release(); } }
    }
 
+
+
+   /// <summary>Fetches and validates the discovery document and caches it; callers hold the client gate.</summary>
    private async Task<QqqApiDiscovery> DiscoverCoreAsync(CancellationToken cancellationToken)
    {
       if(_discovery is not null)
@@ -243,6 +296,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       return discovery;
    }
 
+
+
+   /// <summary>
+   /// Fetches the authentication metadata after discovery and caches it. Only table-based and OAuth2 are accepted, and an
+   /// OAuth2 server must offer the native-client grant this agent can use, otherwise the server is reported as unsupported.
+   /// </summary>
    private async Task<QqqAuthenticationMetadata> AuthenticationCoreAsync(CancellationToken cancellationToken)
    {
       await DiscoverCoreAsync(cancellationToken).ConfigureAwait(false);
@@ -262,6 +321,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       return metadata;
    }
 
+
+
+   /// <summary>Asks the server to renew the managed session, adopts the returned token, and re-verifies a bound identity.</summary>
    private async Task ResumeCoreAsync(CancellationToken cancellationToken)
    {
       RequireAuthenticated();
@@ -273,6 +335,13 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       { await IdentityCoreAsync(_device, cancellationToken).ConfigureAwait(false); }
    }
 
+
+
+   /// <summary>
+   /// Reads the printing session identity and refuses any change. Once a principal and tenant are bound, a response naming
+   /// a different one, or a different device than the credential's, clears the session and reports permission denied, so
+   /// the agent can never silently continue as another user.
+   /// </summary>
    private async Task<QqqSessionBinding> IdentityCoreAsync(QqqDeviceCredential? credential, CancellationToken cancellationToken)
    {
       RequireAuthenticated();
@@ -296,6 +365,15 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       return identity;
    }
 
+
+
+   /// <summary>
+   /// The single place a request leaves this client. It refuses any URL outside the server origin (except provider
+   /// discovery), marks the request as this agent's channel, attaches the session cookie, device headers or Basic
+   /// credential that the caller passed, refuses redirects, and either buffers the body within the size bound or, for a
+   /// successful document download, hands back the live stream. The default 20 second limit is skipped only when the caller
+   /// bounds the request itself.
+   /// </summary>
    private async Task<HttpResponseMessage> SendCoreAsync(Uri uri, HttpMethod method, HttpContent? content, int maximumBytes, string? cookie,
       QqqDeviceCredential? device, string? basic, CancellationToken cancellationToken, bool providerDiscovery = false, bool streamContent = false, bool boundedByCaller = false)
    {
@@ -351,6 +429,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
    }
 
+
+
+   /// <summary>
+   /// Reads a response body into memory but never more than the stated limit, whether announced by Content-Length or
+   /// discovered while reading, so a hostile or broken server cannot exhaust memory. The buffered content keeps the original headers.
+   /// </summary>
    private static async Task BufferResponseAsync(HttpResponseMessage response, int maximumBytes, CancellationToken token)
    {
       if(response.Content.Headers.ContentLength > maximumBytes)
@@ -372,6 +456,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       response.Content = buffered;
    }
 
+
+
+   /// <summary>
+   /// Takes the session token from a manage-session response, from its body, its cookie or both. When both are present they
+   /// must agree and the token must be well formed, otherwise the session is cleared and the response rejected.
+   /// </summary>
    private void AdoptManagedSession(HttpResponseMessage response)
    {
       using JsonDocument document = ParseDocument(response);
@@ -386,6 +476,13 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       catch(ArgumentException) { ClearSession(); throw InvalidResponse(); }
    }
 
+
+
+   /// <summary>
+   /// Extracts the session token from Set-Cookie headers, strictly. Headers are size-bounded, the cookie must be for this
+   /// host with path "/", and repeated session cookies must agree. An expired, empty or deleted session cookie means the
+   /// server ended the session, so the local session is cleared and sign-in is required.
+   /// </summary>
    private string? ReadSessionCookie(HttpResponseMessage response)
    {
       if(!response.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? headers))
@@ -422,6 +519,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       return token;
    }
 
+
+
+   /// <summary>
+   /// Makes a token the current session and rebuilds the cookie jar under both cookie names QQQ has used. The generation
+   /// advances only when the token changed, so a renewal to the same token does not invalidate in-flight requests.
+   /// </summary>
    private void SetSession(string token)
    {
       if(!string.Equals(_sessionToken, token, StringComparison.Ordinal))
@@ -432,6 +535,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       _cookies.Add(Origin, new Cookie("sessionId", token, "/") { HttpOnly = true, Secure = string.Equals(Origin.Scheme, "https", StringComparison.Ordinal) });
    }
 
+
+
+   /// <summary>Forgets the token, cookies, device and bound identity and advances the generation, so every request already in flight is refused when it returns.</summary>
    private void ClearSession()
    {
       _sessionToken = null;
@@ -442,11 +548,32 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       _generation++;
    }
 
+
+
+   /// <summary>The Cookie header value for the current session, scoped to this origin.</summary>
    private string CookieHeader() => _cookies.GetCookieHeader(Origin);
+
+
+
+   /// <summary>Throws the sign-in-required failure when no session exists.</summary>
    private void RequireAuthenticated() { if(_sessionToken is null) { throw AuthenticationRequired(); } }
+
+
+
+   /// <summary>The failure meaning the user must sign in again; the message is safe to show and carries no server detail.</summary>
    private static QqqSessionException AuthenticationRequired() => new(QqqSessionException.FailureKind.AuthenticationRequired, "Sign in to QQQ to continue.");
+
+
+
+   /// <summary>The failure for any response that breaks the expected shape; deliberately generic so a hostile body is never echoed.</summary>
    private static QqqSessionException InvalidResponse() => new(QqqSessionException.FailureKind.InvalidResponse, "The server returned an invalid authentication or API response.");
 
+
+
+   /// <summary>
+   /// Maps 401 to a cleared session and sign-in required, and 403 to permission denied. They are kept apart because a
+   /// withdrawn session can be repaired by signing in, whereas a denied permission cannot.
+   /// </summary>
    private void CheckAuthorization(HttpResponseMessage response)
    {
       if(response.StatusCode == HttpStatusCode.Unauthorized)
@@ -457,6 +584,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
    }
 
+
+
+   /// <summary>Applies the authorization mapping first, then treats any other non-success status as a refused request with a generic message.</summary>
    private void RequireSuccess(HttpResponseMessage response)
    {
       CheckAuthorization(response);
@@ -466,6 +596,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
    }
 
+
+
+   /// <summary>
+   /// Builds a URL under the printing route from a caller-supplied relative path, rejecting absolute, backslash, fragment,
+   /// percent-encoded, dot-segment and empty-segment paths so a caller cannot reach another route or origin by crafting the path.
+   /// </summary>
    private Uri PrintingUri(string path)
    {
       if(string.IsNullOrEmpty(path) || path.StartsWith('/') || path.Contains('\\', StringComparison.Ordinal)
@@ -480,12 +616,21 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       return uri;
    }
 
+
+
+   /// <summary>Compares scheme, host and port only, ignoring case; used to refuse cross-origin requests.</summary>
    private static bool SameOrigin(Uri left, Uri right) => left.IsAbsoluteUri && right.IsAbsoluteUri
       && string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase)
       && string.Equals(left.IdnHost, right.IdnHost, StringComparison.OrdinalIgnoreCase) && left.Port == right.Port;
 
+
+
+   /// <summary>Serializes a request body as JSON with the client's strict, case-sensitive options.</summary>
    private static StringContent JsonBody<T>(T body) => new(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
 
+
+
+   /// <summary>Deserializes a response into a type, reporting a missing or malformed body as the generic invalid-response failure.</summary>
    private static T Parse<T>(HttpResponseMessage response)
    {
       using JsonDocument document = ParseDocument(response);
@@ -494,6 +639,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       catch(JsonException) { throw InvalidResponse(); }
    }
 
+
+
+   /// <summary>
+   /// Parses a response as a JSON object with a depth limit and no duplicate property names (a common smuggling trick for
+   /// disagreeing parsers). Anything else is an invalid response; the caller owns the returned document.
+   /// </summary>
    private static JsonDocument ParseDocument(HttpResponseMessage response)
    {
       try
@@ -512,6 +663,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       catch(JsonException) { throw InvalidResponse(); }
    }
 
+
+
+   /// <summary>Walks objects and arrays and rejects any object that repeats a property name, ignoring case.</summary>
    private static void RejectDuplicateProperties(JsonElement element)
    {
       if(element.ValueKind == JsonValueKind.Object)
@@ -531,6 +685,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
    }
 
+
+
+   /// <summary>Reads a required identity string that must be non-blank, at most 1024 characters and free of control characters.</summary>
    private static string IdentityValue(JsonElement root, string name)
    {
       if(!root.TryGetProperty(name, out JsonElement value) || value.ValueKind != JsonValueKind.String
@@ -541,6 +698,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       return value.GetString()!;
    }
 
+
+
+   /// <summary>Clears the session, so a late response is refused, and releases the HTTP client and gate.</summary>
    public void Dispose()
    {
       ClearSession();

@@ -12,8 +12,17 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// The service's polling loop and management pipe in one running runtime against a fake server: it recovers from a network
+/// timeout when asked to reconnect, serves job actions over the pipe, and keeps serving after a client misbehaves.
+/// </summary>
 public sealed class AgentRuntimeTests
 {
+   /// <summary>
+   /// The first server request times out, and a reconnect request over the pipe wakes the loop immediately instead of waiting out
+   /// the poll interval, so the service reconnects within three seconds. The pipe then handles the job actions below, and a client
+   /// that disconnects halfway through a command does not stop the service or its next command.
+   /// </summary>
    [Fact]
    public async Task Reconnect_WakesPollingAfterHttpTimeout_AndRetainsPipeAfterClientDisconnect()
    {
@@ -65,6 +74,12 @@ public sealed class AgentRuntimeTests
       }
    }
 
+
+
+   /// <summary>
+   /// A test print is refused until the printer is shared. A failed job turns health red and its details show the failure text;
+   /// acknowledging it returns health to green without changing the delivery record; a shared printer's test print is queued on the server.
+   /// </summary>
    private static async Task VerifyJobActionsAsync(string directory, string pipeName, AgentRuntime runtime, CancellationToken token)
    {
       string denied = await SendAsync(pipeName, new PipeRequest("test-print", PrinterId: "test-printer", Format: "PDF"), token);
@@ -84,6 +99,9 @@ public sealed class AgentRuntimeTests
       Assert.StartsWith("Queued on the server", queued, StringComparison.Ordinal);
    }
 
+
+
+   /// <summary>Sends one line-delimited JSON request over the runtime's private test pipe and returns the one-line reply.</summary>
    private static async Task<string> SendAsync(string name, PipeRequest request, CancellationToken token)
    {
       await using NamedPipeClientStream pipe = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -94,6 +112,9 @@ public sealed class AgentRuntimeTests
       return await reader.ReadLineAsync(token) ?? throw new IOException("Pipe closed before response.");
    }
 
+
+
+   /// <summary>Writes half a command (invalid JSON, no newline) and drops the connection, to prove an abandoned pipe client cannot wedge the service.</summary>
    private static async Task DisconnectMidCommandAsync(string name, CancellationToken token)
    {
       await using NamedPipeClientStream pipe = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -102,8 +123,12 @@ public sealed class AgentRuntimeTests
       await pipe.FlushAsync(token);
    }
 
+
+
+   /// <summary>Fake server: the control poll gets 404, the first other request throws a simulated timeout, and later requests succeed (a test-print returns a queued job id).</summary>
    private sealed class Handler(Func<int> count) : HttpMessageHandler
    {
+      /// <summary>Applies the timeout-then-success script and counts non-control requests through the supplied counter.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          if(request.RequestUri!.AbsolutePath.EndsWith("/control/poll", StringComparison.Ordinal))
@@ -119,9 +144,17 @@ public sealed class AgentRuntimeTests
       }
    }
 
+
+
+   /// <summary>Reports one ready PDF queue and refuses to print, so the test can exercise sharing and queuing without any physical output.</summary>
    private sealed class NoPrinters : IPrinterBackend
    {
+      /// <summary>Reports the single synthetic queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new PrinterInfo("test-printer", "Test printer", "Test driver", "Test port", "READY", ["PDF"])];
+
+
+
+      /// <summary>Always throws: no physical printing is allowed here.</summary>
       public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new InvalidOperationException("No physical printing is allowed in this test.");
    }
 }

@@ -11,7 +11,6 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-
 SPEC = importlib.util.spec_from_file_location("headers", Path(__file__).with_name("check-source-headers.py"))
 assert SPEC is not None and SPEC.loader is not None
 HEADERS = importlib.util.module_from_spec(SPEC)
@@ -32,8 +31,7 @@ limitations under the License."""
 
 def fixture_policy(holder: str = "James Maes", license_id: str = "MIT") -> dict[str, Any]:
    """Use the production styles with a small explicit owned fixture scope."""
-   return {"includes": ["src/*"], "exclusions": [], "styles": POLICY["styles"],
-           "notices": [{"holder": holder, "license": license_id, "paths": ["src/*"]}]}
+   return {"includes": ["src/*"], "exclusions": [], "styles": POLICY["styles"], "notices": [{"holder": holder, "license": license_id, "paths": ["src/*"]}]}
 
 
 class HeaderTests(unittest.TestCase):
@@ -51,12 +49,23 @@ class HeaderTests(unittest.TestCase):
          with self.subTest(name=name):
             HEADERS.check_notice(name, text, fixture_policy())
 
+   def test_year_range_separator_is_hyphen_or_en_dash_only(self) -> None:
+      """Accept a hyphen or en dash between years and reject any other separator."""
+      for separator, accepted in (("-", True), (chr(0x2013), True), ("/", False), (chr(0x2014), False)):
+         text = f"# Copyright 2025{separator}2026 James Maes\n# SPDX-License-Identifier: MIT"
+         with self.subTest(separator=separator):
+            if accepted:
+               HEADERS.check_notice("src/a.py", text, fixture_policy())
+            else:
+               with self.assertRaises(ValueError):
+                  HEADERS.check_notice("src/a.py", text, fixture_policy())
+
    def test_required_first_lines_and_bom(self) -> None:
       """Accept shebangs, PowerShell requirements and XML declarations first."""
       for name, prefix, body in (
          ("src/a.sh", "#!/bin/sh\n", "# " + MIT.replace("\n", "\n# ")),
          ("src/a.ps1", "#Requires -Version 7.4\n", "# " + MIT.replace("\n", "\n# ")),
-         ("src/a.xml", "<?xml version=\"1.0\"?>\n", "<!--" + MIT + "--><root/>"),
+         ("src/a.xml", '<?xml version="1.0"?>\n', "<!--" + MIT + "--><root/>"),
          ("src/a.mjs", "#!/usr/bin/env node\n", "/*" + MIT + "*/"),
       ):
          with self.subTest(name=name):
@@ -67,21 +76,20 @@ class HeaderTests(unittest.TestCase):
       for name, text in (
          ("src/a.sh", "# " + MIT.replace("\n", "\n# ") + "\n#!/bin/sh"),
          ("src/a.ps1", "# " + MIT.replace("\n", "\n# ") + "\n#Requires -Version 7.4"),
-         ("src/a.xml", "<!--" + MIT + "--><?xml version=\"1.0\"?><root/>"),
+         ("src/a.xml", "<!--" + MIT + '--><?xml version="1.0"?><root/>'),
       ):
          with self.subTest(name=name), self.assertRaises(ValueError):
             HEADERS.check_notice(name, text, fixture_policy())
 
    def test_code_strings_and_late_comments_do_not_count(self) -> None:
       """Reject docstrings and comments after executable declarations."""
-      for text in ("notice = \"" + MIT.replace("\n", "\\n") + "\"",
-                   "\"\"\"" + MIT + "\"\"\"", "import os\n# " + MIT.replace("\n", "\n# ")):
+      for text in ('notice = "' + MIT.replace("\n", "\\n") + '"', '"""' + MIT + '"""', "import os\n# " + MIT.replace("\n", "\n# ")):
          with self.subTest(text=text), self.assertRaises(ValueError):
             HEADERS.check_notice("src/a.py", text, fixture_policy())
 
    def test_wrong_syntax_and_unterminated_comments_fail(self) -> None:
       """Notice text alone is insufficient without a complete language comment."""
-      for text in ("# " + MIT, "/*" + MIT, "string text = \"" + MIT + "\";"):
+      for text in ("# " + MIT, "/*" + MIT, 'string text = "' + MIT + '";'):
          with self.subTest(text=text), self.assertRaises(ValueError):
             HEADERS.check_notice("src/a.cs", text, fixture_policy())
       with self.assertRaises(ValueError):
@@ -89,8 +97,7 @@ class HeaderTests(unittest.TestCase):
 
    def test_wrong_holder_or_license_and_conflicting_spdx_fail(self) -> None:
       """Do not conflate repository licenses or accept conflicting identifiers."""
-      for text in (MIT.replace("James Maes", "Someone Else"), MIT.replace("MIT", "Apache-2.0"),
-                   MIT + "\nSPDX-License-Identifier: Apache-2.0", MIT.splitlines()[0]):
+      for text in (MIT.replace("James Maes", "Someone Else"), MIT.replace("MIT", "Apache-2.0"), MIT + "\nSPDX-License-Identifier: Apache-2.0", MIT.splitlines()[0]):
          with self.subTest(text=text), self.assertRaises(ValueError):
             HEADERS.check_notice("src/a.cs", "/*" + text + "*/", fixture_policy())
 
@@ -103,8 +110,7 @@ class HeaderTests(unittest.TestCase):
    def test_java_requires_full_apache_block(self) -> None:
       """An abbreviated SPDX-only Java notice cannot replace scoped convention."""
       policy = fixture_policy("Kingsrook, LLC", "Apache-2.0")
-      for notice in ("Copyright 2026 Kingsrook, LLC\nSPDX-License-Identifier: Apache-2.0",
-                     APACHE.replace("limitations under the License.", "")):
+      for notice in ("Copyright 2026 Kingsrook, LLC\nSPDX-License-Identifier: Apache-2.0", APACHE.replace("limitations under the License.", "")):
          with self.subTest(notice=notice), self.assertRaises(ValueError):
             HEADERS.check_notice("src/A.java", "/*" + notice + "*/", policy)
 
@@ -121,9 +127,7 @@ class HeaderTests(unittest.TestCase):
       """New scripts enter the guard; data, generated and upstream files do not."""
       self.assertTrue(HEADERS.selected(".github/scripts/new-tool.py", POLICY))
       self.assertTrue(HEADERS.selected(".github/workflows/new-check.yml", POLICY))
-      for name in (".mvn/wrapper/MavenWrapperDownloader.java", "mvnw", "schemas/new.json",
-                   "src/main/resources/openapi/new.yaml", "src/test/resources/openapi/old.yaml",
-                   "src/generated/Example.cs", "src/Example/obj/Generated.cs", "packages.lock.json"):
+      for name in (".mvn/wrapper/MavenWrapperDownloader.java", "mvnw", "schemas/new.json", "src/main/resources/openapi/new.yaml", "src/test/resources/openapi/old.yaml", "src/generated/Example.cs", "src/Example/obj/Generated.cs", "packages.lock.json"):
          with self.subTest(name=name):
             self.assertFalse(HEADERS.selected(name, POLICY))
       self.assertTrue(all(item["reason"].strip() for item in POLICY["exclusions"]))
@@ -140,11 +144,11 @@ class HeaderTests(unittest.TestCase):
       """A tracked new source fails while untracked generated output is ignored."""
       with tempfile.TemporaryDirectory() as directory:
          root = Path(directory)
-         subprocess.run(["git", "init", "-q", str(root)], check=True)
+         subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607 -- Fixed Git command in the owned temporary test directory.
          root.joinpath("src").mkdir()
          source = root / "src/a.py"
          source.write_text("print(1)", encoding="utf-8")
-         subprocess.run(["git", "-C", str(root), "add", "--", "src/a.py"], check=True)
+         subprocess.run(["git", "-C", str(root), "add", "--", "src/a.py"], check=True)  # noqa: S603, S607 -- Fixed synthetic path; never a shell command.
          with self.assertRaisesRegex(ValueError, "src/a.py"):
             HEADERS.check_repository(root, fixture_policy())
          source.write_text("# " + MIT.replace("\n", "\n# ") + "\nprint(1)", encoding="utf-8")

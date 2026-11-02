@@ -495,3 +495,8 @@ worker.lock
 # This vendor legal-file directory is not a generated .msix package.
 !licenses/Microsoft.Windows.SDK.BuildTools.MSIX/
 
+
+# Local script-quality environments and tool caches.
+.venv/
+.ruff_cache/
+__pycache__/

@@ -11,16 +11,34 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
 
+/// <summary>
+/// Sign-in part of the main window. The companion discovers what the server offers, signs the operator in (password or
+/// browser), and hands only the resulting session credential to the service, which keeps it protected; the window never
+/// stores a password or a provider token, and the password box is cleared after every attempt.
+/// </summary>
 public sealed partial class MainWindow
 {
    private QqqSessionClient? _signInClient;
    private QqqAuthenticationMetadata? _signInMetadata;
    private CancellationTokenSource? _browserSignInCancellation;
 
+
+
+   /// <summary>Cancels the browser sign-in that is waiting for its callback, if one is running.</summary>
    private void CancelBrowserSignIn_Click(object sender, RoutedEventArgs e) => _browserSignInCancellation?.Cancel();
 
+
+
+   /// <summary>Cancels a waiting browser sign-in when the connection dialog closes, so no attempt keeps listening after the operator left.</summary>
    private void ConnectionDialog_Closing(ContentDialog sender, ContentDialogClosingEventArgs args) => _browserSignInCancellation?.Cancel();
 
+
+
+   /// <summary>
+   /// Asks the entered server which sign-in methods it offers and shows only those: the password form for a table-based
+   /// server, and the browser button when the server advertises a native grant. A server that offers neither is reported as
+   /// needing configuration. Any previous sign-in client is disposed first, so each attempt starts from a clean session.
+   /// </summary>
    private async void DiscoverSignIn_Click(object sender, RoutedEventArgs e)
    {
       if(_busy)
@@ -54,6 +72,13 @@ public sealed partial class MainWindow
       finally { SetBusy(false); }
    }
 
+
+
+   /// <summary>
+   /// Signs in with the entered user name and password, then transfers the resulting session to the service. The password
+   /// box is cleared in a finally block whether or not sign-in worked, and the failure message deliberately does not say
+   /// which part (credentials, device ownership or permission) was wrong.
+   /// </summary>
    private async void PasswordSignIn_Click(object sender, RoutedEventArgs e)
    {
       if(_busy || _signInClient is null)
@@ -75,6 +100,13 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>
+   /// Hands the session credential, and nothing else, to the service together with the operator's pairing choice (keep the
+   /// current pairing, claim a legacy device, or start a new pairing). The service verifies it and keeps it protected; the
+   /// result is shown as success only when the service confirms it signed in.
+   /// </summary>
    private async Task TransferSignInAsync()
    {
       string result = await _sendRequest(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(),
@@ -83,6 +115,9 @@ public sealed partial class MainWindow
       Feedback(success ? "Signed in" : "Service authorization not completed", result, success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
    }
 
+
+
+   /// <summary>Asks the service to sign out and forget its session, then drops the window's own sign-in client. Pairing and job history are not removed.</summary>
    private async void SignOut_Click(object sender, RoutedEventArgs e)
    {
       if(_busy)
@@ -100,6 +135,13 @@ public sealed partial class MainWindow
       finally { SetBusy(false); }
    }
 
+
+
+   /// <summary>
+   /// Runs the browser sign-in with a three minute limit and a Cancel button. The redirect address must be the one this
+   /// application's installer registered, and only an address the server also lists is used, so a server cannot steer the
+   /// callback elsewhere. Cancelling discards the half-finished client, and a failure asks the operator to start again explicitly.
+   /// </summary>
    private async void BrowserSignIn_Click(object sender, RoutedEventArgs e)
    {
       if(_busy || _signInClient is null)
@@ -135,6 +177,13 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>
+   /// The browser exchange itself: open the callback inbox first (so a fast redirect is not lost), begin the login, open the
+   /// provider's page in the default browser, wait for the forwarded callback, and complete the login against the attempt
+   /// that started it. The inbox is disposed when the exchange ends.
+   /// </summary>
    private async Task CompleteBrowserSignInAsync(Uri redirect, CancellationToken token)
    {
       using QqqBrowserCallback inbox = new();

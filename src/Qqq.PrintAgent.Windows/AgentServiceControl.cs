@@ -15,6 +15,8 @@ public static class AgentServiceControl
 {
    private const string ServiceName = "QqqPrintAgent";
 
+
+
    /// <summary>Read service state even when the print management pipe is unavailable.</summary>
    public static AgentServiceStatus GetStatus()
    {
@@ -36,6 +38,8 @@ public static class AgentServiceControl
       }
    }
 
+
+
    /// <summary>Start an installed stopped service and wait at most 30 seconds.</summary>
    public static async Task<AgentServiceStatus> StartAsync()
    {
@@ -47,6 +51,8 @@ public static class AgentServiceControl
       await WaitAsync(service, ServiceControllerStatus.Running).ConfigureAwait(false);
       return GetStatus();
    }
+
+
 
    /// <summary>Restart only after an explicit administrator action; callers must warn about active submissions.</summary>
    public static async Task<AgentServiceStatus> RestartAsync()
@@ -62,6 +68,8 @@ public static class AgentServiceControl
       return GetStatus();
    }
 
+
+
    /// <summary>Open the native Services console on explicit user request.</summary>
    public static void OpenServices()
    {
@@ -70,6 +78,9 @@ public static class AgentServiceControl
       using var process = Process.Start(start);
    }
 
+
+
+   /// <summary>Polls the service every 250 ms until it reaches the wanted state, giving up with a clear message after 30 seconds, so a stuck service stops the action instead of hanging the window.</summary>
    private static async Task WaitAsync(ServiceController service, ServiceControllerStatus desired)
    {
       long started = Stopwatch.GetTimestamp();

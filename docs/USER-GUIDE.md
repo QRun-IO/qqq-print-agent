@@ -72,7 +72,7 @@ Administrators can apply [customer branding](BRANDING.md) without rebuilding. Ap
 
 ## Branded warehouse test prints
 
-Select a printer and choose **Print test**. Choose a document format and stock from the native option boxes, then confirm **Print one test**. PDF offers Letter, A4 or a 4 × 6-inch label. ZPL offers 4 × 6-inch labels at 203, 300 or 600 dpi. Match the loaded stock and actual device resolution; the driver-name suggestion is only a hint. PDF stock choices do not change Windows queue defaults.
+Select a printer and choose **Print test**. Choose a document format and stock from the native option boxes, then confirm **Print one test**. PDF offers Letter, A4 or a 4 × 6, 4 × 2 or 4 × 1-inch label. ZPL offers those label sizes at 203, 300 or 600 dpi. Match the loaded stock and actual device resolution; the driver-name suggestion is only a hint. The default stays 4 × 6 until you pick another size, so load 4 × 1 or 4 × 2 stock before choosing it. PDF stock choices do not change Windows queue defaults; a 4 × 2 or 4 × 1 PDF sends its own actual-size paper for that job only, and needs the matching 0.4 server.
 
 QQQ generates the same branded diagnostics for desktop requests and its own printer record/table actions. The pages use the QQQ logo, large warehouse identifiers, dotted zeros and distinct 1/I/l glyphs from embedded JetBrains Mono Bold. PDF embeds the font; ZPL carries rasterized glyphs in bounded document graphics, so neither depends on a resident printer font. Label diagnostics include a Code 128 barcode on the ZPL path, and all layouts include size/alignment checks. Paper output and scanner readability must be checked physically.
 

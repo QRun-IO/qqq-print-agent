@@ -42,6 +42,8 @@ public sealed partial class MainWindow : Window, IDisposable
    {
    }
 
+
+
    /// <summary>Allows the native regression host to use synthetic service responses without printing.</summary>
    internal MainWindow(Func<PipeRequest, Task<string>> sendRequest)
    {
@@ -87,6 +89,11 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
+   /// <summary>
+   /// Applies the customer's runtime branding to the window: product and company headings, the About button label, the
+   /// support link (falling back to the project's issue tracker) and an optional logo. A logo that fails to load is hidden
+   /// rather than shown broken, so a bad branding file can never block the window.
+   /// </summary>
    private void ApplyBranding()
    {
       Title = AppIdentity.Info.DisplayName;
@@ -104,6 +111,7 @@ public sealed partial class MainWindow : Window, IDisposable
          CustomerLogo.Visibility = Visibility.Visible;
       }
    }
+
 
 
    /// <summary>Release the tray icon and polling timer when the companion exits.</summary>
@@ -138,6 +146,12 @@ public sealed partial class MainWindow : Window, IDisposable
       await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync(), CheckUpdatesAfterStartupAsync(), RefreshTransportAsync());
    }
 
+
+
+   /// <summary>
+   /// Labels the navigation's built-in Settings item once the template has created it, which only happens after
+   /// construction: an automation identifier for tests and assistive technology, an access key and a tooltip with the shortcut.
+   /// </summary>
    private void Navigation_Loaded(object sender, RoutedEventArgs e)
    {
       // The built-in settings item is created by the template, after construction.
@@ -152,6 +166,8 @@ public sealed partial class MainWindow : Window, IDisposable
       }
    }
 
+
+
    /// <summary>Apply tray-only startup after App has completed the initial Window.Activate call.</summary>
    internal void ApplyStartupVisibility()
    {
@@ -161,6 +177,13 @@ public sealed partial class MainWindow : Window, IDisposable
       }
    }
 
+
+
+   /// <summary>
+   /// Shows exactly one page (Printers, Jobs, Logs or Settings) and updates its title and description. Any open job details
+   /// are invalidated first so a stale detail view cannot outlive its page. Logs opens the single shared log viewer, and
+   /// Settings and Jobs refresh their data on entry, but not during startup, when the window refreshes everything itself.
+   /// </summary>
    private async void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
    {
       if(PageTitle is null)
@@ -195,8 +218,14 @@ public sealed partial class MainWindow : Window, IDisposable
       }
    }
 
+
+
+   /// <summary>Opens the connection dialog from its button; the work is in <c>ShowConnectionAsync</c> so other entry points can reuse it.</summary>
    private async void Connection_Click(object sender, RoutedEventArgs e) => await ShowConnectionAsync();
 
+
+
+   /// <summary>Shows the connection dialog through the dialog guard, which serializes dialogs so two can never be open at once.</summary>
    private async Task ShowConnectionAsync()
    {
       ConnectionDialog.XamlRoot = Content.XamlRoot;
@@ -255,6 +284,12 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Refresh the local service and the queues visible under its identity.</summary>
    private async void Refresh_Click(object sender, RoutedEventArgs e) => await Task.WhenAll(RefreshAsync(), RefreshLifecycleAsync());
 
+
+
+   /// <summary>
+   /// Asks the service to reconnect to the server now. It ignores the click while another administration request is
+   /// running, reports the service's answer, and refreshes so the footer shows the result rather than the old state.
+   /// </summary>
    private async void Reconnect_Click(object sender, RoutedEventArgs e)
    {
       if(_busy)
@@ -392,11 +427,6 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
-
-
-
-
-
    /// <summary>Close only the companion; the service remains running.</summary>
    private void Exit_Click(object sender, RoutedEventArgs e) => ExitCompanion();
 
@@ -485,6 +515,11 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
+   /// <summary>
+   /// Reconciles the printer list with the service's snapshot: rows for printers that disappeared are removed, new printers
+   /// get a row, and existing rows are updated in place so selection and expansion survive a refresh. The empty-state text
+   /// and the shared-printer count are recomputed each time.
+   /// </summary>
    private void UpdatePrinters(AgentSnapshot snapshot)
    {
       var present = snapshot.Printers.Select(printer => printer.PrinterId).ToHashSet(StringComparer.Ordinal);
@@ -510,6 +545,8 @@ public sealed partial class MainWindow : Window, IDisposable
       PrintersSummary.Text = $"{snapshot.Printers.Count} printers · {snapshot.Printers.Count(printer => printer.Exposed)} shared with the server";
       UpdateSelectedPrinter();
    }
+
+
 
    /// <summary>Persist local printer exposure through the protected service pipe.</summary>
    private async Task SetExposureAsync(PrinterSnapshot printer, bool exposed)
@@ -577,6 +614,12 @@ public sealed partial class MainWindow : Window, IDisposable
       _currentHealth = health;
    }
 
+
+
+   /// <summary>
+   /// Builds the tray tooltip from the status and product name, cut to the 127 UTF-16 characters Windows allows for a
+   /// notification icon without splitting a surrogate pair, so the tooltip is never rejected or shown with a broken character.
+   /// </summary>
    private static string TrayTooltip(string status)
    {
       string text = status + " — " + AppIdentity.Info.DisplayName;
@@ -588,6 +631,8 @@ public sealed partial class MainWindow : Window, IDisposable
       int length = char.IsHighSurrogate(text[125]) ? 125 : 126;
       return text[..length] + "…";
    }
+
+
 
    /// <summary>Load the packaged status image synchronously before registering the tray icon.</summary>
    private static System.Drawing.Icon LoadTrayIcon(string state)
@@ -667,6 +712,8 @@ public sealed partial class MainWindow : Window, IDisposable
       await DialogGuard.ShowAsync(dialog);
    }
 
+
+
    /// <summary>Use the single AppKit log viewer from every logs entry point.</summary>
    private void ServiceLogs_Click(object sender, RoutedEventArgs e)
    {
@@ -675,11 +722,18 @@ public sealed partial class MainWindow : Window, IDisposable
    }
 
 
+
+   /// <summary>Formats a service timestamp in the user's local time and culture, or "Not yet" when the service has not reported one.</summary>
    private static string FormatTime(string? timestamp)
       => DateTimeOffset.TryParse(timestamp, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset time)
          ? time.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture) : "Not yet";
 
+
+
+   /// <summary>Maps a protocol state word to the label shown to people, through the same table the Jobs page uses.</summary>
    private static string FriendlyState(string state) => JobLabels.Status(state);
+
+
 
    /// <summary>Persist presentation preferences only.</summary>
    private void Save()

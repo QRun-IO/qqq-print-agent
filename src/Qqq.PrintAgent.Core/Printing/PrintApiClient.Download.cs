@@ -8,8 +8,18 @@ using System.Security.Cryptography;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
+/// <summary>
+/// Streaming download part of the API client: documents go straight into a protected staging file while their size and SHA-256 are
+/// checked, with total, connect and idle time limits and an optional shared bandwidth throttle. Nothing reaches the printer unless the
+/// whole file verified.
+/// </summary>
 public sealed partial class PrintApiClient
 {
+   /// <summary>
+   /// Downloads a job's document into a new uniquely named file in the staging folder and returns it open for reading. The
+   /// settings must be valid and the declared size within the format and staging limits before any bytes are requested; a failed
+   /// download deletes its partial file, so only a verified file is ever returned.
+   /// </summary>
    public async Task<DownloadedDocument> DownloadFileAsync(PrintJob job, string directory, RealtimeSettings settings, CancellationToken token, Func<int, CancellationToken, Task>? throttle = null)
    {
       settings.Validate();
@@ -31,6 +41,13 @@ public sealed partial class PrintApiClient
       }
    }
 
+
+
+   /// <summary>
+   /// Requests the document (through the signed-in session when there is one) under a total time limit and a shorter connect limit,
+   /// refuses a response whose declared length differs from the manifest, and copies it into the file with verification. The file is
+   /// created exclusively, so an existing file can never be overwritten.
+   /// </summary>
    private async Task DownloadIntoFileAsync(PrintJob job, string path, RealtimeSettings settings, Func<int, CancellationToken, Task>? throttle, CancellationToken token)
    {
       using var total = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -52,6 +69,13 @@ public sealed partial class PrintApiClient
       await output.FlushAsync(total.Token).ConfigureAwait(false);
    }
 
+
+
+   /// <summary>
+   /// Copies the stream to the file while hashing it, stopping with an error the moment more than the declared length arrives, when no
+   /// data arrives within the idle limit, or when the final length or SHA-256 does not match. A shared throttle, or else the per-download
+   /// rate limit, paces the copy so the aggregate bandwidth setting holds.
+   /// </summary>
    private static async Task CopyVerifiedAsync(Stream source, Stream output, PrintJob job, RealtimeSettings settings, Func<int, CancellationToken, Task>? throttle, CancellationToken token)
    {
       using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

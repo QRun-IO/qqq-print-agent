@@ -7,6 +7,10 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Cloud queue preview part of the runtime. It shows jobs the server holds but this device has not received yet, and discards a result
+/// if the connection or queue changed while it was being fetched, so the preview never shows another pairing's jobs.
+/// </summary>
 public sealed partial class AgentRuntime
 {
    /// <summary>Refresh the bounded cloud preview only after a server or operator signal, including while dispatch is paused.</summary>

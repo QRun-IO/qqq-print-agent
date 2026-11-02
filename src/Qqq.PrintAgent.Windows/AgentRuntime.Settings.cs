@@ -8,8 +8,13 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Settings commands of the runtime: log options and device and printer profiles. They live in one place so every change is followed by
+/// a poll wake-up and a fresh snapshot, and the caller sees the state that was actually stored.
+/// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>Runs one log or profile command and returns its JSON result. Each store use is scoped to one command so a failed save leaves no open database, and unknown or incomplete requests are rejected instead of ignored.</summary>
    private string HandleSettingsCommand(PipeRequest request)
    {
       switch(request.Operation)

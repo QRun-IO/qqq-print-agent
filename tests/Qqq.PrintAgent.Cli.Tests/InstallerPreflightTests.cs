@@ -8,8 +8,15 @@ using System.Xml.Linq;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Checks the installer's machine-state safety step without installing anything: the embedded PowerShell must be correctly escaped for the MSI formatter, scheduled in the right order, and syntactically valid.</summary>
 public sealed class InstallerPreflightTests
 {
+   /// <summary>
+   /// Reads the real installer definition, undoes the MSI escaping of brackets and braces, and confirms the resulting script has the
+   /// expected content (type names, common-data folder, try block) and no leftover escapes. The step must run before folders are
+   /// created, after InstallExecute at sequence 6500, with the major upgrade scheduled after install. The script is then handed
+   /// to PowerShell only to be parsed (never run), proving it is syntactically valid.
+   /// </summary>
    [Fact]
    public async Task InstallerEscapesFormattedLiteralsAndPowerShellParsesWithoutExecution()
    {

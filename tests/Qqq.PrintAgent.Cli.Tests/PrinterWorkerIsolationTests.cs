@@ -11,10 +11,18 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// Native printer calls run in a separate worker process so a hang or crash cannot take down the service. These tests start a
+/// real fixture worker (no printer involved) to prove the boundary: refusals cross it intact, a hung worker is killed and
+/// replaced, the configured watchdog applies, and a worker never outlives its parent.
+/// </summary>
 public sealed class PrinterWorkerIsolationTests
 {
    private static string FixtureExecutable => Path.ChangeExtension(typeof(WorkerFixture.Program).Assembly.Location, ".exe");
 
+
+
+   /// <summary>A media-mismatch refusal made inside the worker arrives as the same specific exception on the service side, so it is treated as a known refusal before printing and not as an uncertain outcome.</summary>
    [Fact]
    public async Task VerifiedMediaRefusalSurvivesTheWorkerBoundaryWithoutAnUncertainOutcome()
    {
@@ -30,6 +38,9 @@ public sealed class PrinterWorkerIsolationTests
       await Assert.ThrowsAsync<PrinterMediaMismatchException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-media-fixture.pdf"), CancellationToken.None));
    }
 
+
+
+   /// <summary>A file submission obeys the timeout the server configured (one second here) rather than a fixed two minutes: a hung worker is abandoned with a timeout error and its process is gone afterwards.</summary>
    [Fact]
    public async Task FileSubmissionUsesConfiguredWatchdogInsteadOfFixedTwoMinuteTimeout()
    {
@@ -50,6 +61,9 @@ public sealed class PrinterWorkerIsolationTests
       Assert.True(ProcessExited(childId));
    }
 
+
+
+   /// <summary>When the first worker hangs, the call times out and that worker process is killed; the next operation starts a fresh worker and succeeds, so one hang does not wedge printer discovery.</summary>
    [Fact]
    public void TimedOutWorkerIsKilledAndNextOperationSucceeds()
    {
@@ -78,6 +92,9 @@ public sealed class PrinterWorkerIsolationTests
       Assert.Equal(2, launches);
    }
 
+
+
+   /// <summary>A worker that is busy in a native call still exits once its parent process is gone, so a crashed service cannot leave an orphan worker holding the print spooler.</summary>
    [Fact]
    public async Task WorkerExitsWhenItsParentDiesDuringANativeOperation()
    {
@@ -111,6 +128,9 @@ public sealed class PrinterWorkerIsolationTests
       }
    }
 
+
+
+   /// <summary>True when the process has exited or no longer exists; a missing process id counts as exited.</summary>
    private static bool ProcessExited(int processId)
    {
       try

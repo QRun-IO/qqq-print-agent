@@ -9,8 +9,18 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// The job history list is sorted and paged by the database, then merged with the server's bounded queue in memory. These tests
+/// hold the two orderings to one definition so a page boundary never repeats, drops or reorders a job.
+/// </summary>
 public sealed class JobSortingTests
 {
+   /// <summary>
+   /// Seeds 10,000 local jobs plus a 50-entry cloud queue (one entry duplicating a local job) and checks every sortable column in
+   /// both directions at the first page, a page spanning the local/cloud boundary and a page past the end. It also proves that an
+   /// unknown sort column is rejected instead of reaching SQL, and that a page read never parses distant rows: a corrupt payload
+   /// far from the page would fail the call if the whole history were materialized.
+   /// </summary>
    [Fact]
    public void TenThousandJobs_AllColumnsSortAcrossPagesAndInterleaveBoundedCloudQueue()
    {
@@ -30,6 +40,12 @@ public sealed class JobSortingTests
       Assert.Equal(100, AgentRuntime.QueryJobsWithQueue(fixture.Store, new JobQuery(Offset: 5000, PageSize: 100), cloud).Jobs.Count);
    }
 
+
+
+   /// <summary>
+   /// Compares database pages and merged database-plus-queue pages with an independent in-memory sort of the same jobs. The merged
+   /// total must exclude queue entries already stored locally and must report that the server queue was limited.
+   /// </summary>
    private static void VerifyPages(AgentStore store, JobSnapshot[] local, JobSnapshot[] cloud, JobQuery query)
    {
       var comparer = Comparer<JobSnapshot>.Create((left, right) => JobSorting.Compare(left, right, query));
@@ -47,6 +63,13 @@ public sealed class JobSortingTests
       }
    }
 
+
+
+   /// <summary>
+   /// The in-memory comparator used for queued jobs must order text exactly as SQLite orders the stored jobs, including nulls,
+   /// case, accents, private-use and astral characters and embedded NULs. Any difference would make a job jump position when it
+   /// moves from the server queue into local history.
+   /// </summary>
    [Fact]
    public void QueueTextComparator_MatchesSqliteUnicodeNullAndCaseOrdering()
    {
@@ -67,6 +90,12 @@ public sealed class JobSortingTests
       Assert.True(JobSorting.Compare(lowerId, higherId, new JobQuery(Descending: false)) < 0);
    }
 
+
+
+   /// <summary>
+   /// Builds a deterministic job whose fields vary by index (missing created time, printer, title or format, and every status),
+   /// so sorting is exercised on nulls and ties rather than on tidy data.
+   /// </summary>
    private static JobSnapshot MakeJob(int index, string id)
    {
       string?[] titles = [null, "alpha", "ALPHA", "Éclair", "éclair", "\uE000", "😀", "Packing slip"];
@@ -77,12 +106,18 @@ public sealed class JobSortingTests
          titles[(index / 3) % titles.Length], titles[index % titles.Length], index % 5 == 0 ? null : index % 2 == 0 ? "PDF" : "ZPL", index % 7 == 0, created);
    }
 
+
+
+   /// <summary>A throwaway agent store plus a direct SQLite connection to its journal, so tests can seed rows and ask SQLite for the reference ordering.</summary>
    private sealed class Fixture : IDisposable
    {
       private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-sort-" + Guid.NewGuid().ToString("N"));
       private readonly SqliteConnection _database;
       public AgentStore Store { get; }
 
+
+
+      /// <summary>Creates the store (and with it the journal schema) in a fresh temporary directory, then opens the journal for direct access.</summary>
       public Fixture()
       {
          Store = new AgentStore(_directory);
@@ -90,6 +125,9 @@ public sealed class JobSortingTests
          _database.Open();
       }
 
+
+
+      /// <summary>Inserts the generated jobs in one transaction with parameterized statements and returns them as the expected snapshots.</summary>
       public JobSnapshot[] Seed(int count)
       {
          using SqliteTransaction transaction = _database.BeginTransaction();
@@ -120,6 +158,9 @@ public sealed class JobSortingTests
          return jobs.ToArray();
       }
 
+
+
+      /// <summary>Asks SQLite to compare two values with nulls first and case-insensitive text, the reference ordering the app's queries use.</summary>
       public int CompareSql(string? first, string? second)
       {
          using SqliteCommand command = _database.CreateCommand();
@@ -129,6 +170,9 @@ public sealed class JobSortingTests
          return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
       }
 
+
+
+      /// <summary>Runs one raw statement against the journal, used to plant a corrupt row.</summary>
       public void Execute(string sql)
       {
          using SqliteCommand command = _database.CreateCommand();
@@ -136,6 +180,9 @@ public sealed class JobSortingTests
          command.ExecuteNonQuery();
       }
 
+
+
+      /// <summary>Closes both connections and clears SQLite's pool so the temporary journal file can be deleted on Windows.</summary>
       public void Dispose()
       {
          Store.Dispose();

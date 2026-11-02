@@ -10,8 +10,13 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>
+/// The sign-in startup task launches the companion with elevated rights, so what counts as "our" task is checked strictly: it must
+/// name the right user and installed executable, run only as that interactive user, and uninstall may remove only exact matches.
+/// </summary>
 public sealed class AgentStartupTests
 {
+   /// <summary>Windows may rewrite the task's user as an account name instead of the SID; the task is still recognized as ours when the name resolves to the same SID, in either the principal, the logon trigger, or both.</summary>
    [Theory]
    [InlineData(true, false)]
    [InlineData(false, true)]
@@ -33,6 +38,9 @@ public sealed class AgentStartupTests
       Assert.True(AgentStartup.IsOwnedTaskDefinition("\\QQQ Print Agent " + sid, document.ToString()));
    }
 
+
+
+   /// <summary>An account name that resolves fine but belongs to a different SID than the task claims is not accepted, so a task cannot be adopted by naming an existing user.</summary>
    [Fact]
    public void ResolvableAccountForADifferentSidCannotAuthorizeTaskOwnership()
    {
@@ -44,6 +52,9 @@ public sealed class AgentStartupTests
       Assert.False(AgentStartup.IsOwnedTaskDefinition("\\QQQ Print Agent " + OtherSid, document.ToString()));
    }
 
+
+
+   /// <summary>The generated task runs only the installed companion with the tray argument, for exactly one user, at that user's logon, as an interactive session with the highest available level and no stored password.</summary>
    [Fact]
    public void SignInTaskUsesOnlyTheInstalledExecutableAndCurrentInteractiveIdentity()
    {
@@ -60,6 +71,9 @@ public sealed class AgentStartupTests
       Assert.Empty(document.Descendants(ns + "Password"));
    }
 
+
+
+   /// <summary>Only the installed companion in its Program Files location may register an elevated startup task: a development build, a same-named file elsewhere, or no executable at all is refused.</summary>
    [Fact]
    public void DevelopmentAndMissingExecutableCannotAuthorizeElevatedStartup()
    {
@@ -68,6 +82,9 @@ public sealed class AgentStartupTests
       Assert.False(AgentStartup.IsInstalledCompanion(null));
    }
 
+
+
+   /// <summary>Uninstall deletes a scheduled task only when its name and full definition match what the installer creates; a different name, command, executable, logon type, extra action or unparsable XML leaves the task alone.</summary>
    [Fact]
    public void UninstallRecognizesOnlyExactOwnedTaskDefinitions()
    {

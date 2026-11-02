@@ -8,8 +8,13 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Enrollment part of the runtime. It pairs this computer with the signed-in QQQ user, so the device credential is only ever issued to
+/// and stored for the session that asked for it.
+/// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>Exchanges the enrollment code for a device credential using the live user session on the selected server. Authentication changes are serialized by a gate, the identity is checked again after binding, and the old connection state is reset first so nothing from the previous pairing survives.</summary>
    private async Task<string> EnrollNativeAsync(PipeRequest request, CancellationToken token)
    {
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);

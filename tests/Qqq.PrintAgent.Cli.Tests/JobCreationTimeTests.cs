@@ -9,8 +9,10 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The job list sorts by when the server created each job. These tests pin how that creation time is stored: normalized to UTC, kept stable when a job is replayed or changes status, and filled in for journals written before the column existed.</summary>
 public sealed class JobCreationTimeTests
 {
+   /// <summary>A server creation time with an offset is stored as UTC and never replaced by a later claim carrying a different time, nor by status updates (which change the updated time only). Sorting by creation then orders the jobs by their server creation times in both directions.</summary>
    [Fact]
    public void Receipt_NormalizesServerCreationAndPreservesItAcrossStatusChangesAndReplay()
    {
@@ -39,6 +41,13 @@ public sealed class JobCreationTimeTests
       }
    }
 
+
+
+   /// <summary>
+   /// For a journal created before the creation-time column existed, opening the store fills it from the job's first event, or from
+   /// the last-updated time when its events were pruned. The fill happens once: changing every timestamp afterwards and reopening
+   /// leaves the earlier values alone, so the migration is not repeated on each open.
+   /// </summary>
    [Fact]
    public void LegacyBackfill_UsesFirstEventThenSummaryFallbackAndRunsOnlyOnce()
    {
@@ -77,6 +86,9 @@ public sealed class JobCreationTimeTests
       }
    }
 
+
+
+   /// <summary>Runs raw SQL against the journal file directly, bypassing the store, to simulate an older schema or tampered timestamps.</summary>
    private static void Execute(string directory, string sql)
    {
       using SqliteConnection connection = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "journal.db") }.ToString());

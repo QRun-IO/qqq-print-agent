@@ -12,7 +12,10 @@ namespace Qqq.PrintAgent.Core;
 /// <summary>Optional machine-deployed presentation settings, read once when the companion starts.</summary>
 public sealed record RuntimeBranding(string? DisplayName = null, string? CompanyName = null, Uri? SupportUrl = null, string? AccentColor = null, string? LogoPath = null, string? IconPath = null)
 {
+   /// <summary>The machine-wide branding file under ProgramData, the one place customer branding is read from, so a user cannot override a deployment's labels.</summary>
    public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "QqqPrintAgent", "branding.json");
+
+
 
    /// <summary>The MSI persists labels so unattended upgrades keep the customer identity.</summary>
    public static RuntimeBranding LoadMachine()
@@ -37,7 +40,12 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
       }
    }
 
+
+
+   /// <summary>Accepts a label stored by the installer only when it is non-blank, at most 180 characters and free of control characters; otherwise the built-in label is used.</summary>
    private static string? ValidMachineLabel(string? value) => string.IsNullOrWhiteSpace(value) || value.Length > 180 || value.Any(char.IsControl) ? null : value.Trim();
+
+
 
    /// <summary>Missing, unreadable, oversized or malformed settings fall back to the built-in appearance.</summary>
    public static RuntimeBranding Load(string path)
@@ -80,6 +88,8 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
       }
    }
 
+
+
    /// <summary>Apply presentation without changing application identity, source attribution or storage paths.</summary>
    public AppInfo Apply(AppInfo defaults) => defaults with
    {
@@ -95,6 +105,12 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
       },
    };
 
+
+
+   /// <summary>
+   /// Accepts a branding icon only when it is a local .ico file (never a network share) of 22 bytes to 2 MiB whose header and
+   /// image directory are self-consistent: the right signature, between 1 and 64 images, and every image inside the file. Anything else is ignored.
+   /// </summary>
    private static string? ValidateIcon(string? value, string directory)
    {
       if(value is null)
@@ -141,6 +157,9 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
       }
    }
 
+
+
+   /// <summary>True for a #RRGGBB accent colour dark enough that white text on it has a contrast ratio of at least 4.5 to 1, so a customer colour can never make the header unreadable.</summary>
    private static bool HasReadableWhiteText(string? color)
    {
       if(color is not { Length: 7 } || color[0] != '#' || !color.Skip(1).All(Uri.IsHexDigit))
@@ -151,12 +170,18 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
       return 1.05 / (luminance + 0.05) >= 4.5;
    }
 
+
+
+   /// <summary>Converts one two-digit hex colour channel to its linear light value, as the contrast formula requires.</summary>
    private static double LinearChannel(string color, int offset)
    {
       double value = int.Parse(color.AsSpan(offset, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture) / 255d;
       return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
    }
 
+
+
+   /// <summary>Reads an optional text setting, trimmed, returning null when it is absent, not a string, empty, over the maximum length or contains control characters.</summary>
    private static string? ReadText(JsonElement root, string key, int maximum)
    {
       if(!root.TryGetProperty(key, out JsonElement field) || field.ValueKind != JsonValueKind.String)
@@ -167,6 +192,12 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
       return string.IsNullOrEmpty(value) || value.Length > maximum || value.Any(char.IsControl) ? null : value;
    }
 
+
+
+   /// <summary>
+   /// Accepts a branding logo only when it is a local .png file of at most 2 MiB whose own header says it is a real PNG no larger
+   /// than 2048 by 2048 pixels. Network paths and other file types are refused, which also bounds how much image data the window will decode.
+   /// </summary>
    private static string? ValidateLogo(string? value, string directory)
    {
       if(value is null || value.Contains(':') && !Path.IsPathFullyQualified(value))

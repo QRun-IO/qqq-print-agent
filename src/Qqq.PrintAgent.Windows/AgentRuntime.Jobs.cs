@@ -8,8 +8,18 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Operator job part of the runtime: the job list the companion shows, job details, review, cancel, retry and test print.
+/// Local history is the source of truth; actions that need QQQ are refused while the connection is restricted, and a
+/// cancel of work already sent to Windows goes to the spooler by exact receipt instead of asking the server.
+/// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>
+   /// Handles the job-related pipe commands. A list request merges local history with the bounded cloud preview; details and
+   /// review read or update the local journal; cancelling a job already spooled goes to the Windows spooler by its recorded
+   /// receipt, and every other cancel, retry or test goes to the server through <c>SendOperatorActionAsync</c>.
+   /// </summary>
    private async Task<string> HandleJobCommandAsync(PipeRequest request, CancellationToken token)
    {
       using AgentStore store = new(directory);
@@ -50,6 +60,13 @@ public sealed partial class AgentRuntime
       return await SendOperatorActionAsync(store, request, token).ConfigureAwait(false);
    }
 
+
+
+   /// <summary>
+   /// Sends a test print, retry or cancel to the server as an explicit operator action. It is refused while ordinary traffic is
+   /// not allowed; a test print also needs the printer to be shared locally and to support the chosen format. A cancelled job is
+   /// removed from the cloud preview at once and the queue generation advances so a slower refresh cannot bring it back.
+   /// </summary>
    private async Task<string> SendOperatorActionAsync(AgentStore store, PipeRequest request, CancellationToken token)
    {
       if(!NormalTrafficAllowed)
@@ -82,6 +99,9 @@ public sealed partial class AgentRuntime
       return string.IsNullOrEmpty(queuedJob) ? "The server accepted the cancellation before dispatch." : "Queued on the server. The new job will appear here when this device receives it.";
    }
 
+
+
+   /// <summary>Returns one job's details as JSON, from the local journal or, for a job the server holds but this computer has not received, a summary with no events; an unknown job is an error.</summary>
    private string SerializeJobDetails(AgentStore store, PipeRequest request)
    {
       JobDetailsSnapshot? details = store.GetJobDetails(RequiredJob(request));
@@ -94,8 +114,18 @@ public sealed partial class AgentRuntime
       return JsonSerializer.Serialize(details ?? throw new InvalidOperationException("Job not found in this connection."), PrintApiClient.JsonOptions);
    }
 
+
+
+   /// <summary>Returns the request's job identifier, or tells the operator to select a job when it is missing.</summary>
    private static string RequiredJob(PipeRequest request) => !string.IsNullOrWhiteSpace(request.JobId) ? request.JobId : throw new InvalidOperationException("Select a job first.");
 
+
+
+   /// <summary>
+   /// Builds one page of the job list from local history and the cloud preview. Cloud jobs the journal already has are dropped
+   /// and the rest are merged under the same sort, reading at most 150 local candidates in pages of 100 whatever the offset, so
+   /// a deep page costs the same as a shallow one. The result says when the preview hit its 50 job limit.
+   /// </summary>
    internal static JobPage QueryJobsWithQueue(AgentStore store, JobQuery query, IReadOnlyList<JobSnapshot> queued)
    {
       _ = AgentStore.ValidateJobQuery(query);
@@ -115,6 +145,9 @@ public sealed partial class AgentRuntime
       return new JobPage(page, first.TotalCount + cloud.Length, query.Offset, query.PageSize, queued.Count >= 50);
    }
 
+
+
+   /// <summary>Applies the state, printer, needs-attention and prefix-search filters to a cloud preview job in memory, matching the rules the database applies to local rows so both sources filter alike.</summary>
    private static bool MatchesQuery(JobSnapshot job, JobQuery query)
    {
       if(!string.IsNullOrWhiteSpace(query.Status) && !string.Equals(job.Status, query.Status, StringComparison.Ordinal))

@@ -8,6 +8,7 @@ namespace Qqq.PrintAgent.Core.Authentication;
 /// <summary>Secondary device possession proof. It never replaces the current QQQ user session.</summary>
 public sealed class QqqDeviceCredential
 {
+   /// <summary>Accepts a device identifier of letters, digits, dot, underscore and hyphen (at most 128) and a visible-ASCII token (at most 4096), so a malformed value can never become a header injection or a path.</summary>
    public QqqDeviceCredential(string deviceId, string deviceToken)
    {
       ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
@@ -24,7 +25,13 @@ public sealed class QqqDeviceCredential
       DeviceToken = deviceToken;
    }
 
+
+
    public string DeviceId { get; }
    public string DeviceToken { get; }
+
+
+
+   /// <summary>Returns a fixed redacted label, so logging or displaying the credential can never reveal the device token.</summary>
    public override string ToString() => "QQQ device credential (redacted)";
 }

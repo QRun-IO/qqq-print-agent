@@ -38,7 +38,9 @@ public class AppTests
       session.WaitForElementGone("AboutVersionText");
    }
 
-   /// <summary>Splash: shows, then dismisses itself.</summary>
+
+
+   /// <summary>With the splash enabled the splash window appears at launch and then closes on its own within 20 seconds, so a user is never left behind a stuck splash screen.</summary>
    [Fact]
    public void Splash_ShowsThenDismissesItself()
    {
@@ -49,7 +51,7 @@ public class AppTests
 
 
 
-   /// <summary>About: shows the build version.</summary>
+   /// <summary>Opening About from the settings page shows a "Version ..." line for the running build and can be closed again, so users and support can read exactly which build is installed.</summary>
    [Fact]
    public void About_ShowsTheBuildVersion()
    {
@@ -99,6 +101,8 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
    /// <summary>The computer metadata dialog permits inspection and cancellation without changing the service.</summary>
    [Fact]
    public void MetadataEditor_CanBeOpenedAndCanceled()
@@ -120,6 +124,8 @@ public class AppTests
       session.WaitForElementGone("MetadataName");
       Assert.False(session.App.HasExited);
    }
+
+
 
    /// <summary>A real installed queue expands in place and opens settings without saving or printing.</summary>
    [Fact]
@@ -154,6 +160,8 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
    /// <summary>Uses existing job evidence only; the fixture must have at least one retained job.</summary>
    [Fact]
    public void ExistingJob_DoubleClickOpensStructuredDetailsWithoutMutation()
@@ -171,6 +179,8 @@ public class AppTests
       AppSession.WaitUntilGone(() => session.FindInApp(cf => cf.ByControlType(ControlType.Text).And(cf.ByName("Event history"))), "job details to close");
       Assert.False(session.App.HasExited);
    }
+
+
 
    /// <summary>Header direction changes are presentation-only and do not change service job records.</summary>
    [Fact]
@@ -190,6 +200,8 @@ public class AppTests
       session.WaitFor(() => session.FindInApp(cf => cf.ByAutomationId("SortJobTitle")) is { Name: "Sort by document, ascending" } button ? button : null, "document sort query to finish");
    }
 
+
+
    /// <summary>Requires retained jobs with at least two creation instants; verifies visible row values, not just header glyphs.</summary>
    [Fact]
    public void ExistingJobs_CreationSortChangesActualVisibleRowOrder()
@@ -208,6 +220,8 @@ public class AppTests
       session.WaitFor(() => session.WaitForElement("SortJobCreated").Name is "Sort by created, descending" ? history : null, "descending query to finish");
       _ = WaitForCreatedOrder(session, history, descending: true);
    }
+
+
 
    /// <summary>Expands existing evidence, collapses/reopens it and filters it away without changing jobs.</summary>
    [Fact]
@@ -239,6 +253,12 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
+   /// <summary>
+   /// Waits until the visible job rows show at least two distinct creation times in the requested order, reading each time from
+   /// the cell's accessible help text. Comparing what a user can actually see (not the header arrow) is what proves the sort.
+   /// </summary>
    private static DateTimeOffset[] WaitForCreatedOrder(AppSession session, AutomationElement history, bool descending)
    {
       DateTimeOffset[] observed = [];
@@ -259,6 +279,8 @@ public class AppTests
       return observed;
    }
 
+
+
    /// <summary>Requires an exposed PDF/ZPL queue; opens diagnostic choices and cancels without submitting any job.</summary>
    [Fact]
    public void LabelTestDialog_OffersResolutionAndStockChoicesWithoutPrinting()
@@ -273,7 +295,8 @@ public class AppTests
       ComboBox format = session.WaitForElement("TestPrintFormat").AsComboBox();
       ComboBox media = session.WaitForElement("TestPrintMedia").AsComboBox();
       Assert.Equal("Printer-ready label (ZPL)", format.SelectedItem?.Text);
-      string[] resolutions = ["4 × 6 in label — 203 dpi", "4 × 6 in label — 300 dpi", "4 × 6 in label — 600 dpi"];
+      string[] resolutions = ["4 × 6 in label — 203 dpi", "4 × 6 in label — 300 dpi", "4 × 6 in label — 600 dpi",
+         "4 × 2 in label — 300 dpi", "4 × 1 in label — 300 dpi", "4 × 6 in label — 203 dpi"];
       foreach(string resolution in resolutions)
       {
          media.Select(resolution);
@@ -281,7 +304,7 @@ public class AppTests
       }
       format.Select("Document (PDF)");
       session.WaitFor(() => string.Equals(media.SelectedItem?.Text, "US Letter — 8.5 × 11 in", StringComparison.Ordinal) ? media : null, "PDF stock choices");
-      string[] stocks = ["US Letter — 8.5 × 11 in", "A4 — 210 × 297 mm", "4 × 6 in label"];
+      string[] stocks = ["US Letter — 8.5 × 11 in", "A4 — 210 × 297 mm", "4 × 6 in label", "4 × 2 in label", "4 × 1 in label", "US Letter — 8.5 × 11 in"];
       foreach(string stock in stocks)
       {
          media.Select(stock);
@@ -292,6 +315,12 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
+   /// <summary>
+   /// True for a visible printer row whose share checkbox is on and whose compact header lists both ZPL and PDF. These rows are
+   /// the only ones the diagnostic dialog test can use, so the test waits for one instead of assuming a particular queue name.
+   /// </summary>
    private static bool IsSharedLabelRow(AutomationElement row)
    {
       AutomationElement? exposure = row.FindFirstDescendant(cf => cf.ByControlType(ControlType.CheckBox));
@@ -321,6 +350,8 @@ public class AppTests
       Assert.False(session.App.HasExited);
    }
 
+
+
    /// <summary>A second launch restores the hidden existing window and exits without another companion.</summary>
    [Fact]
    public async Task Relaunch_RestoresHiddenExistingCompanion()
@@ -340,6 +371,8 @@ public class AppTests
       Assert.Equal(originalProcess, session.App.ProcessId);
       Assert.Single(session.TopLevelWindows(), window => string.Equals(window.Name, session.MainWindow.Name, StringComparison.Ordinal));
    }
+
+
 
    /// <summary>Search/filter remain read-only and lifecycle controls are discoverable without invoking them.</summary>
    [Fact]
@@ -385,7 +418,7 @@ public class AppTests
 
 
 
-   /// <summary>Theme: the choice is saved to settings.json.</summary>
+   /// <summary>Choosing the Dark theme in settings is written to the app's settings.json, so the choice survives a restart; the test reads the file the app itself saved.</summary>
    [Fact]
    public void ThemeChoice_IsSaved()
    {
@@ -396,6 +429,8 @@ public class AppTests
          () => session.ReadSettings().Contains("\"Theme\": \"Dark\"", StringComparison.Ordinal) ? session.MainWindow : null,
          "settings.json to record the dark theme");
    }
+
+
 
    /// <summary>Shared shell preferences persist without checking the network or changing machine startup.</summary>
    [Fact]

@@ -17,11 +17,24 @@ namespace Qqq.PrintAgent.Windows;
 public static partial class AgentStartup
 {
    private static readonly XNamespace TaskNamespace = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+
+
+
+   /// <summary>The only program the sign-in task may launch: the companion at its fixed machine-wide install path, so the task can never be pointed at another executable.</summary>
    private static string InstalledExecutable => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent", "App", "Qqq.PrintAgent.exe");
+
+
 
    /// <summary>Query only; never registers a task. Call off the UI thread.</summary>
    public static AgentStartupStatus GetStatus() => GetStatusAsync().GetAwaiter().GetResult();
 
+
+
+   /// <summary>
+   /// Reads the startup task's state for the current administrator. A non-administrator gets an explanation instead of a
+   /// state. A task with this name that is not exactly ours is reported as foreign and never treated as enabled, so the
+   /// preference never claims control of someone else's task.
+   /// </summary>
    private static async Task<AgentStartupStatus> GetStatusAsync()
    {
       using var identity = WindowsIdentity.GetCurrent();
@@ -46,7 +59,14 @@ public static partial class AgentStartup
          : "Enable this from the MSI-installed companion. Development and portable executables cannot create an elevated sign-in task.");
    }
 
-   /// <summary>Only an explicit user action calls this method; enabling authorizes an elevated task for the current administrator.</summary>
+
+
+   /// <summary>
+   /// Only an explicit user action calls this method; enabling authorizes an elevated task for the current administrator.
+   /// Disabling deletes only a task that is exactly ours. Enabling is allowed only from the installed companion, writes the
+   /// task definition to a protected folder, registers it, then reads it back and requires it to match, so a task that
+   /// Windows stored differently is reported instead of trusted. The temporary definition is always deleted.
+   /// </summary>
    public static async Task<AgentStartupStatus> SetEnabledAsync(bool enabled)
    {
       using var identity = WindowsIdentity.GetCurrent();
@@ -103,8 +123,18 @@ public static partial class AgentStartup
       return await GetStatusAsync().ConfigureAwait(false);
    }
 
+
+
+   /// <summary>The task name for one user: a fixed prefix plus the user's SID, so every administrator has a separate task and the name identifies its owner.</summary>
    private static string TaskName(WindowsIdentity identity) => "QQQ Print Agent " + (identity.User?.Value ?? throw new InvalidOperationException("Current user has no SID."));
 
+
+
+   /// <summary>
+   /// Writes the task definition and returns it open for reading, with sharing set so Task Scheduler's own reader can open
+   /// it while this handle stays held. Holding the handle in the validated protected folder prevents the file being replaced
+   /// between validation and registration.
+   /// </summary>
    internal static FileStream CreateHeldDefinition(string path, string xml)
    {
       Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(path);
@@ -118,6 +148,8 @@ public static partial class AgentStartup
       }
       return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
    }
+
+
 
    /// <summary>Full-uninstall cleanup removes only task definitions that exactly match this application's fixed identity.</summary>
    public static async Task RemoveInstalledTasksAsync()
@@ -162,6 +194,13 @@ public static partial class AgentStartup
       }
    }
 
+
+
+   /// <summary>
+   /// Decides whether a registered task is exactly the one this application creates: a name with a user SID, a single
+   /// principal that logs on interactively at the highest available level, a single logon trigger and a single action that runs the
+   /// installed companion with "--tray". Anything else, including unparsable XML, is not ours and is never changed or deleted.
+   /// </summary>
    internal static bool IsOwnedTaskDefinition(string taskName, string xml)
    {
       Match name = OwnedTaskName().Match(taskName);
@@ -194,6 +233,13 @@ public static partial class AgentStartup
       }
    }
 
+
+
+   /// <summary>
+   /// True when a task's user element is the expected SID, or an account name that resolves to exactly that SID, because Task
+   /// Scheduler may store a name even when the task was registered with a SID. A different SID, or a name that does not
+   /// resolve, is rejected, so ownership still requires the exact original identity.
+   /// </summary>
    private static bool MatchesUserSid(string? account, string expectedSid)
    {
       if(string.Equals(account, expectedSid, StringComparison.Ordinal))
@@ -217,9 +263,18 @@ public static partial class AgentStartup
       }
    }
 
+
+
+   /// <summary>Matches only this application's task names (the fixed prefix and a SID), with a one second match limit, so an uninstall scan can never act on an unrelated task.</summary>
    [GeneratedRegex("""^\\?QQQ Print Agent (?<sid>S-\d+(?:-\d+)+)$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex OwnedTaskName();
 
+
+
+   /// <summary>
+   /// True only for the real installed companion: it must be the Program Files executable at the exact install path, exist, and
+   /// neither it nor its two parent folders may be a reparse point, so a development copy or a redirected folder cannot gain the elevated task.
+   /// </summary>
    internal static bool IsInstalledCompanion(string? executable)
    {
       if(executable is null || !string.Equals(Path.GetFullPath(executable), Path.GetFullPath(InstalledExecutable), StringComparison.OrdinalIgnoreCase) || !File.Exists(executable))
@@ -231,6 +286,13 @@ public static partial class AgentStartup
          && !File.GetAttributes(Path.GetDirectoryName(Path.GetDirectoryName(executable))!).HasFlag(FileAttributes.ReparsePoint);
    }
 
+
+
+   /// <summary>
+   /// Builds the Task Scheduler definition for one user: an interactive logon trigger and principal at the highest available
+   /// level, and a single action running the installed companion with "--tray". It must stay in step with
+   /// <c>IsOwnedTaskDefinition</c>, which accepts only this shape.
+   /// </summary>
    internal static string CreateTaskXml(string userSid)
    {
       XNamespace ns = TaskNamespace;
@@ -245,6 +307,12 @@ public static partial class AgentStartup
       return document.Declaration + Environment.NewLine + document;
    }
 
+
+
+   /// <summary>
+   /// Runs schtasks.exe from the system folder with an argument list (never a shell string) and a 15 second limit, and returns
+   /// its exit code and output. A hung scheduler is killed with its process tree and reported as a timeout with advice to refresh.
+   /// </summary>
    private static async Task<(int Code, string Output)> RunSchedulerAsync(params string[] arguments)
    {
       ProcessStartInfo start = new(Path.Combine(Environment.SystemDirectory, "schtasks.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };

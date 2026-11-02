@@ -33,7 +33,12 @@ volatile private bytes may require reselection; the client does not guess which
 vendor fields can be ignored. The fingerprint is not a credential.
 
 Consumers submit `options.mediaProfile: {id, revision}` exactly as advertised.
-It cannot be combined with `paperWidthMm` or `paperHeightMm`. The worker checks
+It cannot be combined with `paperWidthMm` or `paperHeightMm`. Those two values
+(a complete pair, PDF only) request explicit actual-size job paper instead: the
+agent edits a copy of the queue's machine defaults (user paper size, tenths of a
+millimeter, form name ignored, one copy, 100 percent) and refuses the job before
+StartDoc unless the device context reports that physical size and resolution. The
+queue default is never changed. The worker checks
 the current selection after download and before its submission state. The
 native helper checks again immediately before opening a spool document. A known
 media refusal is propagated across the helper boundary and recorded as FAILED

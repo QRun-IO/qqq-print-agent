@@ -70,7 +70,11 @@ The maintainer accepted this exact 15-package scope on 2026-11-01.
 [EX-0014](https://github.com/KofTwentyTwo/standards/blob/fbfc8d2cf3b5e16ae9750b04cf9de1794f1e7152/exceptions/register.md#ex-0014)
 is the approved record, merged through the normal protected workflow in
 [standards PR 56](https://github.com/KofTwentyTwo/standards/pull/56). The caller
-allows only these 15 package names through the automated license check.
+allows only these 15 package names through the automated license check, plus the
+one separately approved EX-0015 development-only `pkg:npm/uri-js` entry. The SDK
+guard accepts exactly that finite union; any other npm or other-ecosystem purl, or
+a versioned or duplicate entry, is rejected, and `check-script-quality.py` pins the
+uri-js version, lock integrity and license bytes.
 
 EX-0014 is limited to these exact package/version/artifact tuples through
 2027-04-30 UTC inclusive. The required CI and pre-MSI guard rejects use from

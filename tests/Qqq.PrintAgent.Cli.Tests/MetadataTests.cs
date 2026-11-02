@@ -9,10 +9,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Operator-entered names, locations and descriptions for the computer and its printers: stored durably, validated at their limits, and kept apart from the technical queue identity the server dispatches on.</summary>
 public sealed class MetadataTests : IDisposable
 {
    private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-metadata-" + Guid.NewGuid().ToString("N"));
 
+
+
+   /// <summary>Profiles survive closing and reopening the store, surrounding spaces are trimmed, multi-line descriptions are kept, and a printer's friendly name is attached only to its own stable queue id, never to another.</summary>
    [Fact]
    public void Profiles_SurviveReopenAndRemainSeparateFromTechnicalQueueIdentity()
    {
@@ -27,6 +31,9 @@ public sealed class MetadataTests : IDisposable
       Assert.Null(reopened.GetPrinterProfile("different-queue-id").DisplayName);
    }
 
+
+
+   /// <summary>Never having set a profile (null) is different from deliberately clearing it (empty text); the store keeps that difference so a cleared name is not replaced by a default.</summary>
    [Fact]
    public void ExplicitClear_DiffersFromUnconfiguredMetadata()
    {
@@ -37,6 +44,9 @@ public sealed class MetadataTests : IDisposable
       Assert.Equal(new DeviceProfile("", "", ""), store.GetDeviceProfile());
    }
 
+
+
+   /// <summary>A name or location of 513 characters, or a description of 4,097, is rejected, and the previously saved profile is left exactly as it was, so a bad edit can never half-apply.</summary>
    [Theory]
    [InlineData("name")]
    [InlineData("location")]
@@ -56,6 +66,9 @@ public sealed class MetadataTests : IDisposable
       Assert.Equal(previous, store.GetDeviceProfile());
    }
 
+
+
+   /// <summary>Single-line fields (a name or location) refuse embedded line breaks and tabs, which would break one-line displays and lists; only the multi-line description may contain them.</summary>
    [Fact]
    public void NamesAndLocations_RejectEmbeddedLineBreaks()
    {
@@ -64,6 +77,9 @@ public sealed class MetadataTests : IDisposable
       Assert.Throws<ArgumentException>(() => store.SavePrinterProfile("queue", new PrinterProfile(Location: "First\tSecond")));
    }
 
+
+
+   /// <summary>Releases SQLite's pooled connections and deletes the temporary store directory.</summary>
    public void Dispose()
    {
       SqliteConnection.ClearAllPools();

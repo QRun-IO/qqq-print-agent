@@ -12,6 +12,11 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Applying part of the updater, which runs only inside the staged helper copy. It re-verifies the request, waits for the
+/// companion that asked to close, installs the verified MSI with Windows Installer, checks that all three installed programs
+/// carry the requested release, records the outcome, and reopens the companion. It never kills a process or an installer.
+/// </summary>
 public static partial class MsiUpdateInstaller
 {
    /// <summary>Runs only inside the protected copied helper; never kills an installer or an application.</summary>
@@ -56,6 +61,13 @@ public static partial class MsiUpdateInstaller
       return code;
    }
 
+
+
+   /// <summary>
+   /// Waits up to 30 seconds for the companion that requested the update to exit, so its files can be replaced. It first
+   /// confirms the process is still the same one (same start time and the installed executable); a different process
+   /// aborts the update before any installer starts. It never terminates the companion, and a timeout is reported.
+   /// </summary>
    private static async Task WaitForCompanionExitAsync(InstallRequest request)
    {
       Process parent;
@@ -100,6 +112,13 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>
+   /// Opens the staged MSI for reading with sharing that blocks writes and deletes, and checks its size and SHA-256 against the
+   /// request in constant time. The caller keeps the handle open until the installer exits, so the file cannot be swapped
+   /// between the check and the install.
+   /// </summary>
    internal static FileStream OpenVerifiedPackage(string path, string expectedHash)
    {
       FileStream content = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -119,6 +138,9 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>Builds the msiexec start: the system msiexec, passive display, no automatic restart and a verbose log in the protected folder. Arguments go in a list, never a shell string.</summary>
    internal static ProcessStartInfo CreateInstallerStart(string package, string logPath)
    {
       ProcessStartInfo start = new(Path.Combine(Environment.SystemDirectory, "msiexec.exe")) { UseShellExecute = false, CreateNoWindow = true };
@@ -129,6 +151,12 @@ public static partial class MsiUpdateInstaller
       return start;
    }
 
+
+
+   /// <summary>
+   /// Turns an installer exit code into an honest message for the operator: success, restart required (3010, which is not
+   /// full success), operator cancellation (1602), or an unreported failure that points at the private log.
+   /// </summary>
    internal static string DescribeExitCode(int code) => code switch
    {
       0 => "Update installed successfully. Open the companion to verify service status.",
@@ -137,8 +165,13 @@ public static partial class MsiUpdateInstaller
       _ => "Windows Installer did not report a completed update (exit " + code.ToString(CultureInfo.InvariantCulture) + "). Inspect the private installation log and service status before retrying.",
    };
 
+
+
+   /// <summary>True when the installed product version, ignoring the build metadata after "+", is exactly the requested release.</summary>
    internal static bool InstalledVersionMatches(string? productVersion, string requestedVersion)
       => productVersion is not null && string.Equals(productVersion.Split('+')[0], requestedVersion, StringComparison.Ordinal);
+
+
 
    /// <summary>Checks the installed payload after MSI success without assuming rollback on mismatch.</summary>
    internal static void ValidateInstalledVersions(string requestedVersion, Func<string, string?> readProductVersion)
@@ -172,6 +205,13 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>
+   /// Finishes an update attempt in three independent best-effort steps, so a failure in one never blocks the next: record the
+   /// outcome and log it, tell the service to resume printing after the maintenance pause, and reopen the installed companion.
+   /// The installer's own log remains the evidence if any step fails.
+   /// </summary>
    private static async Task CompleteAsync(string version, int code, string message)
    {
       try
@@ -210,6 +250,9 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>Saves the last update outcome by writing a temporary file in the protected folder and moving it over the previous result, so a reader never sees a half-written file.</summary>
    private static void WriteOutcome(InstallOutcome outcome)
    {
       ValidateStagingDirectory(UpdatesDirectory);
@@ -228,6 +271,8 @@ public static partial class MsiUpdateInstaller
       }
       finally { File.Delete(temporary); }
    }
+
+
 
    /// <summary>Read-only, bounded last outcome; retained for Settings/log diagnostics rather than consumed.</summary>
    public static string? ReadLastOutcomeMessage()
@@ -254,5 +299,8 @@ public static partial class MsiUpdateInstaller
       }
    }
 
+
+
+   /// <summary>The recorded result of one update attempt: when it finished, which release it targeted, the installer's exit code and the message shown to the operator.</summary>
    private sealed record InstallOutcome(DateTimeOffset CompletedAt, string Version, int ExitCode, string Message);
 }

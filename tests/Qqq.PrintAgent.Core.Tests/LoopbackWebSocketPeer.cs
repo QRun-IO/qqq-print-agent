@@ -21,12 +21,21 @@ internal sealed class LoopbackWebSocketPeer : IDisposable
    internal Uri Origin { get; }
    internal Dictionary<string, string> Headers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+
+
+   /// <summary>Starts listening on an ephemeral loopback port, so each test gets its own address and nothing else on the machine can connect.</summary>
    internal LoopbackWebSocketPeer()
    {
       _listener.Start();
       Origin = new Uri($"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}/");
    }
 
+
+
+   /// <summary>
+   /// Accepts one connection, requires the realtime path, records the upgrade request's headers (so tests can check which
+   /// credentials were presented), answers the RFC 6455 handshake and returns the server end of the socket.
+   /// </summary>
    internal async Task<WebSocket> AcceptAsync(CancellationToken token)
    {
       TcpClient client = await _listener.AcceptTcpClientAsync(token);
@@ -51,9 +60,15 @@ internal sealed class LoopbackWebSocketPeer : IDisposable
       return WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, SubProtocol = "qqq-printing.v1" });
    }
 
+
+
+   /// <summary>Sends one realtime message in the protocol envelope (type, a fresh message id and the payload) as a single text frame.</summary>
    internal static Task SendAsync(WebSocket socket, string type, object payload, CancellationToken token)
       => socket.SendAsync(JsonSerializer.SerializeToUtf8Bytes(new { type, messageId = Guid.NewGuid().ToString("N"), payload }, PrintApiClient.JsonOptions), WebSocketMessageType.Text, true, token);
 
+
+
+   /// <summary>Reads one complete (possibly fragmented) message of up to 1 MiB and parses it as an envelope; a close frame is reported as an error.</summary>
    internal static async Task<RealtimeEnvelope> ReceiveAsync(WebSocket socket, CancellationToken token)
    {
       byte[] bytes = new byte[1048576];
@@ -69,6 +84,9 @@ internal sealed class LoopbackWebSocketPeer : IDisposable
       return JsonSerializer.Deserialize<RealtimeEnvelope>(bytes.AsSpan(0, offset), PrintApiClient.JsonOptions) ?? throw new IOException("Missing message.");
    }
 
+
+
+   /// <summary>Stops listening and closes every accepted connection.</summary>
    public void Dispose()
    {
       _listener.Stop();

@@ -10,8 +10,10 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Reconnection behavior of the realtime channel: how long the agent waits between attempts, and that a late failure from an old connection or session cannot disturb a newer one.</summary>
 public sealed class AgentRealtimeGenerationTests
 {
+   /// <summary>The reconnect delay starts at one second (up to 20 percent more with jitter) and is capped by the configured maximum (24 to 30 seconds at the twelfth attempt), so reconnects back off but never wait longer than the server allows.</summary>
    [Theory]
    [InlineData(0, 0, 1000)]
    [InlineData(0, 1, 1200)]
@@ -20,6 +22,13 @@ public sealed class AgentRealtimeGenerationTests
    public void ReconnectJitterRespectsConfiguredHardDelayBounds(int attempt, double sample, int expected)
       => Assert.Equal(TimeSpan.FromMilliseconds(expected), AgentRuntime.ReconnectDelay(new RealtimeSettings(), attempt, sample));
 
+
+
+   /// <summary>
+   /// A handshake on the old session is held open while the user signs in again. When the old handshake is later refused as
+   /// unauthenticated, that late failure must not sign out or block the replacement: the replacement session still opens its own
+   /// realtime connection and the agent stays authorized.
+   /// </summary>
    [Fact]
    public async Task OldHandshakeDenialCannotBlockReplacementSignedInSession()
    {

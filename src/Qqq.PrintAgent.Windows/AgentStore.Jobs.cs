@@ -8,10 +8,18 @@ using Microsoft.Data.Sqlite;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Job history part of the store: indexed, filtered, sorted and paged queries over local jobs, and bounded retention. The
+/// queries must stay cheap at tens of thousands of jobs a day, so sort fields are whitelisted, every filter is a parameter
+/// (never joined into the SQL text), and pruning removes only delivered, reviewed detail in small batches.
+/// </summary>
 public sealed partial class AgentStore
 {
    private const string JobColumns = "job_id,state,updated_at,last_event_json,printer_id,printer_name,title,format,failure_acknowledged,history_pruned,created_at";
 
+
+
+   /// <summary>True when this connection already has a record for the job, used to drop a cloud preview row once the job has been received locally.</summary>
    public bool HasJob(string jobId)
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -21,6 +29,9 @@ public sealed partial class AgentStore
       return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) != 0;
    }
 
+
+
+   /// <summary>Creates the indexes that keep outbox drains, status and printer filters, the attention list, retention and prefix searches fast as history grows; each is created only if missing.</summary>
    private void CreateJobIndexes()
    {
       using SqliteCommand command = _database.CreateCommand();
@@ -39,6 +50,13 @@ public sealed partial class AgentStore
       command.ExecuteNonQuery();
    }
 
+
+
+   /// <summary>
+   /// Returns one page of this connection's jobs in one read transaction, so the count and the rows agree. The query is
+   /// validated first; search is an escaped prefix match on job identifier, title or printer name; status, printer and
+   /// needs-attention filters narrow it; and the page offset and size are bound as parameters.
+   /// </summary>
    public JobPage QueryJobs(JobQuery query)
    {
       string order = ValidateJobQuery(query);
@@ -89,6 +107,9 @@ public sealed partial class AgentStore
       return new JobPage(jobs, count, query.Offset, query.PageSize);
    }
 
+
+
+   /// <summary>Checks a job query's bounds (non-negative offset, page of 1 to 100, short filters) and returns its whitelisted ORDER BY text, so an oversized or malformed query is refused before any SQL runs.</summary>
    internal static string ValidateJobQuery(JobQuery query)
    {
       ArgumentNullException.ThrowIfNull(query);
@@ -101,6 +122,8 @@ public sealed partial class AgentStore
       }
       return JobSorting.SqlOrder(query);
    }
+
+
 
    /// <summary>One bounded maintenance batch; only delivered, reviewed terminal detail is removed.</summary>
    public int PruneHistory(int retainDays = 30, int maxDetailedJobs = 300000)

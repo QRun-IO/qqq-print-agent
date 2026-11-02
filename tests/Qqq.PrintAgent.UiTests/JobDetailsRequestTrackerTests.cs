@@ -8,6 +8,7 @@ namespace Qqq.PrintAgent.UiTests;
 /// <summary>Exercises the same generation guard used by inline rows without launching a desktop.</summary>
 public sealed class JobDetailsRequestTrackerTests
 {
+   /// <summary>A details request that was started, then invalidated by collapsing the row, and replaced by reopening it, is no longer current: its late completion is ignored and does not end the replacement's loading state, so a stale answer cannot appear in the reopened row.</summary>
    [Fact]
    public void CollapseAndReopen_RejectsOldCompletionWithoutFinishingReplacement()
    {
@@ -27,6 +28,7 @@ public sealed class JobDetailsRequestTrackerTests
 
 
 
+   /// <summary>When the context changes (for example the list is filtered) the in-flight request is invalidated immediately: loading stops, a late completion is ignored, and the next request gets a new identity, even before another request has begun.</summary>
    [Fact]
    public void ContextInvalidation_RejectsCompletionBeforeAnotherRequestStarts()
    {
@@ -44,6 +46,7 @@ public sealed class JobDetailsRequestTrackerTests
 
 
 
+   /// <summary>While one request is pending a second cannot start, so a double click cannot fire overlapping reads; completing the first frees the slot and the next request gets a different identity.</summary>
    [Fact]
    public void PendingRequest_BlocksOverlapUntilCompleted()
    {

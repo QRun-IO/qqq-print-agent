@@ -13,12 +13,19 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
 
+/// <summary>
+/// Connection footer part of the main window: the WebSocket state and live traffic rates. It asks the local service for a
+/// small observation once a second; this is a local read, not a request to QQQ, so it adds no job or control polling.
+/// </summary>
 public sealed partial class MainWindow
 {
    private readonly DispatcherTimer _transportTimer = new() { Interval = TimeSpan.FromSeconds(1) };
    private bool _transportStarted;
    private bool _transportRefreshing;
 
+
+
+   /// <summary>Starts the one-second refresh timer once; later calls do nothing, so the timer is never started twice.</summary>
    private void InitializeTransportStatus()
    {
       if(_transportStarted)
@@ -30,6 +37,13 @@ public sealed partial class MainWindow
       _transportTimer.Start();
    }
 
+
+
+   /// <summary>
+   /// Reads the transport observation from the service and shows it. A reply that arrives after the window closed is dropped, an
+   /// error or unreadable reply shows "unavailable" rather than old numbers, and an overlapping refresh is skipped, so a slow
+   /// service cannot queue up requests.
+   /// </summary>
    private async Task RefreshTransportAsync()
    {
       if(_updatesClosed || _transportRefreshing)
@@ -59,6 +73,13 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>
+   /// Shows the connection state and the download and upload rates, with the exact totals and what they measure (service
+   /// payload bytes, not headers or TLS) in the tooltip and as accessible help text. With no observation it says so plainly
+   /// instead of leaving a stale figure on screen.
+   /// </summary>
    private void RenderTransport(AgentTransportSnapshot? transport)
    {
       if(transport is null)

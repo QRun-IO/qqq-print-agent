@@ -10,8 +10,14 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The server can cap how fast documents download; the cap applies to the whole agent, not to each download separately.</summary>
 public sealed class AgentRealtimeBandwidthTests
 {
+   /// <summary>
+   /// Two 256 KiB documents download at once under a 128 KiB/s aggregate cap. Both downloads are held open first, so timing starts
+   /// only when both are really reading; together they need about four seconds at the shared rate, whereas two independent per-file
+   /// limits would finish in about two. Finishing in under 3.5 seconds therefore means the cap was not shared. Both jobs still print.
+   /// </summary>
    [Fact]
    public async Task ConcurrentDownloadsShareOneConfiguredBandwidthBudget()
    {
@@ -48,6 +54,9 @@ public sealed class AgentRealtimeBandwidthTests
       finally { release.TrySetResult(); }
    }
 
+
+
+   /// <summary>Queues a PDF job for the given printer and registers the held-open stream the fake server will serve as its document.</summary>
    private static void AddDocument(RealtimeRuntimeFixture fixture, string id, string printerId, byte[] bytes, GatedDocument stream)
    {
       fixture.Documents[id] = () => stream;
@@ -55,10 +64,16 @@ public sealed class AgentRealtimeBandwidthTests
          new PrintOptions(), RealtimeRuntimeFixture.Now(), "QUEUED"));
    }
 
+
+
+   /// <summary>A document body that signals when reading begins and withholds its bytes until a shared release task completes, so two downloads can be started together.</summary>
    private sealed class GatedDocument(byte[] bytes, Task release) : MemoryStream(bytes)
    {
       internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+
+
+      /// <summary>Signals the first read, waits for the shared release, then reads normally.</summary>
       public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
       {
          Entered.TrySetResult();

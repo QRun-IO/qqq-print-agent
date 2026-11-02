@@ -8,8 +8,19 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Remote command part of the runtime: executing the server's commands (refresh printers, cancel one spooler job) at most once each. The
+/// intent is committed before any effect and the receipt before delivery, so a crash or lost acknowledgement is answered with the
+/// recorded result or an honest "outcome unknown", never by repeating a physical action.
+/// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>
+   /// Applies one command. An expired command is answered as expired, and a refresh is skipped while traffic is not allowed. The
+   /// execution intent is committed first; if a receipt already exists it is simply redelivered, and a command whose intent was
+   /// recorded without a receipt is reported as outcome unknown instead of being run again. The receipt message is redacted and
+   /// bounded, and the last command is recorded in the control state.
+   /// </summary>
    private async Task ApplyControlCommandAsync(AgentStore store, PrintApiClient api, DeviceControlCommand command, DateTimeOffset serverTime, CancellationToken token)
    {
       bool expired = DateTimeOffset.Parse(command.ExpiresAt, CultureInfo.InvariantCulture) <= serverTime;
@@ -38,6 +49,13 @@ public sealed partial class AgentRuntime
       SetControlState(store, state);
    }
 
+
+
+   /// <summary>
+   /// Carries out a command and turns the result into an outcome code and message. A cancelled, timed-out or lost-result execution is
+   /// always reported as outcome unknown with advice to inspect the printer, and a known failure as failed, so no failure path suggests
+   /// an action did or did not happen when that is not known.
+   /// </summary>
    private async Task<(string Outcome, string Message)> ExecuteControlCommandAsync(AgentStore store, PrintApiClient api, DeviceControlCommand command, CancellationToken token)
    {
       try
@@ -76,6 +94,13 @@ public sealed partial class AgentRuntime
       }
    }
 
+
+
+   /// <summary>
+   /// Cancels one job on the server's request, but only when it can be done safely: a job still downloading is cancelled before it
+   /// reaches the printer; a spooled job is cancelled by its exact recorded spooler receipt on its recorded printer; every other state
+   /// (no receipt, already completed, unknown, unsupported backend, missing printer) is refused with a specific outcome and nothing is changed.
+   /// </summary>
    private async Task<(string Outcome, string Message)> CancelRemoteSpoolAsync(AgentStore store, string jobId, CancellationToken token)
    {
       JobSnapshot? job = store.GetJobDetails(jobId)?.Job;

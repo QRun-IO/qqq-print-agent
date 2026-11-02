@@ -8,6 +8,7 @@ namespace Qqq.PrintAgent;
 /// <summary>Leaves a failed native layout unhandled after AppKit has recorded it.</summary>
 internal static class UiExceptionPolicy
 {
+   /// <summary>Marks a layout-cycle failure as unhandled so the companion exits instead of limping on without input; any other failure, or one whose type cannot be read, keeps AppKit's existing handling. Only this process ends and the print service stays up.</summary>
    internal static void HandleUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs args)
    {
       string? exceptionType;

@@ -14,8 +14,14 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Checks that the agent keeps telling the server it is alive while a print is stuck, so a slow spooler is not mistaken for a dead device.</summary>
 public sealed class AgentRuntimeHeartbeatTests
 {
+   /// <summary>
+   /// While a submission blocks indefinitely in the printer, at least three more heartbeats reach the server at the 50 ms test
+   /// interval, the snapshot still reports connected with a recent successful poll, and the job shows SUBMITTING. Heartbeats
+   /// therefore run independently of the print in progress.
+   /// </summary>
    [Fact]
    public async Task HeartbeatsContinueAndUpdateRealContactDuringBlockedSubmission()
    {
@@ -67,10 +73,21 @@ public sealed class AgentRuntimeHeartbeatTests
       }
    }
 
+
+
+   /// <summary>A printer whose print call signals the test and then never finishes until cancelled, simulating a spooler submission that hangs.</summary>
    private sealed class BlockingPrinter : IPrinterBackend
    {
       public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>Reports the single synthetic queue.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new PrinterInfo("printer", "Synthetic", "Fixture", "None", "READY", ["PDF"])];
+
+
+
+      /// <summary>Signals that submission started, then waits until cancelled; ending any other way is a test failure.</summary>
       public async Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
       {
          Entered.TrySetResult();
@@ -79,9 +96,16 @@ public sealed class AgentRuntimeHeartbeatTests
       }
    }
 
+
+
+   /// <summary>Fake server: counts heartbeats through the supplied callback, offers one verified three-byte job on claim, and serves its content.</summary>
    private sealed class Handler(Action heartbeat) : HttpMessageHandler
    {
       private static readonly byte[] Content = [1, 2, 3];
+
+
+
+      /// <summary>Control polls get 404; heartbeat, claim and content requests are answered by URL suffix; everything else returns an empty object.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          string path = request.RequestUri!.AbsolutePath;

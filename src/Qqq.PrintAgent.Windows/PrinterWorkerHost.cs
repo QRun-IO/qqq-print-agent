@@ -15,12 +15,29 @@ namespace Qqq.PrintAgent.Windows;
 public static class PrinterWorkerHost
 {
    internal const string ParentEnvironmentVariable = "QQQ_PRINT_WORKER_PARENT";
+
+
+
+   /// <summary>One operation sent to the helper as a single JSON line: discover, print, print a staged file, or cancel a spool job, with only the fields that operation needs. A staged file travels by path, never by content.</summary>
    internal sealed record Request(string Operation, PrintJob? Job = null, byte[]? Content = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null, string? ContentPath = null);
+
+
+
+   /// <summary>The helper's single-line answer: success with the printers or spooler receipt, or a failure with a redacted message and, for known refusals, a code the parent maps back to a specific exception.</summary>
    internal sealed record Response(bool Success, IReadOnlyList<PrinterInfo>? Printers = null, string? SpoolerJobId = null, string? Error = null, string? ErrorCode = null);
+
+
 
    /// <summary>Run before ordinary service or CLI hosting when invoked with --printer-worker.</summary>
    public static Task<int> RunAsync() => RunAsync(new WindowsPrinters());
 
+
+
+   /// <summary>
+   /// Runs exactly one operation read from standard input and writes one JSON answer to standard output, with exit code 0 for
+   /// success and 1 for failure. It refuses to start without a parent process id, ends itself if that parent exits, bounds the
+   /// request size, and redacts error text before it leaves the process. A backend is injected so tests can run it without a printer.
+   /// </summary>
    internal static async Task<int> RunAsync(IPrinterBackend printers)
    {
       using CancellationTokenSource lifetime = new();
@@ -83,6 +100,9 @@ public static class PrinterWorkerHost
       }
    }
 
+
+
+   /// <summary>Waits for the parent service to exit and then terminates this helper immediately, so a blocked driver call can never leave an orphan process running after the service is gone.</summary>
    private static async Task WatchParentAsync(int parentId, CancellationToken token)
    {
       try

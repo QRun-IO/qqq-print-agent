@@ -19,6 +19,12 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) :
 
    public string? CurrentVersion { get; } = typeof(MsiUpdateService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
+
+
+   /// <summary>
+   /// True only for the MSI-installed companion (running from its Program Files path with the machine state folder present).
+   /// A development or portable copy cannot replace the service and CLI together, so it is never offered an in-app update.
+   /// </summary>
    public bool IsSupported
    {
       get
@@ -28,6 +34,13 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) :
       }
    }
 
+
+
+   /// <summary>
+   /// Asks the release feed whether a newer eligible release exists and remembers it for the later install step. Any previous
+   /// candidate is cleared first, so a failed check can never leave an old release to be installed. A failure is returned
+   /// as a message for the user, not thrown.
+   /// </summary>
    public async Task<UpdateCheckResult> CheckAsync(CancellationToken cancellationToken = default)
    {
       _pending = null;
@@ -46,6 +59,14 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) :
       }
    }
 
+
+
+   /// <summary>
+   /// Stages the checked release, asks the service to finish active printing and pause, starts the staged helper and closes
+   /// the companion so the installer can replace its files. Returns null on a successful hand-off or a message otherwise.
+   /// If anything fails before the hand-off the pause is lifted and the staged files removed, and once the helper has started
+   /// the failure is reported as "could not close", never as a failed install.
+   /// </summary>
    public async Task<string?> DownloadAndApplyAsync(IProgress<int>? progress = null, CancellationToken cancellationToken = default)
    {
       bool paused = false;
@@ -92,6 +113,13 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) :
       }
    }
 
+
+
+   /// <summary>
+   /// Downloads the verified MSI into a fresh protected staging folder (reporting percent progress) and prepares the helper
+   /// request, returning its path. The folder name is a new GUID and is validated before and after creation, and a failure at
+   /// any step removes what was staged.
+   /// </summary>
    private async Task<string> StageAsync(MsiRelease release, IProgress<int>? progress, CancellationToken token)
    {
       string staging = Path.Combine(MsiUpdateInstaller.UpdatesDirectory, Guid.NewGuid().ToString("N"));
@@ -118,6 +146,13 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) :
       }
    }
 
+
+
+   /// <summary>
+   /// Deletes a staging folder that was never applied. It first walks the whole tree and refuses to delete anything
+   /// containing a link or junction, because a recursive delete could otherwise follow it out of the folder; a refusal or
+   /// failure is only logged, and the folder is retained for an administrator.
+   /// </summary>
    private void RemoveUnappliedStage(string directory)
    {
       try
@@ -148,6 +183,9 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) :
       }
    }
 
+
+
+   /// <summary>Tells the service to lift the maintenance pause after an update was abandoned; best effort, since the service also expires an abandoned pause on its own.</summary>
    private static async Task ResumePrintingAsync()
    {
       try
@@ -160,9 +198,15 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) :
       }
    }
 
+
+
+   /// <summary>Turns a failure into a message for the operator: a cancellation reads as "canceled, current version remains", anything else is redacted so no secret or path detail leaks into the UI.</summary>
    private static string Describe(Exception exception) => exception is OperationCanceledException
       ? "The update was canceled. The current version remains installed."
       : AgentActivityLog.Redact(exception.Message);
 
+
+
+   /// <summary>Releases the release-feed client.</summary>
    public void Dispose() => _releases.Dispose();
 }

@@ -15,6 +15,11 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
 
+/// <summary>
+/// Settings and update part of the main window: appearance preferences, the manual and startup update checks, and the
+/// keyboard shortcuts. Updates use the AppKit coordinator over the machine-MSI service, and nothing installs without the
+/// operator's confirmation. Everything here stops cleanly when the window closes.
+/// </summary>
 public sealed partial class MainWindow
 {
    private readonly CancellationTokenSource _updateLifetime = new();
@@ -24,6 +29,13 @@ public sealed partial class MainWindow
    private bool _startupUpdateScheduled;
    private bool _updatesClosed;
 
+
+
+   /// <summary>
+   /// Loads the saved preferences into the settings controls and wires the update service: splash options bounded by the
+   /// shared shell limits, theme, the startup-check toggle, version and channel text, and the last installer outcome message.
+   /// Updates are disabled with an explanation when this is not a machine-MSI install, which cannot update itself.
+   /// </summary>
    private void InitializeAppKitSettings()
    {
       SplashToggle.IsOn = _settings.ShowSplashScreen;
@@ -50,6 +62,12 @@ public sealed partial class MainWindow
       LastUpdateOutcomeText.Visibility = string.IsNullOrWhiteSpace(outcome) ? Visibility.Collapsed : Visibility.Visible;
    }
 
+
+
+   /// <summary>
+   /// Supplies the window's root for update prompts, bringing the window forward first so a dialog is never shown over a
+   /// hidden tray-only window. It throws once the window has closed, which cancels a prompt that would otherwise outlive it.
+   /// </summary>
    private XamlRoot UpdateDialogRoot()
    {
       if(_updatesClosed)
@@ -60,6 +78,9 @@ public sealed partial class MainWindow
       return Content.XamlRoot;
    }
 
+
+
+   /// <summary>Shows the update service's progress text on the UI thread, ignoring messages that arrive after the window closed.</summary>
    private void UpdateService_StatusChanged(object? sender, UpdateStatusEventArgs args)
    {
       DispatcherQueue.TryEnqueue(() =>
@@ -71,6 +92,12 @@ public sealed partial class MainWindow
       });
    }
 
+
+
+   /// <summary>
+   /// Runs the optional quiet update check once per window lifetime, after the splash has had time to finish so the check
+   /// never competes with startup. It honours the saved preference both before waiting and again afterwards, and closing the window cancels it.
+   /// </summary>
    private async Task CheckUpdatesAfterStartupAsync()
    {
       if(_startupUpdateScheduled)
@@ -96,8 +123,18 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Runs an update check the operator asked for, with the prompts and results of the interactive flow.</summary>
    private async void CheckUpdates_Click(object sender, RoutedEventArgs e) => await CheckUpdatesAsync(interactive: true);
 
+
+
+   /// <summary>
+   /// Runs one update check, interactive or quiet. Only one runs at a time and none starts after the window closes. The
+   /// buttons are disabled while it runs and restored afterwards, a failure is logged and shown only for an interactive check,
+   /// and window shutdown cancels it without showing a dialog.
+   /// </summary>
    private async Task CheckUpdatesAsync(bool interactive)
    {
       if(_checkingUpdates || _updatesClosed || _updates is null || _updateService?.IsSupported != true)
@@ -143,6 +180,9 @@ public sealed partial class MainWindow
       }
    }
 
+
+
+   /// <summary>Saves whether to check for updates at startup; ignored while the window is still loading its saved values.</summary>
    private void UpdateStartup_Toggled(object sender, RoutedEventArgs e)
    {
       if(_initializing)
@@ -153,6 +193,9 @@ public sealed partial class MainWindow
       Save();
    }
 
+
+
+   /// <summary>Stops update work for good: marks the window closed so no late callback touches it, cancels pending checks and prompts, and releases the service.</summary>
    private void DisposeUpdates()
    {
       _updatesClosed = true;
@@ -165,6 +208,9 @@ public sealed partial class MainWindow
       _updateLifetime.Dispose();
    }
 
+
+
+   /// <summary>Saves the splash duration, clamped to the shared shell's allowed range, ignoring a blank box and the initial load.</summary>
    private void SplashDuration_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
    {
       if(_initializing || double.IsNaN(args.NewValue))
@@ -175,12 +221,18 @@ public sealed partial class MainWindow
       Save();
    }
 
+
+
+   /// <summary>Keyboard shortcut that opens Settings, marked handled so the key press goes no further.</summary>
    private void SettingsAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
    {
       Navigation.SelectedItem = Navigation.SettingsItem;
       args.Handled = true;
    }
 
+
+
+   /// <summary>Keyboard shortcut that opens the Logs page and the shared log viewer.</summary>
    private void LogsAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
    {
       Navigation.SelectedItem = LogsNavigation;

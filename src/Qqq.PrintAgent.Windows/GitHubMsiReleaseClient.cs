@@ -22,6 +22,12 @@ public sealed class GitHubMsiReleaseClient : IDisposable
    private static readonly Uri Feed = new("https://api.github.com/repos/QRun-IO/qqq-print-agent/releases?per_page=100");
    private readonly HttpClient _http;
 
+
+
+   /// <summary>
+   /// Creates the client with automatic redirects off, because every redirect is validated by hand against an allow-list of
+   /// GitHub hosts. A caller-supplied handler lets tests substitute the network without relaxing that rule.
+   /// </summary>
    public GitHubMsiReleaseClient(HttpMessageHandler? handler = null)
    {
       _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false })
@@ -31,7 +37,13 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("QQQ-Print-Agent", "1"));
    }
 
-   /// <summary>Select a strictly newer supported release, excluding drafts and unsafe legacy installers.</summary>
+
+
+   /// <summary>
+   /// Selects a strictly newer supported release from this repository's release feed, excluding drafts and unsafe legacy
+   /// installers. The whole check has a two minute limit, the feed is size and shape bounded, a release whose prerelease flag
+   /// disagrees with its tag is rejected, and each candidate must carry exactly one MSI and one checksum file of allowed size.
+   /// </summary>
    public async Task<MsiRelease?> FindUpdateAsync(string currentVersion, CancellationToken cancellationToken = default)
    {
       using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -84,7 +96,14 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       return selected;
    }
 
-   /// <summary>Caller supplies an access-restricted staging directory; only the verified unique MSI path is returned.</summary>
+
+
+   /// <summary>
+   /// Downloads the release's MSI into a caller-supplied, access-restricted staging directory and returns only the verified,
+   /// uniquely named path. The expected hash comes from the release's checksum file, the file is written to a partial name
+   /// while its size and SHA-256 are checked as it streams, and it is moved into place only when both match, so a corrupt or
+   /// truncated download can never be mistaken for an installer. A failed download removes its own partial file.
+   /// </summary>
    public async Task<string> DownloadVerifiedAsync(MsiRelease release, string currentVersion, string stagingDirectory, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
    {
       using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -131,8 +150,18 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       }
    }
 
+
+
+   /// <summary>Releases the HTTP client.</summary>
    public void Dispose() => _http.Dispose();
 
+
+
+   /// <summary>
+   /// Copies the stream to disk while hashing it and enforcing the declared size, aborting the moment the data exceeds the
+   /// declared size or the absolute cap. The hash is compared in constant time at the end, and reported progress is the
+   /// fraction of the declared size received so far.
+   /// </summary>
    private static async Task CopyVerifiedAsync(Stream source, Stream target, long size, byte[] expected, IProgress<double>? progress, CancellationToken token)
    {
       using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -157,9 +186,18 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       await target.FlushAsync(token).ConfigureAwait(false);
    }
 
+
+
+   /// <summary>
+   /// A candidate is eligible when it meets the minimum supported version and is strictly newer than the installed one.
+   /// A stable install ignores prereleases; a prerelease install may take a newer prerelease or stable release.
+   /// </summary>
    private static bool Eligible(MsiReleaseVersion candidate, MsiReleaseVersion current)
       => candidate.MeetsMinimum && candidate.CompareTo(current) > 0 && (current.Candidate is not null || candidate.Candidate is null);
 
+
+
+   /// <summary>Rechecks a release description before it is used: version and channel eligibility, size, and that both URLs are exactly this repository's asset addresses.</summary>
    private static void Validate(MsiRelease release, MsiReleaseVersion current)
    {
       if(!MsiReleaseVersion.TryParse(release.Version, out MsiReleaseVersion candidate) || !Eligible(candidate, current) || release.Size is <= 0 or > MaximumMsiBytes)
@@ -170,8 +208,14 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       ValidateAssetUri(release.ChecksumUrl, release.Version, "SHA256SUMS");
    }
 
+
+
+   /// <summary>The single MSI file name a release must publish for a version; the updater depends on this exact name.</summary>
    private static string AssetName(string version) => "QqqPrintAgent-v" + version + "-x64.msi";
 
+
+
+   /// <summary>Finds the one asset with the given name; zero or several matches is an error, so an ambiguous release can never choose a file by accident.</summary>
    private static JsonElement SingleAsset(JsonElement assets, string name)
    {
       if(assets.ValueKind != JsonValueKind.Array)
@@ -182,9 +226,15 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       return matches.Length == 1 ? matches[0] : throw new InvalidDataException("The release must contain exactly one " + name + " asset.");
    }
 
+
+
+   /// <summary>Reads an asset's download address as an absolute URL; the address is checked against the repository path separately.</summary>
    private static Uri AssetUri(JsonElement asset)
       => Uri.TryCreate(asset.GetProperty("browser_download_url").GetString(), UriKind.Absolute, out Uri? uri) ? uri : throw new InvalidDataException("Invalid release asset URL.");
 
+
+
+   /// <summary>Requires the URL to equal, character for character, this repository's release path for the version and file name, so a feed entry cannot point elsewhere.</summary>
    private static void ValidateAssetUri(Uri uri, string version, string asset)
    {
       string expected = "https://github.com" + RepositoryPath + "v" + version + "/" + asset;
@@ -194,6 +244,12 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       }
    }
 
+
+
+   /// <summary>
+   /// Parses a SHA256SUMS file strictly and returns the hash for the expected file. Each line must be a 64 digit hex hash
+   /// and a plain file name with no path or control characters, duplicates are rejected, and the expected file must be present.
+   /// </summary>
    private static byte[] ReadChecksum(string text, string expectedName)
    {
       HashSet<string> filenames = new(StringComparer.OrdinalIgnoreCase);
@@ -222,6 +278,13 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       return selected ?? throw new InvalidDataException("The expected MSI is missing from SHA256SUMS.");
    }
 
+
+
+   /// <summary>
+   /// Gets a URL, following at most five redirects by hand. Metadata never redirects. An asset may redirect only to the same
+   /// path on github.com or to GitHub's release asset hosts, over HTTPS on the default port with no credentials, so a
+   /// compromised redirect cannot move the download to another site.
+   /// </summary>
    private async Task<HttpResponseMessage> GetAsync(Uri initial, bool metadata, CancellationToken token)
    {
       Uri current = initial;
@@ -254,6 +317,9 @@ public sealed class GitHubMsiReleaseClient : IDisposable
       throw new InvalidDataException("Too many release asset redirects.");
    }
 
+
+
+   /// <summary>Reads a small response into memory but never more than the stated limit, whether announced or discovered while reading.</summary>
    private static async Task<byte[]> ReadBoundedAsync(HttpResponseMessage response, int maximum, CancellationToken token)
    {
       if(response.Content.Headers.ContentLength > maximum)

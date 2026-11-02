@@ -10,8 +10,10 @@ using Xunit.Abstractions;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>The activity log must be bounded and safe to manage: a normal day of heavy printing fits the default budget, retention and clearing touch only the agent's own daily logs, concurrent writers share one size cap, and invalid settings are refused.</summary>
 public sealed class AgentLogSettingsTests(ITestOutputHelper output)
 {
+   /// <summary>Ten thousand jobs with three status lines each (30,000 entries) stay under the default 20 MiB daily limit without tripping it, so a very busy day is not silently cut off from the log.</summary>
    [Fact]
    public void TenThousandJobs_ThreeStatusEntriesEachFitDefaultDailyBudget()
    {
@@ -39,6 +41,13 @@ public sealed class AgentLogSettingsTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>
+   /// Applying a seven-day retention removes the agent's own log older than that, and Clear removes only its current-format daily
+   /// logs. Another application's log, a file that merely resembles ours, and the job journal are left untouched, and logging works
+   /// again afterwards.
+   /// </summary>
    [Fact]
    public void RetentionAndClear_OnlyRemoveOwnedDailyLogsAndPreserveJournal()
    {
@@ -74,6 +83,9 @@ public sealed class AgentLogSettingsTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>Two writers sharing one directory together stop at the 1 MiB daily cap (with a limit-reached notice in the file) and further writes are dropped; clearing the logs lifts the cap and both writers can log again.</summary>
    [Fact]
    public async Task SharedWriters_RespectDailySizeLimitAndContinueAfterClear()
    {
@@ -102,6 +114,9 @@ public sealed class AgentLogSettingsTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>Retention outside 1 to 365 days or a size cap outside 1 to 100 MiB is rejected, and the settings already saved remain in force.</summary>
    [Theory]
    [InlineData(0, 20)]
    [InlineData(366, 20)]
@@ -122,6 +137,9 @@ public sealed class AgentLogSettingsTests(ITestOutputHelper output)
       }
    }
 
+
+
+   /// <summary>Writes the same 8 KiB line 100 times, enough from two writers to pass the daily cap.</summary>
    private static void WriteMany(IActivityLog log, string payload)
    {
       for(int index = 0; index < 100; index++)

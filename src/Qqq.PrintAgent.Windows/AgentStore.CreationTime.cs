@@ -8,8 +8,13 @@ using Microsoft.Data.Sqlite;
 
 namespace Qqq.PrintAgent.Windows;
 
+/// <summary>
+/// Creation-time migration of the job table. It exists so jobs saved before the column was added still sort by when they were created,
+/// instead of by their last update.
+/// </summary>
 public sealed partial class AgentStore
 {
+   /// <summary>Adds the created-at column if missing, filling it from the first recorded event (or the update time), and ensures one sort index per display field. It runs in a single transaction so a failure leaves the old table unchanged.</summary>
    private void MigrateJobCreationTime()
    {
       using SqliteTransaction transaction = _database.BeginTransaction();

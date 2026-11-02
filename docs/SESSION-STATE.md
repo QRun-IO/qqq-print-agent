@@ -1,6 +1,64 @@
-# Session state — 2026-11-01
+# Session state — 2026-11-02
 
-## Candidate 0.4.0-rc.1 integration with protected main — 2026-11-01
+## Current status: stable 1.0 closeout — 2026-11-02
+
+The official 0.4.0-rc.4 build is installed with all three components; the normal MSI
+upgrade exited 0 and the service is Running. The latest source is
+`53fe1b8281806eda7adc314f92c8205aefcb51ce`: clean hosted Windows CI run 41442796961 on
+that exact head passed 499 tests (166 Core + 333 CLI) with zero failures and skips, and the
+build and MSI had zero warnings and errors. Core.Tests is never built on the local host;
+that clean hosted pass is its evidence. The earlier run 41384467500 on `b5eb5d73` (499
+tests) is historical. The primary Gitea feed and the public feed carry all three
+prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1), with nine assets
+checked and provenance verified. The source-header inventory (289 tracked files, 231
+C#) reported zero issues.
+
+Physical output: the operator confirmed the 4 × 1 label on RC3 with the same relevant
+printing runtime; 4 × 6 and Letter were accepted earlier. Physical 4 × 2 was deferred by
+the operator and is not a stable blocker.
+
+Stable signing is implemented (not in progress): the release workflow signs the owned
+binaries and the MSI with Azure Artifact Signing, as for MarkdownViewr Windows. All 19
+first-party binary copies of an installed RC4 payload, including `Cli/qqq-print-agent.dll`,
+and a disposable official RC4 MSI were Azure-signed and strictly verified (exact publisher,
+SHA256, timestamp). That is a local administrator proof; the new CI OIDC identity has not
+been exercised. See [RELEASE-SIGNING.md](RELEASE-SIGNING.md).
+
+Remaining stable-release work: (1) the Windows release branch (Gitea PR 2) normal protected
+merge, which awaits the central native 1725 repair for Windows ACL and file sharing on
+Linux; (2) a supported, published QQQ core with native session login, still awaited (the
+last official release, RC20, does not have it). Installed and published remains RC4, not
+1.0. No new stable tag exists and this file makes no 1.0 claim.
+
+Accepted known limitation: the post-print WinUI `LayoutCycleException` recorded under
+"Installed realtime release and companion follow-up" was removed from the 1.0 blocker
+list by the user on 2026-11-02. It is not fixed, and that history is preserved. The repeat
+Auth/S3 qualification, the latency investigation and the MSI comparison analysis were
+cancelled by the user and must not be resumed; their evidence is historical. All sections
+below are historical checkpoints; where they list work as pending they are superseded by
+this section. See [RELEASE-READINESS.md](RELEASE-READINESS.md).
+
+## Historical: rc.3 ordered file version — 2026-11-01
+
+Source `e10d251` implements the standard ordered numeric PE FileVersion: `X.Y.Z-rc.N`
+becomes `X.Y.Z.N` and stable becomes `X.Y.Z.65535` (details in
+[RELEASING.md](RELEASING.md)). The packaging-input checks and the actual rc.3
+production packaging passed: all three payloads report file version `0.4.0.3` and
+semantic version `0.4.0-rc.3+e10d251`. The local rc.2 installation was verified. The
+rc.3 normal MSI upgrade completed with exit 0; all three installed executables match
+the rc.3 source and report numeric file version `0.4.0.3`, with no repair required. The
+server was updated to printing 2.3.0 with pairing and history preserved.
+
+Printing observation: the operator confirmed the 4 × 1 test printed perfectly after
+the initial media-alignment issue. The operator chose to keep 4 × 1 stock loaded;
+the implemented 4 × 2 test option is awaiting a future stock change, with no physical
+result claimed for that size. No further test jobs will be sent until requested.
+
+Not claimed: no GA. The Gitea release artifact, update feed and shared Windows CI stay
+with the migration owner. Core.Tests is not built or run on this host, which includes the
+Gitea runner 6; it is not scheduled here.
+
+## Historical: candidate 0.4.0-rc.1 integration with protected main — 2026-11-01
 
 Protected main advanced during qualification (client virtual-agent behavior; server
 printing 2.2.0 rendering), so the earlier green PR heads are historical evidence
@@ -27,11 +85,54 @@ Observed locally (no hosted result for the final heads yet):
   lifecycle defect (realtime channel workers outliving the stopped host).
 
 Pending, not claimed: hosted CI on the final signed heads (including Core.Tests and
-the MSI build), installer and upgrade-preservation qualification
-([UPGRADE-QUALIFICATION.md](UPGRADE-QUALIFICATION.md)), profile-selected physical
-output, the unexplained 5–7 s ZPL test-print latency (measure first), and installed
-browser/private-callback sign-in against a published API 1.9+ server. No 1.0 claim.
-See [RELEASE-READINESS.md](RELEASE-READINESS.md).
+the MSI build), profile-selected physical output, and installed browser/private-callback
+sign-in against a published API 1.9+ server. The earlier plans for repeat Auth/S3
+qualification, ZPL test-print latency measurement and installer/MSI analysis were
+cancelled by the user and are not active work; the evidence recorded earlier in this
+file and in [UPGRADE-QUALIFICATION.md](UPGRADE-QUALIFICATION.md) is historical and kept.
+No 1.0 claim. See [RELEASE-READINESS.md](RELEASE-READINESS.md).
+
+## Historical: final pin and release identity — 2026-11-01
+
+The final protocol pin is `42c0d249f81395f00408ec0f92638dcbbf5deb03`
+([Gitea PR 2](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/2)); root updated
+`.github/workflows/ci.yml` and the Gitea standards-exception (EX-0015) citation. The
+[standards PR 54](https://github.com/KofTwentyTwo/standards/pull/54) is recorded as
+merged after CI 777778 passed. The earlier pins (`a26c18c9…`, `df3729ac…`, `f3cbc02e…`)
+are historical evidence. Because a 0.4.0-rc.1 build is already installed locally and the
+updater needs a strictly newer semantic version, the candidate identity moves to
+**0.4.0-rc.2**: `VersionSuffix` and the `Build-Installer.ps1` default change, while
+`VersionPrefix`/ProductVersion stay 0.4.0 (the installer already allows same-version
+upgrades, so RC to RC upgrades in place). No behavior, dependency or lock change. The
+`ci.yml` release-version defaults are protected and are proposed as a patch for root
+review. Server strict full verify (R31) passed; the merged UI build and 35 paper/media
+tests passed locally. Hosted Windows CI and the update-feed handoff await the migration
+owner; nothing is installed or tagged.
+
+## Historical: release cohort integration — 2026-11-01
+
+Integration branch `release/printing-cohort-20261101` merges the completed C# source
+documentation cleanup (every type, method, constructor and non-auto property has a
+how/why header and the `.editorconfig` structural spacing, proven comment-and-blank-line
+only by the Roslyn token compare per batch) with the small test-print label change
+(4 × 6, 4 × 2 and 4 × 1 label stock at 203/300/600 dpi, job-only actual-size paper for
+short PDF labels, and the 2000 mm paper bound). The three merge conflicts
+(`PrintOptions.cs`, `TestPrintEditor.cs`, `TestPrintProfileTests.cs`) were resolved by
+keeping both: the new behavior and the headers. No behavior was rolled back.
+
+Observed locally on the merged tree (R39): the production UI build under strict XML and
+analyzers passed with zero warnings, and the 35 existing paper/media tests passed.
+Core.Tests is hosted-only (Defender quarantine unchanged). The prior protected base
+`0336d5f` had 477 hosted tests; this head still needs a normal Gitea Core, CLI and build
+run. Pending: that CI run, installation of the new label implementation, and a
+small-stock paper test. The label implementation is **not installed** and has produced no
+physical output; the user's 4 × 6 stock is still loaded and unchanged. Native printing
+stays 2.3 with wire payload v1; the protocol pin awaits root's final commit. The existing
+Auth/S3 qualification is accepted and no new desktop or provider proof is claimed. The product stays
+0.4.0-rc.1, unreleased; no version bump or new updater design is part of the Gitea
+migration. Publishing and update-feed dependency: the AppKit updater reads the fixed
+GitHub release channel, so a Gitea move needs a decision on where releases are published
+before any update is offered from there.
 
 ## Candidate Echo media discovery — 2026-11-01
 

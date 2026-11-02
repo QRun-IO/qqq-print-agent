@@ -5,6 +5,11 @@
 
 namespace Qqq.PrintAgent.Core.Printing;
 
+/// <summary>
+/// Optional hooks and limits that change how a <see cref="PrintWorker"/> runs. The defaults give the simple serial worker; the
+/// realtime service supplies a staging folder, the live server limits, claim and event gates, bandwidth throttling, and
+/// reservation callbacks, so concurrency and ordering are decided by the runtime while the worker keeps the safety rules.
+/// </summary>
 public sealed record PrintWorkerOptions
 {
    public string? StagingDirectory { get; init; }

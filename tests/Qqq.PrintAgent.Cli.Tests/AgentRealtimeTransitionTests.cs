@@ -8,8 +8,10 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
+/// <summary>Changes of state while the realtime channel is live: enrolling a new device resets what the old one negotiated, and an instruction that arrives before a state acknowledgement is not lost.</summary>
 public sealed class AgentRealtimeTransitionTests
 {
+   /// <summary>After enrolling a new device while the service keeps running, the next realtime handshake reports settings revision 0 (the new pairing's own) instead of the old pairing's revision 5, and the stored settings and device id belong to the replacement device, so the new device is not judged against policy negotiated by the old one.</summary>
    [Fact]
    public async Task NewPairingStartsWithItsOwnSettingsRevisionWithoutServiceRestart()
    {
@@ -26,6 +28,9 @@ public sealed class AgentRealtimeTransitionTests
       Assert.Equal(0, store.LoadRealtimeSettings().Revision);
    }
 
+
+
+   /// <summary>A command that arrives while the server is still holding the acknowledgement of a state change is kept, and runs (a receipt is sent) as soon as that acknowledgement is released, with no HTTP polling needed to retrigger it.</summary>
    [Fact]
    public async Task CommandWaitingForStateAcknowledgementRunsAsSoonAsNegotiationCompletes()
    {
