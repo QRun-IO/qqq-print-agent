@@ -13,7 +13,7 @@ The native setup and status application uses the same [KofTwentyTwo AppKit](http
 
 > **Latest published prerelease: [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1).** All four assets, checksums and provenance attestations were verified. The real in-app update completed with matching app/service/CLI builds, retained identity and history, and an automatically reopened Connected app. The installer remains unsigned.
 
-> **Candidate 0.4.0-rc.4 — unsigned prerelease identity, no tag yet.** A strictly newer release candidate of the same 0.4.0 MSI core with numeric file version 0.4.0.4 (packaging gives each executable an ordered file version: rc.N is revision N, stable is 65535), so Windows Installer replaces the files of an earlier 0.4.0 candidate in place. It supersedes the local, unpublished 0.4.0-rc.3 build, which is installed and was upgraded normally with matching app, service and CLI builds. The cohort adds optional printer-media selection against printing extension 2.3+ servers (2.2 is rendering only and stays a three-capability peer), the 4 × 2 and 4 × 1 test labels, one phase-timing log line per job, and the completed source documentation. Native printing is 2.3 with wire payload v1. The rc.4 head is version metadata and docs on top of pre-release product source `5c2bfc9`, whose full hosted CI run 41381287355 passed 499 tests (166 Core + 333 CLI) with zero warnings and errors; rc.4 itself is not yet tested or published, and its tag pipeline must pass all gates afresh before publication. Earlier operator acceptance covers 4 × 6 and Letter output, and the 4 × 1 layout was confirmed on the local rc.3 build of the same product code; 4 × 2 is deferred. See [release readiness](docs/RELEASE-READINESS.md). No 1.0 or GA readiness is claimed.
+> **Version 1.0.0 — source prepared for publication; not yet tagged or published.** The latest published release remains 0.4.0-rc.4. A stable `v1.0.0` tag runs the release workflow, which signs the service, companion and CLI binaries and the MSI with Azure Artifact Signing and publishes a non-prerelease; nothing is published or available until that run succeeds ([signing](docs/RELEASE-SIGNING.md)). 1.0 is a product version only: native printing stays 2.3 with wire payload v1. The cohort adds optional printer-media selection against printing extension 2.3+ servers (2.2 is rendering only and stays a three-capability peer), the 4 × 2 and 4 × 1 test labels, one phase-timing log line per job, and the completed source documentation. Physical acceptance covers 4 × 6, Letter and 4 × 1; 4 × 2 is deferred. See [release readiness](docs/RELEASE-READINESS.md).
 
 **0.3.2-rc.1** checks the app, service and CLI for the same complete
 build version after an update, reports an inconsistent installation explicitly,
@@ -133,7 +133,7 @@ git clone https://github.com/QRun-IO/qqq-print-agent.git
 git clone https://github.com/QRun-IO/qqq-print-protocol.git
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 0.4.0 -ReleaseVersion 0.4.0-rc.4
+./build/Build-Installer.ps1 -ProductVersion 1.0.0 -ReleaseVersion 1.0.0
 ```
 
 [Realtime architecture and settings](docs/REALTIME.md) · [History and log limits](docs/SCALABILITY.md) · [Customer branding](docs/BRANDING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Administrator guide](docs/ADMINISTRATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Release process](docs/RELEASING.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
