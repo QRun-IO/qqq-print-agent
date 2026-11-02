@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
 <Project>
 
    <!-- KofTwentyTwo .NET quality gate (standards: K22-CODE-CS, from
@@ -55,7 +60,7 @@
         commit as "+<sha>" on AssemblyInformationalVersion, which the About dialog and the
         CLI's version output show as a short hash. -->
    <PropertyGroup>
-      <VersionPrefix>0.3.2</VersionPrefix>
+      <VersionPrefix>0.4.0</VersionPrefix>
       <VersionSuffix>rc.1</VersionSuffix>
    </PropertyGroup>
 

@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
    <Package Name="QQQ Print Agent" Manufacturer="QRun-IO" Version="$(ProductVersion)"
             UpgradeCode="D761CD03-F616-4C98-9A94-9F590A36E449" Scope="perMachine" InstallerVersion="500">

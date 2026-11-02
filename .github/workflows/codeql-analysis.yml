@@ -1,3 +1,6 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 # Local copy of KofTwentyTwo/standards at fdf5ed029603c938615a32b1beca3628b8787945 (v0.1.2).
 # Pins, inputs and analysis checks preserved; report validation now fails closed.
 # Static analysis (K22-CI-22): CodeQL with the security-extended suite, failing on

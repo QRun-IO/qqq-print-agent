@@ -202,7 +202,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
-      var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location)).ToList();
+      var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location, printer.MediaProfiles)).ToList();
       foreach(string missing in exposed.Where(id => !printers.Any(printer => string.Equals(printer.PrinterId, id, StringComparison.Ordinal))))
       {
          PrinterProfile profile = store.GetPrinterProfile(missing);

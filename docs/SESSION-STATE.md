@@ -1,5 +1,90 @@
 # Session state — 2026-11-01
 
+## Candidate 0.4.0-rc.1 integration with protected main — 2026-11-01
+
+Protected main advanced during qualification (client virtual-agent behavior; server
+printing 2.2.0 rendering), so the earlier green PR heads are historical evidence
+only. The media/operator/retained feature moved to printing **2.3.0**; this client
+offers `printer-media-v1` only to a stable 2.3+ server in major two and stays a
+three-capability peer on 2.0, 2.1 and 2.2. Product candidate 0.4.0-rc.1, wire
+payload v1, no tag.
+
+Observed locally (no hosted result for the final heads yet):
+
+- A focused build was **rejected** by analyzer MA0051 on `PrintWorker.ProcessJobAsync`
+  (67 lines, maximum 60), caused by the new per-job phase-timing instrumentation.
+  It was fixed by extracting `SubmitJobAsync`, `RequireCurrentPrinter`,
+  `RequireSubmitAllowed`, `SubmitNativeAsync` and a nested `JobAttempt`, with no
+  analyzer waiver. Reservation, staged-file and submission leases are still
+  released inside the same catch, and the authority checks and state order are
+  unchanged (reviewed by the coordinator).
+- The focused negotiation/runtime run then passed **16 of 16** with no warnings or
+  analyzer errors. Core.Tests was not built locally (Defender quarantine unchanged).
+- The Roslyn token compare against the merge base found exactly the four intended
+  semantic files changed and no fifth file.
+- Server: the merged candidate's full verify passed 189 reported / 188 executed /
+  1 intentional opt-in skip / 0 failures, Checkstyle 0, after fixing a real
+  lifecycle defect (realtime channel workers outliving the stopped host).
+
+Pending, not claimed: hosted CI on the final signed heads (including Core.Tests and
+the MSI build), installer and upgrade-preservation qualification
+([UPGRADE-QUALIFICATION.md](UPGRADE-QUALIFICATION.md)), profile-selected physical
+output, the unexplained 5–7 s ZPL test-print latency (measure first), and installed
+browser/private-callback sign-in against a published API 1.9+ server. No 1.0 claim.
+See [RELEASE-READINESS.md](RELEASE-READINESS.md).
+
+## Candidate Echo media discovery — 2026-11-01
+
+The isolated candidate implements `printer-media-v1`, machine-wide queue-default
+profiles, immutable media selection and pre-spool drift refusal. Selected PDFs
+use a driver-normalized job-only copy of the captured DEVMODE; RAW's physical-stock limitation is explicit
+in `docs/PRINTER-MEDIA.md`. Read-only native discovery produced a stable configured
+4 × 6 inch, 300 × 300 DPI profile across three helper launches. No live component
+was changed and no physical output was submitted.
+
+Core/Windows/CLI and synthetic test projects compile without warnings. Seven
+initial adapter cases and one isolated-worker refusal case passed. Review added
+driver-normalized copies/scale overrides and effective DC geometry/DPI validation
+before StartDoc; all 24 focused Windows adapter cases now pass with zero build
+warnings. The original queue fingerprint remains unchanged, and the driver may
+update private settings only in the job's in-memory buffer. Unsupported override
+fields stay absent. A read-only probe of the corrected production adapter passed
+on the configured label driver, including its absent native-scale flag and an
+effective 1,200 × 1,800 pixel DC at 300 DPI, without StartDoc or queue changes.
+A Core run executed
+150 cases, with 147 passing (including the new media/worker cases) and three
+failing because the new worktree's linked fixtures were missing. The subsequent
+full rerun is blocked by local Defender quarantine of the Core test assembly;
+no protection changes, exclusions or quarantine restoration were performed.
+This is not a clean full-suite or release qualification. Parent review owns the
+security provenance investigation and the remaining server/hardware gates.
+The shared selection validator also enforces protocol IDs of at most 128 ASCII
+URL-safe characters, profile names of 1–512 characters and at most 32 profiles.
+New Core boundary regressions are present for hosted validation and were not
+locally compiled or run after the quarantine.
+Capability negotiation requires discovered stable printing 2.3+ within major
+two (2.2 is the rendering extension without media negotiation); older 2.0/2.1/2.2 servers retain the original three-capability HELLO. The real
+session/loopback-WebSocket compatibility tests cover same-session upgrade and
+downgrade, refreshing discovery once per socket (separate from initial sign-in
+discovery), with zero forbidden HTTP polls. The combined focused Windows gate
+passed 40 cases with zero build warnings/errors.
+
+## Query in About — 2026-11-01
+
+The shared AppKit About dialog now places Query and its public links in a compact
+two-column section just after the brand header. The original header logo/text
+are reparented into an Auto/Star Grid so long customer names wrap without
+clipping; identity, version, license and credits remain supplied by AppKit.
+The PNG is bundled unmodified with provenance on a 128-pixel white card.
+
+The Release gate passes 426 tests (145 Core, 281 Windows/CLI), with zero build
+warnings/errors. The isolated native host passed image decoding, rendered
+contrast, initial mascot/link/name visibility, scrolling, keyboard focus and
+Close checks in both themes with a long synthetic customer name at observed
+125% DPI; full dialog captures verify the refinement. The private publish output contains
+the exact PNG, provenance and required WinUI resources. These About changes are
+not yet released or installed; the native host uses synthetic service responses.
+
 ## Published and installed 0.3.2 — 2026-11-01
 
 [0.3.2-rc.1](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v0.3.2-rc.1)

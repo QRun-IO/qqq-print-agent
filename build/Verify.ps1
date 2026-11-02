@@ -1,4 +1,7 @@
 #Requires -Version 7.4
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
 [CmdletBinding()]
 param([string] $ProtocolFixtures)
 
@@ -10,6 +13,13 @@ if(-not $ProtocolFixtures) { $ProtocolFixtures = Join-Path (Split-Path -Parent $
 if(-not (Test-Path -LiteralPath $protocolFixtures))
 {
    throw 'Check out the pinned qqq-print-protocol repository beside qqq-print-agent before running verification.'
+}
+foreach($fixture in @('claim.response.json', 'enroll.response.json', 'control-poll.response.json', 'printing-session.response.json', 'printing-session-bound.response.json'))
+{
+   if(-not (Test-Path -LiteralPath (Join-Path $ProtocolFixtures $fixture) -PathType Leaf))
+   {
+      throw "Required protocol fixture is missing: $fixture. Use the protocol revision pinned in .github/workflows/ci.yml, or pass its fixtures directory with -ProtocolFixtures."
+   }
 }
 Push-Location $projectRoot
 try

@@ -45,7 +45,9 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
             string port = Marshal.PtrToStringUni(info.PortName) ?? "";
             bool interactive = RequiresInteractiveOutput(port, driver);
             string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name))).ToLowerInvariant()[..24];
-            printers.Add(new PrinterInfo(id, name, driver, port, interactive ? "UNKNOWN" : status, interactive ? [] : zebra ? ["PDF", "ZPL"] : ["PDF"]));
+            QueueDefaultMedia? media = interactive ? null : ReadQueueMedia(id, name, driver, port);
+            printers.Add(new PrinterInfo(id, name, driver, port, interactive ? "UNKNOWN" : status, interactive ? [] : zebra ? ["PDF", "ZPL"] : ["PDF"],
+               MediaProfiles: media?.Profile is null ? [] : [media.Profile]));
          }
          return printers;
       }
@@ -118,18 +120,19 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       cancellationToken.ThrowIfCancellationRequested();
       return job.Format switch
       {
-         "ZPL" => PrintRaw(printer.Name, job, content),
-         "PDF" => await PrintPdfAsync(printer.Name, job, content, cancellationToken).ConfigureAwait(false),
+         "ZPL" => PrintRaw(printer, job, content),
+         "PDF" => await PrintPdfAsync(printer, job, content, cancellationToken).ConfigureAwait(false),
          _ => throw new InvalidDataException("Unsupported document format."),
       };
    }
 
    /// <summary>Send printer-ready ZPL bytes, handling partial spooler writes.</summary>
-   private static string PrintRaw(string printerName, PrintJob job, byte[] content)
+   private static string PrintRaw(PrinterInfo selectedPrinter, PrintJob job, byte[] content)
    {
-      Check(Native.OpenPrinter(printerName, out IntPtr printer, IntPtr.Zero));
+      Check(Native.OpenPrinter(selectedPrinter.Name, out IntPtr printer, IntPtr.Zero));
       try
       {
+         _ = RequireCurrentMedia(selectedPrinter, job);
          Native.DocInfo1 info = new() { DocumentName = $"QQQ {job.JobId}", DataType = "RAW" };
          uint id = Native.StartDocPrinter(printer, 1, ref info);
          if(id == 0)
@@ -163,7 +166,7 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
    }
 
    /// <summary>Own the native document lifecycle while rendering its PDF pages.</summary>
-   private static async Task<string> PrintPdfAsync(string printerName, PrintJob job, byte[] content, CancellationToken cancellationToken)
+   private static async Task<string> PrintPdfAsync(PrinterInfo printer, PrintJob job, byte[] content, CancellationToken cancellationToken)
    {
       using InMemoryRandomAccessStream pdfStream = new();
       using(DataWriter writer = new(pdfStream))
@@ -174,12 +177,14 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       }
       pdfStream.Seek(0);
       PdfDocument document = await PdfDocument.LoadFromStreamAsync(pdfStream);
-      return await PrintPdfDocumentAsync(printerName, job, document, cancellationToken).ConfigureAwait(false);
+      return await PrintPdfDocumentAsync(printer, job, document, cancellationToken).ConfigureAwait(false);
    }
 
-   private static async Task<string> PrintPdfDocumentAsync(string printerName, PrintJob job, PdfDocument document, CancellationToken cancellationToken)
+   private static async Task<string> PrintPdfDocumentAsync(PrinterInfo printer, PrintJob job, PdfDocument document, CancellationToken cancellationToken)
    {
-      IntPtr dc = Native.CreateDC("WINSPOOL", printerName, null, IntPtr.Zero);
+      QueueDefaultMedia? media = RequireCurrentMedia(printer, job);
+      byte[]? documentMode = media is null ? null : PreparePdfMode(printer, media);
+      IntPtr dc = CreateDocumentContext(printer.Name, documentMode);
       if(dc == IntPtr.Zero)
       {
          throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -188,7 +193,8 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       try
       {
          Native.DocInfo info = new() { Size = Marshal.SizeOf<Native.DocInfo>(), DocumentName = $"QQQ {job.JobId}" };
-         int jobId = Native.StartDoc(dc, ref info);
+         int jobId = StartValidatedPdfDocument(documentMode, media?.Profile,
+            capability => Native.GetDeviceCaps(dc, capability), () => Native.StartDoc(dc, ref info));
          if(jobId <= 0)
          {
             throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -272,7 +278,7 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       }
    }
 
-   private static class Native
+   private static partial class Native
    {
       [StructLayout(LayoutKind.Sequential)]
       internal struct PrinterInfo2

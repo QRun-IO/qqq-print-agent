@@ -1,3 +1,8 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
 <Project Sdk="Microsoft.NET.Sdk">
 
    <!-- The WinUI 3 shell: views, dialogs, and startup plumbing only; everything testable
@@ -24,6 +29,7 @@
       <Content Include="Assets\Brand\app-icon.svg" CopyToOutputDirectory="PreserveNewest" />
       <Content Include="Assets\Brand\app.ico" CopyToOutputDirectory="PreserveNewest" />
       <Content Include="Assets\Brand\tray-*.png" CopyToOutputDirectory="PreserveNewest" />
+      <Content Include="Assets\Query\query-mascot.png;Assets\Query\README.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
       <Manifest Include="$(ApplicationManifest)" />
    </ItemGroup>
 

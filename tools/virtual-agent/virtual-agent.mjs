@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /*
  * Copyright 2026 QRun.IO, Inc. Licensed under the MIT License (see LICENSE).
+ * SPDX-License-Identifier: MIT
  */
 
 /**
@@ -28,6 +29,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 export const AGENT_VERSION = '0.3.1-virtual'
@@ -49,10 +51,20 @@ export const LIMITS = {
   maxStagedBytes: 9007199254740991,
 }
 
-export function parseArgs(argv, env = process.env) {
+/** Where printed documents go by default: the user's Downloads folder, as browser downloads and qqq exports do. */
+export function defaultOutDir(home = homedir()) {
+  return join(home, 'Downloads')
+}
+
+/** The device identity and revisions: kept in a dot folder of the home directory, not among the printed files. */
+export function defaultStateFile(home = homedir()) {
+  return join(home, '.qqq-print-agent', 'state.json')
+}
+
+export function parseArgs(argv, env = process.env, home = homedir()) {
   const options = {
     server: env.QQQ_PRINT_SERVER ?? 'http://localhost:8078',
-    out: env.QQQ_PRINT_OUT ?? './virtual-printer-output',
+    out: env.QQQ_PRINT_OUT || defaultOutDir(home),
     state: env.QQQ_PRINT_STATE,
     name: env.QQQ_PRINT_PRINTER_NAME ?? 'Virtual PDF printer',
     deviceName: env.QQQ_PRINT_DEVICE_NAME ?? 'Virtual print agent',
@@ -88,7 +100,9 @@ export function parseArgs(argv, env = process.env) {
   }
   options.server = new URL(options.server).origin
   options.out = resolve(options.out)
-  options.state = resolve(options.state ?? join(options.out, '.agent-state.json'))
+  // an identity kept next to the output by earlier versions is still used; new ones go to the home dot folder
+  const legacy = join(options.out, '.agent-state.json')
+  options.state = resolve(options.state ?? (existsSync(legacy) ? legacy : defaultStateFile(home)))
   if (!options.formats.length || options.formats.some((f) => f !== 'PDF' && f !== 'ZPL')) throw new Error('--formats takes PDF and/or ZPL')
   return options
 }
@@ -102,12 +116,19 @@ export function checkTransport(server) {
   throw new Error(`${server}: use https (plain http is accepted only for a loopback server)`)
 }
 
-/** Compares dotted versions: negative, zero or positive. */
+/** Compare canonical stable SemVer without rounding large numeric components. */
 export function compareVersions(a, b) {
-  const pa = String(a).split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0)
-  const pb = String(b).split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0)
-  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0)
+  const pa = stableVersionParts(a)
+  const pb = stableVersionParts(b)
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1
   return 0
+}
+
+/** Match the protocol's stable three-part version boundary, including exact end of input. */
+function stableVersionParts(version) {
+  const match = typeof version === 'string' && /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(version)
+  if (!match || match[0] !== version) throw new Error('printing version is not supported: expected a canonical stable three-part version')
+  return match.slice(1).map((part) => BigInt(part))
 }
 
 /** The realtime contract: printing >=2.0.0 <3.0.0 must be listed by GET /version. */
@@ -156,7 +177,7 @@ export function backoff(attempt, settings = {}, random = Math.random) {
   return Math.round(Math.min(max, Math.max(min, base * (1 - jitter + 2 * jitter * random()))))
 }
 
-class Agent {
+export class Agent {
   constructor(options, log = (line) => console.log(`${new Date().toISOString()} ${line}`)) {
     this.o = options
     this.log = log
@@ -190,7 +211,12 @@ class Agent {
   }
 
   async request(method, path, { body, device = false, raw = false, form } = {}) {
-    const init = { method, headers: this.headers(device), redirect: 'error' }
+    const origin = new URL(this.o.server).origin
+    const url = new URL(path, origin)
+    if (url.origin !== origin || url.username || url.password) throw new Error('request target must remain on the configured server origin')
+    const verb = method.toUpperCase()
+    const init = { method: verb, headers: this.headers(device), redirect: 'error' }
+    if (this.cookie && !['GET', 'HEAD', 'OPTIONS'].includes(verb)) init.headers.Origin = origin
     if (form) {
       const data = new FormData()
       for (const [k, v] of Object.entries(form)) data.append(k, v)
@@ -199,7 +225,7 @@ class Agent {
       init.headers['content-type'] = 'application/json'
       init.body = JSON.stringify(body)
     }
-    const response = await fetch(new URL(path, this.o.server), init)
+    const response = await fetch(url, init)
     if (!response.ok) {
       const text = await response.text().catch(() => '')
       let message = text

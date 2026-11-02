@@ -113,3 +113,13 @@ Direct MSI and branded installation enforce this invariant before using persiste
 Unreadable session ciphertext is quarantined only on explicit sign-out or after fresh sign-in and authoritative binding succeed. Unreadable device proof remains in place until explicit enrollment replaces it; old journal scopes and local printer exposure are retained. Recovery never invents device authority or retries old print submissions. A missing readable session cannot be remotely revoked by local sign-out; the UI reports the separate QQQ revocation requirement. Background traffic remains fail closed.
 
 Replacement pairing requires an explicit local setup choice and fresh standard QQQ authentication. Its persisted unbound identity prevents restoration from presenting old, revoked device proof. New claims remain gated until successful enrollment, binding and control synchronization. Default sign-in still requires the saved pairing's authoritative binding. Failed setup preserves old configuration; successful replacement changes journal scope without replaying prior-device work.
+
+### Virtual development agent HTTP boundary
+
+The virtual agent's native HTTP request helper rejects foreign origins before
+attaching session or device credentials, refuses redirects, and sends the exact
+configured Origin on unsafe cookie-authenticated requests. This preserves the
+server's missing/foreign-Origin rejection. Discovery accepts canonical stable
+three-part printing versions in major 2, matching the protocol fixtures.
+Synthetic loopback HTTP tests cover these boundaries; they do not establish
+production authentication, durable spooling or physical printing acceptance.

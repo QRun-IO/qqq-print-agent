@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.UI.Xaml;

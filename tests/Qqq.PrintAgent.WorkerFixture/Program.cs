@@ -31,10 +31,10 @@ public static class Program
          Console.WriteLine(child.Id.ToString(CultureInfo.InvariantCulture));
          return 0;
       }
-      return await PrinterWorkerHost.RunAsync(new FakePrinters(args.Contains("--hang", StringComparer.Ordinal))).ConfigureAwait(false);
+      return await PrinterWorkerHost.RunAsync(new FakePrinters(args.Contains("--hang", StringComparer.Ordinal), args.Contains("--media-drift", StringComparer.Ordinal))).ConfigureAwait(false);
    }
 
-   private sealed class FakePrinters(bool hang) : IFilePrinterBackend
+   private sealed class FakePrinters(bool hang, bool mediaDrift) : IFilePrinterBackend
    {
       public IReadOnlyList<PrinterInfo> Discover()
       {
@@ -52,6 +52,8 @@ public static class Program
 
       public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
       {
+         if(mediaDrift)
+         { throw new PrinterMediaMismatchException("The fixture changed its default before submission."); }
          if(hang)
          { Thread.Sleep(Timeout.Infinite); }
          throw new InvalidOperationException("This fixture never opens documents or prints.");

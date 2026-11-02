@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -98,7 +103,7 @@ internal sealed class SessionFixture : IDisposable
          object body = new DeviceControlPoll(1, DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), 5, new DeviceDesiredState(1, false, "CONNECTED"), []);
          return new HttpResponseMessage(Status) { Content = new StringContent(JsonSerializer.Serialize(body, PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") };
       }
-      public Task<QqqApiDiscovery> DiscoverAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task<QqqApiDiscovery> DiscoverAsync(CancellationToken cancellationToken = default) => Task.FromResult(new QqqApiDiscovery());
       public Task<QqqAuthenticationMetadata> GetAuthenticationMetadataAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
       public Task SignInWithPasswordAsync(string username, string password, CancellationToken cancellationToken = default) => throw new NotSupportedException();
       public Task<QqqBrowserLogin> BeginBrowserLoginAsync(Uri redirectUri, CancellationToken cancellationToken = default) => throw new NotSupportedException();

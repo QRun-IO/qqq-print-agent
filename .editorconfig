@@ -29,6 +29,10 @@ trim_trailing_whitespace = false
 end_of_line = crlf
 
 [*.cs]
+# Repository-owned C# sources retain the MIT notice in LICENSE; enforced by the existing build.
+file_header_template = Copyright (c) 2026 James Maes\nSPDX-License-Identifier: MIT
+dotnet_diagnostic.IDE0073.severity = warning
+
 #### Formatting (IDE0055 makes every rule below a build error) ####
 dotnet_diagnostic.IDE0055.severity = warning
 dotnet_sort_system_directives_first = true

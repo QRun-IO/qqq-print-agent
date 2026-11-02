@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Shared visible job labels used by the companion and server-side local sorting.</summary>

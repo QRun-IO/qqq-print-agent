@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -28,18 +33,19 @@ public sealed partial class WindowsPrinters
       }
       if(string.Equals(job.Format, "ZPL", StringComparison.Ordinal))
       {
-         return PrintRawStream(printer.Name, job, input, cancellationToken);
+         return PrintRawStream(printer, job, input, cancellationToken);
       }
       using global::Windows.Storage.Streams.IRandomAccessStream random = input.AsRandomAccessStream();
       PdfDocument document = await PdfDocument.LoadFromStreamAsync(random).AsTask(cancellationToken).ConfigureAwait(false);
-      return await PrintPdfDocumentAsync(printer.Name, job, document, cancellationToken).ConfigureAwait(false);
+      return await PrintPdfDocumentAsync(printer, job, document, cancellationToken).ConfigureAwait(false);
    }
 
-   private static string PrintRawStream(string printerName, PrintJob job, Stream input, CancellationToken token)
+   private static string PrintRawStream(PrinterInfo selectedPrinter, PrintJob job, Stream input, CancellationToken token)
    {
-      Check(Native.OpenPrinter(printerName, out IntPtr printer, IntPtr.Zero));
+      Check(Native.OpenPrinter(selectedPrinter.Name, out IntPtr printer, IntPtr.Zero));
       try
       {
+         _ = RequireCurrentMedia(selectedPrinter, job);
          Native.DocInfo1 info = new() { DocumentName = $"QQQ {job.JobId}", DataType = "RAW" };
          uint id = Native.StartDocPrinter(printer, 1, ref info);
          if(id == 0)
