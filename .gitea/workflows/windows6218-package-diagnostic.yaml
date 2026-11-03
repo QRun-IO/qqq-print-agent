@@ -1,0 +1,69 @@
+name: Windows6218 packaging diagnostic
+true:
+  workflow_dispatch: null
+permissions:
+  contents: read
+jobs:
+  package-diagnostic:
+    runs-on: qqq-windows-vm6218
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: qqq-print-agent
+    steps:
+    - name: Checkout agent
+      uses: builtin:checkout
+      with:
+        path: qqq-print-agent
+        persist-credentials: false
+    - name: Checkout pinned protocol fixtures
+      uses: builtin:checkout
+      with:
+        repository: QRun-IO/qqq-print-protocol
+        ref: 42c0d249f81395f00408ec0f92638dcbbf5deb03
+        path: qqq-print-protocol
+        fetch-depth: 1
+        persist-credentials: false
+    - name: Verify installed .NET SDK
+      run: '$ErrorActionPreference = ''Stop''
+
+        $expected = (Get-Content -Raw global.json | ConvertFrom-Json).sdk.version
+
+        $installed = @(dotnet --list-sdks | ForEach-Object { ($_ -split '' '')[0]
+        })
+
+        if ($installed -notcontains $expected) { throw "SDK $expected is not installed
+        (found: $($installed -join '', ''))" }
+
+        $active = (dotnet --version).Trim()
+
+        if ($active -ne $expected) { throw "Active SDK $active does not match global.json
+        $expected" }
+
+        '
+    - name: Build unsigned prerelease MSI
+      env:
+        PRODUCT_VERSION: 1.0.1
+        RELEASE_VERSION: 1.0.1
+      run: "./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion\
+        \ $env:RELEASE_VERSION\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n\
+        New-Item -ItemType Directory -Path artifacts/release -Force | Out-Null\n$source\
+        \ = \"artifacts/installer/QqqPrintAgent-$env:PRODUCT_VERSION-x64.msi\"\n$name\
+        \ = \"QqqPrintAgent-v$env:RELEASE_VERSION-x64.msi\"\nCopy-Item -LiteralPath\
+        \ $source -Destination \"artifacts/release/$name\"\nCopy-Item -LiteralPath\
+        \ build/Install-Branded.ps1 -Destination artifacts/release/Install-Branded.ps1\n\
+        Copy-Item -LiteralPath docs/branding.example.json -Destination artifacts/release/branding.example.json\n\
+        $hash = (Get-FileHash -LiteralPath \"artifacts/release/$name\" -Algorithm\
+        \ SHA256).Hash.ToLowerInvariant()\n\"$hash  $name\" | Set-Content artifacts/release/SHA256SUMS\
+        \ -Encoding ascii\nforeach ($file in @('Install-Branded.ps1', 'branding.example.json'))\
+        \ {\n  $hash = (Get-FileHash -LiteralPath \"artifacts/release/$file\" -Algorithm\
+        \ SHA256).Hash.ToLowerInvariant()\n  \"$hash  $file\" | Add-Content artifacts/release/SHA256SUMS\
+        \ -Encoding ascii\n}\n"
+    - name: Upload unsigned installer
+      uses: self:KofTwentyTwo/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: windows-x64-installer
+        path: qqq-print-agent/artifacts/release/*
+        if-no-files-found: error
+        retention-days: 14
