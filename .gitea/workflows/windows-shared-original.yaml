@@ -1,0 +1,29 @@
+name: Original Windows shared route qualification
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  original-windows:
+    uses: self:KofTwentyTwo/platform-ci/.gitea/workflows/dotnet.yaml@6fc43478a6e79cb8f3a65e166ab3da1792104fef
+    with:
+      runner: linux-small
+      native-runner: qqq-windows-vm6218
+      solution: Qqq.PrintAgent.slnx
+      platform: x64
+      configuration: Release
+      test-platform: x64
+      test-projects: tests/Qqq.PrintAgent.Cli.Tests/Qqq.PrintAgent.Cli.Tests.csproj
+      format-enabled: 'false'
+      exact-sdk: 'true'
+      fixtures-repository: QRun-IO/qqq-print-protocol
+      fixtures-ref: 42c0d249f81395f00408ec0f92638dcbbf5deb03
+      fixtures-subdirectory: fixtures
+      verify-script: build/Verify.ps1
+      test-reports-path: TestResults
+      package-script: build/Build-CiRelease.ps1
+      package-product-version: 1.0.1
+      package-release-version: 1.0.1
+      package-output: artifacts/release
+      package-artifact-name: windows-x64-installer
