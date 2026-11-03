@@ -1,6 +1,4 @@
 name: Windows6218 packaging diagnostic
-true:
-  workflow_dispatch: null
 permissions:
   contents: read
 jobs:
@@ -67,3 +65,5 @@ jobs:
         path: qqq-print-agent/artifacts/release/*
         if-no-files-found: error
         retention-days: 14
+'on':
+  workflow_dispatch: null
