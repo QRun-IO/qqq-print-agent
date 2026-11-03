@@ -28,21 +28,13 @@ jobs:
           path: qqq-print-agent
           persist-credentials: false
       - name: Checkout pinned protocol fixtures
-        working-directory: .
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $sha = '42c0d249f81395f00408ec0f92638dcbbf5deb03'
-          git init qqq-print-protocol
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Set-Location qqq-print-protocol
-          git remote add origin https://git.kof22.com/QRun-IO/qqq-print-protocol.git
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -c http.extraheader= -c credential.helper= fetch --no-tags --depth 1 origin $sha
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git -c advice.detachedHead=false checkout --detach FETCH_HEAD
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $head = (git rev-parse HEAD).Trim()
-          if ($head -ne $sha) { throw "Protocol checkout is $head, expected $sha" }
+        uses: builtin:checkout
+        with:
+          repository: QRun-IO/qqq-print-protocol
+          ref: 42c0d249f81395f00408ec0f92638dcbbf5deb03
+          path: qqq-print-protocol
+          fetch-depth: 1
+          persist-credentials: false
       - name: Verify installed .NET SDK
         run: |
           $ErrorActionPreference = 'Stop'
