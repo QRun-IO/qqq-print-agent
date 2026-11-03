@@ -1,0 +1,95 @@
+# Copyright (c) 2026 James Maes
+# SPDX-License-Identifier: MIT
+
+name: windows6218-printing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-test-package:
+    runs-on: qqq-windows-vm6218
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: qqq-print-agent
+    steps:
+      - name: Checkout agent
+        uses: builtin:checkout
+        with:
+          path: qqq-print-agent
+          persist-credentials: false
+      - name: Checkout pinned protocol fixtures
+        working-directory: .
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sha = '42c0d249f81395f00408ec0f92638dcbbf5deb03'
+          git init qqq-print-protocol
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Location qqq-print-protocol
+          git remote add origin https://git.kof22.com/QRun-IO/qqq-print-protocol.git
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -c http.extraheader= -c credential.helper= fetch --no-tags --depth 1 origin $sha
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -ne $sha) { throw "Protocol checkout is $head, expected $sha" }
+      - name: Verify installed .NET SDK
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = (Get-Content -Raw global.json | ConvertFrom-Json).sdk.version
+          $installed = @(dotnet --list-sdks | ForEach-Object { ($_ -split ' ')[0] })
+          if ($installed -notcontains $expected) { throw "SDK $expected is not installed (found: $($installed -join ', '))" }
+          $active = (dotnet --version).Trim()
+          if ($active -ne $expected) { throw "Active SDK $active does not match global.json $expected" }
+      - name: Locked restore, build and test
+        run: ./build/Verify.ps1
+      - name: Verify exact Windows SDK inventory and notice bytes
+        run: ./build/Test-WindowsSdkInventory.ps1 -VerifyPackages
+      - name: Validate branded installer dry run
+        run: |
+          ./build/Test-BrandedInstaller.ps1
+          ./build/Test-PackagingInputs.ps1
+      - name: Build unsigned prerelease MSI
+        env:
+          PRODUCT_VERSION: '1.0.1'
+          RELEASE_VERSION: '1.0.1'
+        run: |
+          ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Path artifacts/release -Force | Out-Null
+          $source = "artifacts/installer/QqqPrintAgent-$env:PRODUCT_VERSION-x64.msi"
+          $name = "QqqPrintAgent-v$env:RELEASE_VERSION-x64.msi"
+          Copy-Item -LiteralPath $source -Destination "artifacts/release/$name"
+          Copy-Item -LiteralPath build/Install-Branded.ps1 -Destination artifacts/release/Install-Branded.ps1
+          Copy-Item -LiteralPath docs/branding.example.json -Destination artifacts/release/branding.example.json
+          $hash = (Get-FileHash -LiteralPath "artifacts/release/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content artifacts/release/SHA256SUMS -Encoding ascii
+          foreach ($file in @('Install-Branded.ps1', 'branding.example.json')) {
+            $hash = (Get-FileHash -LiteralPath "artifacts/release/$file" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $file" | Add-Content artifacts/release/SHA256SUMS -Encoding ascii
+          }
+      - name: Upload unsigned installer
+        uses: self:KofTwentyTwo/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-x64-installer
+          path: qqq-print-agent/artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload tests and coverage
+        if: always()
+        uses: self:KofTwentyTwo/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-test-results
+          path: qqq-print-agent/TestResults/**
+          if-no-files-found: warn
+          retention-days: 14
