@@ -1,6 +1,18 @@
-# Session state — 2026-11-02
+# Session state — 2026-11-04
 
-## Current status: stable 1.0 closeout — 2026-11-02
+## Current status: released and installed — 2026-11-04
+
+Signed Windows **1.0.1** is published on primary Gitea and GitHub, from source `5bf00f3291923f7afb34c6cce61276e69649689b`. [Release run 41532214447](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41532214447) passed its protected gates, OIDC signing and publication. Checksums, signatures and provenance were verified. The November 3 local MSI installation exited 0; app/service/CLI matched 1.0.1 (`1.0.1.65535`) and the service was Running. This docs-only update does not imply a new runtime check.
+
+The matching released cohort is **qbit-printing 1.0.0**, **protocol 1.0.0** and **QQQ 4.1.0-RC.21**, with native printing API 2.3 and wire payload v1. The supported native sign-in prerequisite and protected release merges are complete. See [Release readiness](RELEASE-READINESS.md).
+
+Current README and operator/maintainer guides have been refreshed against the released source. Gitea owns ordinary branches and PRs. The authorized Windows GitHub signing/CI workflows and GitHub release feed remain necessary; the installed updater uses that feed. Server/protocol Actions retirement does not retire the Windows bridge or remove the pinned protocol fixtures.
+
+The user explicitly authorized publishing this documentation update after being informed that a Markdown-only push triggers the retained Microsoft-hosted workflow's full `Core.Tests` build. The branch `docs/printing-release-closeout-20261104` uses the normal Gitea PR and required checks. This authorization covers that hosted documentation build only; it does not clear local/VM6218 builds, quarantine restoration, exclusions or changes to protections. The prior local publication hold is superseded for this documentation update.
+
+The requested product implementation, release and local installation are closed. No new builds, print tests, auth/storage qualification, UI-waiver work or Defender investigation belong to this documentation closeout. Earlier checkpoints below retain their original evidence and pending language as history, not active tasks.
+
+## Historical: stable 1.0 closeout checkpoint — 2026-11-02
 
 The official 0.4.0-rc.4 build is installed with all three components; the normal MSI
 upgrade exited 0 and the service is Running. The latest source is

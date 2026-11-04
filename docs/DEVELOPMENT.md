@@ -16,7 +16,7 @@ and reconnect rules. The service never falls back from WSS to job/control pollin
 
 The service owns the credential, journal and print operations. The UI is optional at runtime and sees only credential-free snapshots. Service IPC uses the `QqqPrintAgent` named pipe and accepts administrator clients. `snapshot` returns connection health, all locally discovered printers with exposure state, the latest 50 jobs and the latest 100 in-memory log entries. `set-exposure` persists a selected queue and returns a fresh snapshot. Legacy `status`, `printers` and `enroll` operations remain available.
 
-The cloud API lives in [qqq-print-protocol](https://github.com/QRun-IO/qqq-print-protocol). Its inventory is the complete currently exposed printer set. The server separately owns authorization/approval. Removing local exposure filters inventory and prevents new local submission to that queue. It cannot retract a job already handed to Windows.
+The cloud API lives in [qqq-print-protocol](https://git.kof22.com/QRun-IO/qqq-print-protocol). Its inventory is the complete currently exposed printer set. The server separately owns authorization/approval. Removing local exposure filters inventory and prevents new local submission to that queue. It cannot retract a job already handed to Windows.
 
 ## Reproducible checks
 
@@ -30,7 +30,7 @@ This performs locked restore, Release solution build, core tests and Windows/CLI
 
 ## Local server and CLI
 
-Use a disposable native QQQ host from the sibling qbit-printing project, advertising printing extension 2.0. Sign in through the companion's advertised QQQ authentication flow before using normal CLI commands. The service owns the session, device proof and unattended printing. A bearer-only demo is not a compatible realtime host.
+Use a disposable native QQQ host from the sibling qbit-printing project, using qbit-printing 1.0.0 on QQQ 4.1.0-RC.21 and advertising native printing API 2.3. Sign in through the companion's advertised QQQ authentication flow before using normal CLI commands. The service owns the session, device proof and unattended printing. A bearer-only demo is not a compatible realtime host.
 
 ```powershell
 $agent = '.\src\Qqq.PrintAgent.Cli\bin\x64\Debug\net10.0-windows10.0.19041.0\qqq-print-agent.exe'

@@ -1,6 +1,6 @@
 # Customer branding
 
-Use the same released machine MSI for every customer. No customer-specific build is required. The deployment wrapper stages an optional machine branding file and local assets, then supplies customer labels to Windows Installer. The companion, service display name, installed-product labels and all-users Start menu shortcut use that identity.
+Use the same [signed stable machine MSI](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1) for every customer. No customer-specific build is required. The deployment wrapper stages an optional machine branding file and local assets, then supplies customer labels to Windows Installer. The companion, service display name, installed-product labels and all-users Start menu shortcut use that identity.
 
 ## Install with a customer name
 
@@ -21,7 +21,7 @@ Use PowerShell 7.4 or newer. First validate a downloaded MSI and configuration w
 ./build/Install-Branded.ps1 -MsiPath 'C:\Deployment\QqqPrintAgent.msi' -BrandingFile './docs/branding.example.json' -WhatIf
 ```
 
-Run the same command **without `-WhatIf` from an elevated administrator PowerShell** to install. The script does not silently elevate or bypass UAC. Supply `-ExpectedSHA256 '<64 hexadecimal digits>'` when you have the expected MSI checksum from your approved release source. The wrapper verifies it before installation and keeps the source MSI read-locked through execution. A checksum does not substitute for publisher signing.
+Run the same command **without `-WhatIf` from an elevated administrator PowerShell** to install. The script does not silently elevate or bypass UAC. Supply `-ExpectedSHA256 '<64 hexadecimal digits>'` when you have the expected MSI checksum from your approved release source. The wrapper verifies it before installation and keeps the source MSI read-locked through execution. A checksum does not substitute for publisher signing; verify the stable MSI signature as described in [Installation](INSTALLATION.md#download-and-verify). Customer branding does not change the Authenticode publisher or update feed.
 
 The wrapper launches `msiexec.exe` with `/i`, `/passive` and `/norestart`, using separate arguments. It accepts success/reboot codes 0, 1641 and 3010 and reports the result. It creates `%ProgramData%\QqqPrintAgent` with SYSTEM/Administrators permissions when absent, or rejects unsafe existing permissions. It never broadens access to existing device state. It copies validated assets under unique names, replaces `branding.json`, and restores the previous configuration if Windows Installer fails. The client/service/enrollment remain one coherent MSI installation.
 

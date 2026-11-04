@@ -1,8 +1,6 @@
 # Administrator operations
 
-These transport and capacity instructions describe release candidate `0.3.0-rc.1`.
-The published `0.2.0-rc.1` installer uses its earlier native HTTP transport.
-See [realtime architecture and settings](REALTIME.md) for the coordinated server requirement.
+These instructions describe client **1.0.1** with qbit-printing **1.0.0**, native printing API **2.3** and wire payload **v1**. See [realtime architecture and settings](REALTIME.md) for the coordinated server requirement.
 
 ## Service and data
 
@@ -14,7 +12,8 @@ See [realtime architecture and settings](REALTIME.md) for the coordinated server
 | Credentials | Device proof and QQQ session protected separately with Windows DPAPI CurrentUser under LocalSystem |
 | Submission journal | `journal.db` and SQLite WAL/SHM files |
 | Worker coordination | Exclusive `worker.lock` in the data directory |
-| Desktop preferences/logs | AppKit's per-user `qqq-print-agent` directory |
+| Desktop preferences | AppKit's per-user `qqq-print-agent` directory |
+| Shared service/companion logs | `%ProgramData%\QqqPrintAgent\logs` |
 
 The MSI applies SYSTEM/Administrators permissions to the service directory. Do not loosen those ACLs or copy its credential to another machine/account. Backups should treat the entire directory as sensitive. Do not upload the database or protected configuration to public issues.
 
@@ -27,7 +26,7 @@ Get-Service QqqPrintAgent, Spooler
 
 Use the actual install path if it differs. Normal CLI commands and the companion use the authenticated installed service. Its printer list reflects the service identity; explicit isolated legacy diagnostics may see different queues under their invoking account.
 
-Windows service messages are emitted through .NET hosting logging. Review Windows Event Viewer and the desktop activity log for the relevant timestamp; record job IDs and error text without customer document contents.
+Use the built-in AppKit activity log for shared service and companion events, with source labels and severity filtering. Windows Event Viewer can also help diagnose service-host startup failures. Record relevant timestamps, job IDs and error text without customer document contents.
 
 ## Credentials and network
 
