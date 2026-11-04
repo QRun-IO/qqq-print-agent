@@ -1,6 +1,19 @@
 # TODO
 
-## Stable 1.0 closeout — 2026-11-02
+## Closed product release — 2026-11-04
+
+- [x] Publish signed Windows 1.0.1 on Gitea and the GitHub updater feed; release run 41532214447 passed its gates and Azure OIDC signing.
+- [x] Verify release assets, signatures and provenance; install the official MSI locally. November 3 receipt: exit 0, matching app/service/CLI 1.0.1, service Running.
+- [x] Publish qbit-printing 1.0.0 and protocol 1.0.0 with QQQ 4.1.0-RC.21 native sign-in support.
+- [x] Refresh current README, operator and maintainer documentation against the stable source; preserve dated evidence.
+
+The requested product work is complete. Shared CI migration is separate. Everything below is historical or unscheduled backlog; unchecked boxes do not reopen work or authorize more tests. See [Release readiness](RELEASE-READINESS.md).
+
+## Documentation publication scope
+
+The user authorized publishing `docs/printing-release-closeout-20261104` through a normal Gitea PR, including its automatic Microsoft-hosted checks. The previous publication hold is superseded for that scope. No code or workflow change, local/VM6218 build, quarantine restoration or protection exception is part of this update. The PR records publication and merge status.
+
+## Historical stable 1.0 checkpoint — 2026-11-02
 
 Active stable-release work is only the two open items below. Every other unchecked item in this file is historical or unscheduled backlog, not a stable-1.0 blocker.
 

@@ -72,40 +72,18 @@ Read the immutable owner and repository IDs from `gh api repos/QRun-IO/qqq-print
 (and confirm `use_immutable_subject`). Trust must not be broadened to pull requests or other environments. MarkdownViewr's
 and gclo's identities must not be reused for this repository without separate approval and their own trust.
 
-## Configuration status and limits
+## Published stable result — 2026-11-03
 
-- Azure setup is configured: existing account `kof22signing`, profile `releases` (Active, PublicTrust), a
-  printing-only client `083a3874-ebbb-453f-b625-71bbfefd3227` with the exact immutable subject
-  `repo:QRun-IO@93010898/qqq-print-agent@1438820325:environment:release`, a profile-scoped signer role and the
-  seven environment variables, with no secret. The first hosted stable run (`v1.0.0`) passed every build, test,
-  security, CodeQL and script gate and the Azure OIDC login (so the CI identity exchange works), then stopped before
-  signing: the action's SignCLI installer uses `dotnet tool install --add-source`, which the repository's NuGet
-  package source mapping rejects. No signed installer was published. The `sign` job now preinstalls only the
-  pinned SignCLI (`0.9.1-beta.26227.3`) through the mapped `nuget.config` into
-  `%LOCALAPPDATA%\ArtifactSigning\sign\sign.<version>` (the layout the action expects, checked for
-  `tools\net8.0\any\sign.dll`) before the first signing step. Signing itself in CI is **not yet proven**; a local
-  administrator proof cannot show it, only the next hosted stable run (1.0.1) will.
-- The `azure/artifact-signing-action` inputs used (`endpoint`, `signing-account-name`, `certificate-profile-name`,
-  `files-folder`, `files-folder-filter`, `files-folder-recurse`, `file-digest`, `timestamp-rfc3161`, `timestamp-digest`)
-  were checked against the `action.yml` of the pinned commit (`c7ab2a86…`, v2.0.0) supplied by root. The action
-  filters by extension, which is why only owned files are staged, and it authenticates through the Azure CLI
-  credential left by `azure/login` (the Azure CLI credential type is not excluded by default).
-- Proof so far (local, existing Azure client): the signing code and configuration are implemented, and the source head
-  `53fe1b8281806eda7adc314f92c8205aefcb51ce` passed clean hosted Windows CI run 41442796961 (499 tests, zero failures and
-  skips; build and MSI zero warnings and errors). All 19 first-party binary copies of an installed, published RC4 payload,
-  including `Cli/qqq-print-agent.dll`, were Azure-signed and each passed the strict `Sign-Release.ps1 -Operation Verify`
-  (exact publisher subject, SHA256, timestamp, one signature, zero warnings and errors); the source payload was
-  untouched. A disposable copy of the official RC4 MSI was also Azure-signed and passed `Apply`/`Verify`. This is a
-  local administrator proof of the signer and the verification path. It does **not** prove the CI identity's OIDC
-  exchange, nor signed payload files inside the old MSI; that is shown only by the first hosted stable-tag run.
-  Installed and published remains RC4; no new stable tag exists.
-- `Install-Branded.ps1` and `branding.example.json` are not Authenticode-signed; their integrity rests on the
-  checksums in `SHA256SUMS` and the release provenance attestation.
-- A published QQQ core with native session login is still awaited; the last official release, RC20 (API 1.8), does
-  not have it, and a stable tag waits for it. The Windows release branch (Gitea PR 2) awaits a normal protected merge
-  after the central native 1725 repair for Windows ACL and file sharing on Linux.
-- `Apply` requires the signed stage to contain exactly the staged files, and fails closed otherwise.
-- The subject comparison is an exact string match against the signer certificate; a formatting difference (for
-  example `S=` versus `ST=`) fails the release rather than weakening the check.
-- The current source version is 1.0.1 (the `v1.0.0` tag is unchanged and published nothing signed). Signing proves
-  publisher identity, not product qualification; it is not production hardware or server acceptance.
+The authorized GitHub signing bridge completed [release run 41532214447](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41532214447) for `v1.0.1`, source `5bf00f3291923f7afb34c6cce61276e69649689b`. Its build, test, security, CodeQL, script, OIDC signing and publication gates passed. The signed MSI and matching assets are published on [Gitea](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1) and [GitHub](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1); the latter remains the installed updater feed.
+
+The downloaded MSI's checksum matched `SHA256SUMS`; Authenticode reported **Valid**, the exact configured publisher `CN=James Maes, O=James Maes, L=Chester, S=il, C=US`, and a timestamp. Release provenance was verified. The local installation on November 3 exited 0 with companion, service and CLI all reporting `1.0.1+5bf00f3291923f7afb34c6cce61276e69649689b`, file version `1.0.1.65535`, and service state **Running**. See [release readiness](RELEASE-READINESS.md).
+
+The printing-only Azure client uses the exact immutable repository/environment subject, a profile-scoped signer role and protected environment variables, with no stored client secret. The same signing account/profile and verification rules described above remain in use.
+
+## Historical bootstrap failure and limits
+
+The first hosted stable attempt, `v1.0.0`, passed its prerequisite gates and Azure OIDC login but stopped before signing because the action's SignCLI installer conflicted with NuGet package source mapping. No signed 1.0.0 installer was published. Version 1.0.1 fixes the bootstrap by preinstalling only pinned SignCLI `0.9.1-beta.26227.3` through the mapped `nuget.config` into the action's expected `%LOCALAPPDATA%\ArtifactSigning\sign\sign.<version>` layout. The 1.0.0 tag is unchanged.
+
+The earlier local signing proof used copies of the RC4 payload and MSI; it was not the hosted release. The successful 1.0.1 run now supplies the CI identity/signing evidence. QQQ 4.1.0-RC.21 and qbit-printing 1.0.0 provide the released native-authentication cohort; the older RC20 prerequisite is superseded.
+
+`Apply` still requires exactly the staged files, and publisher matching remains an exact string comparison. `Install-Branded.ps1` and `branding.example.json` are not Authenticode-signed; their integrity rests on release checksums and provenance. Signing establishes publisher identity, not physical printer compatibility or universal deployment qualification.

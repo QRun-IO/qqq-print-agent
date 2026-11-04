@@ -1,8 +1,12 @@
 # Release process
 
+Gitea is primary for source branches, reviews and normal pull requests. GitHub is the automatic source shadow. The existing authorized [GitHub release workflow](../.github/workflows/release.yml), its CI/security dependencies and the GitHub release assets remain the signing and installed-updater bridge. Do not retire those Windows workflows or remove the feed as part of ordinary source migration.
+
+Current stable release: **[1.0.1 on Gitea](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1)** and the matching **[GitHub assets](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1)**. The protected [release run](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41532214447) completed signing and publication. The earlier immutable `v1.0.0` tag produced no signed installer; it must not be moved or reused.
+
 ## Stable releases
 
-The same workflow also runs on a stable `vX.Y.Z` tag. After every gate below it signs the service, companion and CLI binaries, builds the MSI from them, signs the MSI with the project's Azure Artifact Signing identity, verifies the exact publisher, and publishes a non-prerelease with checksums computed after signing. Prerelease tags are unaffected and stay unsigned. Setup, ordering and required variables are in [RELEASE-SIGNING.md](RELEASE-SIGNING.md).
+The release workflow runs on a stable `vX.Y.Z` tag. After every gate below it signs the service, companion and CLI binaries, builds the MSI from them, signs the MSI with the project's Azure Artifact Signing identity, verifies the exact publisher, and publishes a non-prerelease with checksums computed after signing. Prerelease tags are unaffected and stay unsigned. Setup, ordering and required variables are in [RELEASE-SIGNING.md](RELEASE-SIGNING.md).
 
 ## Prereleases
 
@@ -24,23 +28,23 @@ Windows Installer replaces a versioned file only when its numeric file version i
 ## Maintainer checklist
 
 1. Update CHANGELOG.md, acceptance evidence and version inputs. Ensure no local enrollment/journal/payload files are tracked.
-2. Review the protocol pin, dependency lock files, unsigned-release notice and open limitations.
-3. Run `./build/Verify.ps1` and build the MSI locally or inspect the corresponding green CI run.
-4. Obtain explicit release authorization, create/push the immutable prerelease tag, and wait for the workflow.
-5. Verify every published filename/checksum and its provenance attestation. Record the workflow URL and version-specific installed/hardware acceptance, distinguishing observed results from pending qualification.
+2. Review the protocol pin, dependency lock files, channel-specific signing notice and release scope.
+3. Inspect the corresponding successful CI run, or run `./build/Verify.ps1` and build the MSI on a permitted Windows test host. Host restrictions remain in force.
+4. Obtain explicit release authorization, create the immutable stable or prerelease tag from reviewed primary source, and use the authorized GitHub bridge to run the workflow. Do not push ordinary branches to the GitHub shadow.
+5. Verify every published filename/checksum, applicable Authenticode signature and provenance attestation. Publish the same reviewed release assets on primary Gitea without rebuilding or changing them. Record the workflow URL and version-specific installed/hardware evidence.
 
 If publishing the initial release manually, attach only reviewed artifacts and disclose whether they were built locally. Do not claim GitHub build provenance for a local MSI.
 
 ## Signing
 
-Stable tags are signed by the release workflow with Azure Artifact Signing (see [Stable releases](#stable-releases) and [RELEASE-SIGNING.md](RELEASE-SIGNING.md)); release candidates stay unsigned. `Build-Installer.ps1` also accepts a certificate thumbprint and timestamp server for local signing only. The signing code and configuration are implemented, but the CI identity's first signing run has not happened, and no stable release has been published. Current evidence and open items are in [RELEASE-READINESS.md](RELEASE-READINESS.md).
+Stable tags are signed by the release workflow with Azure Artifact Signing (see [Stable releases](#stable-releases) and [RELEASE-SIGNING.md](RELEASE-SIGNING.md)); release candidates stay unsigned. `Build-Installer.ps1` also accepts a certificate thumbprint and timestamp server for local signing only. The CI identity completed OIDC authentication and signed stable 1.0.1. Current evidence is in [RELEASE-READINESS.md](RELEASE-READINESS.md).
 
 ## Update-feed contract
 
 The companion uses AppKit update prompts with a machine MSI adapter. Release assets are also updater inputs: preserve the exact versioned MSI filename and matching `SHA256SUMS` entry. The updater checks release identity, size and SHA-256; provenance verification is a separate release/operator check. The fixed feed is this repository's GitHub releases; branding and QQQ configuration cannot redirect it. Stable installations ignore prereleases, while RC installations may receive a newer RC or stable version. The minimum offered core version is 0.1.3. Never replace a published release's binary under the same version.
 
-MSI has a numeric three-part ProductVersion; informational version preserves `-rc.N`. Same-numeric-version MSI upgrades are enabled for RC-to-RC/stable transitions, while the updater enforces a strictly newer semantic release. This intentional authoring requires a narrow ICE61 exception alongside the existing Microsoft-resource ICE03 exception; no other MSI checks are disabled. Manual MSI deployments must follow semantic release order because MSI alone cannot order RC suffixes. See [ADR-0002](adr/0002-prerelease-quality-and-packaging.md). The helper verifies the installed companion's actual ProductVersion against the requested release after exit 0. Exit 3010 remains restart-required.
+MSI has a numeric three-part ProductVersion; informational version preserves `-rc.N`. Same-numeric-version MSI upgrades are enabled for RC-to-RC/stable transitions, while the updater enforces a strictly newer semantic release. This intentional authoring requires a narrow ICE61 exception alongside the existing Microsoft-resource ICE03 exception; no other MSI checks are disabled. Manual MSI deployments must follow semantic release order because MSI alone cannot order RC suffixes. See [ADR-0002](adr/0002-prerelease-quality-and-packaging.md). The helper verifies the installed component versions against the requested release after exit 0. Exit 3010 remains restart-required.
 
 Same-feed SHA-256 establishes asset consistency, not independent publisher authentication; stable releases additionally carry Authenticode signatures on the first-party binaries and the MSI, while release candidates do not. The helper requires administrator rights, installs service/UI/CLI together and retains credentials/journal; no per-user updater or privileged persistent daemon is shipped. Completed staging folders and install logs are retained for administrator review.
 
-Historical: the 0.1.3 source gate passed 163 tests with zero warnings/errors and locked restore. A real in-app update from 0.3.1 to 0.3.2 has since been accepted with retained identity, history and profiles, matching component versions and an automatically reopened companion; see [ACCEPTANCE.md](ACCEPTANCE.md) and [RELEASE-READINESS.md](RELEASE-READINESS.md). Packaging or UI test compilation alone does not establish update acceptance, and no stable 1.0 publication is claimed here.
+Historical: the 0.1.3 source gate passed 163 tests with zero warnings/errors and locked restore. A real in-app update from 0.3.1 to 0.3.2 has since been accepted with retained identity, history and profiles, matching component versions and an automatically reopened companion; see [ACCEPTANCE.md](ACCEPTANCE.md) and [RELEASE-READINESS.md](RELEASE-READINESS.md). Packaging or UI test compilation alone does not establish update acceptance. Stable 1.0.1 publication and its separate local MSI installation are recorded above.

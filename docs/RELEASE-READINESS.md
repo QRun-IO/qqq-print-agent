@@ -1,32 +1,25 @@
-# Release readiness — stable 1.0 closeout
+# Release readiness — signed 1.0 closeout
 
-Updated 2026-11-02. This replaces the stale candidate matrix, which is kept below as a clearly historical section. No stable tag exists yet and **no 1.0 or production-readiness statement is made** by this file.
+Updated 2026-11-04. The requested product release and local installation are complete. The dated records below distinguish the stable release from earlier candidate evidence; they are not a claim that every printer or deployment has been qualified.
 
-## Current truth
+## Current release
 
-- **Installed:** the official 0.4.0-rc.4 build is installed with all three components (companion, service, CLI). The normal MSI upgrade exited 0 and the service is Running.
-- **Hosted gate:** clean hosted Windows CI run 41442796961 on source `53fe1b8281806eda7adc314f92c8205aefcb51ce` passed 499 tests (166 Core + 333 CLI) with zero failures and skips, and the build and MSI had zero warnings and errors. This is the Core.Tests evidence; Core.Tests is never built on the local host. The earlier run 41384467500 on `b5eb5d73` is historical.
-- **Signing:** stable signing is implemented. All 19 first-party binary copies of an installed RC4 payload, including `Cli/qqq-print-agent.dll`, and a disposable official RC4 MSI were Azure-signed and strictly verified (exact publisher, SHA256, timestamp). This is a local administrator proof; the new CI OIDC identity has not been exercised ([RELEASE-SIGNING.md](RELEASE-SIGNING.md)). Installed and published remains RC4; no new stable tag exists.
-- **Published:** the primary Gitea feed and the public feed carry all three prereleases (Windows 0.4.0-rc.4; server and protocol 0.4.0-rc.1). Nine assets were checked and their provenance verified.
-- **Physical output:** the operator confirmed the 4 × 1 label on RC3 with the same relevant printing runtime; 4 × 6 and Letter were accepted earlier. Physical 4 × 2 was deferred by the operator and is **not** a stable-release blocker.
-- **Source standards:** the source-header inventory (289 tracked files, 231 C# files) reported zero issues; that work is done.
+- **Windows:** signed [1.0.1 on Gitea](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1) and matching [GitHub updater assets](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1), from source `5bf00f3291923f7afb34c6cce61276e69649689b`.
+- **Release gate:** [run 41532214447](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41532214447) passed the build/test/package, security, CodeQL, script, Azure OIDC signing and publication gates. Published checksums, signatures and provenance were verified. See [release signing](RELEASE-SIGNING.md).
+- **Installed:** the November 3 check recorded MSI exit 0, app/service/CLI product version `1.0.1+5bf00f3291923f7afb34c6cce61276e69649689b`, file version `1.0.1.65535`, and service **Running**. No new runtime check is implied by this documentation update.
+- **Server and contract:** [qbit-printing 1.0.0](https://git.kof22.com/QRun-IO/qbit-printing/releases/tag/v1.0.0), [protocol 1.0.0](https://git.kof22.com/QRun-IO/qqq-print-protocol/releases/tag/v1.0.0) and QQQ **4.1.0-RC.21** are released. Native printing API **2.3**, payload **v1** and WebSocket subprotocol `qqq-printing.v1` retain their own version meanings.
+- **Physical scope:** Letter and 4 × 6 output were accepted earlier; the operator confirmed 4 × 1 on RC3 with the same relevant print path. Physical 4 × 2 was deferred and is not a release blocker. Dated evidence remains in [Acceptance](ACCEPTANCE.md).
+- **Documentation:** current install, sign-in, settings, media, logs, branding and release instructions reflect the stable release. Ordinary source changes use Gitea; the authorized GitHub signing and updater bridge remains in place.
 
-## Active stable-release work (only these)
+No product implementation, release publication or installation task remains in this closeout. Shared CI-platform migration is separate from the shipped product. Historical unchecked items below do not reopen cancelled work or authorize physical tests.
 
-1. Windows release branch (Gitea PR 2): normal protected merge, awaiting the central native 1725 repair for Windows ACL and file sharing on Linux.
-2. A supported, published QQQ core with native session login, still awaited (the last official release, RC20, does not have it). Stable tag publication, including the first CI OIDC signing run, follows it.
-
-## Accepted known limitation
+## Historical scope decision — 2026-11-02
 
 The post-print native UI layout exception (WinUI `LayoutCycleException` after a print, recovered by the existing mitigation) was removed from the 1.0 blocker list by the user on 2026-11-02 and is accepted as a known limitation. It is **not fixed**, and the history below is preserved unchanged. It is not carried as another mandatory qualification.
 
-## Cancelled, not active
+## Historical cancelled work, not active
 
 Repeat Auth/S3 qualification, the print-latency investigation, and the MSI comparison/install-free upgrade analysis were cancelled by the user. Their recorded evidence is historical; do not resume them.
-
-## Not claimed
-
-Authenticode signing of the rc builds (signing belongs to the stable-tag work above), a published native-authentication cohort result, 4 × 2 physical output, a broad driver matrix, and any 1.0 readiness until the stable tag is published and verified.
 
 ---
 

@@ -1,6 +1,6 @@
 # Contributing
 
-QQQ Print Agent is developed in the [QRun-IO organization](https://github.com/QRun-IO). It uses the KofTwentyTwo Windows AppKit service architecture. Contributions are accepted under the [MIT license](LICENSE); preserve existing attribution.
+QQQ Print Agent is developed in the [QRun-IO organization on Gitea](https://git.kof22.com/QRun-IO). It uses the KofTwentyTwo Windows AppKit service architecture. Contributions are accepted under the [MIT license](LICENSE); preserve existing attribution.
 
 ## Set up
 
@@ -14,6 +14,8 @@ Use Windows x64, Git and the .NET 10 SDK selected by `global.json`. Check out `q
 Verification uses locked NuGet restore, a warnings-as-errors solution build, core tests, Windows/CLI tests and a coverage report. Packaging creates a self-contained x64 MSI. Neither command installs the service or prints a document.
 
 ## Changes and review
+
+Publish ordinary branches and pull requests to the [primary Gitea repository](https://git.kof22.com/QRun-IO/qqq-print-agent). GitHub is a source shadow; the existing authorized release/signing workflow and CI/security workflows remain there. GitHub release assets also serve the installed updater. See [Releasing](docs/RELEASING.md) before changing either distribution path.
 
 - Branch from `main`, use Conventional Commit titles, and include a DCO sign-off (`git commit -s`). Sign commits where your account supports signing.
 - Keep business/protocol logic in Core, Windows integration in Windows, hosting in Service, and view/tray plumbing in the AppKit companion.
@@ -34,7 +36,7 @@ A passing unit suite does not establish printer compatibility. Record Windows ve
 
 ## Issues and releases
 
-Open ordinary bugs or proposals in [Issues](https://github.com/QRun-IO/qqq-print-agent/issues). Use [private security reporting](SECURITY.md) for vulnerabilities. Release authorization and tagging belong to maintainers; see [RELEASING.md](docs/RELEASING.md).
+Open ordinary bugs or proposals in [Issues](https://git.kof22.com/QRun-IO/qqq-print-agent/issues). Use [private security reporting](SECURITY.md) for vulnerabilities. Release authorization and tagging belong to maintainers; see [RELEASING.md](docs/RELEASING.md).
 
 ## Script quality
 

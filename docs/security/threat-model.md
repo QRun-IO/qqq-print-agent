@@ -1,6 +1,10 @@
 # Threat model: QQQ Print Agent
 
-## Realtime source boundary — 0.3.0-rc.1 release candidate
+## Current release boundary — 1.0.1
+
+The signed 1.0.1 release uses the realtime and native-authentication boundaries described here. Stable distribution now includes Azure-signed first-party binaries and MSI, checksums and provenance; the earlier unsigned audit baseline below is retained as history. Gitea is the primary source; the authorized GitHub signing workflow and fixed GitHub updater feed remain trusted distribution infrastructure. See [release signing](../RELEASE-SIGNING.md) and [current release status](../RELEASE-READINESS.md).
+
+## Realtime boundary
 
 The remote-control adapter accepts only inventory refresh and cancellation of one locally journaled spooler job. Desired pause/disconnect state is revisioned and persists by canonical server URL and device identity; older or conflicting revisions cannot resume a device. An independently processed authenticated WSS channel carries controls and receipts while documents stream over separate same-origin HTTPS requests. There is no job/control polling fallback. A paused device claims no new work. A disconnected device retains control traffic and in-flight receipts; already-submitted printing is not recalled. Reconnect is a transport refresh, never an OS or service restart. See [the realtime contract and operational limits](../REALTIME.md).
 
@@ -14,7 +18,7 @@ Successful cancellation means Windows accepted the request, not that printed pap
 
 ## Historical audit baseline
 
-Installed baseline: 0.1.7-rc.1; audit source changes pending release. Reviewed: 2026-10-30. This is an implementation-level inventory. The separate independent deep scan has not yet returned its findings.
+Historical baseline: 0.1.7-rc.1, reviewed 2026-10-30. The inventory and source checkpoints below retain their original evidence and pending language; they do not describe the current release status or reopen qualification work. Current distribution and acceptance are summarized above and in [Release readiness](../RELEASE-READINESS.md).
 
 ## Boundaries and assets
 
