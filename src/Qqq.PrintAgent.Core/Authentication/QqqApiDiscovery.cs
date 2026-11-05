@@ -28,6 +28,16 @@ public sealed class QqqApiDiscovery
 
 
 
+   /// <summary>The UI API capability that says the server validates the native sign-in nonce at the code exchange.</summary>
+   public const string NonceValidationFeature = "nativeSessionNonceValidation";
+
+
+
+   /// <summary>True when the server advertises that it validates the native sign-in nonce at exchange.</summary>
+   public bool ValidatesNativeSessionNonce => Features?.Contains(NonceValidationFeature, StringComparer.Ordinal) == true;
+
+
+
    /// <summary>One extension the server advertises: its name, semantic version and the path prefix its routes live under.</summary>
    public sealed record Extension(string Name, string Version, string PathPrefix);
 

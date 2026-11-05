@@ -524,9 +524,51 @@ public sealed class QqqSessionAuthenticationTests
 
 
 
+   /// <summary>Under the OPTIONAL policy the server validates a nonce when one is sent, so the exchange carries this attempt's nonce exactly as under REQUIRED.</summary>
+   [Fact]
+   public async Task OptionalNonceValidationAlsoSendsTheAttemptsOwnNonce()
+   {
+      using Handler handler = NonceHandler("OPTIONAL");
+      handler.Add("{}", cookie: "sessionUUID=opaque-session; Path=/; HttpOnly; Secure");
+      using var client = new QqqSessionClient(Origin, handler);
+      QqqBrowserLogin attempt = await client.BeginBrowserLoginAsync(Redirect);
+      Dictionary<string, string> authorization = Query(attempt.AuthorizationUri);
+      await client.CompleteBrowserLoginAsync(attempt, Callback(attempt, authorization["state"]));
+      using var body = JsonDocument.Parse(handler.Requests[3].Body!);
+      Assert.Equal(5, body.RootElement.EnumerateObject().Count());
+      Assert.Equal(authorization["nonce"], body.RootElement.GetProperty("expectedNonce").GetString());
+   }
+
+
+
+   /// <summary>A server that advertises the nativeSessionNonceValidation capability but whose grant states no policy still receives the attempt's nonce, while a server advertising neither keeps the legacy four-field body.</summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public async Task DiscoveryCapabilityAloneDecidesTheNonceWhenTheGrantIsSilent(bool capability)
+   {
+      using var handler = new Handler();
+      handler.Add(capability ? Discovery.Replace("\"nativeSessionLogin\"", "\"nativeSessionLogin\",\"nativeSessionNonceValidation\"", StringComparison.Ordinal) : Discovery);
+      handler.Add(OAuth);
+      handler.Add(Provider);
+      handler.Add("{}", cookie: "sessionUUID=opaque-session; Path=/; HttpOnly; Secure");
+      using var client = new QqqSessionClient(Origin, handler);
+      QqqBrowserLogin attempt = await client.BeginBrowserLoginAsync(Redirect);
+      Dictionary<string, string> authorization = Query(attempt.AuthorizationUri);
+      await client.CompleteBrowserLoginAsync(attempt, Callback(attempt, authorization["state"]));
+      using var body = JsonDocument.Parse(handler.Requests[3].Body!);
+      Assert.Equal(capability ? 5 : 4, body.RootElement.EnumerateObject().Count());
+      Assert.Equal(capability, body.RootElement.TryGetProperty("expectedNonce", out JsonElement expected));
+      if(capability)
+      {
+         Assert.Equal(authorization["nonce"], expected.GetString());
+      }
+   }
+
+
+
    /// <summary>A nonce policy the client does not understand is refused as a configuration problem after the two public requests, before the provider is contacted, so no browser opens and nothing is exchanged.</summary>
    [Theory]
-   [InlineData("OPTIONAL")]
    [InlineData("required")]
    [InlineData("NONE")]
    [InlineData(" ")]

@@ -11,7 +11,10 @@ prefix; and the installed updater following that asset on the shared feed. CI bu
 and the stable release workflow signs and publishes one installer per edition beside the generic one
 with a single checksum list. The first edition is `gg-forge` (GG Forge Print Agent by Greater Goods).
 Deployment branding through `Install-Branded.ps1` is unchanged and still applies on top of an edition.
-No wire change.
+Native browser sign-in sends the attempt's nonce as `expectedNonce` when the grant policy is REQUIRED or
+OPTIONAL or when discovery advertises `nativeSessionNonceValidation`; legacy servers keep the unchanged
+exchange body. `build/Build-CiRelease.ps1` is the shared-CI packaging entrypoint and delegates to
+`Package-Release.ps1`. No wire change.
 
 ## 1.1.1
 

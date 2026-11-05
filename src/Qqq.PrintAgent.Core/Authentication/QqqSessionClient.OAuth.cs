@@ -53,9 +53,12 @@ public sealed partial class QqqSessionClient
             Query = string.Join("&", query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value))),
          };
          ClearSession();
-         // The per-attempt nonce is kept only when the server advertised REQUIRED; legacy servers keep the exact old exchange.
-         _browserLogin = new QqqBrowserLogin(builder.Uri, redirectUri, state, verifier, grant.Issuer, _timeProvider.GetTimestamp(),
-            string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceRequired, StringComparison.Ordinal) ? nonce : null);
+         string? nonceSignal = NonceSignal(grant);
+         _diagnostics.Info(nonceSignal is null
+            ? "The server does not validate the sign-in nonce at exchange (legacy server); the exchange body stays unchanged."
+            : $"The server validates the sign-in nonce at exchange ({nonceSignal}); this attempt's nonce will be sent as expectedNonce.");
+         // The per-attempt nonce is kept only when the server validates it at exchange; legacy servers keep the exact old exchange.
+         _browserLogin = new QqqBrowserLogin(builder.Uri, redirectUri, state, verifier, grant.Issuer, _timeProvider.GetTimestamp(), nonceSignal is null ? null : nonce);
          _diagnostics.Info($"Browser sign-in attempt started: the authorization page is {QqqSessionDiagnostics.Describe(builder.Uri)} (query not logged); waiting for the callback, which expires after five minutes.");
          return _browserLogin;
       }
@@ -192,6 +195,22 @@ public sealed partial class QqqSessionClient
 
 
    /// <summary>
+   /// Says why the exchange will carry the attempt's nonce, or null for a legacy server: the grant's policy REQUIRED, the grant's
+   /// policy OPTIONAL (the server validates a nonce when one is sent, so sending it is always right), or the discovery
+   /// capability nativeSessionNonceValidation on a server whose grant does not state a policy.
+   /// </summary>
+   private string? NonceSignal(QqqAuthenticationMetadata.NativeGrant grant)
+   {
+      if(string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceRequired, StringComparison.Ordinal))
+      { return "grant policy REQUIRED"; }
+      if(string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceOptional, StringComparison.Ordinal))
+      { return "grant policy OPTIONAL"; }
+      return _discovery?.ValidatesNativeSessionNonce == true ? "discovery capability " + QqqApiDiscovery.NonceValidationFeature : null;
+   }
+
+
+
+   /// <summary>
    /// Builds the manageSession code-exchange body. A legacy attempt (no stored nonce) keeps the exact four-field body; an attempt
    /// made under the server's REQUIRED policy adds that attempt's own nonce as expectedNonce. The nonce comes only from the attempt,
    /// never from the callback, and is not logged.
@@ -226,9 +245,10 @@ public sealed partial class QqqSessionClient
          { problems.Add($"code challenge method is '{grant.CodeChallengeMethod}', expected S256"); }
          if(!string.Equals(grant.Prompt, "login", StringComparison.Ordinal))
          { problems.Add($"prompt is '{grant.Prompt}', expected login"); }
-         // Absent means a legacy server; any other value than REQUIRED is a policy this client cannot honor, so refuse before any provider or browser step.
-         if(!string.IsNullOrEmpty(grant.NonceValidation) && !string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceRequired, StringComparison.Ordinal))
-         { problems.Add("nonce validation policy is not one this client supports (expected REQUIRED or absent)"); }
+         // Absent means a legacy server; REQUIRED and OPTIONAL both mean the nonce is sent; any other value is a policy this client cannot honor, so refuse before any provider or browser step.
+         if(!string.IsNullOrEmpty(grant.NonceValidation) && !string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceRequired, StringComparison.Ordinal)
+            && !string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceOptional, StringComparison.Ordinal))
+         { problems.Add($"nonce validation policy '{grant.NonceValidation}' is not one this client supports (expected REQUIRED, OPTIONAL or absent)"); }
          if(!TryHttps(grant.Issuer, out _))
          { problems.Add($"issuer '{grant.Issuer}' is not a plain HTTPS address"); }
          if(!TryHttps(grant.DiscoveryUrl, out _))

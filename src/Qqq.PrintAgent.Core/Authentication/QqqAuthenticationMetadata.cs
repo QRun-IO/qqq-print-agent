@@ -38,6 +38,9 @@ public sealed class QqqAuthenticationMetadata
       /// <summary>The server's nonce policy for the code exchange. Absent on older servers; <see cref="NonceRequired"/> means the exchange must carry the attempt's own nonce as expectedNonce.</summary>
       public string? NonceValidation { get; init; }
       public const string NonceRequired = "REQUIRED";
+
+      /// <summary>The server validates the nonce when one is sent; sending the attempt's own nonce is always correct under this policy.</summary>
+      public const string NonceOptional = "OPTIONAL";
       public IReadOnlyList<string> RedirectUris { get; init; } = [];
    }
 }
