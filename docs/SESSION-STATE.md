@@ -1,6 +1,20 @@
-# Session state — 2026-11-04
+# Session state — 2026-11-05
 
-## Current status: released and installed — 2026-11-04
+## Active scoped work: required-nonce native sign-in fix — 2026-11-05
+
+Branch `fix/native-login-required-nonce`, integrated on main `f954f11`, makes native sign-in honor the server's `NativeGrant.NonceValidation` policy. One nonce is created per authorization attempt and kept in the attempt only when the policy is `REQUIRED`; the same value is sent as `expectedNonce` at `manageSession`. An absent (legacy) policy keeps the exact old four-field body, and an unknown non-empty policy is refused before any provider or browser step. The callback never supplies the nonce, and state, issuer, PKCE, single-use and expiry checks are unchanged.
+
+The shared-server scanner Authentik requires this fix. The prior stable printing release below remains historical accepted evidence and is not reopened.
+
+Observed so far:
+
+- Previous-base solution build and 333 CLI tests passed locally. Core tests executed 0 tests because Windows security blocked the assembly; that is hosted-CI-only and is **not a pass**.
+- The integrated NativeCI Release build passed with zero warnings/errors after extracting the code-exchange body into a private helper to meet the existing method-length limit. All 352 Windows/CLI tests passed with no failures/skips; the source-notice check passed for 300 tracked files. Core.Tests was excluded as required on this workstation.
+- Root verified, in an isolated shared scanner/Printing 1.0.0 fixture with `REQUIRED` nonce, that both exact native callback registrations and real server HTTPS discovery work. This is discovery only, not native login proof.
+
+Pending: hosted CI (including Core.Tests), real shared-provider native login acceptance, and the final published build.
+
+## Historical: released and installed — 2026-11-04
 
 Signed Windows **1.0.1** is published on primary Gitea and GitHub, from source `5bf00f3291923f7afb34c6cce61276e69649689b`. [Release run 41532214447](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41532214447) passed its protected gates, OIDC signing and publication. Checksums, signatures and provenance were verified. The November 3 local MSI installation exited 0; app/service/CLI matched 1.0.1 (`1.0.1.65535`) and the service was Running. This docs-only update does not imply a new runtime check.
 

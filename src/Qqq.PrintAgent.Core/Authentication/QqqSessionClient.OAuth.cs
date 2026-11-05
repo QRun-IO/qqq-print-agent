@@ -35,6 +35,7 @@ public sealed partial class QqqSessionClient
          Uri authorizationUri = await ProviderAuthorizationEndpointAsync(grant, cancellationToken).ConfigureAwait(false);
          string state = Base64Url(RandomNumberGenerator.GetBytes(32));
          string verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
+         string nonce = Base64Url(RandomNumberGenerator.GetBytes(32));
          var query = new Dictionary<string, string>(StringComparer.Ordinal)
          {
             ["client_id"] = metadata.Values!.ClientId,
@@ -42,7 +43,7 @@ public sealed partial class QqqSessionClient
             ["redirect_uri"] = redirectUri.AbsoluteUri,
             ["scope"] = metadata.Values.Scopes,
             ["state"] = state,
-            ["nonce"] = Base64Url(RandomNumberGenerator.GetBytes(32)),
+            ["nonce"] = nonce,
             ["prompt"] = grant.Prompt,
             ["code_challenge_method"] = "S256",
             ["code_challenge"] = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))),
@@ -52,7 +53,9 @@ public sealed partial class QqqSessionClient
             Query = string.Join("&", query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value))),
          };
          ClearSession();
-         _browserLogin = new QqqBrowserLogin(builder.Uri, redirectUri, state, verifier, grant.Issuer, _timeProvider.GetTimestamp());
+         // The per-attempt nonce is kept only when the server advertised REQUIRED; legacy servers keep the exact old exchange.
+         _browserLogin = new QqqBrowserLogin(builder.Uri, redirectUri, state, verifier, grant.Issuer, _timeProvider.GetTimestamp(),
+            string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceRequired, StringComparison.Ordinal) ? nonce : null);
          _diagnostics.Info($"Browser sign-in attempt started: the authorization page is {QqqSessionDiagnostics.Describe(builder.Uri)} (query not logged); waiting for the callback, which expires after five minutes.");
          return _browserLogin;
       }
@@ -175,7 +178,7 @@ public sealed partial class QqqSessionClient
          }
          _diagnostics.Info("Browser callback validated; exchanging the authorization code with QQQ for a server-managed session.");
          using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/manageSession"), HttpMethod.Post,
-            JsonBody(new { code, codeVerifier = attempt.Verifier, redirectUri = attempt.RedirectUri.AbsoluteUri, authenticationFlow = QqqAuthenticationMetadata.NativeSessionFlow }),
+            JsonBody(NativeCodeExchange(attempt, code)),
             MetadataLimit, null, null, null, cancellationToken).ConfigureAwait(false);
          RequireSuccess(response);
          AdoptManagedSession(response);
@@ -185,6 +188,17 @@ public sealed partial class QqqSessionClient
       { throw; }
       finally { _gate.Release(); }
    }
+
+
+
+   /// <summary>
+   /// Builds the manageSession code-exchange body. A legacy attempt (no stored nonce) keeps the exact four-field body; an attempt
+   /// made under the server's REQUIRED policy adds that attempt's own nonce as expectedNonce. The nonce comes only from the attempt,
+   /// never from the callback, and is not logged.
+   /// </summary>
+   private static object NativeCodeExchange(QqqBrowserLogin attempt, string code) => attempt.ExpectedNonce is null
+      ? new { code, codeVerifier = attempt.Verifier, redirectUri = attempt.RedirectUri.AbsoluteUri, authenticationFlow = QqqAuthenticationMetadata.NativeSessionFlow }
+      : new { code, codeVerifier = attempt.Verifier, redirectUri = attempt.RedirectUri.AbsoluteUri, authenticationFlow = QqqAuthenticationMetadata.NativeSessionFlow, expectedNonce = attempt.ExpectedNonce };
 
 
 
@@ -212,6 +226,9 @@ public sealed partial class QqqSessionClient
          { problems.Add($"code challenge method is '{grant.CodeChallengeMethod}', expected S256"); }
          if(!string.Equals(grant.Prompt, "login", StringComparison.Ordinal))
          { problems.Add($"prompt is '{grant.Prompt}', expected login"); }
+         // Absent means a legacy server; any other value than REQUIRED is a policy this client cannot honor, so refuse before any provider or browser step.
+         if(!string.IsNullOrEmpty(grant.NonceValidation) && !string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceRequired, StringComparison.Ordinal))
+         { problems.Add("nonce validation policy is not one this client supports (expected REQUIRED or absent)"); }
          if(!TryHttps(grant.Issuer, out _))
          { problems.Add($"issuer '{grant.Issuer}' is not a plain HTTPS address"); }
          if(!TryHttps(grant.DiscoveryUrl, out _))
