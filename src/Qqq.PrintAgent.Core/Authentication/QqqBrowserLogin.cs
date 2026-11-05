@@ -9,8 +9,9 @@ namespace Qqq.PrintAgent.Core.Authentication;
 public sealed class QqqBrowserLogin
 {
    /// <summary>Records one sign-in attempt: the address to open in the browser, the registered redirect, the random state and PKCE verifier that only this attempt knows, the expected issuer, and when it started so it can expire.</summary>
-   internal QqqBrowserLogin(Uri authorizationUri, Uri redirectUri, string state, string verifier, string issuer, long startedAt)
+   internal QqqBrowserLogin(Uri authorizationUri, Uri redirectUri, string state, string verifier, string issuer, long startedAt, string? expectedNonce = null)
    {
+      ExpectedNonce = expectedNonce;
       AuthorizationUri = authorizationUri;
       RedirectUri = redirectUri;
       State = state;
@@ -26,10 +27,13 @@ public sealed class QqqBrowserLogin
    internal string State { get; }
    internal string Verifier { get; }
    internal string Issuer { get; }
+
+   /// <summary>This attempt's own authorization nonce, kept only when the server advertised that it validates it at exchange; null otherwise. Never taken from a callback.</summary>
+   internal string? ExpectedNonce { get; }
    internal long StartedAt { get; }
 
 
 
-   /// <summary>Returns a fixed redacted label, so logging or displaying an attempt can never reveal its state or verifier.</summary>
+   /// <summary>Returns a fixed redacted label, so logging or displaying an attempt can never reveal its state, nonce or verifier.</summary>
    public override string ToString() => "QQQ browser sign-in attempt (redacted)";
 }

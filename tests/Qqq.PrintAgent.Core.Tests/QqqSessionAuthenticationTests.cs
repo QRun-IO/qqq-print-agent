@@ -450,6 +450,7 @@ public sealed class QqqSessionAuthenticationTests
       Assert.Null(exchange.DeviceToken);
       using var body = JsonDocument.Parse(exchange.Body!);
       Assert.Equal(4, body.RootElement.EnumerateObject().Count());
+      Assert.False(body.RootElement.TryGetProperty("expectedNonce", out _));
       Assert.Equal("one-time-code", body.RootElement.GetProperty("code").GetString());
       Assert.Equal(QqqAuthenticationMetadata.NativeSessionFlow, body.RootElement.GetProperty("authenticationFlow").GetString());
       string verifier = body.RootElement.GetProperty("codeVerifier").GetString()!;
@@ -492,6 +493,66 @@ public sealed class QqqSessionAuthenticationTests
       if(string.Equals(fault, "expired", StringComparison.Ordinal))
       { time.Advance(TimeSpan.FromMinutes(6)); }
       await Assert.ThrowsAsync<QqqSessionException>(() => client.CompleteBrowserLoginAsync(attempt, callback));
+      await Assert.ThrowsAsync<QqqSessionException>(() => client.CompleteBrowserLoginAsync(attempt, Callback(attempt, state)));
+      Assert.Equal(3, handler.Requests.Count);
+      Assert.False(client.IsAuthenticated);
+   }
+
+
+
+   /// <summary>
+   /// When the server descriptor advertises nonceValidation REQUIRED, the exchange carries expectedNonce equal to the nonce in this
+   /// attempt's authorization URL, even if the callback tries to supply a different nonce, and the redacted attempt text does not reveal it.
+   /// </summary>
+   [Fact]
+   public async Task RequiredNonceValidationSendsTheAttemptsOwnAuthorizationNonce()
+   {
+      using Handler handler = NonceHandler("REQUIRED");
+      handler.Add("{}", cookie: "sessionUUID=opaque-session; Path=/; HttpOnly; Secure");
+      using var client = new QqqSessionClient(Origin, handler);
+      QqqBrowserLogin attempt = await client.BeginBrowserLoginAsync(Redirect);
+      Dictionary<string, string> authorization = Query(attempt.AuthorizationUri);
+      Assert.DoesNotContain(authorization["nonce"], attempt.ToString(), StringComparison.Ordinal);
+      await client.CompleteBrowserLoginAsync(attempt, new Uri(Callback(attempt, authorization["state"]).AbsoluteUri + "&nonce=callback-supplied-nonce"));
+      using var body = JsonDocument.Parse(handler.Requests[3].Body!);
+      Assert.Equal(5, body.RootElement.EnumerateObject().Count());
+      Assert.Equal(authorization["nonce"], body.RootElement.GetProperty("expectedNonce").GetString());
+      Assert.NotEqual("callback-supplied-nonce", body.RootElement.GetProperty("expectedNonce").GetString(), StringComparer.Ordinal);
+      Assert.Equal("one-time-code", body.RootElement.GetProperty("code").GetString());
+      Assert.Equal("opaque-session", client.ExportCredential().SessionToken);
+   }
+
+
+
+   /// <summary>A nonce policy the client does not understand is refused as a configuration problem after the two public requests, before the provider is contacted, so no browser opens and nothing is exchanged.</summary>
+   [Theory]
+   [InlineData("OPTIONAL")]
+   [InlineData("required")]
+   [InlineData("NONE")]
+   [InlineData(" ")]
+   public async Task UnknownNonceValidationPolicyIsRefusedBeforeBrowserOrExchange(string policy)
+   {
+      using var handler = new Handler();
+      handler.Add(Discovery);
+      handler.Add(OAuthWithNonce(policy));
+      using var client = new QqqSessionClient(Origin, handler);
+      QqqSessionException exception = await Assert.ThrowsAsync<QqqSessionException>(() => client.BeginBrowserLoginAsync(Redirect));
+      Assert.Equal(QqqSessionException.FailureKind.ConfigurationRequired, exception.Failure);
+      Assert.Equal(2, handler.Requests.Count);
+      Assert.All(handler.Requests, AssertPublic);
+   }
+
+
+
+   /// <summary>With the nonce required, a callback carrying the wrong state is still refused without an exchange and consumes the attempt, so the correct callback cannot be replayed afterwards.</summary>
+   [Fact]
+   public async Task RequiredNonceDoesNotWeakenStateAndReplayProtection()
+   {
+      using Handler handler = NonceHandler("REQUIRED");
+      using var client = new QqqSessionClient(Origin, handler);
+      QqqBrowserLogin attempt = await client.BeginBrowserLoginAsync(Redirect);
+      string state = Query(attempt.AuthorizationUri)["state"];
+      await Assert.ThrowsAsync<QqqSessionException>(() => client.CompleteBrowserLoginAsync(attempt, Callback(attempt, "wrong")));
       await Assert.ThrowsAsync<QqqSessionException>(() => client.CompleteBrowserLoginAsync(attempt, Callback(attempt, state)));
       Assert.Equal(3, handler.Requests.Count);
       Assert.False(client.IsAuthenticated);
@@ -598,6 +659,23 @@ public sealed class QqqSessionAuthenticationTests
       var handler = new Handler();
       handler.Add(Discovery);
       handler.Add(Table);
+      return handler;
+   }
+
+
+
+   /// <summary>The native browser-login description with an explicit nonceValidation value added to the grant.</summary>
+   private static string OAuthWithNonce(string policy) => OAuth.Replace("\"prompt\":\"login\"", "\"prompt\":\"login\",\"nonceValidation\":\"" + policy + "\"", StringComparison.Ordinal);
+
+
+
+   /// <summary>A fake server whose native grant advertises the given nonce policy, followed by the provider's discovery document.</summary>
+   private static Handler NonceHandler(string policy)
+   {
+      var handler = new Handler();
+      handler.Add(Discovery);
+      handler.Add(OAuthWithNonce(policy));
+      handler.Add(Provider);
       return handler;
    }
 

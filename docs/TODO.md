@@ -1,5 +1,16 @@
 # TODO
 
+## Active: required-nonce native sign-in fix — 2026-11-05
+
+The stable printing release below remains accepted historical evidence. The shared-server scanner Authentik requires this fix (`fix/native-login-required-nonce`, integrated on main `f954f11`).
+
+- [x] Implement per-attempt nonce kept only under `REQUIRED`, sent as `expectedNonce`; legacy four-field body preserved; unknown policy refused before provider/browser.
+- [x] Root verified exact native callback registrations and real server HTTPS discovery in an isolated shared scanner/Printing 1.0.0 fixture with `REQUIRED` nonce (discovery only, not login proof).
+- [x] Integrated NativeCI Release build: zero warnings/errors; 352 Windows/CLI tests passed with no failures/skips; source notices passed for 300 tracked files. Existing method-length limit retained; Core.Tests excluded locally.
+- [ ] Hosted CI including Core.Tests. Core tests executed 0 locally (Windows security) and are hosted-CI-only; that is not a pass.
+- [ ] Real shared-provider native login acceptance.
+- [ ] Final published build.
+
 ## Closed product release — 2026-11-04
 
 - [x] Publish signed Windows 1.0.1 on Gitea and the GitHub updater feed; release run 41532214447 passed its gates and Azure OIDC signing.
