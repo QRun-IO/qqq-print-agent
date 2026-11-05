@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using Qqq.PrintAgent.Core;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -21,7 +22,7 @@ public sealed partial class AgentRuntime
    private DateTimeOffset _nextSessionResume;
    private bool _authorizationReady;
    private bool _authorizationBlocked;
-   private string _authenticationMessage = "Sign in to QQQ to enable printing. Existing pairing and history are preserved.";
+   private string _authenticationMessage = $"Sign in to {AppIdentity.ServerName} to enable printing. Existing pairing and history are preserved.";
    private string? _lastAuthorizationNote;
    internal TimeSpan SessionResumeInterval { get; init; } = TimeSpan.FromMinutes(5);
 
@@ -98,7 +99,7 @@ public sealed partial class AgentRuntime
          }
          else if(!_sessionClient.IsAuthenticated)
          {
-            WriteLog("WARN", "The held QQQ session is no longer authenticated (the server ended it or an identity check failed).");
+            WriteLog("WARN", $"The held {AppIdentity.ServerName} session is no longer authenticated (the server ended it or an identity check failed).");
             BlockAuthorization();
             return false;
          }
@@ -121,7 +122,7 @@ public sealed partial class AgentRuntime
 
    /// <summary>Explains, for the log, why the service cannot talk to QQQ yet: no session, signed out, no pairing, or a session for a server other than the paired one.</summary>
    private static string DescribeMissingAuthorization(AgentAuthentication? saved, AgentConfiguration? configuration) => saved is null
-      ? "No saved QQQ session: sign in from the companion to enable printing."
+      ? $"No saved {AppIdentity.ServerName} session: sign in from the companion to enable printing."
       : saved.Credential is null ? $"Signed out of {saved.Binding.Origin.Authority}: sign in again to enable printing; pairing and history are preserved."
       : configuration is null ? $"The saved session for {saved.Binding.Origin.Authority} names device {saved.Binding.DeviceId}, but this computer has no pairing configuration; sign in and enroll again."
       : $"The saved session is for {saved.Binding.Origin.Authority} but the pairing is for {configuration.ServerUrl}; sign in to the paired server, or start a new pairing.";
@@ -135,7 +136,7 @@ public sealed partial class AgentRuntime
    private async Task RestoreSavedSessionAsync(AgentAuthentication saved, AgentConfiguration? configuration, AgentStore store, CancellationToken token)
    {
       QqqSessionCredential credential = saved.Credential ?? throw new InvalidOperationException("Sign in is required.");
-      WriteLog("INFO", $"Restoring the saved QQQ session for {credential.Origin.Authority} (saved identity: principal {saved.Binding.PrincipalId}, tenant {saved.Binding.TenantId}, device {saved.Binding.DeviceId ?? "(none)"}).");
+      WriteLog("INFO", $"Restoring the saved {AppIdentity.ServerName} session for {credential.Origin.Authority} (saved identity: principal {saved.Binding.PrincipalId}, tenant {saved.Binding.TenantId}, device {saved.Binding.DeviceId ?? "(none)"}).");
       IQqqSessionClient restored = NewSession(credential.Origin);
       try
       {
@@ -144,11 +145,11 @@ public sealed partial class AgentRuntime
             : await restored.BindDeviceAsync(new QqqDeviceCredential(configuration.DeviceId, configuration.DeviceToken), cancellationToken: token).ConfigureAwait(false);
          RequireSameIdentity(saved.Binding, binding);
          ActivateSession(restored, binding, store);
-         WriteLog("INFO", "Saved QQQ session restored. " + _authenticationMessage);
+         WriteLog("INFO", $"Saved {AppIdentity.ServerName} session restored. " + _authenticationMessage);
       }
       catch(Exception exception)
       {
-         WriteFailure("Saved QQQ session could not be restored", exception);
+         WriteFailure($"Saved {AppIdentity.ServerName} session could not be restored", exception);
          restored.Dispose();
          throw;
       }
@@ -204,11 +205,11 @@ public sealed partial class AgentRuntime
             && string.Equals(binding.DeviceId, configuration.DeviceId, StringComparison.Ordinal);
          _authorizationBlocked = false;
          _nextSessionResume = DateTimeOffset.UtcNow + SessionResumeInterval;
-         _authenticationMessage = _authorizationReady ? "Signed in to QQQ." : "Signed in. Enroll this computer to enable printing.";
+         _authenticationMessage = _authorizationReady ? $"Signed in to {AppIdentity.ServerName}." : "Signed in. Enroll this computer to enable printing.";
          ready = _authorizationReady;
          _lastAuthorizationNote = null;
       }
-      WriteLog("INFO", $"QQQ session active for {binding.Origin.Authority}: principal {binding.PrincipalId}, tenant {binding.TenantId}, device {binding.DeviceId ?? "(none)"}; "
+      WriteLog("INFO", $"{AppIdentity.ServerName} session active for {binding.Origin.Authority}: principal {binding.PrincipalId}, tenant {binding.TenantId}, device {binding.DeviceId ?? "(none)"}; "
          + (ready ? "authorized to print." : configuration is null ? "this computer is not enrolled on any server; enroll to print."
             : !SameOrigin(binding.Origin, configuration.ServerUrl) ? $"the pairing is for {configuration.ServerUrl}, so printing stays blocked until this computer is enrolled on the signed-in server."
             : $"the session device is {binding.DeviceId ?? "(none)"} but the pairing is device {configuration.DeviceId}, so printing stays blocked until the pairing is re-associated.")
@@ -232,10 +233,10 @@ public sealed partial class AgentRuntime
          _controlReady = false;
          _realtimeReady = false;
          _realtimeLifetime?.Cancel();
-         _authenticationMessage = "QQQ authorization is required. Sign in again; pairing and history are preserved.";
+         _authenticationMessage = $"{AppIdentity.ServerName} authorization is required. Sign in again; pairing and history are preserved.";
       }
       if(changed)
-      { WriteLog("WARN", "Printing blocked: QQQ authorization is required. Sign in again from the companion; pairing and history are preserved."); }
+      { WriteLog("WARN", $"Printing blocked: {AppIdentity.ServerName} authorization is required. Sign in again from the companion; pairing and history are preserved."); }
       SignalPipeline();
    }
 
@@ -260,7 +261,7 @@ public sealed partial class AgentRuntime
       {
          WriteLog("WARN", $"Identity check failed: the approved identity is principal {expected.PrincipalId}, tenant {expected.TenantId}, device {expected.DeviceId ?? "(none)"} on {expected.Origin.Authority}; "
             + $"the session now reports principal {actual.PrincipalId}, tenant {actual.TenantId}, device {actual.DeviceId ?? "(none)"} on {actual.Origin.Authority}. Sign in as the approved user, or start a new pairing.");
-         throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "The QQQ user, tenant or device changed. Explicit connection setup is required.");
+         throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, $"The {AppIdentity.ServerName} user, tenant or device changed. Explicit connection setup is required.");
       }
    }
 

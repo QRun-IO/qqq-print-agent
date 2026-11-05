@@ -18,8 +18,12 @@ namespace Qqq.PrintAgent.Core;
 /// executable names, the install directory, the protocol handler and the MSI upgrade identity stay shared. Machine
 /// branding (<see cref="RuntimeBranding"/>) still applies on top of an edition.
 /// </summary>
-public sealed partial record Edition(string Id, string DisplayName, string CompanyName, string? Tagline, string? Description, Uri? SupportUrl, string? AccentColor, string AssetPrefix)
+public sealed partial record Edition(string Id, string DisplayName, string CompanyName, string? Tagline, string? Description, Uri? SupportUrl, string? AccentColor, string AssetPrefix,
+   string ServerName = Edition.DefaultServerName, bool ShowMascot = true, bool ShowLicense = true)
 {
+   /// <summary>What the generic build calls the server in user-facing text.</summary>
+   public const string DefaultServerName = "QQQ";
+
    /// <summary>The descriptor's file name, next to the executable in an edition build.</summary>
    public const string FileName = "edition.json";
 
@@ -70,7 +74,8 @@ public sealed partial record Edition(string Id, string DisplayName, string Compa
             && string.Equals(candidate.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) && string.IsNullOrEmpty(candidate.UserInfo) ? candidate : null;
          string? accent = RuntimeBranding.ReadText(root, "accentColor", 7);
          return new(id, name, company, RuntimeBranding.ReadText(root, "tagline", 180), RuntimeBranding.ReadText(root, "description", 180), supportUri,
-            RuntimeBranding.HasReadableWhiteText(accent) ? accent : null, prefix);
+            RuntimeBranding.HasReadableWhiteText(accent) ? accent : null, prefix,
+            RuntimeBranding.ReadText(root, "serverName", 60) ?? DefaultServerName, ReadFlag(root, "aboutMascot"), ReadFlag(root, "aboutLicense"));
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or JsonException)
       {
@@ -97,6 +102,12 @@ public sealed partial record Edition(string Id, string DisplayName, string Compa
          },
       };
    }
+
+
+
+   /// <summary>Reads an optional boolean switch; anything but an explicit false keeps the generic behaviour.</summary>
+   private static bool ReadFlag(JsonElement root, string key)
+      => !(root.TryGetProperty(key, out JsonElement field) && field.ValueKind == JsonValueKind.False);
 
 
 

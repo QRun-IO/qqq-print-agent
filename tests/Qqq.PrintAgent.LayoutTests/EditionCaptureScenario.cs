@@ -54,7 +54,7 @@ internal static class EditionCaptureScenario
       {
          AppInfo identity = AppIdentity.Info;
          var dialog = new AboutDialog(identity) { XamlRoot = root.XamlRoot, RequestedTheme = theme };
-         QueryAboutSection.InsertAfterHeader((StackPanel)((ScrollViewer)dialog.Content).Content);
+         AboutContent.Compose((StackPanel)((ScrollViewer)dialog.Content).Content, AppIdentity.Branding.SupportUrl, null);
          Task<ContentDialogResult?> showing = DialogGuard.ShowAsync(dialog);
          try
          {

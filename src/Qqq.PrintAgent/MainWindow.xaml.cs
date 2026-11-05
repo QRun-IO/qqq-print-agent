@@ -494,10 +494,10 @@ public sealed partial class MainWindow : Window, IDisposable
          : "This device has not been enrolled. Open Connection settings to connect it to the server.";
       AuthenticationText.Text = snapshot.Authentication is { } authentication
          ? authentication.SignedIn ? $"Signed in as {authentication.PrincipalId} · Tenant {authentication.TenantId}\n{authentication.Message}" : authentication.Message
-         : "Sign in to QQQ to enable printing.";
+         : $"Sign in to {AppIdentity.ServerName} to enable printing.";
       if(snapshot.Authentication is { Authorized: false })
       {
-         FooterStatus.Text = "QQQ authorization required";
+         FooterStatus.Text = AppIdentity.ServerName + " authorization required";
       }
       ToolTipService.SetToolTip(FooterStatus, FooterStatus.Text);
       ToolTipService.SetToolTip(FooterContact, FooterContact.Text);
@@ -700,15 +700,7 @@ public sealed partial class MainWindow : Window, IDisposable
       var dialog = new AboutDialog(AppIdentity.Info) { XamlRoot = Content.XamlRoot };
       if(dialog.Content is ScrollViewer { Content: StackPanel body })
       {
-         if(AppIdentity.Branding.SupportUrl is Uri support)
-         {
-            body.Children.Add(new HyperlinkButton { Content = "Contact support", NavigateUri = support });
-         }
-         if(CustomerLogo.Visibility == Visibility.Visible)
-         {
-            body.Children.Insert(0, new Image { Source = CustomerLogo.Source, Width = 128, Height = 64, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left });
-         }
-         QueryAboutSection.InsertAfterHeader(body);
+         AboutContent.Compose(body, AppIdentity.Branding.SupportUrl, CustomerLogo.Visibility == Visibility.Visible ? CustomerLogo.Source as BitmapImage : null);
       }
       await DialogGuard.ShowAsync(dialog);
    }

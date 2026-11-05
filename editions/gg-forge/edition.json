@@ -5,5 +5,8 @@
   "tagline": "Cloud printing for GG Forge",
   "description": "Connect local printers to GG Forge.",
   "accentColor": "#424242",
-  "assetPrefix": "GgForgePrintAgent"
+  "assetPrefix": "GgForgePrintAgent",
+  "serverName": "GG Forge",
+  "aboutMascot": false,
+  "aboutLicense": false
 }

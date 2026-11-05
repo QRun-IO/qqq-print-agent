@@ -223,7 +223,7 @@ public sealed partial class MainWindow
       App.Log.Info("[Companion] Sign-in accepted by the server; handing the session to the service (" + choice + ").");
       string result = await _sendRequest(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(),
          ClaimLegacyDevice: PairingChoice.SelectedIndex == 1, StartNewPairing: PairingChoice.SelectedIndex == 2));
-      bool success = result.StartsWith("Signed in to QQQ.", StringComparison.Ordinal);
+      bool success = result.StartsWith("Signed in to " + AppIdentity.ServerName + ".", StringComparison.Ordinal);
       if(success)
       { App.Log.Info("[Companion] Service sign-in result: " + result); }
       else

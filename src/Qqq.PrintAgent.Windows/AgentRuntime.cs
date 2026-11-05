@@ -7,6 +7,7 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using Qqq.PrintAgent.Core;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -193,7 +194,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       PrintingRealtimeChannel realtime;
       lock(_stateLock)
       { realtime = _realtime ?? throw new IOException("The realtime connection is unavailable."); }
-      return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException("Sign in to QQQ before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
+      return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException($"Sign in to {AppIdentity.ServerName} before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
    }
 
 

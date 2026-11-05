@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using Qqq.PrintAgent.Core;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -45,7 +46,7 @@ public sealed partial class AgentRuntime
          if(request.StartNewPairing && binding.DeviceId is not null)
          {
             WriteLog("WARN", $"Sign-in refused: a new pairing needs a session without device proof, but the session already names device {binding.DeviceId}.");
-            throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "New pairing requires a fresh QQQ session without device proof.");
+            throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, $"New pairing requires a fresh {AppIdentity.ServerName} session without device proof.");
          }
          AgentAuthentication? saved = store.LoadAuthenticationForRecovery();
          if(!request.StartNewPairing && configuration is not null && SameOrigin(credential.Origin, configuration.ServerUrl))
@@ -73,7 +74,7 @@ public sealed partial class AgentRuntime
          previous?.Dispose();
          WakePoll();
          WriteLog("INFO", "Sign-in complete. " + _authenticationMessage);
-         return "Signed in to QQQ. " + _authenticationMessage;
+         return $"Signed in to {AppIdentity.ServerName}. " + _authenticationMessage;
       }
       catch(Exception exception)
       {
@@ -89,7 +90,7 @@ public sealed partial class AgentRuntime
    /// <summary>Checks the request shape before any network work (a credential is present and the pairing choice is not contradictory) and logs what was asked.</summary>
    private QqqSessionCredential BeginSignIn(PipeRequest request)
    {
-      QqqSessionCredential credential = request.SessionCredential ?? throw new InvalidOperationException("A QQQ sign-in session is required.");
+      QqqSessionCredential credential = request.SessionCredential ?? throw new InvalidOperationException($"A {AppIdentity.ServerName} sign-in session is required.");
       if(request.StartNewPairing && request.ClaimLegacyDevice)
       {
          WriteLog("WARN", "Sign-in refused: the companion asked for both a new pairing and association with the existing pairing.");
@@ -124,7 +125,7 @@ public sealed partial class AgentRuntime
          AgentAuthentication? saved = store.LoadAuthenticationForRecovery();
          bool unreadableSession = store.QuarantineUnreadableAuthentication();
          if(unreadableSession)
-         { WriteLog("WARN", "The saved session data could not be read and was moved aside for recovery; revoke the previous session in QQQ."); }
+         { WriteLog("WARN", $"The saved session data could not be read and was moved aside for recovery; revoke the previous session in {AppIdentity.ServerName}."); }
          if(saved is not null)
          {
             store.SaveAuthentication(new AgentAuthentication(saved.Binding, null));
@@ -157,7 +158,7 @@ public sealed partial class AgentRuntime
             WriteLog("INFO", "Signed out locally. Device pairing and print history were preserved.");
          }
          return unreadableSession
-            ? "Signed out locally. Unreadable session data was preserved for recovery; revoke the previous session in QQQ. Device pairing and print history were preserved."
+            ? $"Signed out locally. Unreadable session data was preserved for recovery; revoke the previous session in {AppIdentity.ServerName}. Device pairing and print history were preserved."
             : "Signed out. Device pairing and print history were preserved.";
       }
       finally { _authenticationGate.Release(); }

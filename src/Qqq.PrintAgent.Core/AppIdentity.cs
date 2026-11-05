@@ -58,6 +58,9 @@ public static class AppIdentity
    /// <summary>The identity this build ships with: the edition's presentation over <see cref="BaseInfo"/>, before machine branding.</summary>
    public static AppInfo DefaultInfo { get; } = Edition?.Apply(BaseInfo) ?? BaseInfo;
 
+   /// <summary>What user-facing text calls the server: the edition's name for it, or QQQ in the generic build.</summary>
+   public static string ServerName => Edition?.ServerName ?? Core.Edition.DefaultServerName;
+
    /// <summary>The release asset prefix the installed updater looks for, so an edition keeps updating on its own line.</summary>
    public static string UpdateAssetPrefix => Edition?.AssetPrefix ?? Core.Edition.DefaultAssetPrefix;
 

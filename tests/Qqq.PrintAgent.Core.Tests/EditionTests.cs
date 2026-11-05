@@ -24,6 +24,9 @@ public sealed class EditionTests
          Assert.Equal("AcmePrintConnector", edition.AssetPrefix);
          Assert.Equal("#0F766E", edition.AccentColor);
          Assert.Equal(new Uri("https://support.example.invalid/print"), edition.SupportUrl);
+         Assert.Equal(Edition.DefaultServerName, edition.ServerName);
+         Assert.True(edition.ShowMascot);
+         Assert.True(edition.ShowLicense);
          KofTwentyTwo.AppKit.AppInfo applied = edition.Apply(AppIdentity.BaseInfo);
          Assert.Equal("Acme Print Connector", applied.DisplayName);
          Assert.Equal("Printing for Acme", applied.Tagline);
@@ -70,12 +73,35 @@ public sealed class EditionTests
 
 
 
+   /// <summary>An edition may name the server and switch the About mascot and license sections off; only an explicit false switches them off.</summary>
+   [Fact]
+   public void EditionOptions_NameTheServerAndTrimAbout()
+   {
+      string path = Path.Combine(Path.GetTempPath(), "qqq-edition-" + Guid.NewGuid().ToString("N") + ".json");
+      try
+      {
+         File.WriteAllText(path, """{"id":"acme","displayName":"Acme Print","companyName":"Acme","assetPrefix":"AcmePrint","serverName":"Acme Cloud","aboutMascot":false,"aboutLicense":"no"}""");
+         var edition = Edition.Load(path);
+         Assert.NotNull(edition);
+         Assert.Equal("Acme Cloud", edition.ServerName);
+         Assert.False(edition.ShowMascot);
+         Assert.True(edition.ShowLicense);
+      }
+      finally
+      {
+         File.Delete(path);
+      }
+   }
+
+
+
    /// <summary>The test host carries no edition, so the identity is the generic one and the updater follows the generic asset name.</summary>
    [Fact]
    public void GenericBuild_HasNoEdition()
    {
       Assert.Null(AppIdentity.Edition);
       Assert.Equal(Edition.DefaultAssetPrefix, AppIdentity.UpdateAssetPrefix);
+      Assert.Equal("QQQ", AppIdentity.ServerName);
       Assert.Equal("QQQ Print Agent", AppIdentity.DefaultInfo.DisplayName);
    }
 }
