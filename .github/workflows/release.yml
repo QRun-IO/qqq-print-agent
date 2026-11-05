@@ -166,7 +166,9 @@ jobs:
           Write-Output "Edition: '$env:EDITION' -> $prefix"
       - name: Publish and check the payload
         run: |
-          $editionArgs = if ($env:EDITION_ARGS) { $env:EDITION_ARGS.Split(' ') } else { @() }
+          # Hashtable splat: an array splat binds "-Edition gg-forge" positionally (to CertificateThumbprint/TimestampServer) and trips the PublishOnly guard.
+          $editionArgs = @{}
+          if ($env:EDITION) { $editionArgs['Edition'] = $env:EDITION }
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION -PublishOnly -PayloadDirectory "$env:RUNNER_TEMP/payload" @editionArgs
       - name: Stage owned binaries
         run: ./build/Sign-Release.ps1 -Operation Stage -Kind Payload -Root "$env:RUNNER_TEMP/payload" -Stage "$env:RUNNER_TEMP/sign-payload"
@@ -212,7 +214,9 @@ jobs:
         run: ./build/Sign-Release.ps1 -Operation Apply -Kind Payload -Root "$env:RUNNER_TEMP/payload" -Stage "$env:RUNNER_TEMP/sign-payload" -ExpectedSubject $env:ARTIFACT_SIGNING_SUBJECT
       - name: Build MSI from the signed payload
         run: |
-          $editionArgs = if ($env:EDITION_ARGS) { $env:EDITION_ARGS.Split(' ') } else { @() }
+          # Hashtable splat: an array splat binds "-Edition gg-forge" positionally (to CertificateThumbprint/TimestampServer) and trips the PublishOnly guard.
+          $editionArgs = @{}
+          if ($env:EDITION) { $editionArgs['Edition'] = $env:EDITION }
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION -SkipPublish -PayloadDirectory "$env:RUNNER_TEMP/payload" @editionArgs
       - name: Stage MSI
         run: ./build/Sign-Release.ps1 -Operation Stage -Kind Msi -Root $env:MSI_PATH -Stage "$env:RUNNER_TEMP/sign-msi"

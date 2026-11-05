@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+Release-pipeline fix only; same source as 1.2.0 otherwise. The stable release workflow's per-edition
+sign job passed the edition to `Build-Installer.ps1` through an array splat, which PowerShell binds
+positionally, so `-Edition gg-forge` landed in the signing-certificate parameters and the GG Forge
+sign job refused to publish; tag `v1.2.0` therefore produced no signed installer and must not be
+moved or reused. The workflow now splats a hashtable. No application or wire change.
+
 ## 1.2.0
 
 Client editions. A folder under `editions/<id>` (descriptor, SVG mark, ICO icon, optional logo) and
