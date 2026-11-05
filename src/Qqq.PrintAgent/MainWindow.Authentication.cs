@@ -69,7 +69,7 @@ public sealed partial class MainWindow
    private void ShowServerTrust()
    {
       AllowUntrustedCertificateBox.IsChecked = _serverTrust.AllowUntrustedCertificate;
-      AllowUntrustedCertificateBox.Content = _serverTrust.AllowUntrustedCertificate
+      AllowUntrustedCertificateLabel.Text = _serverTrust.AllowUntrustedCertificate
          ? "Allow untrusted server certificate for " + _serverTrust.Origin + " (development only)"
          : "Allow untrusted server certificate for this server (development only)";
    }

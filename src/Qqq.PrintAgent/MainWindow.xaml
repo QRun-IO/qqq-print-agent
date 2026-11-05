@@ -126,7 +126,58 @@
          </Grid>
       </Border>
       <ContentDialog x:Name="ConnectionDialog" Title="Connection settings" CloseButtonText="Close" Closing="ConnectionDialog_Closing">
-         <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="650"><StackPanel Spacing="12"><TextBlock Text="Sign in using this server's configured authentication. Printing uses your current permissions. Existing pairing and history are preserved." TextWrapping="Wrap" /><TextBox x:Name="ServerBox" Header="Server address" PlaceholderText="https://print.example.com" AutomationProperties.AutomationId="ServerAddress" /><CheckBox x:Name="AllowUntrustedCertificateBox" Content="Allow untrusted server certificate for this server (development only)" Click="AllowUntrustedCertificate_Click" AutomationProperties.AutomationId="AllowUntrustedCertificate" /><TextBlock Text="Enter the server address first; the exception is saved for that one server only and never applies to another. Use it for a development server with a self-signed or private-authority certificate. The service runs as LocalSystem and trusts only the machine certificate store, so a certificate your user account trusts can still be refused by the service. With this on, any certificate from that server is accepted and every session is logged with a warning." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><ComboBox x:Name="PairingChoice" Header="Device pairing for this sign-in" SelectedIndex="0" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="PairingChoice"><ComboBoxItem Content="Reuse the saved pairing" /><ComboBoxItem Content="Associate the existing pairing with my account" /><ComboBoxItem Content="Set up a new pairing" /></ComboBox><TextBlock Text="For revoked or replaced devices, choose Set up a new pairing before signing in. Printing stays paused until a new enrollment succeeds; existing history and printer choices are preserved." TextWrapping="Wrap" /><Button Content="Discover sign-in options" Click="DiscoverSignIn_Click" AutomationProperties.AutomationId="DiscoverQqqSignIn" /><StackPanel x:Name="PasswordSignInPanel" Spacing="8" Visibility="Collapsed"><TextBox x:Name="UsernameBox" Header="Username" AutomationProperties.AutomationId="QqqUsername" /><PasswordBox x:Name="QqqPasswordBox" Header="Password" AutomationProperties.AutomationId="QqqPassword" /><Button Content="Sign in" Click="PasswordSignIn_Click" AutomationProperties.AutomationId="QqqPasswordSignIn" /></StackPanel><Button x:Name="BrowserSignInButton" Content="Sign in with your browser" Visibility="Collapsed" Click="BrowserSignIn_Click" AutomationProperties.AutomationId="QqqBrowserSignIn" /><Button x:Name="CancelBrowserSignInButton" Content="Cancel browser sign-in" Visibility="Collapsed" Click="CancelBrowserSignIn_Click" AutomationProperties.AutomationId="CancelQqqSignIn" /><TextBlock Text="For a new connection, after signing in, create a single-use enrollment code on the server: Printing → Print devices → Actions → Enroll a print device." TextWrapping="Wrap" /><PasswordBox x:Name="EnrollmentBox" Header="Enrollment code (new pairing only)" PlaceholderText="Paste the code from the server" AutomationProperties.AutomationId="EnrollmentCode" /><Button x:Name="EnrollButton" Content="Connect this device" Click="Enroll_Click" Style="{ThemeResource AccentButtonStyle}" AutomationProperties.AutomationId="EnrollDevice" /><InfoBar x:Name="ConnectionFeedback" IsOpen="False" IsClosable="False" /></StackPanel></ScrollViewer>
+         <ContentDialog.Resources>
+            <!-- The default content-dialog width (about 548 px) clips this form; give it room and let the page scroll instead of the dialog. -->
+            <x:Double x:Key="ContentDialogMaxWidth">760</x:Double>
+            <x:Double x:Key="ContentDialogMaxHeight">900</x:Double>
+         </ContentDialog.Resources>
+         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" MaxHeight="720" Padding="0,0,16,0">
+            <StackPanel Spacing="16">
+               <TextBlock Text="Sign in with the server's own authentication. Printing uses your permissions; pairing and history are kept." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+               <StackPanel Spacing="8">
+                  <TextBlock Text="1. Server" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                  <TextBox x:Name="ServerBox" Header="Server address" PlaceholderText="https://print.example.com" AutomationProperties.AutomationId="ServerAddress" />
+                  <CheckBox x:Name="AllowUntrustedCertificateBox" Click="AllowUntrustedCertificate_Click" AutomationProperties.AutomationId="AllowUntrustedCertificate" MinWidth="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                     <TextBlock x:Name="AllowUntrustedCertificateLabel" Text="Allow untrusted server certificate for this server (development only)" TextWrapping="Wrap" />
+                  </CheckBox>
+                  <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{ThemeResource CaptionTextBlockStyle}"
+                             Text="Development servers only: accepts any certificate from this one server, logged with a warning. Hover for details."
+                             ToolTipService.ToolTip="The exception is saved for the server address above and never applies to another server. Use it for a development server with a self-signed or private-authority certificate. The Windows service runs as LocalSystem and trusts only the machine certificate store, so a certificate your user account trusts can still be refused by the service; installing the issuer in the Local Machine Trusted Root store is the alternative. With this on, any certificate from that server is accepted and every session is logged with a warning." />
+               </StackPanel>
+
+               <StackPanel Spacing="8">
+                  <TextBlock Text="2. Sign in" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                  <ComboBox x:Name="PairingChoice" Header="Device pairing for this sign-in" SelectedIndex="0" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="PairingChoice">
+                     <ComboBoxItem Content="Reuse the saved pairing" />
+                     <ComboBoxItem Content="Associate the existing pairing with my account" />
+                     <ComboBoxItem Content="Set up a new pairing" />
+                  </ComboBox>
+                  <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{ThemeResource CaptionTextBlockStyle}"
+                             Text="Choose Set up a new pairing for a revoked or replaced device; printing pauses until the new enrollment succeeds and history and printer choices are kept." />
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                     <Button Content="Discover sign-in options" Click="DiscoverSignIn_Click" AutomationProperties.AutomationId="DiscoverQqqSignIn" />
+                     <Button x:Name="BrowserSignInButton" Content="Sign in with your browser" Visibility="Collapsed" Click="BrowserSignIn_Click" Style="{ThemeResource AccentButtonStyle}" AutomationProperties.AutomationId="QqqBrowserSignIn" />
+                     <Button x:Name="CancelBrowserSignInButton" Content="Cancel browser sign-in" Visibility="Collapsed" Click="CancelBrowserSignIn_Click" AutomationProperties.AutomationId="CancelQqqSignIn" />
+                  </StackPanel>
+                  <StackPanel x:Name="PasswordSignInPanel" Spacing="8" Visibility="Collapsed">
+                     <TextBox x:Name="UsernameBox" Header="Username" AutomationProperties.AutomationId="QqqUsername" />
+                     <PasswordBox x:Name="QqqPasswordBox" Header="Password" AutomationProperties.AutomationId="QqqPassword" />
+                     <Button Content="Sign in" Click="PasswordSignIn_Click" Style="{ThemeResource AccentButtonStyle}" AutomationProperties.AutomationId="QqqPasswordSignIn" />
+                  </StackPanel>
+               </StackPanel>
+
+               <StackPanel Spacing="8">
+                  <TextBlock Text="3. New pairing only" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                  <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{ThemeResource CaptionTextBlockStyle}"
+                             Text="After signing in, create a single-use enrollment code on the server (Printing → Print devices → Actions → Enroll a print device) and paste it here." />
+                  <PasswordBox x:Name="EnrollmentBox" Header="Enrollment code" PlaceholderText="Paste the code from the server" AutomationProperties.AutomationId="EnrollmentCode" />
+                  <Button x:Name="EnrollButton" Content="Connect this device" Click="Enroll_Click" AutomationProperties.AutomationId="EnrollDevice" HorizontalAlignment="Left" />
+               </StackPanel>
+
+               <InfoBar x:Name="ConnectionFeedback" IsOpen="False" IsClosable="False" />
+            </StackPanel>
+         </ScrollViewer>
       </ContentDialog>
    </Grid>
 </Window>

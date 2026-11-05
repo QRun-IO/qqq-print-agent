@@ -61,7 +61,7 @@ internal static class LayoutScenario
       root.UpdateLayout();
       await VerifyFooterAsync(root, service);
       await QueryAboutScenario.RunAsync(root);
-      await EditionCaptureScenario.RunAsync(root);
+      await EditionCaptureScenario.RunAsync(window, root);
       var feedback = (InfoBar)root.FindName("FeedbackBar");
       if(!feedback.IsOpen || !string.Equals(feedback.Title, "Request completed", StringComparison.Ordinal))
       {

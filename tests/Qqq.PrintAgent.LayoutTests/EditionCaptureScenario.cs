@@ -17,6 +17,49 @@ namespace Qqq.PrintAgent;
 /// </summary>
 internal static class EditionCaptureScenario
 {
+   /// <summary>Shows the connection dialog with a server address and the browser button visible, captures it, and hides it again.</summary>
+   private static async Task CaptureConnectionDialogAsync(MainWindow window, FrameworkElement root)
+   {
+      // A dialog that was shown once lives in a popup afterwards, so take the window's own fields rather than a name lookup.
+      ContentDialog connection = Field<ContentDialog>(window, "ConnectionDialog");
+      connection.XamlRoot = root.XamlRoot;
+      Field<TextBox>(window, "ServerBox").Text = "https://127.0.0.1:18581";
+      Field<Button>(window, "BrowserSignInButton").Visibility = Visibility.Visible;
+      Task<ContentDialogResult?> connecting = DialogGuard.ShowAsync(connection);
+      try
+      {
+         // The dialog is measured inside its popup after it opens; render only once it has a real size, and capture
+         // its scroll content (the dialog chrome itself is a popup layer that RenderTargetBitmap does not accept).
+         for(int waited = 0; waited < 40 && (connection.ActualWidth < 1 || connection.ActualHeight < 1); waited++)
+         { await Task.Delay(100); }
+         await Task.Delay(500);
+         connection.UpdateLayout();
+         // Captured on its own the content has no backdrop, so give it the light theme and a solid page colour for the picture.
+         connection.RequestedTheme = ElementTheme.Light;
+         var content = (ScrollViewer)connection.Content;
+         content.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
+         content.Padding = new Thickness(24, 24, 40, 24);
+         await Task.Delay(300);
+         content.UpdateLayout();
+         await QueryAboutScenario.CaptureAsync(content, "edition-connection-dialog.png", requireContrast: false);
+      }
+      finally
+      {
+         connection.Hide();
+         await connecting;
+         Field<Button>(window, "BrowserSignInButton").Visibility = Visibility.Collapsed;
+      }
+   }
+
+
+
+   /// <summary>Reads one of the window's generated XAML fields, which stay valid after a dialog has been reparented into a popup.</summary>
+   private static T Field<T>(MainWindow window, string name) where T : class
+      => typeof(MainWindow).GetField(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(window) as T
+         ?? throw new InvalidOperationException("Window field missing: " + name);
+
+
+
    /// <summary>True when the caller asked for identity captures.</summary>
    internal static bool IsEnabled => string.Equals(Environment.GetEnvironmentVariable("QQQ_LAYOUT_CAPTURE_EDITION"), "1", StringComparison.Ordinal);
 
@@ -36,7 +79,7 @@ internal static class EditionCaptureScenario
 
 
    /// <summary>Captures the Printers page, the Settings page and the About dialog (light and dark) with the build's real identity, then returns to Printers.</summary>
-   internal static async Task RunAsync(FrameworkElement root)
+   internal static async Task RunAsync(MainWindow window, FrameworkElement root)
    {
       if(!IsEnabled)
       {
@@ -70,6 +113,7 @@ internal static class EditionCaptureScenario
       }
       navigation.SelectedItem = navigation.MenuItems.OfType<NavigationViewItem>().First();
       await Task.Delay(300);
+      await CaptureConnectionDialogAsync(window, root);
       File.WriteAllText(Path.Combine(Program.EvidenceDirectory, "edition-identity.json"), System.Text.Json.JsonSerializer.Serialize(new
       {
          edition = AppIdentity.Edition?.Id,
