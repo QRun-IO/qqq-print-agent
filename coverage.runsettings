@@ -13,6 +13,10 @@
      is run separately and must not be inferred from a successful unit-test run.
      Report each suite separately; duplicate package measurements must not be averaged. -->
 <RunSettings>
+   <!-- A test run that executes zero tests (for example, a test assembly blocked from loading) must fail, not pass. -->
+   <RunConfiguration>
+      <TreatNoTestsAsError>true</TreatNoTestsAsError>
+   </RunConfiguration>
    <DataCollectionRunSettings>
       <DataCollectors>
          <DataCollector friendlyName="XPlat Code Coverage">
