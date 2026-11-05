@@ -6,6 +6,7 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
@@ -28,11 +29,31 @@ public sealed partial class QqqBrowserCallback : IDisposable
 
 
    /// <summary>
-   /// Creates the one-instance pipe. It is current-user-only and the first instance wins, so a second sign-in attempt or a
+   /// Creates the one-instance pipe. Only this user may open it and the first instance wins, so a second sign-in attempt or a
    /// look-alike server created earlier by another process is refused rather than silently sharing the inbox.
    /// </summary>
-   internal QqqBrowserCallback(string name) => _pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 1,
-      PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | PipeOptions.FirstPipeInstance);
+   internal QqqBrowserCallback(string name) => _pipe = NamedPipeServerStreamAcl.Create(name, PipeDirection.InOut, 1,
+      PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 4096, 4096, InboxSecurity());
+
+
+
+   /// <summary>
+   /// The inbox's security descriptor. The companion runs elevated, and PipeOptions.CurrentUserOnly would key the pipe to
+   /// the elevated token's default owner, which is the Administrators group rather than the user; the protocol handler the
+   /// browser launches runs as the ordinary user with Administrators present only as a deny-only group, so it was refused.
+   /// The descriptor therefore grants access to the user's own SID (the same single-user restriction, keyed correctly) and
+   /// names the user as owner, so the unelevated handler can reach the inbox and nobody else can.
+   /// </summary>
+   internal static PipeSecurity InboxSecurity()
+   {
+      using var identity = WindowsIdentity.GetCurrent();
+      SecurityIdentifier user = identity.User ?? throw new InvalidOperationException("The current user has no security identifier.");
+      var security = new PipeSecurity();
+      security.SetOwner(user);
+      security.SetGroup(user);
+      security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.FullControl, AccessControlType.Allow));
+      return security;
+   }
 
 
 
@@ -69,7 +90,9 @@ public sealed partial class QqqBrowserCallback : IDisposable
       trace?.Invoke("Callback address accepted: " + validated.GetLeftPart(UriPartial.Path) + " with " + (validated.Query.Length - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " characters of query (not logged).");
       using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
       timeout.CancelAfter(TimeSpan.FromSeconds(5));
-      await using NamedPipeClientStream pipe = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, TokenImpersonationLevel.Anonymous);
+      // Not CurrentUserOnly: that client option compares the pipe owner with this token's default owner, which differs
+      // between an elevated and an unelevated process of the same user. The peer is verified by process image instead.
+      await using NamedPipeClientStream pipe = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Anonymous);
       trace?.Invoke("Connecting to the companion's callback inbox (five second limit). If this is the last line, no companion in this user session was waiting for a callback: start the browser sign-in from the app first, and keep the app open.");
       await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
       trace?.Invoke("Inbox connected; verifying that it belongs to the installed companion " + expectedExecutable + ".");
