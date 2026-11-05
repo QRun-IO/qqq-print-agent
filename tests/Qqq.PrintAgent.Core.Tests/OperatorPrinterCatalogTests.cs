@@ -23,7 +23,7 @@ public sealed class OperatorPrinterCatalogTests
       using CatalogSession session = new(
          """{"printers":[{"printerRowId":"r1","deviceId":"d1","printerId":"p1","name":"Laser","deviceName":"Desk","status":"READY","formats":["PDF"],"mediaProfiles":[]}],"nextCursor":"c1"}""",
          """{"printers":[{"printerRowId":"r2","deviceId":"d2","printerId":"p2","name":"Zebra","deviceName":"Dock","status":"OFFLINE","formats":["ZPL","PDF"],"extra":true}],"nextCursor":null}""");
-      using PrintApiClient api = PrintApiClient.ForSession(session);
+      using var api = PrintApiClient.ForSession(session);
       IReadOnlyList<OperatorPrinter> printers = await api.OperatorPrintersAsync(CancellationToken.None);
       Assert.Equal(new[] { "p1", "p2" }, printers.Select(printer => printer.PrinterId), StringComparer.Ordinal);
       Assert.Equal(new[] { "d1", "d2" }, printers.Select(printer => printer.DeviceId), StringComparer.Ordinal);
@@ -41,7 +41,7 @@ public sealed class OperatorPrinterCatalogTests
    public async Task Catalog_ExplainsMissingRouteAndRefusedAccess(HttpStatusCode status, Type exception)
    {
       using CatalogSession session = new(status);
-      using PrintApiClient api = PrintApiClient.ForSession(session);
+      using var api = PrintApiClient.ForSession(session);
       await Assert.ThrowsAsync(exception, () => api.OperatorPrintersAsync(CancellationToken.None));
    }
 
@@ -62,7 +62,7 @@ public sealed class OperatorPrinterCatalogTests
    public async Task Catalog_StopsAfterThePageBound()
    {
       using CatalogSession session = new(Enumerable.Repeat("""{"printers":[],"nextCursor":"again"}""", PrintApiClient.CatalogPageLimit + 1).ToArray());
-      using PrintApiClient api = PrintApiClient.ForSession(session);
+      using var api = PrintApiClient.ForSession(session);
       await Assert.ThrowsAsync<InvalidDataException>(() => api.OperatorPrintersAsync(CancellationToken.None));
       Assert.Equal(PrintApiClient.CatalogPageLimit, session.Paths.Count);
    }
