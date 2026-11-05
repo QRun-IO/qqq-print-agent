@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: QRun-IO/qqq-print-protocol
-          ref: 42c0d249f81395f00408ec0f92638dcbbf5deb03
+          ref: ac835f8b9396b641b525669249fdb4a1e2a50c99
           path: qqq-print-protocol
           persist-credentials: false
       - name: Set up .NET
