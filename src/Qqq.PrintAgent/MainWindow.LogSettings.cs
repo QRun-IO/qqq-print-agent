@@ -6,7 +6,9 @@
 using System.Text.Json;
 using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
@@ -85,11 +87,37 @@ public sealed partial class MainWindow
 
 
    /// <summary>Clears the diagnostic logs only after the operator confirms; the prompt states that job history, printer settings and print jobs are kept.</summary>
-   private async void ClearLogs_Click(object sender, RoutedEventArgs e)
+   private async void ClearLogs_Click(object sender, RoutedEventArgs e) => await ClearLogsAsync(Content.XamlRoot);
+
+
+
+   /// <summary>Confirms in the window the operator is looking at, then asks the service (which owns the files) to clear the logs.</summary>
+   private async Task ClearLogsAsync(XamlRoot owner)
    {
-      if(await ConfirmAsync("Clear local diagnostic logs?", "This permanently deletes retained service and companion diagnostic logs. Print jobs, printer settings and job history are preserved. New events will start a fresh log.", "Clear logs"))
+      if(await ConfirmAsync("Clear local diagnostic logs?", "This permanently deletes retained service and companion diagnostic logs. Print jobs, printer settings and job history are preserved. New events will start a fresh log.", "Clear logs", owner))
       {
          await RunActionAsync(new PipeRequest("clear-logs"));
       }
+   }
+
+
+
+   /// <summary>
+   /// Opens (or activates) the shared AppKit log viewer and adds this application's "Clear logs" button to its toolbar. The viewer
+   /// is sealed and has no command hook, so the button is placed by walking its toolbar once per window; if the viewer's layout
+   /// ever changes the viewer still opens and the Settings page keeps its own Clear local logs button.
+   /// </summary>
+   private void ShowActivityLog()
+   {
+      var viewer = LogWindow.ShowSingle(App.Log, AppIdentity.Info);
+      if(viewer.Content is not Grid { Children: [StackPanel toolbar, ..] } || toolbar.Children.OfType<Button>().Any(button => string.Equals(AutomationProperties.GetAutomationId(button), "ClearLogsFromViewer", StringComparison.Ordinal)))
+      {
+         return;
+      }
+      var clear = new Button { Content = "Clear logs" };
+      AutomationProperties.SetAutomationId(clear, "ClearLogsFromViewer");
+      clear.Click += async (_, _) => await ClearLogsAsync(viewer.Content.XamlRoot);
+      int position = toolbar.Children.TakeWhile(child => child is ButtonBase).Count();
+      toolbar.Children.Insert(position, clear);
    }
 }

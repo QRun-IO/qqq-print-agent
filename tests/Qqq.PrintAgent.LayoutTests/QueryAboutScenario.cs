@@ -139,7 +139,7 @@ internal static class QueryAboutScenario
 
 
    /// <summary>Checks optional card contrast and retains only synthetic native-dialog pixels for visual review.</summary>
-   private static async Task CaptureAsync(FrameworkElement target, string fileName, bool requireContrast)
+   internal static async Task CaptureAsync(FrameworkElement target, string fileName, bool requireContrast)
    {
       var rendering = new RenderTargetBitmap();
       await rendering.RenderAsync(target);

@@ -15,6 +15,7 @@ internal sealed class PrinterDetailsView : StackPanel
    private readonly TextBlock _name = Value();
    private readonly TextBlock _queue = Value();
    private readonly TextBlock _status = Value();
+   private readonly TextBlock _server = Value();
    private readonly TextBlock _location = Value();
    private readonly TextBlock _description = Value();
    private readonly TextBlock _technical = Value();
@@ -28,6 +29,7 @@ internal sealed class PrinterDetailsView : StackPanel
       AddField("Name", _name);
       AddField("Windows queue", _queue);
       AddField("Status", _status);
+      AddField("Server", _server);
       AddField("Location", _location);
       _description.MaxLines = 3;
       _description.TextTrimming = TextTrimming.WordEllipsis;
@@ -39,11 +41,12 @@ internal sealed class PrinterDetailsView : StackPanel
 
 
    /// <summary>Fills the fields from a printer snapshot, showing "Not set" for an empty location or description so a blank is never mistaken for a missing control.</summary>
-   internal void Update(PrinterSnapshot printer, string name, string status)
+   internal void Update(PrinterSnapshot printer, string name, string status, string server)
    {
       _name.Text = name;
       _queue.Text = printer.Name;
       _status.Text = status;
+      _server.Text = server;
       _location.Text = string.IsNullOrWhiteSpace(printer.Location) ? "Not set" : printer.Location;
       _description.Text = string.IsNullOrWhiteSpace(printer.Description) ? "Not set" : printer.Description;
       _technical.Text = $"Driver: {printer.DriverName}\nPort: {printer.PortName}\nPrinter ID: {printer.PrinterId}";

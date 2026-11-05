@@ -37,6 +37,21 @@ public sealed class ProtocolFixtureTests
 
 
 
+   /// <summary>The shared PRINTERS frame (printing extension 2.4, printer-approval-v1) parses into the per-printer approval states the runtime applies: one approved, one known but not approved.</summary>
+   [Fact]
+   public void SharedPrintersFrameFixture_Deserializes()
+   {
+      string json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "realtime-printers.message.json"));
+      RealtimeEnvelope envelope = JsonSerializer.Deserialize<RealtimeEnvelope>(json, PrintApiClient.JsonOptions)!;
+      Assert.Equal("PRINTERS", envelope.Type);
+      PrinterApprovalState[] printers = envelope.Payload.GetProperty("printers").Deserialize<PrinterApprovalState[]>(PrintApiClient.JsonOptions)!;
+      Assert.Equal(2, printers.Length);
+      Assert.Contains(printers, printer => string.Equals(printer.PrinterId, "laser-example", StringComparison.Ordinal) && printer.Enabled);
+      Assert.Contains(printers, printer => string.Equals(printer.PrinterId, "label-example", StringComparison.Ordinal) && !printer.Enabled);
+   }
+
+
+
    /// <summary>An event with no message or spooler id serializes without any null members, since the server treats an explicit null differently from an absent field.</summary>
    [Fact]
    public void OptionalEventFields_AreOmitted()

@@ -21,15 +21,22 @@ public sealed class GitHubMsiReleaseClient : IDisposable
    private const string RepositoryPath = "/QRun-IO/qqq-print-agent/releases/download/";
    private static readonly Uri Feed = new("https://api.github.com/repos/QRun-IO/qqq-print-agent/releases?per_page=100");
    private readonly HttpClient _http;
+   private readonly string _assetPrefix;
 
 
 
    /// <summary>
    /// Creates the client with automatic redirects off, because every redirect is validated by hand against an allow-list of
-   /// GitHub hosts. A caller-supplied handler lets tests substitute the network without relaxing that rule.
+   /// GitHub hosts. A caller-supplied handler lets tests substitute the network without relaxing that rule. The asset prefix
+   /// selects which MSI on the shared feed this build follows: the generic one, or a client edition's.
    /// </summary>
-   public GitHubMsiReleaseClient(HttpMessageHandler? handler = null)
+   public GitHubMsiReleaseClient(HttpMessageHandler? handler = null, string assetPrefix = Qqq.PrintAgent.Core.Edition.DefaultAssetPrefix)
    {
+      if(string.IsNullOrEmpty(assetPrefix) || assetPrefix.Length > 40 || !char.IsAsciiLetter(assetPrefix[0]) || !assetPrefix.All(char.IsAsciiLetterOrDigit))
+      {
+         throw new ArgumentException("The update asset prefix must be 2 to 40 letters or digits.", nameof(assetPrefix));
+      }
+      _assetPrefix = assetPrefix;
       _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false })
       {
          Timeout = TimeSpan.FromMinutes(10),
@@ -198,7 +205,7 @@ public sealed class GitHubMsiReleaseClient : IDisposable
 
 
    /// <summary>Rechecks a release description before it is used: version and channel eligibility, size, and that both URLs are exactly this repository's asset addresses.</summary>
-   private static void Validate(MsiRelease release, MsiReleaseVersion current)
+   private void Validate(MsiRelease release, MsiReleaseVersion current)
    {
       if(!MsiReleaseVersion.TryParse(release.Version, out MsiReleaseVersion candidate) || !Eligible(candidate, current) || release.Size is <= 0 or > MaximumMsiBytes)
       {
@@ -211,7 +218,7 @@ public sealed class GitHubMsiReleaseClient : IDisposable
 
 
    /// <summary>The single MSI file name a release must publish for a version; the updater depends on this exact name.</summary>
-   private static string AssetName(string version) => "QqqPrintAgent-v" + version + "-x64.msi";
+   private string AssetName(string version) => _assetPrefix + "-v" + version + "-x64.msi";
 
 
 

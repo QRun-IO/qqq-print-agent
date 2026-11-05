@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using Qqq.PrintAgent.Core;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -21,11 +22,11 @@ public sealed partial class AgentRuntime
       try
       {
          WriteLog("INFO", $"Enrollment requested on {request.ServerUrl ?? "(no server)"} with a {(request.EnrollmentCode ?? "").Length}-character enrollment code (never logged), computer name {Environment.MachineName}, agent {PrintApiClient.AgentVersion}.");
-         IQqqSessionClient session = _sessionClient ?? throw Refused("no QQQ session is held; sign in first.", new InvalidOperationException("Sign in to QQQ before enrolling this computer."));
+         IQqqSessionClient session = _sessionClient ?? throw Refused($"no {AppIdentity.ServerName} session is held; sign in first.", new InvalidOperationException($"Sign in to {AppIdentity.ServerName} before enrolling this computer."));
          if(!session.IsAuthenticated || request.ServerUrl is null || !SameOrigin(session.Origin, request.ServerUrl))
          {
             throw Refused(!session.IsAuthenticated ? "the held session is not authenticated." : request.ServerUrl is null ? "no server address was given."
-               : $"the session is for {session.Origin.Authority} but enrollment was requested on {request.ServerUrl}.", new InvalidOperationException("Sign in to the selected QQQ server before enrollment."));
+               : $"the session is for {session.Origin.Authority} but enrollment was requested on {request.ServerUrl}.", new InvalidOperationException($"Sign in to the selected {AppIdentity.ServerName} server before enrollment."));
          }
          WriteLog("INFO", "Step 1 of 4: reading the signed-in identity.");
          QqqSessionBinding identity = await session.GetSessionIdentityAsync(token).ConfigureAwait(false);
@@ -47,7 +48,7 @@ public sealed partial class AgentRuntime
          {
             _queuedJobs = [];
          }
-         WriteLog("INFO", "Device enrolled with the QQQ user session.");
+         WriteLog("INFO", $"Device enrolled with the {AppIdentity.ServerName} user session.");
          WakePoll();
          return $"Enrolled device {response.DeviceId}";
       }

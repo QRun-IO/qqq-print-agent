@@ -17,11 +17,15 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
 
 
 
-   /// <summary>The MSI persists labels so unattended upgrades keep the customer identity.</summary>
-   public static RuntimeBranding LoadMachine()
+   /// <summary>
+   /// Reads the machine branding file and, for the generic build, the labels the installer persisted so unattended upgrades
+   /// keep a deployment's identity. An edition build skips the persisted labels: its installer writes the edition's own
+   /// labels anyway, and labels left by an earlier generic install must not relabel the edition. The branding file still wins.
+   /// </summary>
+   public static RuntimeBranding LoadMachine(bool includeInstallerLabels = true)
    {
       RuntimeBranding branding = Load(DefaultPath);
-      if(!OperatingSystem.IsWindows())
+      if(!OperatingSystem.IsWindows() || !includeInstallerLabels)
       {
          return branding;
       }
@@ -160,7 +164,7 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
 
 
    /// <summary>True for a #RRGGBB accent colour dark enough that white text on it has a contrast ratio of at least 4.5 to 1, so a customer colour can never make the header unreadable.</summary>
-   private static bool HasReadableWhiteText(string? color)
+   internal static bool HasReadableWhiteText(string? color)
    {
       if(color is not { Length: 7 } || color[0] != '#' || !color.Skip(1).All(Uri.IsHexDigit))
       {
@@ -182,7 +186,7 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
 
 
    /// <summary>Reads an optional text setting, trimmed, returning null when it is absent, not a string, empty, over the maximum length or contains control characters.</summary>
-   private static string? ReadText(JsonElement root, string key, int maximum)
+   internal static string? ReadText(JsonElement root, string key, int maximum)
    {
       if(!root.TryGetProperty(key, out JsonElement field) || field.ValueKind != JsonValueKind.String)
       {

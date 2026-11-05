@@ -4,15 +4,21 @@
 -->
 
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-   <Package Name="QQQ Print Agent" Manufacturer="QRun-IO" Version="$(ProductVersion)"
+   <Package Name="$(BrandName)" Manufacturer="$(BrandCompany)" Version="$(ProductVersion)"
             UpgradeCode="D761CD03-F616-4C98-9A94-9F590A36E449" Scope="perMachine" InstallerVersion="500">
       <!-- Execute the protected-state preflight before removing the previous product.
            Deferred actions are queued until InstallExecute, not run at their table slot.
            Stable component GUIDs preserve shared files/service during old-product removal. -->
       <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute" DowngradeErrorMessage="A newer print connector is already installed." />
       <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+      <?if $(BrandForced) = 1 ?>
+      <!-- An edition build carries its client's identity and applies it over any labels an earlier install stored. -->
+      <Property Id="BRANDNAME" Secure="yes" Value="$(BrandName)" />
+      <Property Id="BRANDCOMPANY" Secure="yes" Value="$(BrandCompany)" />
+      <?else?>
       <Property Id="BRANDNAME" Secure="yes" />
       <Property Id="BRANDCOMPANY" Secure="yes" />
+      <?endif?>
       <Property Id="STORED_BRAND_NAME">
          <RegistrySearch Id="FindBrandName" Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="DisplayName" Type="raw" Bitness="always64" />
       </Property>
@@ -20,9 +26,9 @@
          <RegistrySearch Id="FindBrandCompany" Root="HKLM" Key="SOFTWARE\QRunIO\PrintAgent" Name="CompanyName" Type="raw" Bitness="always64" />
       </Property>
       <SetProperty Id="BRANDNAME" Action="UseStoredBrandName" Value="[STORED_BRAND_NAME]" After="AppSearch" Condition="NOT BRANDNAME AND STORED_BRAND_NAME" />
-      <SetProperty Id="BRANDNAME" Action="UseDefaultBrandName" Value="QQQ Print Agent" After="UseStoredBrandName" Condition="NOT BRANDNAME" />
+      <SetProperty Id="BRANDNAME" Action="UseDefaultBrandName" Value="$(BrandName)" After="UseStoredBrandName" Condition="NOT BRANDNAME" />
       <SetProperty Id="BRANDCOMPANY" Action="UseStoredBrandCompany" Value="[STORED_BRAND_COMPANY]" After="UseDefaultBrandName" Condition="NOT BRANDCOMPANY AND STORED_BRAND_COMPANY" />
-      <SetProperty Id="BRANDCOMPANY" Action="UseDefaultBrandCompany" Value="QRun-IO" After="UseStoredBrandCompany" Condition="NOT BRANDCOMPANY" />
+      <SetProperty Id="BRANDCOMPANY" Action="UseDefaultBrandCompany" Value="$(BrandCompany)" After="UseStoredBrandCompany" Condition="NOT BRANDCOMPANY" />
       <SetProperty Id="ProductName" Action="SetBrandedProductName" Value="[BRANDNAME]" After="UseDefaultBrandCompany" />
       <SetProperty Id="Manufacturer" Action="SetBrandedManufacturer" Value="[BRANDCOMPANY]" After="SetBrandedProductName" />
       <CustomAction Id="ValidateMachineStateBeforeFolders" Directory="System64Folder" ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;$ErrorActionPreference=&apos;Stop&apos;; $trusted=@(&apos;S-1-5-18&apos;,&apos;S-1-5-32-544&apos;,&apos;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464&apos;); function AssertNode([\[]string[\]]$p) [\{] $i=Get-Item -LiteralPath $p -Force; if($i.Attributes -band [\[]IO.FileAttributes[\]]::ReparsePoint) [\{] throw &apos;Machine print state contains a link. Installation refused.&apos; [\}]; $a=$i.GetAccessControl(); if($a.GetOwner([\[]Security.Principal.SecurityIdentifier[\]]).Value -notin $trusted) [\{] throw &apos;Machine print state has an untrusted owner. Installation refused.&apos; [\}]; $raw=[\[]Security.AccessControl.RawSecurityDescriptor[\]]::new($a.GetSecurityDescriptorBinaryForm(),0); if($null -eq $raw.DiscretionaryAcl) [\{] throw &apos;Machine print state has no ACL.&apos; [\}]; foreach($r in $a.GetAccessRules($true,$true,[\[]Security.Principal.SecurityIdentifier[\]])) [\{] if($r.AccessControlType -eq &apos;Allow&apos; -and [\[]int[\]]$r.FileSystemRights -ne 0 -and $r.IdentityReference.Value -notin $trusted) [\{] throw &apos;Machine print state permits untrusted access. Installation refused.&apos; [\}] [\}]; if($i.PSIsContainer) [\{] foreach($c in [\[]IO.Directory[\]]::EnumerateFileSystemEntries($p)) [\{] AssertNode $c [\}] [\}] [\}]; try [\{] $root=Join-Path ([\[]Environment[\]]::GetFolderPath(&apos;CommonApplicationData&apos;)) &apos;QqqPrintAgent&apos;; for($p=$root;$p;$p=[\[]IO.Path[\]]::GetDirectoryName($p)) [\{] if(Test-Path -LiteralPath $p) [\{] if((Get-Item -LiteralPath $p -Force).Attributes -band [\[]IO.FileAttributes[\]]::ReparsePoint) [\{] throw &apos;Machine print state path contains a link.&apos; [\}] [\}] [\}]; if(-not [\[]IO.Directory[\]]::Exists($root)) [\{] $acl=[\[]Security.AccessControl.DirectorySecurity[\]]::new(); $acl.SetSecurityDescriptorSddlForm(&apos;O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)&apos;); [\[]IO.DirectoryInfo[\]]::new($root).Create($acl) [\}]; AssertNode $root; exit 0 [\}] catch [\{] [\[]Console[\]]::Error.WriteLine($_.Exception.Message); exit 1 [\}]&quot;" Execute="deferred" Impersonate="no" Return="check" />

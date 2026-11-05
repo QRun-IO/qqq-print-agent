@@ -22,6 +22,7 @@ public sealed partial class AgentRuntime
    /// <summary>Invalidate in-flight responses from the prior enrollment without clearing durable job evidence.</summary>
    private void ResetConnectionState()
    {
+      ResetPrinterCatalog();
       using var store = new AgentStore(directory, recoverUnreadableConfiguration: true);
       RealtimeSettings settings = store.LoadRealtimeSettings();
       lock(_stateLock)

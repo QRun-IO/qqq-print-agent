@@ -14,11 +14,13 @@ namespace Qqq.PrintAgent.Core;
 /// The application's identity, declared once and shared by the window, the command line,
 /// and the tests. AppKit derives the data folder (%LOCALAPPDATA%\qqq-print-agent), the data-folder
 /// override variable, the log file names, and the credential prefix from <see cref="Info"/>.
+/// A compiled-in client <see cref="Edition"/> changes names, colours and the update asset; machine
+/// branding applies on top of that; the id and paths never change.
 /// </summary>
 public static class AppIdentity
 {
-   /// <summary>Who the app is: id, names, links, credits, and brand.</summary>
-   public static AppInfo DefaultInfo { get; } = new()
+   /// <summary>The generic identity before any edition or machine branding: id, names, links, credits, and brand.</summary>
+   public static AppInfo BaseInfo { get; } = new()
    {
       Id = "qqq-print-agent",
       DisplayName = "QQQ Print Agent",
@@ -50,7 +52,33 @@ public static class AppIdentity
 
 
 
-   public static RuntimeBranding Branding { get; } = RuntimeBranding.LoadMachine();
+   /// <summary>The client edition compiled into this build, or null for the generic build.</summary>
+   public static Edition? Edition { get; } = Edition.LoadInstalled();
+
+   /// <summary>The identity this build ships with: the edition's presentation over <see cref="BaseInfo"/>, before machine branding.</summary>
+   public static AppInfo DefaultInfo { get; } = Edition?.Apply(BaseInfo) ?? BaseInfo;
+
+   /// <summary>What user-facing text calls the server: the edition's name for it, or QQQ in the generic build.</summary>
+   public static string ServerName => Edition?.ServerName ?? Core.Edition.DefaultServerName;
+
+   /// <summary>The release asset prefix the installed updater looks for, so an edition keeps updating on its own line.</summary>
+   public static string UpdateAssetPrefix => Edition?.AssetPrefix ?? Core.Edition.DefaultAssetPrefix;
+
+   /// <summary>The edition's logo shipped beside the executable, when the edition supplies one and no machine branding logo overrides it.</summary>
+   public static string? EditionLogoPath
+   {
+      get
+      {
+         if(Edition is null)
+         {
+            return null;
+         }
+         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Brand", "logo.png");
+         return File.Exists(path) ? path : null;
+      }
+   }
+
+   public static RuntimeBranding Branding { get; } = RuntimeBranding.LoadMachine(includeInstallerLabels: Edition is null);
    public static AppInfo Info { get; } = Branding.Apply(DefaultInfo);
 
    /// <summary>Where the app keeps its per-user data; honors the data-folder override variable.</summary>

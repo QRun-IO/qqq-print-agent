@@ -46,7 +46,7 @@ public sealed partial class MainWindow
       ThemeChoice.SelectedIndex = _settings.ThemeKind switch { AppTheme.Light => 1, AppTheme.Dark => 2, _ => 0 };
       Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(ThemeChoice, "AppTheme");
       UpdateStartupToggle.IsOn = _settings.CheckForUpdatesOnStartup;
-      _updateService = new MsiUpdateService(() => DispatcherQueue.TryEnqueue(ExitCompanion), App.Log);
+      _updateService = new MsiUpdateService(() => DispatcherQueue.TryEnqueue(ExitCompanion), App.Log, AppIdentity.UpdateAssetPrefix);
       _updateService.StatusChanged += UpdateService_StatusChanged;
       var prompter = new LifetimeUserPrompter(new ContentDialogPrompter(UpdateDialogRoot), _updateLifetime.Token);
       _updates = new UpdateCoordinator(_updateService, prompter, AppIdentity.Info.DisplayName, App.Log);
@@ -236,7 +236,7 @@ public sealed partial class MainWindow
    private void LogsAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
    {
       Navigation.SelectedItem = LogsNavigation;
-      LogWindow.ShowSingle(App.Log, AppIdentity.Info);
+      ShowActivityLog();
       args.Handled = true;
    }
 }

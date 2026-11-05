@@ -33,6 +33,7 @@ internal static class LayoutScenario
    {
       await WaitAsync(() => window.Content.XamlRoot is not null && service.Snapshots > 0);
       var root = (FrameworkElement)window.Content;
+      await EditionCaptureScenario.CaptureSplashAsync(root);
       await Task.Delay(250);
       var printers = (ListView)root.FindName("PrintersList");
       printers.SelectedItem = printers.Items.Cast<PrinterRowView>().Single(row => string.Equals(row.Snapshot?.PrinterId, SyntheticService.Printer.PrinterId, StringComparison.Ordinal));
@@ -60,6 +61,7 @@ internal static class LayoutScenario
       root.UpdateLayout();
       await VerifyFooterAsync(root, service);
       await QueryAboutScenario.RunAsync(root);
+      await EditionCaptureScenario.RunAsync(window, root);
       var feedback = (InfoBar)root.FindName("FeedbackBar");
       if(!feedback.IsOpen || !string.Equals(feedback.Title, "Request completed", StringComparison.Ordinal))
       {

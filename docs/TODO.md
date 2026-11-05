@@ -7,7 +7,7 @@ The stable printing release below remains accepted historical evidence. The shar
 - [x] Implement per-attempt nonce kept only under `REQUIRED`, sent as `expectedNonce`; legacy four-field body preserved; unknown policy refused before provider/browser.
 - [x] Root verified exact native callback registrations and real server HTTPS discovery in an isolated shared scanner/Printing 1.0.0 fixture with `REQUIRED` nonce (discovery only, not login proof).
 - [x] Integrated NativeCI Release build: zero warnings/errors; 352 Windows/CLI tests passed with no failures/skips; source notices passed for 300 tracked files. Existing method-length limit retained; Core.Tests excluded locally.
-- [ ] Hosted CI including Core.Tests. Core tests executed 0 locally (Windows security) and are hosted-CI-only; that is not a pass.
+- [x] Hosted CI including Core.Tests: GitHub CI on the editions branch carrying this fix passed 182 Core and 352 Windows/CLI tests (run 42078731426, 2026-11-05).
 - [ ] Real shared-provider native login acceptance.
 - [ ] Final published build.
 

@@ -69,7 +69,7 @@ public sealed partial class MainWindow
    private void ShowServerTrust()
    {
       AllowUntrustedCertificateBox.IsChecked = _serverTrust.AllowUntrustedCertificate;
-      AllowUntrustedCertificateBox.Content = _serverTrust.AllowUntrustedCertificate
+      AllowUntrustedCertificateLabel.Text = _serverTrust.AllowUntrustedCertificate
          ? "Allow untrusted server certificate for " + _serverTrust.Origin + " (development only)"
          : "Allow untrusted server certificate for this server (development only)";
    }
@@ -195,6 +195,7 @@ public sealed partial class MainWindow
       try
       {
          App.Log.Info("[Companion] Password sign-in submitted for " + _signInClient.Origin.Authority + ".");
+         Feedback("Signing in", "Checking the username and password with the server.", InfoBarSeverity.Informational);
          await _signInClient.SignInWithPasswordAsync(UsernameBox.Text.Trim(), QqqPasswordBox.Password);
          await TransferSignInAsync();
       }
@@ -223,7 +224,7 @@ public sealed partial class MainWindow
       App.Log.Info("[Companion] Sign-in accepted by the server; handing the session to the service (" + choice + ").");
       string result = await _sendRequest(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(),
          ClaimLegacyDevice: PairingChoice.SelectedIndex == 1, StartNewPairing: PairingChoice.SelectedIndex == 2));
-      bool success = result.StartsWith("Signed in to QQQ.", StringComparison.Ordinal);
+      bool success = result.StartsWith("Signed in to " + AppIdentity.ServerName + ".", StringComparison.Ordinal);
       if(success)
       { App.Log.Info("[Companion] Service sign-in result: " + result); }
       else
@@ -277,6 +278,7 @@ public sealed partial class MainWindow
             ?? throw Unlisted();
          using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
          _browserSignInCancellation = timeout;
+         Feedback("Waiting for the browser", "Finish signing in on the page that opened in your browser. This dialog updates when the sign-in completes, is canceled or times out after three minutes.", InfoBarSeverity.Informational);
          await CompleteBrowserSignInAsync(new Uri(redirect), timeout.Token);
          await TransferSignInAsync();
       }

@@ -9,8 +9,14 @@
       <InstallerPlatform>x64</InstallerPlatform>
       <ProductVersion Condition="'$(ProductVersion)' == ''">0.3.0</ProductVersion>
       <PayloadRoot Condition="'$(PayloadRoot)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package</PayloadRoot>
-      <OutputName>QqqPrintAgent-$(ProductVersion)-x64</OutputName>
-      <DefineConstants>ProductVersion=$(ProductVersion);PayloadRoot=$(PayloadRoot)</DefineConstants>
+      <!-- Client editions: the build script passes the edition's names, forces them over any stored labels and names the
+           MSI after the edition's asset prefix; the generic build keeps the defaults below. -->
+      <MsiBaseName Condition="'$(MsiBaseName)' == ''">QqqPrintAgent</MsiBaseName>
+      <BrandName Condition="'$(BrandName)' == ''">QQQ Print Agent</BrandName>
+      <BrandCompany Condition="'$(BrandCompany)' == ''">QRun-IO</BrandCompany>
+      <BrandForced Condition="'$(BrandForced)' == ''">0</BrandForced>
+      <OutputName>$(MsiBaseName)-$(ProductVersion)-x64</OutputName>
+      <DefineConstants>ProductVersion=$(ProductVersion);PayloadRoot=$(PayloadRoot);BrandName=$(BrandName);BrandCompany=$(BrandCompany);BrandForced=$(BrandForced)</DefineConstants>
       <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
       <!-- Bundled Microsoft WinUI DLLs contain multi-language version resources exceeding
            ICE03's Language-column limit, and newer MUI LCIDs absent from its static list.

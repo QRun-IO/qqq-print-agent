@@ -12,10 +12,10 @@ on:
     inputs:
       product-version:
         type: string
-        default: '1.1.1'
+        default: '1.2.0'
       release-version:
         type: string
-        default: '1.1.1'
+        default: '1.2.0'
 
 permissions:
   contents: read
@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: QRun-IO/qqq-print-protocol
-          ref: 42c0d249f81395f00408ec0f92638dcbbf5deb03
+          ref: ac835f8b9396b641b525669249fdb4a1e2a50c99
           path: qqq-print-protocol
           persist-credentials: false
       - name: Set up .NET
@@ -59,19 +59,29 @@ jobs:
           ./build/Test-PackagingInputs.ps1
       - name: Build unsigned prerelease MSI
         env:
-          PRODUCT_VERSION: ${{ inputs.product-version || '1.1.1' }}
-          RELEASE_VERSION: ${{ inputs.release-version || '1.1.1' }}
+          PRODUCT_VERSION: ${{ inputs.product-version || '1.2.0' }}
+          RELEASE_VERSION: ${{ inputs.release-version || '1.2.0' }}
         run: |
           ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # One fully branded installer per client edition (editions/<id>), named after its asset prefix.
+          $installers = @('QqqPrintAgent')
+          foreach ($folder in Get-ChildItem -LiteralPath editions -Directory | Sort-Object Name) {
+            ./build/Build-Installer.ps1 -ProductVersion $env:PRODUCT_VERSION -ReleaseVersion $env:RELEASE_VERSION -Edition $folder.Name
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $installers += (Get-Content -LiteralPath (Join-Path $folder.FullName 'edition.json') -Raw | ConvertFrom-Json).assetPrefix
+          }
           New-Item -ItemType Directory -Path artifacts/release -Force | Out-Null
-          $source = "artifacts/installer/QqqPrintAgent-$env:PRODUCT_VERSION-x64.msi"
-          $name = "QqqPrintAgent-v$env:RELEASE_VERSION-x64.msi"
-          Copy-Item -LiteralPath $source -Destination "artifacts/release/$name"
+          Remove-Item -LiteralPath artifacts/release/SHA256SUMS -Force -ErrorAction SilentlyContinue
+          foreach ($prefix in $installers) {
+            $source = "artifacts/installer/$prefix-$env:PRODUCT_VERSION-x64.msi"
+            $name = "$prefix-v$env:RELEASE_VERSION-x64.msi"
+            Copy-Item -LiteralPath $source -Destination "artifacts/release/$name"
+            $hash = (Get-FileHash -LiteralPath "artifacts/release/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name" | Add-Content artifacts/release/SHA256SUMS -Encoding ascii
+          }
           Copy-Item -LiteralPath build/Install-Branded.ps1 -Destination artifacts/release/Install-Branded.ps1
           Copy-Item -LiteralPath docs/branding.example.json -Destination artifacts/release/branding.example.json
-          $hash = (Get-FileHash -LiteralPath "artifacts/release/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $name" | Set-Content artifacts/release/SHA256SUMS -Encoding ascii
           foreach ($file in @('Install-Branded.ps1', 'branding.example.json')) {
             $hash = (Get-FileHash -LiteralPath "artifacts/release/$file" -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $file" | Add-Content artifacts/release/SHA256SUMS -Encoding ascii

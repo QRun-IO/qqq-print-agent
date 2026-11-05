@@ -13,17 +13,20 @@ public sealed class AgentRealtimeMediaCapabilitiesTests
 {
    /// <summary>Reads actual HELLO frames before and after reconnect, proving each socket refreshes discovery once without HTTP polling.</summary>
    [Theory]
-   [InlineData("2.0.0", false)]
-   [InlineData("2.1.9", false)]
-   [InlineData("2.2.0", false)]
-   [InlineData("2.2.9", false)]
-   [InlineData("2.3.0", true)]
-   [InlineData("2.4.0", true)]
-   public async Task HelloAdvertisesMediaOnlyAfterStandardDiscoveryConfirmsSupport(string version, bool media)
+   [InlineData("2.0.0", false, false)]
+   [InlineData("2.1.9", false, false)]
+   [InlineData("2.2.0", false, false)]
+   [InlineData("2.2.9", false, false)]
+   [InlineData("2.3.0", true, false)]
+   [InlineData("2.3.9", true, false)]
+   [InlineData("2.4.0", true, true)]
+   [InlineData("2.5.2", true, true)]
+   public async Task HelloAdvertisesMediaOnlyAfterStandardDiscoveryConfirmsSupport(string version, bool media, bool approval)
    {
       await using var fixture = new RealtimeRuntimeFixture(printingVersion: version);
       RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
-      string[] expected = media ? ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL", "printer-media-v1"]
+      string[] expected = approval ? ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL", "printer-media-v1", "printer-approval-v1"]
+         : media ? ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL", "printer-media-v1"]
          : ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL"];
       Assert.Equal(expected, fixture.LastHelloCapabilities);
       // One initial authentication discovery, then one fresh discovery per socket.

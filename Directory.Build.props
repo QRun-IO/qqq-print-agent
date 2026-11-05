@@ -60,14 +60,19 @@
         commit as "+<sha>" on AssemblyInformationalVersion, which the About dialog and the
         CLI's version output show as a short hash. -->
    <PropertyGroup>
-      <VersionPrefix>1.1.1</VersionPrefix>
+      <VersionPrefix>1.2.0</VersionPrefix>
       <VersionSuffix></VersionSuffix>
    </PropertyGroup>
 
-   <!-- Product metadata stamped into every assembly. -->
+   <!-- Product metadata stamped into every assembly. A client edition build (build/Build-Installer.ps1 -Edition)
+        passes BrandProduct and BrandCompany, so each executable's product, company and file description carry the
+        client's brand; author and copyright stay with the source. -->
    <PropertyGroup>
       <Authors>James Maes</Authors>
       <Product>QQQ Print Agent</Product>
+      <Product Condition="'$(BrandProduct)' != ''">$(BrandProduct)</Product>
+      <AssemblyTitle Condition="'$(BrandProduct)' != ''">$(BrandProduct)</AssemblyTitle>
+      <Company Condition="'$(BrandCompany)' != ''">$(BrandCompany)</Company>
       <Copyright>Copyright (c) 2026 James Maes</Copyright>
       <RepositoryUrl>https://github.com/QRun-IO/qqq-print-agent</RepositoryUrl>
       <RepositoryType>git</RepositoryType>

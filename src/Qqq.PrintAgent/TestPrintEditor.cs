@@ -35,7 +35,7 @@ internal sealed class TestPrintEditor : StackPanel
    {
       _driverName = printer.DriverName;
       Spacing = 16;
-      Children.Add(new TextBlock { Text = $"Print one high-contrast QQQ diagnostic page or label on {printerLabel}. This uses real stock and requires local sharing and server approval.", TextWrapping = TextWrapping.Wrap });
+      Children.Add(new TextBlock { Text = $"Print one high-contrast {AppIdentity.ServerName} diagnostic page or label on {printerLabel}. This uses real stock and requires local sharing and server approval.", TextWrapping = TextWrapping.Wrap });
       foreach(string format in printer.Formats)
       {
          _format.Items.Add(new ComboBoxItem { Content = string.Equals(format, "ZPL", StringComparison.Ordinal) ? "Printer-ready label (ZPL)" : "Document (PDF)", Tag = format });

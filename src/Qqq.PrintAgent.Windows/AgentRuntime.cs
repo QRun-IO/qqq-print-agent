@@ -7,6 +7,7 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using Qqq.PrintAgent.Core;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -193,7 +194,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       PrintingRealtimeChannel realtime;
       lock(_stateLock)
       { realtime = _realtime ?? throw new IOException("The realtime connection is unavailable."); }
-      return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException("Sign in to QQQ before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
+      return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException($"Sign in to {AppIdentity.ServerName} before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
    }
 
 
@@ -233,12 +234,15 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
-      var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location, printer.MediaProfiles)).ToList();
+      var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location, printer.MediaProfiles, ServerStateFor(printer.PrinterId, exposed.Contains(printer.PrinterId)))).ToList();
       foreach(string missing in exposed.Where(id => !printers.Any(printer => string.Equals(printer.PrinterId, id, StringComparison.Ordinal))))
       {
          PrinterProfile profile = store.GetPrinterProfile(missing);
-         printers.Add(new PrinterSnapshot(missing, "Previously exposed printer is unavailable", "", "", "OFFLINE", [], true, profile.DisplayName, profile.Description, profile.Location));
+         printers.Add(new PrinterSnapshot(missing, "Previously exposed printer is unavailable", "", "", "OFFLINE", [], true, profile.DisplayName, profile.Description, profile.Location, ServerState: ServerStateFor(missing, exposed: true)));
       }
+      PrinterServerSync printerSync;
+      lock(_stateLock)
+      { printerSync = _catalogSync; }
       IReadOnlyList<JobSnapshot> jobs = store.RecentJobs();
       int attentionCount = store.NeedsAttentionCount();
       lock(_stateLock)
@@ -266,7 +270,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             health = "RED";
             status = _authenticationMessage;
          }
-         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot());
+         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot(), PrinterSync: printerSync);
       }
    }
 

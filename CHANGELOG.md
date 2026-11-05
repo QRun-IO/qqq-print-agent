@@ -1,6 +1,32 @@
 # Changelog
 
-## 1.1.1
+## 1.2.0
+
+Client editions. A folder under `editions/<id>` (descriptor, SVG mark, ICO icon, optional logo) and
+`Build-Installer.ps1 -Edition <id>` produce a fully branded build and installer: the client's mark and
+icon on the splash, About, window, taskbar and Start menu; the client's product, company and file
+description in every executable; the client's product name, manufacturer and service display name in
+the MSI, forced over any stored labels; the MSI and release asset named after the edition's asset
+prefix; and the installed updater following that asset on the shared feed. CI builds every edition,
+and the stable release workflow signs and publishes one installer per edition beside the generic one
+with a single checksum list. The first edition is `gg-forge` (GG Forge Print Agent by Greater Goods).
+Deployment branding through `Install-Branded.ps1` is unchanged and still applies on top of an edition.
+Native browser sign-in sends the attempt's nonce as `expectedNonce` when the grant policy is REQUIRED or
+OPTIONAL or when discovery advertises `nativeSessionNonceValidation`; legacy servers keep the unchanged
+exchange body. `build/Build-CiRelease.ps1` is the shared-CI packaging entrypoint and delegates to
+`Package-Release.ps1`.
+
+Printer approval per server. On a printing 2.4 server the client advertises `printer-approval-v1` and
+takes approval from the server's `PRINTERS` frame, pushed after each accepted inventory and whenever an
+administrator approves or disables one of this device's printers (protocol 1.1.0, QBit 1.1.0). On a 2.3
+server the service instead reads the operator printer catalog after each accepted inventory and about once
+a minute while connected. Either way the snapshot carries a per-printer server state:
+approved, awaiting approval, not reported (with the reason) or not checked. The Printers page shows it in a
+new Server column, in the summary line and in the expanded details, named for the connected server, so a
+printer shared before a server change is never mistaken for one the new server approved. The reading is
+reset with the connection. The activity log viewer has a Clear logs button, the connection dialog keeps its
+result banner above the form and shows a waiting state during browser sign-in, and the service's sign-in reply
+no longer repeats itself. No wire change.
 
 Browser sign-in fix. The companion runs elevated, and its callback inbox pipe was keyed with
 PipeOptions.CurrentUserOnly to the elevated token's default owner (the Administrators group), so
