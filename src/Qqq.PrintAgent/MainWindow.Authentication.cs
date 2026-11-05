@@ -283,6 +283,7 @@ public sealed partial class MainWindow
       catch(OperationCanceledException)
       {
          App.Log.Info("[Companion] Browser sign-in cancelled or timed out (three minute limit) before a callback arrived.");
+         ReportCallbackTrace();
          _signInClient?.Dispose();
          _signInClient = null;
          BrowserSignInButton.Visibility = Visibility.Collapsed;
@@ -291,6 +292,7 @@ public sealed partial class MainWindow
       catch(Exception exception) when(exception is IOException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
       {
          LogFailure("Browser sign-in not completed", exception);
+         ReportCallbackTrace();
          Feedback("Browser sign-in not completed", "No validated account session was received. Reason: " + QqqSessionDiagnostics.Explain(exception) + " Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly. The activity log has the full detail.", InfoBarSeverity.Warning);
       }
       finally
@@ -299,6 +301,24 @@ public sealed partial class MainWindow
          CancelBrowserSignInButton.Visibility = Visibility.Collapsed;
          SetBusy(false);
       }
+   }
+
+
+
+   /// <summary>
+   /// Copies the protocol handler's recent trace into the activity log, or states that the browser never launched the
+   /// handler at all, so a hand-off that stops outside the companion is still visible in one place.
+   /// </summary>
+   private static void ReportCallbackTrace()
+   {
+      IReadOnlyList<string> lines = QqqBrowserCallback.RecentTrace(TimeSpan.FromMinutes(10));
+      if(lines.Count == 0)
+      {
+         App.Log.Warning("[Companion] The browser never launched the sign-in protocol handler in the last 10 minutes (no entries in " + QqqBrowserCallback.TracePath
+            + "). Either the identity provider did not redirect to " + QqqBrowserCallback.RedirectUri + " (check the provider's allowed redirect URIs and any error page it showed), or the browser blocked opening the QQQ Print Agent sign-in link.");
+         return;
+      }
+      App.Log.Warning("[Companion] Protocol handler trace from " + QqqBrowserCallback.TracePath + ":" + Environment.NewLine + string.Join(Environment.NewLine, lines));
    }
 
 

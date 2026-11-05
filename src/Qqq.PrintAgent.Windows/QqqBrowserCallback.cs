@@ -54,7 +54,7 @@ public sealed partial class QqqBrowserCallback : IDisposable
 
    /// <summary>Forwards a browser callback from the protocol handler to the running companion, using the installed companion's path as the expected peer.</summary>
    public static Task ForwardAsync(string callback, CancellationToken token = default) => ForwardAsync(callback, PipeName(),
-      InstalledCompanionPath(), token);
+      InstalledCompanionPath(), token, null);
 
 
 
@@ -63,14 +63,18 @@ public sealed partial class QqqBrowserCallback : IDisposable
    /// the whole exchange has a five second limit, and the process serving the pipe must be the expected companion executable
    /// in this session, so the address (which carries a one-time code) is never handed to an impostor. The companion must acknowledge it.
    /// </summary>
-   internal static async Task ForwardAsync(string callback, string pipeName, string expectedExecutable, CancellationToken token)
+   internal static async Task ForwardAsync(string callback, string pipeName, string expectedExecutable, CancellationToken token, Action<string>? trace = null)
    {
-      _ = Validate(callback);
+      Uri validated = Validate(callback);
+      trace?.Invoke("Callback address accepted: " + validated.GetLeftPart(UriPartial.Path) + " with " + (validated.Query.Length - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " characters of query (not logged).");
       using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
       timeout.CancelAfter(TimeSpan.FromSeconds(5));
       await using NamedPipeClientStream pipe = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, TokenImpersonationLevel.Anonymous);
+      trace?.Invoke("Connecting to the companion's callback inbox (five second limit). If this is the last line, no companion in this user session was waiting for a callback: start the browser sign-in from the app first, and keep the app open.");
       await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
+      trace?.Invoke("Inbox connected; verifying that it belongs to the installed companion " + expectedExecutable + ".");
       using Process peer = AuthenticatePeer(pipe.SafePipeHandle, expectedExecutable);
+      trace?.Invoke("Companion verified (process " + peer.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + "); sending the callback.");
       await AgentPipeFraming.WriteAsync(pipe, callback, MaximumLength, timeout.Token).ConfigureAwait(false);
       string acknowledgement = await AgentPipeFraming.ReadAsync(pipe, 32, timeout.Token).ConfigureAwait(false);
       if(!string.Equals(acknowledgement, "received", StringComparison.Ordinal))
