@@ -82,6 +82,50 @@ public sealed class AgentPrinterCatalogTests
 
 
 
+   /// <summary>
+   /// On a printing 2.4 server the client advertises printer-approval-v1 and takes approval from the server's PRINTERS frame: the
+   /// catalog is never read, a disabled or unlisted shared printer is awaiting approval, and a later frame (an administrator approving
+   /// the printer) updates the state at once.
+   /// </summary>
+   [Fact]
+   public async Task PrintersFrame_IsAuthoritativeOnA24Server()
+   {
+      await using RealtimeRuntimeFixture fixture = new(printingVersion: "2.4.0");
+      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      Assert.Contains("printer-approval-v1", fixture.LastHelloCapabilities, StringComparer.Ordinal);
+      await fixture.WaitAsync(() => fixture.Messages.Any(message => message.Type is "INVENTORY"));
+      await connection.SendAsync("PRINTERS", new { printers = new object[] { new { printerId = "printer", enabled = true } } });
+      await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
+      AgentSnapshot snapshot = fixture.Runtime.GetSnapshot();
+      Assert.Equal(PrinterServerSync.RealtimeSource, snapshot.PrinterSync!.Source);
+      Assert.Equal(PrinterServerState.Approved, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "printer", StringComparison.Ordinal)).ServerState);
+      Assert.Equal(PrinterServerState.AwaitingApproval, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "other", StringComparison.Ordinal)).ServerState);
+      await connection.SendAsync("PRINTERS", new { printers = new object[] { new { printerId = "printer", enabled = true }, new { printerId = "other", enabled = true } } });
+      await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Printers.All(printer => string.Equals(printer.ServerState, PrinterServerState.Approved, StringComparison.Ordinal)));
+      await connection.SendAsync("PRINTERS", new { printers = new object[] { new { printerId = "printer", enabled = false }, new { printerId = "other", enabled = true } } });
+      await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().Printers.Single(printer => string.Equals(printer.PrinterId, "printer", StringComparison.Ordinal)).ServerState, PrinterServerState.AwaitingApproval, StringComparison.Ordinal));
+      Assert.Equal(0, fixture.CatalogRequests);
+      Assert.Contains(fixture.Logs, line => line.Contains("Printer approval pushed by", StringComparison.Ordinal) && line.Contains("1 of 1 shared printer(s) approved", StringComparison.Ordinal));
+      Assert.Equal(0, fixture.ForbiddenPolls);
+   }
+
+
+
+   /// <summary>A PRINTERS frame without a printers list is a protocol violation that ends the connection, like any other malformed frame; the catalog is still not consulted on a 2.4 server.</summary>
+   [Fact]
+   public async Task MalformedPrintersFrame_EndsTheConnection()
+   {
+      await using RealtimeRuntimeFixture fixture = new(printingVersion: "2.4.0");
+      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      await first.SendAsync("PRINTERS", new { nothing = true });
+      await fixture.WaitAsync(() => !fixture.Runtime.GetSnapshot().Connected);
+      await using RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
+      Assert.Equal(0, fixture.CatalogRequests);
+      Assert.Contains(fixture.Logs, line => line.Contains("PRINTERS frame has no printers list", StringComparison.Ordinal));
+   }
+
+
+
    /// <summary>Losing the connection resets the reading to "not checked", and the next connection asks the server again.</summary>
    [Fact]
    public async Task Reconnect_StartsFromNotCheckedAndAsksAgain()

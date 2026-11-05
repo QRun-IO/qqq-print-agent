@@ -32,6 +32,7 @@ public sealed partial class AgentRuntime
    private readonly SemaphoreSlim _statusRequested = new(0, 1);
    private readonly SemaphoreSlim _queueRefreshRequested = new(0, 1);
    private bool _inventoryReady;
+   private bool _approvalNegotiated;
    private long _stateSequence;
 
 
@@ -122,7 +123,7 @@ public sealed partial class AgentRuntime
          finally
          {
             lock(_stateLock)
-            { if(generation == _connectionGeneration) { _realtime = null; _realtimeReady = false; _realtimeLifetime = null; } }
+            { if(generation == _connectionGeneration) { _realtime = null; _realtimeReady = false; _realtimeLifetime = null; _approvalNegotiated = false; } }
             // The next connection asks the server about printer approval again rather than showing the previous connection's answer.
             ResetPrinterCatalog();
             SignalPipeline();
@@ -170,7 +171,8 @@ public sealed partial class AgentRuntime
       RealtimeSettings settings = _realtimeSettings;
       using var handshake = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
       handshake.CancelAfter(settings.WebSocketHandshakeTimeoutMillis);
-      (WebSocket socket, bool supportsMedia) = await ConnectRealtimeSocketAsync(settings, lifetime, handshake.Token).ConfigureAwait(false);
+      (WebSocket socket, QqqApiDiscovery discovery) = await ConnectRealtimeSocketAsync(settings, lifetime, handshake.Token).ConfigureAwait(false);
+      string[] capabilities = NegotiateCapabilities(discovery);
       using var channel = new PrintingRealtimeChannel(socket, settings, _traffic);
       var updates = Channel.CreateBounded<RealtimeStateUpdate>(4096);
       var commands = Channel.CreateBounded<RealtimeEnvelope>(4096);
@@ -195,7 +197,6 @@ public sealed partial class AgentRuntime
       Task handshakeWatch = AwaitRealtimeHandshakeAsync(handshake.Token, lifetime.Token);
       try
       {
-         string[] capabilities = supportsMedia ? [.. RealtimeCapabilities, "printer-media-v1"] : RealtimeCapabilities;
          WriteLog("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
          await channel.SendAsync("HELLO", new
          {
@@ -261,8 +262,28 @@ public sealed partial class AgentRuntime
 
 
 
+   /// <summary>
+   /// Chooses this socket's HELLO capabilities from the discovery just read: the three base capabilities always, printer-media-v1
+   /// on a 2.3-or-newer server and printer-approval-v1 on a 2.4-or-newer one. Whether approval was negotiated is remembered for
+   /// the connection, so the catalog fallback is skipped while the server pushes approval itself.
+   /// </summary>
+   private string[] NegotiateCapabilities(QqqApiDiscovery discovery)
+   {
+      bool supportsApproval = discovery.SupportsPrinterApproval();
+      lock(_stateLock)
+      { _approvalNegotiated = supportsApproval; }
+      List<string> negotiated = [.. RealtimeCapabilities];
+      if(discovery.SupportsPrinterMedia())
+      { negotiated.Add("printer-media-v1"); }
+      if(supportsApproval)
+      { negotiated.Add("printer-approval-v1"); }
+      return [.. negotiated];
+   }
+
+
+
    /// <summary>Reads the discovery refreshed by this socket establishment, so server upgrades and downgrades change capabilities on reconnect without polling.</summary>
-   private async Task<(WebSocket Socket, bool SupportsMedia)> ConnectRealtimeSocketAsync(RealtimeSettings settings, CancellationTokenSource lifetime, CancellationToken token)
+   private async Task<(WebSocket Socket, QqqApiDiscovery Discovery)> ConnectRealtimeSocketAsync(RealtimeSettings settings, CancellationTokenSource lifetime, CancellationToken token)
    {
       try
       {
@@ -272,7 +293,7 @@ public sealed partial class AgentRuntime
          try
          {
             QqqApiDiscovery discovery = await session.DiscoverAsync(token).ConfigureAwait(false);
-            return (socket, discovery.SupportsPrinterMedia());
+            return (socket, discovery);
          }
          catch { socket.Dispose(); throw; }
       }
@@ -347,6 +368,10 @@ public sealed partial class AgentRuntime
          case "JOB_AVAILABLE":
             WakePoll();
             RequestQueueRefresh();
+            break;
+         case "PRINTERS":
+            ApplyPrinterApproval(envelope);
+            RequestStatusSynchronization();
             break;
          case "PONG":
             break;

@@ -16,9 +16,11 @@ OPTIONAL or when discovery advertises `nativeSessionNonceValidation`; legacy ser
 exchange body. `build/Build-CiRelease.ps1` is the shared-CI packaging entrypoint and delegates to
 `Package-Release.ps1`.
 
-Printer approval per server. The device routes never say whether the server approved a shared printer, so
-the service now reads the server's operator printer catalog (printing extension 2.3) after each accepted
-inventory and about once a minute while connected, and the snapshot carries a per-printer server state:
+Printer approval per server. On a printing 2.4 server the client advertises `printer-approval-v1` and
+takes approval from the server's `PRINTERS` frame, pushed after each accepted inventory and whenever an
+administrator approves or disables one of this device's printers (protocol 1.1.0, QBit 1.1.0). On a 2.3
+server the service instead reads the operator printer catalog after each accepted inventory and about once
+a minute while connected. Either way the snapshot carries a per-printer server state:
 approved, awaiting approval, not reported (with the reason) or not checked. The Printers page shows it in a
 new Server column, in the summary line and in the expanded details, named for the connected server, so a
 printer shared before a server change is never mistaken for one the new server approved. The reading is

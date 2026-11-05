@@ -3,16 +3,18 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// Printer catalog part of the runtime: after the server accepts the inventory, and then about once a minute while connected,
-/// the service reads the server's operator printer catalog to learn which shared printers the server has approved. The result
-/// is kept in memory only, reset with the connection, and shown per printer in the status snapshot so the companion can say
-/// "approved", "awaiting approval" or "not reported" for the server it is connected to.
+/// Printer approval part of the runtime. On a printing 2.4 server that negotiated printer-approval-v1 the server pushes a
+/// PRINTERS frame after each accepted inventory and whenever an administrator changes an approval, and that frame is the
+/// authoritative reading. On an older server the service reads the operator printer catalog after the inventory is accepted and
+/// about once a minute. Either way the result is kept in memory only, reset with the connection, and shown per printer in the
+/// status snapshot so the companion can say "approved", "awaiting approval" or "not reported" for the connected server.
 /// </summary>
 public sealed partial class AgentRuntime
 {
@@ -22,6 +24,36 @@ public sealed partial class AgentRuntime
    private HashSet<string>? _catalogApproved;
    private PrinterServerSync _catalogSync = PrinterServerSync.Initial;
    private DateTimeOffset? _catalogCheckedAt;
+
+
+
+   /// <summary>True while the current connection negotiated printer-approval-v1, so the server pushes approval and the catalog is not read.</summary>
+   private bool ApprovalNegotiated
+   {
+      get
+      {
+         lock(_stateLock)
+         { return _approvalNegotiated; }
+      }
+   }
+
+
+
+   /// <summary>
+   /// Applies the server's PRINTERS frame: every printer in the latest accepted inventory with its approval. The enabled ones
+   /// become the approved set; a shared printer the frame lists as disabled, or does not list yet, is awaiting approval.
+   /// </summary>
+   private void ApplyPrinterApproval(RealtimeEnvelope envelope)
+   {
+      PrinterApprovalState[] printers = envelope.Payload.TryGetProperty("printers", out JsonElement list) && list.ValueKind == JsonValueKind.Array
+         ? list.Deserialize<PrinterApprovalState[]>(PrintApiClient.JsonOptions) ?? [] : throw new InvalidDataException("The PRINTERS frame has no printers list.");
+      if(printers.Any(printer => string.IsNullOrEmpty(printer?.PrinterId)))
+      { throw new InvalidDataException("The PRINTERS frame names a printer without an identifier."); }
+      var approved = printers.Where(printer => printer.Enabled).Select(printer => printer.PrinterId).ToHashSet(StringComparer.Ordinal);
+      string server = _transportOrigin?.Authority ?? "the server";
+      RecordCatalog(approved, new PrinterServerSync(PrinterServerSync.Reported, Now(), null, server, PrinterServerSync.RealtimeSource),
+         printers.Select(printer => printer.PrinterId).ToArray(), id => id, printers.Length);
+   }
 
 
 
@@ -74,7 +106,7 @@ public sealed partial class AgentRuntime
          IReadOnlyList<OperatorPrinter> catalog = await api.OperatorPrintersAsync(token).ConfigureAwait(false);
          var approved = catalog.Where(printer => string.Equals(printer.DeviceId, configuration.DeviceId, StringComparison.Ordinal))
             .Select(printer => printer.PrinterId).ToHashSet(StringComparer.Ordinal);
-         RecordCatalog(approved, new PrinterServerSync(PrinterServerSync.Reported, Now(), null, server), shared, catalog.Count);
+         RecordCatalog(approved, new PrinterServerSync(PrinterServerSync.Reported, Now(), null, server, PrinterServerSync.CatalogSource), shared.Select(printer => printer.PrinterId).ToArray(), NameOf(shared), catalog.Count);
       }
       catch(OperationCanceledException) when(token.IsCancellationRequested)
       { throw; }
@@ -86,15 +118,21 @@ public sealed partial class AgentRuntime
             QqqSessionException { Failure: QqqSessionException.FailureKind.PermissionDenied } => "The signed-in user may not read the operator printer catalog (HTTP 403 Forbidden).",
             _ => QqqSessionDiagnostics.Explain(exception),
          };
-         RecordCatalog(null, new PrinterServerSync(PrinterServerSync.NotReported, Now(), reason, server), shared, 0);
+         RecordCatalog(null, new PrinterServerSync(PrinterServerSync.NotReported, Now(), reason, server, PrinterServerSync.CatalogSource), shared.Select(printer => printer.PrinterId).ToArray(), NameOf(shared), 0);
          WriteLog("DEBUG", "Printer catalog detail: " + exception);
       }
    }
 
 
 
+   /// <summary>Maps a shared printer's identifier to its Windows queue name for the log, falling back to the identifier.</summary>
+   private static Func<string, string> NameOf(IReadOnlyList<PrinterInfo> shared)
+      => id => shared.FirstOrDefault(printer => string.Equals(printer.PrinterId, id, StringComparison.Ordinal))?.Name ?? id;
+
+
+
    /// <summary>Stores a reading and logs it when the approved set or the outcome differs from the previous reading.</summary>
-   private void RecordCatalog(HashSet<string>? approved, PrinterServerSync sync, IReadOnlyList<PrinterInfo> shared, int catalogCount)
+   private void RecordCatalog(HashSet<string>? approved, PrinterServerSync sync, string[] shared, Func<string, string> nameOf, int catalogCount)
    {
       bool changed;
       lock(_stateLock)
@@ -112,11 +150,12 @@ public sealed partial class AgentRuntime
          WriteLog("WARN", $"Printer approval is not reported by {sync.Server}: {sync.Detail} Shared printers show as 'not reported' until the catalog can be read.");
          return;
       }
-      string[] approvedNames = shared.Where(printer => approved.Contains(printer.PrinterId)).Select(printer => printer.Name).ToArray();
-      string[] waitingNames = shared.Where(printer => !approved.Contains(printer.PrinterId)).Select(printer => printer.Name).ToArray();
-      WriteLog("INFO", $"Printer catalog from {sync.Server}: {approvedNames.Length} of {shared.Count} shared printer(s) approved for this device"
+      string[] approvedNames = shared.Where(approved.Contains).Select(nameOf).ToArray();
+      string[] waitingNames = shared.Where(id => !approved.Contains(id)).Select(nameOf).ToArray();
+      string source = string.Equals(sync.Source, PrinterServerSync.RealtimeSource, StringComparison.Ordinal) ? "Printer approval pushed by" : "Printer catalog from";
+      WriteLog("INFO", $"{source} {sync.Server}: {approvedNames.Length} of {shared.Length} shared printer(s) approved for this device"
          + (approvedNames.Length > 0 ? $" [{string.Join(", ", approvedNames)}]" : "")
          + (waitingNames.Length > 0 ? $"; awaiting approval on the server [{string.Join(", ", waitingNames)}]" : "")
-         + $"; the catalog listed {catalogCount} destination(s) in total.");
+         + (string.Equals(sync.Source, PrinterServerSync.RealtimeSource, StringComparison.Ordinal) ? "." : $"; the catalog listed {catalogCount} destination(s) in total."));
    }
 }

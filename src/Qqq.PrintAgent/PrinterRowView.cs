@@ -175,10 +175,11 @@ internal sealed class PrinterRowView : Grid
    internal static string ServerDetail(PrinterSnapshot printer, PrinterServerSync? sync, string serverName)
    {
       string server = string.IsNullOrEmpty(sync?.Server) ? serverName : $"{serverName} ({sync!.Server})";
+      string freshness = string.Equals(sync?.Source, PrinterServerSync.RealtimeSource, StringComparison.Ordinal) ? " The server pushes a change the moment an administrator makes it." : " Checked about once a minute while connected.";
       return printer.ServerState switch
       {
-         PrinterServerState.Approved => $"{server} approved this printer for this computer; it can receive jobs.",
-         PrinterServerState.AwaitingApproval => $"{server} received this printer in the inventory but has not approved it. An administrator approves it on the server (Printing → Print devices).",
+         PrinterServerState.Approved => $"{server} approved this printer for this computer; it can receive jobs.{freshness}",
+         PrinterServerState.AwaitingApproval => $"{server} received this printer in the inventory but has not approved it. An administrator approves it on the server (Printing → Print devices).{freshness}",
          PrinterServerState.NotReported => $"{server} did not report approval: {sync?.Detail ?? "the catalog could not be read."} Approve or check the printer on the server.",
          PrinterServerState.NotShared => "Not shared with the server. Turn on Shared to offer it; the server then has to approve it.",
          _ => $"Not checked yet with {server}. The service asks the server after it connects and sends the inventory.",

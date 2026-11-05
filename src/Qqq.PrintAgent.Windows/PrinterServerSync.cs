@@ -9,8 +9,14 @@ namespace Qqq.PrintAgent.Windows;
 /// The last attempt to read the server's printer catalog: when it was made, whether the server reported approvals
 /// (REPORTED), could not (NOT_REPORTED, with the reason) or has not been asked (NOT_CHECKED), and which server answered.
 /// </summary>
-public sealed record PrinterServerSync(string Outcome, string? CheckedAt = null, string? Detail = null, string? Server = null)
+public sealed record PrinterServerSync(string Outcome, string? CheckedAt = null, string? Detail = null, string? Server = null, string? Source = null)
 {
+   /// <summary>The reading came from the server's PRINTERS frame (printing extension 2.4, printer-approval-v1): authoritative and pushed on change.</summary>
+   public const string RealtimeSource = "REALTIME";
+
+   /// <summary>The reading came from the operator printer catalog (printing extension 2.3 fallback): read after inventory and about once a minute.</summary>
+   public const string CatalogSource = "CATALOG";
+
    /// <summary>The catalog was read and the printer states are current as of <see cref="CheckedAt"/>.</summary>
    public const string Reported = "REPORTED";
 

@@ -21,10 +21,23 @@ public sealed class QqqApiDiscovery
    /// Enables additive media negotiation only for one standard-path stable printing 2.3-or-newer extension within major two. Printing 2.2 is
    /// the rendering extension and carries no media negotiation, so a 2.2 server must keep this client a three-capability peer.
    /// </summary>
-   public bool SupportsPrinterMedia() => Extensions is not null
+   public bool SupportsPrinterMedia() => HasStandardPrinting(minimumMinor: 3);
+
+
+
+   /// <summary>
+   /// Enables the printer-approval-v1 capability (the server's PRINTERS frame) only for one standard-path stable printing 2.4-or-newer
+   /// extension within major two. Older servers keep the client on the operator catalog for approval, which is the 2.3 behaviour.
+   /// </summary>
+   public bool SupportsPrinterApproval() => HasStandardPrinting(minimumMinor: 4);
+
+
+
+   /// <summary>True when exactly one printing extension is advertised, at the standard path, as a plain 2.x release at or above the given minor.</summary>
+   private bool HasStandardPrinting(uint minimumMinor) => Extensions is not null
       && Extensions.Count(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal)) == 1
       && Extensions.Any(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal)
-         && string.Equals(extension.PathPrefix, "/qbit/printing", StringComparison.Ordinal) && SupportedVersion(extension.Version, 3, "2"));
+         && string.Equals(extension.PathPrefix, "/qbit/printing", StringComparison.Ordinal) && SupportedVersion(extension.Version, minimumMinor, "2"));
 
 
 

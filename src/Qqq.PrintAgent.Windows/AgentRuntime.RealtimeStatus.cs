@@ -78,8 +78,9 @@ public sealed partial class AgentRuntime
                SignalPipeline();
                WakePoll();
             }
-            // The server never reports approval on the device routes; its operator catalog is the authenticated view of it.
-            await RefreshPrinterCatalogAsync(api, configuration, inventory, force: freshInventory, token).ConfigureAwait(false);
+            // A 2.4 server pushes approval in a PRINTERS frame after this inventory; an older server's operator catalog is read instead.
+            if(!ApprovalNegotiated)
+            { await RefreshPrinterCatalogAsync(api, configuration, inventory, force: freshInventory, token).ConfigureAwait(false); }
             if(freshInventory)
             { RequestStatusSynchronization(); }
          }
