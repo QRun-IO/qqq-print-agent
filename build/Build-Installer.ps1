@@ -12,7 +12,11 @@ param(
    [switch] $SkipPublish,
    [switch] $PublishOnly,
    [string] $CertificateThumbprint,
-   [string] $TimestampServer
+   [string] $TimestampServer,
+   # A client edition folder name under editions/ (see editions/README.md): the build ships that client's mark, icon and
+   # names in every executable and the installer, and names the MSI after the edition's asset prefix.
+   [ValidatePattern('^[a-z0-9][a-z0-9-]{0,39}$')]
+   [string] $Edition
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +46,36 @@ if(-not $releaseMatch.Success -or $revision -gt 65535 -or ($releaseMatch.Groups[
    throw 'Unsupported ReleaseVersion: use X.Y.Z-rc.N (N 1..65534) or stable X.Y.Z so the numeric file version orders upgrades.'
 }
 $fileVersion = "$ProductVersion.$revision"
+$brand = $null
+if($Edition)
+{
+   $editionRoot = Join-Path $projectRoot "editions\$Edition"
+   $editionFile = Join-Path $editionRoot 'edition.json'
+   if(-not (Test-Path -LiteralPath $editionFile -PathType Leaf)) { throw "Unknown edition '$Edition': $editionFile does not exist." }
+   $brand = Get-Content -LiteralPath $editionFile -Raw | ConvertFrom-Json
+   foreach($required in @('id', 'displayName', 'companyName', 'assetPrefix'))
+   {
+      if(-not ($brand.PSObject.Properties.Name -contains $required) -or [string]::IsNullOrWhiteSpace($brand.$required)) { throw "edition.json is missing '$required'." }
+   }
+   if($brand.id -cne $Edition) { throw "edition.json id '$($brand.id)' must equal the folder name '$Edition'." }
+   if($brand.assetPrefix -cnotmatch '^[A-Za-z][A-Za-z0-9]{1,39}$') { throw 'assetPrefix must be 2 to 40 letters or digits starting with a letter.' }
+   foreach($label in @($brand.displayName, $brand.companyName))
+   {
+      if($label.Length -gt 180 -or $label -match '[\x00-\x1F;=]') { throw 'Edition names must be at most 180 characters without control characters, semicolons or equals signs.' }
+   }
+   foreach($asset in @('app-icon.svg', 'app.ico'))
+   {
+      if(-not (Test-Path -LiteralPath (Join-Path $editionRoot $asset) -PathType Leaf)) { throw "Edition asset missing: editions\$Edition\$asset" }
+   }
+}
+$msiBaseName = if($brand) { $brand.assetPrefix } else { 'QqqPrintAgent' }
+$brandPublishArgs = @()
+$brandInstallerArgs = @()
+if($brand)
+{
+   $brandPublishArgs = @("-p:BrandEdition=$Edition", "-p:BrandProduct=$($brand.displayName)", "-p:BrandCompany=$($brand.companyName)")
+   $brandInstallerArgs = @("-p:BrandName=$($brand.displayName)", "-p:BrandCompany=$($brand.companyName)", '-p:BrandForced=1', "-p:MsiBaseName=$msiBaseName")
+}
 if($SkipPublish -and -not $PayloadDirectory)
 {
    throw 'SkipPublish requires an explicit reviewed PayloadDirectory.'
@@ -70,8 +104,30 @@ if(-not $SkipPublish)
    }
    foreach($entry in $projects.GetEnumerator())
    {
-      & dotnet publish (Join-Path $projectRoot $entry.Value) --configuration Release --runtime win-x64 --self-contained true --output (Join-Path $payloadRoot $entry.Key) '-p:Platform=x64' '-p:RestoreLockedMode=true' "-p:Version=$ReleaseVersion" "-p:FileVersion=$fileVersion"
+      & dotnet publish (Join-Path $projectRoot $entry.Value) --configuration Release --runtime win-x64 --self-contained true --output (Join-Path $payloadRoot $entry.Key) '-p:Platform=x64' '-p:RestoreLockedMode=true' "-p:Version=$ReleaseVersion" "-p:FileVersion=$fileVersion" @brandPublishArgs
       if($LASTEXITCODE -ne 0) { throw "Publishing $($entry.Key) failed." }
+   }
+   if($brand)
+   {
+      # The companion carries the descriptor through its project; the service and CLI read the same file beside their executables.
+      foreach($target in @('service', 'cli'))
+      {
+         Copy-Item -LiteralPath (Join-Path $projectRoot "editions\$Edition\edition.json") -Destination (Join-Path $payloadRoot "$target\edition.json") -Force
+      }
+   }
+}
+if($brand)
+{
+   foreach($target in @('app', 'service', 'cli'))
+   {
+      if(-not (Test-Path -LiteralPath (Join-Path $payloadRoot "$target\edition.json") -PathType Leaf)) { throw "The payload does not carry edition '$Edition' in $target; publish it with the same -Edition." }
+   }
+   foreach($asset in @('app\Assets\Brand\app-icon.svg', 'app\Assets\Brand\app.ico'))
+   {
+      if((Get-FileHash -LiteralPath (Join-Path $payloadRoot $asset) -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath (Join-Path $projectRoot "editions\$Edition\$(Split-Path $asset -Leaf)") -Algorithm SHA256).Hash)
+      {
+         throw "The published $asset is not edition '$Edition' artwork."
+      }
    }
 }
 
@@ -87,6 +143,10 @@ foreach($executable in $executables)
    if(-not $payloadVersion -or $payloadVersion.Split('+')[0] -cne $ReleaseVersion)
    {
       throw "Published executable version does not match ReleaseVersion: $executable"
+   }
+   if($brand -and (Get-Item -LiteralPath $executable).VersionInfo.ProductName -cne $brand.displayName)
+   {
+      throw "Published executable does not carry edition '$Edition' product metadata: $executable"
    }
    if((Get-Item -LiteralPath $executable).VersionInfo.FileVersion -cne $fileVersion)
    {
@@ -128,12 +188,12 @@ if($CertificateThumbprint)
 }
 
 # WiX incremental inputs do not reliably invalidate a changed version/payload path.
-& dotnet build $installerProject --configuration Release -t:Rebuild '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$buildDirectory\"
+& dotnet build $installerProject --configuration Release -t:Rebuild '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$buildDirectory\" @brandInstallerArgs
 if($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
-$builtMsi = Join-Path $buildDirectory "QqqPrintAgent-$ProductVersion-x64.msi"
+$builtMsi = Join-Path $buildDirectory "$msiBaseName-$ProductVersion-x64.msi"
 if(-not (Test-Path -LiteralPath $builtMsi)) { throw 'MSI output was not produced.' }
 # Keep earlier verified installers available for recovery when WiX cleans its build outputs.
-$msi = Join-Path $outputDirectory "QqqPrintAgent-$ProductVersion-x64.msi"
+$msi = Join-Path $outputDirectory "$msiBaseName-$ProductVersion-x64.msi"
 Copy-Item -LiteralPath $builtMsi -Destination $msi -Force
 
 if($CertificateThumbprint)

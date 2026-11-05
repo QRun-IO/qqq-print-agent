@@ -33,6 +33,21 @@
       <Manifest Include="$(ApplicationManifest)" />
    </ItemGroup>
 
+   <!-- Client edition (editions/<id>, selected by the build script with -p:BrandEdition): its mark and icon replace the
+        generic ones at the same paths, its optional logo and the descriptor ship beside the executable, and the executable
+        icon is the client's. See editions/README.md. -->
+   <PropertyGroup Condition="'$(BrandEdition)' != ''">
+      <EditionRoot>$(MSBuildThisFileDirectory)..\..\editions\$(BrandEdition)\</EditionRoot>
+      <ApplicationIcon>$(EditionRoot)app.ico</ApplicationIcon>
+   </PropertyGroup>
+   <ItemGroup Condition="'$(BrandEdition)' != ''">
+      <Content Remove="Assets\Brand\app-icon.svg;Assets\Brand\app.ico" />
+      <Content Include="$(EditionRoot)app-icon.svg" Link="Assets\Brand\app-icon.svg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="$(EditionRoot)app.ico" Link="Assets\Brand\app.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="$(EditionRoot)logo.png" Link="Assets\Brand\logo.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(EditionRoot)logo.png')" />
+      <Content Include="$(EditionRoot)edition.json" Link="edition.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+   </ItemGroup>
+
    <ItemGroup>
       <PackageReference Include="KofTwentyTwo.AppKit.WinUI" />
       <PackageReference Include="H.NotifyIcon.WinUI" />

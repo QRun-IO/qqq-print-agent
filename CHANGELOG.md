@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0
+
+Client editions. A folder under `editions/<id>` (descriptor, SVG mark, ICO icon, optional logo) and
+`Build-Installer.ps1 -Edition <id>` produce a fully branded build and installer: the client's mark and
+icon on the splash, About, window, taskbar and Start menu; the client's product, company and file
+description in every executable; the client's product name, manufacturer and service display name in
+the MSI, forced over any stored labels; the MSI and release asset named after the edition's asset
+prefix; and the installed updater following that asset on the shared feed. CI builds every edition,
+and the stable release workflow signs and publishes one installer per edition beside the generic one
+with a single checksum list. The first edition is `gg-forge` (GG Forge Print Agent by Greater Goods).
+Deployment branding through `Install-Branded.ps1` is unchanged and still applies on top of an edition.
+No wire change.
+
 ## 1.1.1
 
 Browser sign-in fix. The companion runs elevated, and its callback inbox pipe was keyed with

@@ -104,7 +104,7 @@ public sealed partial class MainWindow : Window, IDisposable
       CompanyHeading.Visibility = AppIdentity.Branding.CompanyName is null ? Visibility.Collapsed : Visibility.Visible;
       SupportLink.NavigateUri = AppIdentity.Branding.SupportUrl ?? new Uri("https://github.com/QRun-IO/qqq-print-agent/issues");
       SupportLink.Visibility = Visibility.Visible;
-      if(AppIdentity.Branding.LogoPath is string logo)
+      if((AppIdentity.Branding.LogoPath ?? AppIdentity.EditionLogoPath) is string logo)
       {
          CustomerLogo.ImageFailed += (_, _) => CustomerLogo.Visibility = Visibility.Collapsed;
          CustomerLogo.Source = new BitmapImage(new Uri(logo));

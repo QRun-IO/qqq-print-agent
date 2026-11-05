@@ -10,9 +10,9 @@ using KofTwentyTwo.AppKit.Updates;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>AppKit update flow backed by a coherent machine MSI rather than a per-user executable update.</summary>
-public sealed class MsiUpdateService(Action exitApplication, IActivityLog log) : IUpdateService, IDisposable
+public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, string assetPrefix = Qqq.PrintAgent.Core.Edition.DefaultAssetPrefix) : IUpdateService, IDisposable
 {
-   private readonly GitHubMsiReleaseClient _releases = new();
+   private readonly GitHubMsiReleaseClient _releases = new(assetPrefix: assetPrefix);
    private MsiRelease? _pending;
 
    public event EventHandler<UpdateStatusEventArgs>? StatusChanged;

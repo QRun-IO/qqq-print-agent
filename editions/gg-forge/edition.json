@@ -1,0 +1,9 @@
+{
+  "id": "gg-forge",
+  "displayName": "GG Forge Print Agent",
+  "companyName": "Greater Goods",
+  "tagline": "Cloud printing for GG Forge",
+  "description": "Connect local printers to GG Forge.",
+  "accentColor": "#424242",
+  "assetPrefix": "GgForgePrintAgent"
+}

@@ -160,7 +160,7 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
 
 
    /// <summary>True for a #RRGGBB accent colour dark enough that white text on it has a contrast ratio of at least 4.5 to 1, so a customer colour can never make the header unreadable.</summary>
-   private static bool HasReadableWhiteText(string? color)
+   internal static bool HasReadableWhiteText(string? color)
    {
       if(color is not { Length: 7 } || color[0] != '#' || !color.Skip(1).All(Uri.IsHexDigit))
       {
@@ -182,7 +182,7 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
 
 
    /// <summary>Reads an optional text setting, trimmed, returning null when it is absent, not a string, empty, over the maximum length or contains control characters.</summary>
-   private static string? ReadText(JsonElement root, string key, int maximum)
+   internal static string? ReadText(JsonElement root, string key, int maximum)
    {
       if(!root.TryGetProperty(key, out JsonElement field) || field.ValueKind != JsonValueKind.String)
       {
