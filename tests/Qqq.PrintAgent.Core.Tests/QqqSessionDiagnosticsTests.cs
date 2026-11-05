@@ -42,10 +42,10 @@ public sealed class QqqSessionDiagnosticsTests
       Assert.Contains(info, line => line.StartsWith("Discovering QQQ at printing.example.invalid", StringComparison.Ordinal));
       Assert.Contains(info, line => line.Contains("printing 2.3.0 at /qbit/printing", StringComparison.Ordinal));
       Assert.Contains(info, line => line.StartsWith("Authentication metadata: type TABLE_BASED", StringComparison.Ordinal));
-      Assert.Contains("Password sign-in requested.", info);
-      Assert.Contains("Password sign-in accepted; a server-managed session is now held.", info);
-      Assert.Contains("Session identity: principal user-1, tenant tenant-1, device device-1.", info);
-      Assert.Contains("Device device-1 bound to principal user-1 in tenant tenant-1.", info);
+      Assert.Contains("Password sign-in requested.", info, StringComparer.Ordinal);
+      Assert.Contains("Password sign-in accepted; a server-managed session is now held.", info, StringComparer.Ordinal);
+      Assert.Contains("Session identity: principal user-1, tenant tenant-1, device device-1.", info, StringComparer.Ordinal);
+      Assert.Contains("Device device-1 bound to principal user-1 in tenant tenant-1.", info, StringComparer.Ordinal);
       Assert.Contains(debug, line => line.StartsWith("HTTP GET https://printing.example.invalid/qqq/v1/version", StringComparison.Ordinal));
       Assert.Contains(debug, line => line.Contains("/qqq/v1/manageSession -> 200", StringComparison.Ordinal));
       Assert.Contains(debug, line => line.Contains("basic credential yes", StringComparison.Ordinal));
