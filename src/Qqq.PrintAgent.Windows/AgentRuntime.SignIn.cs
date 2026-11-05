@@ -74,7 +74,7 @@ public sealed partial class AgentRuntime
          previous?.Dispose();
          WakePoll();
          WriteLog("INFO", "Sign-in complete. " + _authenticationMessage);
-         return $"Signed in to {AppIdentity.ServerName}. " + _authenticationMessage;
+         return SignInReply();
       }
       catch(Exception exception)
       {
@@ -83,6 +83,21 @@ public sealed partial class AgentRuntime
          throw;
       }
       finally { _authenticationGate.Release(); }
+   }
+
+
+
+   /// <summary>
+   /// The one-line result the companion shows after a successful sign-in. It always starts with "Signed in to {server}." (the
+   /// companion's success marker) and then says whether printing is enabled or what still has to happen.
+   /// </summary>
+   private string SignInReply()
+   {
+      string prefix = $"Signed in to {AppIdentity.ServerName}.";
+      const string signedIn = "Signed in.";
+      return _authorizationReady ? prefix + " Printing is enabled."
+         : _authenticationMessage.StartsWith(signedIn, StringComparison.Ordinal) ? prefix + _authenticationMessage[signedIn.Length..]
+         : prefix + " " + _authenticationMessage;
    }
 
 

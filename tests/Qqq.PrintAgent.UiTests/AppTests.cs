@@ -404,7 +404,7 @@ public class AppTests
       AutomationElement logWindow = session.WaitFor(
          () => session.TopLevelWindows().FirstOrDefault(window => string.Equals(window.Name, title, StringComparison.Ordinal)),
          "the activity log window");
-      string[] controls = ["Follow", "Errors only", "Copy", "Open logs folder"];
+      string[] controls = ["Follow", "Errors only", "Copy", "Open logs folder", "Clear logs"];
       foreach(string control in controls)
       {
          session.WaitFor(() => logWindow.FindFirstDescendant(cf => cf.ByName(control)), "log toolbar control " + control);

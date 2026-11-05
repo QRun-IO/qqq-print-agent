@@ -14,9 +14,17 @@ Deployment branding through `Install-Branded.ps1` is unchanged and still applies
 Native browser sign-in sends the attempt's nonce as `expectedNonce` when the grant policy is REQUIRED or
 OPTIONAL or when discovery advertises `nativeSessionNonceValidation`; legacy servers keep the unchanged
 exchange body. `build/Build-CiRelease.ps1` is the shared-CI packaging entrypoint and delegates to
-`Package-Release.ps1`. No wire change.
+`Package-Release.ps1`.
 
-## 1.1.1
+Printer approval per server. The device routes never say whether the server approved a shared printer, so
+the service now reads the server's operator printer catalog (printing extension 2.3) after each accepted
+inventory and about once a minute while connected, and the snapshot carries a per-printer server state:
+approved, awaiting approval, not reported (with the reason) or not checked. The Printers page shows it in a
+new Server column, in the summary line and in the expanded details, named for the connected server, so a
+printer shared before a server change is never mistaken for one the new server approved. The reading is
+reset with the connection. The activity log viewer has a Clear logs button, the connection dialog keeps its
+result banner above the form and shows a waiting state during browser sign-in, and the service's sign-in reply
+no longer repeats itself. No wire change.
 
 Browser sign-in fix. The companion runs elevated, and its callback inbox pipe was keyed with
 PipeOptions.CurrentUserOnly to the elevated token's default owner (the Administrators group), so

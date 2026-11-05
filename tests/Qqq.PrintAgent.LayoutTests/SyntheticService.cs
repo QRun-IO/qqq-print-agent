@@ -17,7 +17,7 @@ namespace Qqq.PrintAgent;
 /// </summary>
 internal sealed class SyntheticService
 {
-   internal static PrinterSnapshot Printer { get; } = new("synthetic-zebra", "Synthetic Zebra-2", "ZDesigner ZT411-300dpi ZPL", "synthetic", "READY", ["PDF", "ZPL"], true, DisplayName: "Z2");
+   internal static PrinterSnapshot Printer { get; } = new("synthetic-zebra", "Synthetic Zebra-2", "ZDesigner ZT411-300dpi ZPL", "synthetic", "READY", ["PDF", "ZPL"], true, DisplayName: "Z2", ServerState: PrinterServerState.Approved);
    internal int Submissions { get; private set; }
    internal int Snapshots { get; private set; }
    internal int JobQueries { get; private set; }
@@ -63,15 +63,16 @@ internal sealed class SyntheticService
       string now = DateTime.UtcNow.ToString("O");
       PrinterSnapshot[] printers =
       [
-         new("synthetic-laser", "Synthetic Laser", "Generic laser", "synthetic", "READY", ["PDF"], true),
-         new("synthetic-pdf", "Microsoft Print to PDF", "Microsoft Print To PDF", "synthetic", "READY", [], false),
-         new("synthetic-note", "Synthetic Notes Printer", "Generic interactive", "synthetic", "READY", [], false),
+         new("synthetic-laser", "Synthetic Laser", "Generic laser", "synthetic", "READY", ["PDF"], true, ServerState: PrinterServerState.AwaitingApproval),
+         new("synthetic-pdf", "Microsoft Print to PDF", "Microsoft Print To PDF", "synthetic", "READY", [], false, ServerState: PrinterServerState.NotShared),
+         new("synthetic-note", "Synthetic Notes Printer", "Generic interactive", "synthetic", "READY", [], false, ServerState: PrinterServerState.NotShared),
          _changedSnapshot ? Printer with { Description = ChangedDescription, Location = "Synthetic packing station, updated during dialog" } : Printer,
       ];
       var snapshot = new AgentSnapshot(true, true, "GREEN", "Connected to synthetic server", "https://synthetic.invalid", "synthetic-device", now, printers, SyntheticJobs(now), [],
          Control: new AgentControlState("SUPPORTED", new DeviceDesiredState(4, false, "CONNECTED"), LastContact: now,
             LastCommand: _changedSnapshot ? "REFRESH_INVENTORY" : null, LastOutcome: _changedSnapshot ? "INVENTORY_REFRESHED" : null, LastCommandAt: _changedSnapshot ? now : null),
-         Authentication: new AgentAuthenticationStatus(true, "synthetic-user", "synthetic-tenant", "Signed in", true), Transport: Transport());
+         Authentication: new AgentAuthenticationStatus(true, "synthetic-user", "synthetic-tenant", "Signed in", true), Transport: Transport(),
+         PrinterSync: new PrinterServerSync(PrinterServerSync.Reported, now, null, "synthetic.invalid"));
       return JsonSerializer.Serialize(snapshot, PrintApiClient.JsonOptions);
    }
 

@@ -206,7 +206,7 @@ public sealed partial class MainWindow : Window, IDisposable
       };
       if(string.Equals(page, "Logs", StringComparison.Ordinal))
       {
-         LogWindow.ShowSingle(App.Log, AppIdentity.Info);
+         ShowActivityLog();
       }
       if(args.IsSettingsSelected && !_initializing)
       {
@@ -538,13 +538,37 @@ public sealed partial class MainWindow : Window, IDisposable
             _printerRows.Add(printer.PrinterId, row);
             PrintersList.Items.Add(row);
          }
-         row.Update(printer, FriendlyState(printer.Status), _busy);
+         row.Update(printer, FriendlyState(printer.Status), PrinterRowView.ServerDetail(printer, snapshot.PrinterSync, AppIdentity.ServerName), _busy);
       }
       SortPrinterRows();
       PrintersEmpty.Visibility = snapshot.Printers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
       PrintersEmptyText.Text = snapshot.Enrolled ? "Add a printer in Windows Settings, then refresh this list." : "Connect this device to the server, then choose the printers to share.";
-      PrintersSummary.Text = $"{snapshot.Printers.Count} printers · {snapshot.Printers.Count(printer => printer.Exposed)} shared with the server";
+      PrintersSummary.Text = PrintersSummaryText(snapshot);
+      ToolTipService.SetToolTip(PrintersSummary, snapshot.PrinterSync?.Detail);
       UpdateSelectedPrinter();
+   }
+
+
+
+   /// <summary>
+   /// One line over the table: how many printers are shared and, for the connected server, how many of those it approved or still
+   /// has to approve; when the server could not report approval, says so instead of counting.
+   /// </summary>
+   internal static string PrintersSummaryText(AgentSnapshot snapshot)
+   {
+      int shared = snapshot.Printers.Count(printer => printer.Exposed);
+      string text = $"{snapshot.Printers.Count} printers · {shared} shared";
+      if(shared == 0)
+      { return text; }
+      string server = AppIdentity.ServerName;
+      return snapshot.PrinterSync?.Outcome switch
+      {
+         PrinterServerSync.Reported => text + $" · {snapshot.Printers.Count(printer => string.Equals(printer.ServerState, PrinterServerState.Approved, StringComparison.Ordinal))} approved by {server}"
+            + (snapshot.Printers.Any(printer => string.Equals(printer.ServerState, PrinterServerState.AwaitingApproval, StringComparison.Ordinal))
+               ? $" · {snapshot.Printers.Count(printer => string.Equals(printer.ServerState, PrinterServerState.AwaitingApproval, StringComparison.Ordinal))} awaiting approval" : ""),
+         PrinterServerSync.NotReported => text + $" · approval not reported by {server}",
+         _ => text + $" · approval not checked with {server} yet",
+      };
    }
 
 
@@ -690,7 +714,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
    /// <summary>Show the shared AppKit activity log.</summary>
-   private void ActivityLog_Click(object sender, RoutedEventArgs e) => LogWindow.ShowSingle(App.Log, AppIdentity.Info);
+   private void ActivityLog_Click(object sender, RoutedEventArgs e) => ShowActivityLog();
 
 
 
@@ -711,7 +735,7 @@ public sealed partial class MainWindow : Window, IDisposable
    private void ServiceLogs_Click(object sender, RoutedEventArgs e)
    {
       Navigation.SelectedItem = LogsNavigation;
-      LogWindow.ShowSingle(App.Log, AppIdentity.Info);
+      ShowActivityLog();
    }
 
 

@@ -123,6 +123,8 @@ public sealed partial class AgentRuntime
          {
             lock(_stateLock)
             { if(generation == _connectionGeneration) { _realtime = null; _realtimeReady = false; _realtimeLifetime = null; } }
+            // The next connection asks the server about printer approval again rather than showing the previous connection's answer.
+            ResetPrinterCatalog();
             SignalPipeline();
          }
          RealtimeSettings settings = _realtimeSettings;

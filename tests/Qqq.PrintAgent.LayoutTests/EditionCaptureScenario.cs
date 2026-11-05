@@ -36,7 +36,8 @@ internal static class EditionCaptureScenario
          connection.UpdateLayout();
          // Captured on its own the content has no backdrop, so give it the light theme and a solid page colour for the picture.
          connection.RequestedTheme = ElementTheme.Light;
-         var content = (ScrollViewer)connection.Content;
+         // The dialog's content is the feedback bar over the scrolling form; capture that whole grid.
+         var content = (Grid)connection.Content;
          content.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White);
          content.Padding = new Thickness(24, 24, 40, 24);
          await Task.Delay(300);

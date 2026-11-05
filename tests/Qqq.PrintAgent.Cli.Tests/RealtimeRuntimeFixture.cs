@@ -57,6 +57,21 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
 
    /// <summary>Controls advertised discovery across a server upgrade or downgrade while retaining the same authenticated client session.</summary>
    internal string PrintingVersion { get; set; }
+
+
+
+   /// <summary>Printer identifiers the fake server's operator catalog lists for this device; both shared queues by default.</summary>
+   internal string[] ApprovedPrinters { get; set; } = ["printer", "other"];
+
+
+
+   /// <summary>When set, the operator catalog answers with this status instead of a page, to model an older server (404) or a user without catalog access (403).</summary>
+   internal HttpStatusCode? CatalogStatus { get; set; }
+
+
+
+   /// <summary>Counts operator catalog reads.</summary>
+   internal int CatalogRequests;
    private readonly Lock _claimLock = new();
    private PrintJob? _claimed;
    private readonly CancellationTokenSource _stopping = new(TimeSpan.FromSeconds(30));
@@ -370,6 +385,17 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
          if(path.EndsWith("/queued", StringComparison.Ordinal))
          {
             return Response(JsonSerializer.Serialize(new { jobs = fixture.Queue.ToArray() }, PrintApiClient.JsonOptions));
+         }
+         if(path.EndsWith("/operator/printers", StringComparison.Ordinal))
+         {
+            Interlocked.Increment(ref fixture.CatalogRequests);
+            if(fixture.CatalogStatus is HttpStatusCode status)
+            { return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{}") }); }
+            return Response(JsonSerializer.Serialize(new
+            {
+               printers = fixture.ApprovedPrinters.Select(id => new { printerRowId = "row-" + id, deviceId = "device", printerId = id, name = id, deviceName = "Synthetic workstation", status = "READY", formats = new[] { "PDF" }, mediaProfiles = Array.Empty<object>() }),
+               nextCursor = (string?)null,
+            }, PrintApiClient.JsonOptions));
          }
          if(path.EndsWith("/devices/enroll", StringComparison.Ordinal))
          { return Response("""{"protocolVersion":1,"deviceId":"replacement-device","deviceToken":"replacement-proof","pollIntervalSeconds":5}"""); }

@@ -195,6 +195,7 @@ public sealed partial class MainWindow
       try
       {
          App.Log.Info("[Companion] Password sign-in submitted for " + _signInClient.Origin.Authority + ".");
+         Feedback("Signing in", "Checking the username and password with the server.", InfoBarSeverity.Informational);
          await _signInClient.SignInWithPasswordAsync(UsernameBox.Text.Trim(), QqqPasswordBox.Password);
          await TransferSignInAsync();
       }
@@ -277,6 +278,7 @@ public sealed partial class MainWindow
             ?? throw Unlisted();
          using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
          _browserSignInCancellation = timeout;
+         Feedback("Waiting for the browser", "Finish signing in on the page that opened in your browser. This dialog updates when the sign-in completes, is canceled or times out after three minutes.", InfoBarSeverity.Informational);
          await CompleteBrowserSignInAsync(new Uri(redirect), timeout.Token);
          await TransferSignInAsync();
       }

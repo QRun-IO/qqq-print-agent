@@ -64,6 +64,7 @@ public sealed partial class MainWindow
    {
       UpdateSortHeader(PrinterNameHeader, "Name", _printerSortBy, _printerSortDescending);
       UpdateSortHeader(PrinterStatusHeader, "Status", _printerSortBy, _printerSortDescending);
+      UpdateSortHeader(PrinterServerHeader, "Server", _printerSortBy, _printerSortDescending);
       UpdateSortHeader(PrinterLocationHeader, "Location", _printerSortBy, _printerSortDescending);
       UpdateSortHeader(PrinterFormatsHeader, "Formats", _printerSortBy, _printerSortDescending);
       UpdateSortHeader(PrinterSharedHeader, "Shared", _printerSortBy, _printerSortDescending);
@@ -152,6 +153,7 @@ public sealed partial class MainWindow
       int comparison = _printerSortBy switch
       {
          "status" => text.Compare(PrinterRowView.StatusLabel(first), PrinterRowView.StatusLabel(second)),
+         "server" => text.Compare(PrinterRowView.ServerLabel(first), PrinterRowView.ServerLabel(second)),
          "location" => text.Compare(first.Location, second.Location),
          "formats" => text.Compare(string.Join(", ", first.Formats), string.Join(", ", second.Formats)),
          "shared" => first.Exposed.CompareTo(second.Exposed),

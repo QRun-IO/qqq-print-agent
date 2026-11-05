@@ -337,8 +337,11 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
             _diagnostics.Info($"Printing request {relativePath} refused locally: no approved device binding is held.");
             throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "An approved device binding is required.");
          }
+         // Device and admin routes, enrollment, and reading the operator printer catalog (the agent's only view of server-side
+         // approval); operator submission stays off this client.
+         bool catalogRead = method == HttpMethod.Get && (string.Equals(relativePath, "operator/printers", StringComparison.Ordinal) || relativePath.StartsWith("operator/printers?", StringComparison.Ordinal));
          if(!relativePath.StartsWith("device/", StringComparison.Ordinal) && !relativePath.StartsWith("admin/", StringComparison.Ordinal)
-            && !string.Equals(relativePath, "devices/enroll", StringComparison.Ordinal))
+            && !string.Equals(relativePath, "devices/enroll", StringComparison.Ordinal) && !catalogRead)
          {
             throw new ArgumentException("Only native printing operations are accepted.", nameof(relativePath));
          }

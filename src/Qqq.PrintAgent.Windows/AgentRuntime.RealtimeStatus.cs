@@ -65,17 +65,23 @@ public sealed partial class AgentRuntime
             ExposedPrinterBackend backend = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
             IReadOnlyList<PrinterInfo> inventory = backend.Discover();
             string serialized = JsonSerializer.Serialize(inventory.OrderBy(item => item.PrinterId, StringComparer.Ordinal), PrintApiClient.JsonOptions);
+            bool freshInventory = false;
             if(!string.Equals(serialized, previousInventory, StringComparison.Ordinal))
             {
                if(!NormalTrafficAllowed)
                { continue; }
                await api.InventoryAsync(inventory, token).ConfigureAwait(false);
                previousInventory = serialized;
+               freshInventory = true;
                lock(_stateLock)
                { _inventoryReady = true; }
                SignalPipeline();
                WakePoll();
             }
+            // The server never reports approval on the device routes; its operator catalog is the authenticated view of it.
+            await RefreshPrinterCatalogAsync(api, configuration, inventory, force: freshInventory, token).ConfigureAwait(false);
+            if(freshInventory)
+            { RequestStatusSynchronization(); }
          }
          await ReconcileRealtimeReceiptsAsync(store, token).ConfigureAwait(false);
          _ = store.PruneHistory();

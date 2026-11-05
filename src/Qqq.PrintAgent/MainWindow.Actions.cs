@@ -28,13 +28,13 @@ public sealed partial class MainWindow
    /// Asks the operator to confirm an action in a dialog whose default button is Back, so pressing Enter cancels rather than
    /// proceeds. It declines without showing anything while another request is running or the window is closing.
    /// </summary>
-   private async Task<bool> ConfirmAsync(string title, string message, string action)
+   private async Task<bool> ConfirmAsync(string title, string message, string action, XamlRoot? owner = null)
    {
       if(_updatesClosed || _busy)
       {
          return false;
       }
-      var dialog = new ContentDialog { Title = title, Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap }, PrimaryButtonText = action, CloseButtonText = "Back", DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot };
+      var dialog = new ContentDialog { Title = title, Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap }, PrimaryButtonText = action, CloseButtonText = "Back", DefaultButton = ContentDialogButton.Close, XamlRoot = owner ?? Content.XamlRoot };
       return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
    }
 

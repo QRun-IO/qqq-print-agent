@@ -236,7 +236,7 @@ public sealed partial class MainWindow
    private void LogsAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
    {
       Navigation.SelectedItem = LogsNavigation;
-      LogWindow.ShowSingle(App.Log, AppIdentity.Info);
+      ShowActivityLog();
       args.Handled = true;
    }
 }
