@@ -62,7 +62,9 @@ internal static class Program
       string profile = Path.Combine(EvidenceDirectory, "profile");
       Directory.CreateDirectory(profile);
       Environment.SetEnvironmentVariable("QQQ_PRINT_AGENT_DATA_DIR", profile);
-      File.WriteAllText(Path.Combine(profile, "settings.json"), "{\"ShowSplashScreen\":false,\"CheckForUpdatesOnStartup\":false}");
+      File.WriteAllText(Path.Combine(profile, "settings.json"), EditionCaptureScenario.IsEnabled
+         ? "{\"ShowSplashScreen\":true,\"SplashMilliseconds\":4000,\"CheckForUpdatesOnStartup\":false}"
+         : "{\"ShowSplashScreen\":false,\"CheckForUpdatesOnStartup\":false}");
       WinRT.ComWrappersSupport.InitializeComWrappers();
       Microsoft.UI.Xaml.Application.Start(callbackParameters =>
       {

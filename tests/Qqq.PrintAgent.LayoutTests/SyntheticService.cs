@@ -40,6 +40,7 @@ internal sealed class SyntheticService
          "query-jobs" => Jobs(),
          "transport" => ReadTransport(),
          "test-print" => Submit(request),
+         "get-server-trust" => JsonSerializer.Serialize(new ServerTrust(), PrintApiClient.JsonOptions),
          _ => throw new InvalidOperationException("The nonprinting fixture rejected an unexpected operation: " + request.Operation),
       };
    }

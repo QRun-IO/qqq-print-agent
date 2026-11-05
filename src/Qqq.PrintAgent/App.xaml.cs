@@ -29,7 +29,7 @@ public partial class App : Application
 
 
    /// <summary>The app-wide activity log.</summary>
-   internal static AgentActivityLog Log { get; } = AgentActivityLog.Create(AgentStore.DefaultDirectory);
+   internal static IAgentLog Log { get; } = AgentActivityLog.Create(AgentStore.DefaultDirectory);
 
 
 

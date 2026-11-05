@@ -17,11 +17,15 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
 
 
 
-   /// <summary>The MSI persists labels so unattended upgrades keep the customer identity.</summary>
-   public static RuntimeBranding LoadMachine()
+   /// <summary>
+   /// Reads the machine branding file and, for the generic build, the labels the installer persisted so unattended upgrades
+   /// keep a deployment's identity. An edition build skips the persisted labels: its installer writes the edition's own
+   /// labels anyway, and labels left by an earlier generic install must not relabel the edition. The branding file still wins.
+   /// </summary>
+   public static RuntimeBranding LoadMachine(bool includeInstallerLabels = true)
    {
       RuntimeBranding branding = Load(DefaultPath);
-      if(!OperatingSystem.IsWindows())
+      if(!OperatingSystem.IsWindows() || !includeInstallerLabels)
       {
          return branding;
       }

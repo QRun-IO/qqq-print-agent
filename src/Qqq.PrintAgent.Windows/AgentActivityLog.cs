@@ -11,7 +11,7 @@ using KofTwentyTwo.AppKit.Logging;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Serializes service and companion writes to the same AppKit daily activity log.</summary>
-public sealed partial class AgentActivityLog : IActivityLog
+public sealed partial class AgentActivityLog : IAgentLog
 {
    private readonly FileActivityLog _log;
    private LogSettings? _cachedSettings;

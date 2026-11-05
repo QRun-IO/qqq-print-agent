@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-using KofTwentyTwo.AppKit.Logging;
 using Microsoft.UI.Xaml;
+using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
 
@@ -12,7 +12,7 @@ namespace Qqq.PrintAgent;
 public partial class App : Application
 {
    private Window? _window;
-   internal static IActivityLog Log { get; } = AppIdentity.CreateLog();
+   internal static IAgentLog Log { get; } = new HarnessLog(AppIdentity.CreateLog());
 
 
 
