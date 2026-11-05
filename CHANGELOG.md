@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.1
+
+Browser sign-in fix. The companion runs elevated, and its callback inbox pipe was keyed with
+PipeOptions.CurrentUserOnly to the elevated token's default owner (the Administrators group), so
+the protocol handler the browser launches as the ordinary user was refused with "Access to the
+path is denied" and no browser sign-in could ever complete. The inbox is now created with an
+explicit descriptor owned by and restricted to the user's own SID, and the handler verifies the
+companion by process image instead of the owner comparison. A protocol-handler trace in the
+per-user profile, copied into the activity log when a browser sign-in does not complete, makes
+the hand-off visible. No wire change.
+
 ## 1.1.0
 
 Diagnostics for new accounts and servers. The session client now narrates every step of discovery,
