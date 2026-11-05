@@ -1,3 +1,13 @@
+# Session state — 2026-11-05 (evening)
+
+## Printer approval over the realtime channel (extension 2.4.0) — implemented across three repositories, merges pending
+
+- **Client (this repository), PR 10 head `f1ec404`** on `feat/client-editions-20261105`: operator-catalog fallback (2.3), `printer-approval-v1` negotiation and the authoritative `PRINTERS` frame (2.4), per-printer server state on the Printers page (Server column, summary, details), Clear logs button in the log viewer, pinned sign-in feedback banner, non-repeating sign-in reply. Hosted CI run 42116396114: 197 Core + 362 Windows tests, zero failures. Protocol fixture pin moved to `ac835f8b9396b641b525669249fdb4a1e2a50c99`.
+- **Protocol 1.1.0**, [PR 11](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/11) (`ac835f8`): capability, `RealtimePrinters` schema, fixtures, REALTIME/VERSIONS docs; all gates green.
+- **QBit 1.1.0 (extension 2.4.0)**, [PR 25](https://git.kof22.com/QRun-IO/qbit-printing/pulls/25) (`3fa78de`): 195 tests green; [PR 26](https://git.kof22.com/QRun-IO/qbit-printing/pulls/26) (`c5a9c6d`, stacked on 25) adds Remove printers / Remove device as archives (`removed_at`) purged by retention when no job references them; 199 tests green.
+- Merge order: protocol 11, then QBit 25 and 26, then client 10. Then tag protocol `v1.1.0`, QBit `v1.1.0` (registry publication through the main run), client `v1.2.0` on Gitea with GitHub mirror sync. Forge adoption and pairing tests belong to the Forge agent; current working versions (protocol 1.0.0, QBit 1.0.0, client 1.1.1 / GG Forge rc.3) stay for rollback.
+- Local test builds today: 1.2.0-rc.1..rc.3 under `artifacts/share/`; GG Forge rc.3 (commit 887c58c, before the 2.4 negotiation) is installed on this PC.
+
 # Session state — 2026-11-05
 
 ## Current status: 1.1.1 signed; client editions (1.2.0) complete in PR 10 — 2026-11-05
