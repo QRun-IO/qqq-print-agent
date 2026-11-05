@@ -1,5 +1,13 @@
 # Session state — 2026-11-05
 
+## Current status: 1.1.1 signed; client editions (1.2.0) complete in PR 10 — 2026-11-05
+
+Signed **1.1.0** (sign-in diagnostics, debug logging, log rollover, per-server untrusted-certificate exception) and **1.1.1** (browser sign-in fix: the elevated companion's callback inbox pipe refused the unelevated protocol handler) are published on GitHub from Gitea tags through the mirror. Browser sign-in against the local Forge server (API 1.11.0, `nonceValidation: REQUIRED`) was confirmed working by the operator on the 1.1.1 build; PR 11 (required-nonce exchange) is on main.
+
+[PR 10](https://git.kof22.com/QRun-IO/qqq-print-agent/pulls/10) (`feat/client-editions-20261105`, version 1.2.0) adds client editions (`editions/<id>`, first `gg-forge`): fully branded builds and installers named after the edition's asset prefix, an updater that follows only that asset, a release workflow that signs one installer per edition from one tag, edition options for server wording and About sections, nonce sending under OPTIONAL and the `nativeSessionNonceValidation` capability, and `build/Build-CiRelease.ps1` delegating to `Package-Release.ps1`. GitHub CI is green on the branch (182 Core, 352 Windows/CLI tests). Gitea refuses the merge only because its shared ".NET CI" jobs never start while the Windows runner is down; the operator is distributing local rc-numbered builds (`artifacts/share/print-agent-1.2.0-rc.1`) meanwhile. PRs 1 (stale dependabot) and 6 (superseded CI entrypoint) were closed. Next: when the runner returns, merge PR 10, tag `v1.2.0` on Gitea, synchronize the mirror, verify the first matrix release (generic + GG Forge), publish the same assets on Gitea.
+
+# Previous session state — 2026-11-05
+
 ## Active scoped work: required-nonce native sign-in fix — 2026-11-05
 
 Branch `fix/native-login-required-nonce`, integrated on main `f954f11`, makes native sign-in honor the server's `NativeGrant.NonceValidation` policy. One nonce is created per authorization attempt and kept in the attempt only when the policy is `REQUIRED`; the same value is sent as `expectedNonce` at `manageSession`. An absent (legacy) policy keeps the exact old four-field body, and an unknown non-empty policy is refused before any provider or browser step. The callback never supplies the nonce, and state, issuer, PKCE, single-use and expiry checks are unchanged.
