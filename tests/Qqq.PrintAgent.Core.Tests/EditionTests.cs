@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using Qqq.PrintAgent.Core;
-
 namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>A compiled-in client edition is read strictly, applies presentation only, and is absent for the generic build.</summary>
@@ -18,7 +16,7 @@ public sealed class EditionTests
       try
       {
          File.WriteAllText(path, """{"id":"acme-print","displayName":"Acme Print Connector","companyName":"Acme Logistics","tagline":"Printing for Acme","supportUrl":"https://support.example.invalid/print","accentColor":"#0F766E","assetPrefix":"AcmePrintConnector"}""");
-         Edition? edition = Edition.Load(path);
+         var edition = Edition.Load(path);
          Assert.NotNull(edition);
          Assert.Equal("acme-print", edition.Id);
          Assert.Equal("Acme Print Connector", edition.DisplayName);
@@ -56,7 +54,7 @@ public sealed class EditionTests
       try
       {
          File.WriteAllText(path, json);
-         Edition? edition = Edition.Load(path);
+         var edition = Edition.Load(path);
          Assert.Equal(loads, edition is not null);
          if(edition is not null)
          {
