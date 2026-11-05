@@ -33,6 +33,30 @@ public sealed class QqqBrowserCallbackInboxTests
 
 
 
+   /// <summary>
+   /// The pipe the companion actually creates is owned by the user's SID, not by the token's default owner. On an elevated
+   /// process (hosted CI runs elevated) the default owner is the Administrators group, so this fails there if the inbox ever
+   /// goes back to PipeOptions.CurrentUserOnly, which is exactly the regression that locked out the browser-launched handler.
+   /// </summary>
+   [Fact]
+   public void CreatedInbox_IsOwnedByTheUserNotTheTokenDefaultOwner()
+   {
+      using var identity = WindowsIdentity.GetCurrent();
+      using QqqBrowserCallback inbox = new("QqqPrintAgent.Auth.Test." + Guid.NewGuid().ToString("N"));
+      PipeSecurity live = inbox.CurrentSecurity();
+      Assert.Equal(identity.User, live.GetOwner(typeof(SecurityIdentifier)));
+      if(identity.Owner is not null && identity.Owner != identity.User)
+      {
+         Assert.NotEqual(identity.Owner, live.GetOwner(typeof(SecurityIdentifier)));
+      }
+      foreach(AuthorizationRule rule in live.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
+      {
+         Assert.Equal(identity.User, rule.IdentityReference);
+      }
+   }
+
+
+
    /// <summary>A callback forwarded by a same-user process through the handler's own client path reaches the inbox, is validated, acknowledged, and returned to the waiting sign-in.</summary>
    [Fact]
    public async Task ForwardedCallback_ReachesTheInboxAndIsAcknowledged()

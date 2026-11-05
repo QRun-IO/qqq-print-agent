@@ -181,6 +181,11 @@ public sealed partial class QqqBrowserCallback : IDisposable
 
 
 
+   /// <summary>The security descriptor the operating system holds for the live inbox pipe, for tests that must check what was created rather than what was intended.</summary>
+   internal PipeSecurity CurrentSecurity() => _pipe.GetAccessControl();
+
+
+
    /// <summary>Closes the inbox, which ends the sign-in attempt's ability to receive a callback.</summary>
    public void Dispose() => _pipe.Dispose();
 
