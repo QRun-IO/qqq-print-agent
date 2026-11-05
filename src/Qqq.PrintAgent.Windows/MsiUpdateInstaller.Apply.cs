@@ -7,7 +7,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
-using KofTwentyTwo.AppKit.Logging;
 using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
@@ -217,7 +216,7 @@ public static partial class MsiUpdateInstaller
       try
       {
          WriteOutcome(new InstallOutcome(DateTimeOffset.UtcNow, version, code, message));
-         IActivityLog log = AgentActivityLog.Create(AgentStore.DefaultDirectory);
+         var log = AgentActivityLog.Create(AgentStore.DefaultDirectory);
          if(code is 0 or 3010)
          {
             log.Info("[Update] " + message);

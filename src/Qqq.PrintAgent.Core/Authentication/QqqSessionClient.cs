@@ -5,6 +5,8 @@
 
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Transport;
@@ -22,6 +24,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private readonly HttpClient _http;
    private readonly TimeProvider _timeProvider;
    private readonly ApplicationTrafficMeter? _traffic;
+   private readonly QqqSessionDiagnostics _diagnostics;
    private readonly SemaphoreSlim _gate = new(1, 1);
    private CookieContainer _cookies = new();
    private QqqApiDiscovery? _discovery;
@@ -40,9 +43,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// manages cookies, because redirects are refused and the session cookie is attached by hand to each request, and the
    /// HTTP client has no overall timeout because every request sets its own bound.
    /// </summary>
-   public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null)
+   public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null,
+      QqqSessionDiagnostics? diagnostics = null, bool allowUntrustedCertificate = false)
    {
       ArgumentNullException.ThrowIfNull(origin);
+      _diagnostics = diagnostics ?? QqqSessionDiagnostics.None;
+      AllowsUntrustedCertificate = allowUntrustedCertificate;
       if(!origin.IsAbsoluteUri || origin.UserInfo.Length != 0 || origin.Query.Length != 0 || origin.Fragment.Length != 0
          || !string.Equals(origin.AbsolutePath, "/", StringComparison.Ordinal)
          || (!string.Equals(origin.Scheme, "https", StringComparison.Ordinal)
@@ -53,16 +59,63 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       Origin = new Uri(origin.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute);
       _timeProvider = timeProvider ?? TimeProvider.System;
       _traffic = traffic;
-      _http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+      // MA0039: the callback keeps the platform's verdict (it accepts only SslPolicyErrors.None) unless the administrator
+      // explicitly allowed untrusted certificates for a development server; it exists so a rejection is logged with its
+      // reason instead of failing silently, and so the opt-in is visible in the log on every connection.
+#pragma warning disable MA0039
+      _http = new HttpClient(handler ?? new HttpClientHandler
+      {
+         AllowAutoRedirect = false,
+         UseCookies = false,
+         ServerCertificateCustomValidationCallback = (request, certificate, chain, errors) => EvaluateCertificate(request.RequestUri?.Authority ?? Origin.Authority, certificate, errors),
+      })
       {
          Timeout = Timeout.InfiniteTimeSpan,
       };
+#pragma warning restore MA0039
+      _diagnostics.Info($"Session client created for {Origin.Scheme}://{Origin.Authority} (plain HTTP {(string.Equals(Origin.Scheme, "http", StringComparison.Ordinal) ? "allowed for loopback" : "not allowed")}; untrusted server certificates {(allowUntrustedCertificate ? "ALLOWED" : "refused")}).");
+      if(allowUntrustedCertificate)
+      { _diagnostics.Info($"WARNING: certificate validation is relaxed for {Origin.Authority}. Any certificate, including a forged one, will be accepted. Use this only for development servers."); }
    }
 
 
 
    public Uri Origin { get; }
    public bool IsAuthenticated => _sessionToken is not null;
+
+   /// <summary>True when this client was told to accept a server certificate that Windows does not trust (self-signed or private authority), for development servers only.</summary>
+   public bool AllowsUntrustedCertificate { get; }
+
+
+
+   /// <summary>
+   /// Decides whether a TLS server certificate is accepted and, either way, says why in the log. A certificate Windows trusts
+   /// is accepted silently (details at debug level). One it does not trust is rejected with the exact policy errors, the
+   /// subject, issuer and validity, and the remedy, unless untrusted certificates were explicitly allowed for this client,
+   /// in which case it is accepted with a warning naming the certificate so the exception is never silent.
+   /// </summary>
+   internal bool EvaluateCertificate(string host, X509Certificate2? certificate, SslPolicyErrors errors)
+   {
+      string summary = certificate is null ? "no certificate presented"
+         : $"subject '{certificate.Subject}', issuer '{certificate.Issuer}', valid {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd} to {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}, thumbprint {certificate.Thumbprint}";
+      if(errors == SslPolicyErrors.None)
+      {
+         _diagnostics.Debug(() => $"TLS certificate for {host} accepted by Windows: {summary}.");
+         return true;
+      }
+      if(AllowsUntrustedCertificate)
+      {
+         _diagnostics.Info($"TLS certificate for {host} is NOT trusted by Windows ({errors}) but was accepted because untrusted certificates are allowed for this server: {summary}.");
+         return true;
+      }
+      _diagnostics.Info($"TLS certificate for {host} rejected: {errors}. Certificate: {summary}. "
+         + (errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors)
+            ? "Windows does not trust the issuing authority for the account this process runs as (the service runs as LocalSystem and reads the machine store, not your user store). Install the issuer's root certificate in the Local Machine Trusted Root store, or enable 'Allow untrusted server certificate' in Connection settings for a development server."
+            : errors.HasFlag(SslPolicyErrors.RemoteCertificateNameMismatch)
+               ? "The certificate is not issued for this host name or address; use the address the certificate names, or reissue it."
+               : "The server presented no usable certificate."));
+      return false;
+   }
 
 
 
@@ -108,16 +161,25 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
       try
       {
+         _diagnostics.Info("Password sign-in requested.");
+         _diagnostics.Debug(() => $"Password sign-in user name: '{username}' ({username.Length} characters); password {password.Length} characters (never logged).");
          QqqAuthenticationMetadata authentication = await AuthenticationCoreAsync(cancellationToken).ConfigureAwait(false);
          if(!string.Equals(authentication.Type, "TABLE_BASED", StringComparison.Ordinal))
-         { throw QqqApiDiscovery.Configuration(); }
+         {
+            _diagnostics.Info($"Password sign-in refused locally: the server authenticates with {authentication.Type}, not TABLE_BASED.");
+            throw QqqApiDiscovery.Configuration();
+         }
          ClearSession();
          string basic = Convert.ToBase64String(Encoding.UTF8.GetBytes(username + ":" + password));
+         _diagnostics.Info("Sending password sign-in to /qqq/v1/manageSession (HTTP Basic, this request only).");
          using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/manageSession"), HttpMethod.Post, JsonBody(new { }),
             MetadataLimit, null, null, basic, cancellationToken).ConfigureAwait(false);
          RequireSuccess(response);
          AdoptManagedSession(response);
+         _diagnostics.Info("Password sign-in accepted; a server-managed session is now held.");
       }
+      catch(Exception exception) when(ReportFailure("Password sign-in", exception))
+      { throw; }
       finally { _gate.Release(); }
    }
 
@@ -131,17 +193,24 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    {
       ArgumentNullException.ThrowIfNull(credential);
       if(credential.Origin != Origin)
-      { throw new ArgumentException("The session belongs to another server.", nameof(credential)); }
+      {
+         _diagnostics.Info($"Saved session refused: it belongs to {QqqSessionDiagnostics.Describe(credential.Origin)}, not {QqqSessionDiagnostics.Describe(Origin)}.");
+         throw new ArgumentException("The session belongs to another server.", nameof(credential));
+      }
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
       try
       {
+         _diagnostics.Info($"Restoring a saved session for {Origin.Authority}: checking discovery and authentication metadata first.");
          await AuthenticationCoreAsync(cancellationToken).ConfigureAwait(false);
          ClearSession();
          SetSession(credential.SessionToken);
+         _diagnostics.Info("Asking the server to confirm the saved session.");
          await ResumeCoreAsync(cancellationToken).ConfigureAwait(false);
+         _diagnostics.Info("Saved session confirmed by the server.");
       }
-      catch
+      catch(Exception exception)
       {
+         ReportFailure("Session restore", exception);
          ClearSession();
          throw;
       }
@@ -155,7 +224,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    {
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
       try
-      { await ResumeCoreAsync(cancellationToken).ConfigureAwait(false); }
+      {
+         _diagnostics.Info("Renewing the session with the server.");
+         await ResumeCoreAsync(cancellationToken).ConfigureAwait(false);
+      }
+      catch(Exception exception) when(ReportFailure("Session renewal", exception))
+      { throw; }
       finally { _gate.Release(); }
    }
 
@@ -169,11 +243,17 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       {
          if(_sessionToken is not null)
          {
+            _diagnostics.Info($"Signing out of {Origin.Authority}: ending the server session.");
             using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/logout"), HttpMethod.Post, JsonBody(new { }),
                MetadataLimit, CookieHeader(), null, null, cancellationToken).ConfigureAwait(false);
             RequireSuccess(response);
+            _diagnostics.Info("Server session ended.");
          }
+         else
+         { _diagnostics.Info("Sign-out requested with no held session; clearing local state only."); }
       }
+      catch(Exception exception) when(ReportFailure("Sign-out", exception))
+      { throw; }
       finally
       {
          ClearSession();
@@ -211,20 +291,28 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       try
       {
          RequireAuthenticated();
+         _diagnostics.Info($"Binding device {credential.DeviceId} to the session{(claimLegacyDevice ? ", claiming it as a legacy device first" : "")}.");
          if(claimLegacyDevice)
          {
             using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, PrintingPath + "device/bind"), HttpMethod.Post, JsonBody(new { }),
                MetadataLimit, CookieHeader(), credential, null, cancellationToken).ConfigureAwait(false);
             RequireSuccess(response);
+            _diagnostics.Info($"Server accepted the legacy claim for device {credential.DeviceId}.");
          }
          QqqSessionBinding identity = await IdentityCoreAsync(credential, cancellationToken).ConfigureAwait(false);
          if(!string.Equals(identity.DeviceId, credential.DeviceId, StringComparison.Ordinal))
-         { throw InvalidResponse(); }
+         {
+            _diagnostics.Info($"Device binding refused: the server reports device {identity.DeviceId ?? "(none)"} for this session, not {credential.DeviceId}.");
+            throw InvalidResponse();
+         }
          _device = credential;
          _binding = identity;
          _generation++;
+         _diagnostics.Info($"Device {credential.DeviceId} bound to principal {identity.PrincipalId} in tenant {identity.TenantId}.");
          return identity;
       }
+      catch(Exception exception) when(ReportFailure("Device binding", exception))
+      { throw; }
       finally { _gate.Release(); }
    }
 
@@ -246,6 +334,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          device = relativePath.StartsWith("device/", StringComparison.Ordinal) ? _device : null;
          if(relativePath.StartsWith("device/", StringComparison.Ordinal) && (device is null || _binding?.HasApprovedDevice != true))
          {
+            _diagnostics.Info($"Printing request {relativePath} refused locally: no approved device binding is held.");
             throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "An approved device binding is required.");
          }
          if(!relativePath.StartsWith("device/", StringComparison.Ordinal) && !relativePath.StartsWith("admin/", StringComparison.Ordinal)
@@ -287,11 +376,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    {
       if(_discovery is not null)
       { return _discovery; }
+      _diagnostics.Info($"Discovering QQQ at {Origin.Authority}: requesting /qqq/v1/version.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/version"), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken).ConfigureAwait(false);
       RequireSuccess(response);
       QqqApiDiscovery discovery = Parse<QqqApiDiscovery>(response);
-      discovery.Validate();
+      _diagnostics.Info("Discovery received: " + discovery.Describe());
+      _diagnostics.Debug(() => $"Discovery features: [{string.Join(", ", discovery.Features ?? [])}]; client channels: [{string.Join(", ", discovery.ClientChannels ?? [])}].");
+      discovery.Validate(report: _diagnostics.Info);
       _discovery = discovery;
       return discovery;
    }
@@ -307,12 +399,19 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       await DiscoverCoreAsync(cancellationToken).ConfigureAwait(false);
       if(_authentication is not null)
       { return _authentication; }
+      _diagnostics.Info("Requesting authentication metadata from /qqq/v1/metaData/authentication.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/metaData/authentication"), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken).ConfigureAwait(false);
       RequireSuccess(response);
       QqqAuthenticationMetadata metadata = Parse<QqqAuthenticationMetadata>(response);
+      QqqAuthenticationMetadata.NativeGrant? grant = metadata.Values?.NativeSessionLogin;
+      _diagnostics.Info($"Authentication metadata: type {(string.IsNullOrEmpty(metadata.Type) ? "(missing)" : metadata.Type)}, provider '{metadata.Name}', native browser sign-in {(grant is null ? "not offered" : "offered")}.");
+      _diagnostics.Debug(() => grant is null
+         ? $"Provider values present: {metadata.Values is not null}; client id {(string.IsNullOrEmpty(metadata.Values?.ClientId) ? "(none)" : "present")}; scopes '{metadata.Values?.Scopes}'."
+         : $"Native grant: flow {grant.Flow}, challenge {grant.CodeChallengeMethod}, prompt {grant.Prompt}, issuer {grant.Issuer}, discovery {grant.DiscoveryUrl}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{string.Join(", ", grant.RedirectUris ?? [])}], scopes '{metadata.Values?.Scopes}'.");
       if(!string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal) && !string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
       {
+         _diagnostics.Info($"Authentication type '{metadata.Type}' is not supported; only TABLE_BASED and OAUTH2 are.");
          throw QqqApiDiscovery.Configuration();
       }
       if(string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
@@ -327,12 +426,17 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private async Task ResumeCoreAsync(CancellationToken cancellationToken)
    {
       RequireAuthenticated();
+      string? previous = _sessionToken;
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/manageSession"), HttpMethod.Post, JsonBody(new { }),
          MetadataLimit, CookieHeader(), null, null, cancellationToken).ConfigureAwait(false);
       RequireSuccess(response);
       AdoptManagedSession(response);
+      _diagnostics.Info($"Session renewed; the session token {(string.Equals(previous, _sessionToken, StringComparison.Ordinal) ? "is unchanged" : "was rotated by the server")}.");
       if(_binding is not null)
-      { await IdentityCoreAsync(_device, cancellationToken).ConfigureAwait(false); }
+      {
+         _diagnostics.Info("Re-checking the bound identity after renewal.");
+         await IdentityCoreAsync(_device, cancellationToken).ConfigureAwait(false);
+      }
    }
 
 
@@ -345,6 +449,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private async Task<QqqSessionBinding> IdentityCoreAsync(QqqDeviceCredential? credential, CancellationToken cancellationToken)
    {
       RequireAuthenticated();
+      _diagnostics.Info($"Reading the session identity from the printing session route{(credential is null ? "" : " with device proof for " + credential.DeviceId)}.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, PrintingPath + "session"), HttpMethod.Get, null,
          MetadataLimit, CookieHeader(), credential, null, cancellationToken).ConfigureAwait(false);
       RequireSuccess(response);
@@ -354,10 +459,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       string tenant = IdentityValue(root, "tenantId");
       string? device = root.TryGetProperty("deviceId", out JsonElement value) && value.ValueKind != JsonValueKind.Null ? IdentityValue(root, "deviceId") : null;
       var identity = new QqqSessionBinding(Origin, principal, tenant, device);
+      _diagnostics.Info($"Session identity: principal {principal}, tenant {tenant}, device {device ?? "(none)"}.");
       if((_binding is not null && (!string.Equals(_binding.PrincipalId, principal, StringComparison.Ordinal)
             || !string.Equals(_binding.TenantId, tenant, StringComparison.Ordinal)))
          || (credential is not null && !string.Equals(credential.DeviceId, device, StringComparison.Ordinal)))
       {
+         _diagnostics.Info(_binding is not null && (!string.Equals(_binding.PrincipalId, principal, StringComparison.Ordinal) || !string.Equals(_binding.TenantId, tenant, StringComparison.Ordinal))
+            ? $"Identity changed: the session was bound to principal {_binding.PrincipalId} in tenant {_binding.TenantId}; the server now reports principal {principal} in tenant {tenant}. Session cleared."
+            : $"Device mismatch: proof was sent for device {credential!.DeviceId} but the server reports device {device ?? "(none)"}. Session cleared.");
          ClearSession();
          throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "The server returned a different principal or device binding.");
       }
@@ -378,11 +487,57 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       QqqDeviceCredential? device, string? basic, CancellationToken cancellationToken, bool providerDiscovery = false, bool streamContent = false, bool boundedByCaller = false)
    {
       if(!providerDiscovery && !SameOrigin(uri, Origin))
-      { throw new ArgumentException("Cross-origin QQQ requests are forbidden.", nameof(uri)); }
+      {
+         _diagnostics.Info($"Refused a request to {QqqSessionDiagnostics.Describe(uri)}: it is not on the session origin {Origin.Authority}.");
+         throw new ArgumentException("Cross-origin QQQ requests are forbidden.", nameof(uri));
+      }
+      string route = QqqSessionDiagnostics.Describe(uri);
+      long started = System.Diagnostics.Stopwatch.GetTimestamp();
+      _diagnostics.Debug(() => $"HTTP {method} {route}: session cookie {(cookie is not null ? "yes" : "no")}, device proof {(device is not null ? "yes" : "no")}, basic credential {(basic is not null ? "yes" : "no")}, body {(content is null ? "none" : content.Headers.ContentType?.MediaType ?? "present")}, limit {(boundedByCaller ? "caller" : "20 s")}, response bound {maximumBytes} bytes.");
       using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
       if(!boundedByCaller)
       { timeout.CancelAfter(TimeSpan.FromSeconds(20)); }
-      using var request = new HttpRequestMessage(method, uri)
+      using HttpRequestMessage request = BuildRequest(uri, method, content, cookie, device, basic, providerDiscovery);
+      HttpResponseMessage response;
+      try
+      { response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); }
+      catch(Exception exception) when(exception is HttpRequestException or OperationCanceledException or IOException)
+      {
+         ReportSendFailure(method, route, started, exception, cancellationToken);
+         throw;
+      }
+      try
+      {
+         _diagnostics.Debug(() => $"HTTP {method} {route} -> {(int)response.StatusCode} {response.ReasonPhrase} in {Elapsed(started)}; content type {response.Content.Headers.ContentType?.MediaType ?? "(none)"}, length {response.Content.Headers.ContentLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown"}, Set-Cookie {(response.Headers.Contains("Set-Cookie") ? "present" : "absent")}.");
+         if(!providerDiscovery && _traffic is not null)
+         { response.Content = new TrafficHttpContent(response.Content, _traffic.RecordDownload); }
+         if((int)response.StatusCode is >= 300 and < 400)
+         {
+            _diagnostics.Info($"HTTP {method} {route} answered {(int)response.StatusCode} (redirect); redirects are refused, so the request failed. Check the server address: it must be the exact HTTPS origin QQQ serves from.");
+            throw new QqqSessionException(QqqSessionException.FailureKind.TransportRefused, "Redirected authentication or API requests are refused.");
+         }
+         if(streamContent && response.IsSuccessStatusCode)
+         {
+            response.RequestMessage = null;
+            return response;
+         }
+         await BufferResponseAsync(response, maximumBytes, timeout.Token).ConfigureAwait(false);
+         response.RequestMessage = null;
+         return response;
+      }
+      catch
+      {
+         response.Dispose();
+         throw;
+      }
+   }
+
+
+
+   /// <summary>Builds the outgoing request: no-store caching, this agent's channel header, and only the cookie, origin, Basic credential and device proof the caller passed.</summary>
+   private HttpRequestMessage BuildRequest(Uri uri, HttpMethod method, HttpContent? content, string? cookie, QqqDeviceCredential? device, string? basic, bool providerDiscovery)
+   {
+      var request = new HttpRequestMessage(method, uri)
       {
          Content = !providerDiscovery && _traffic is not null && content is not null ? new TrafficHttpContent(content, _traffic.RecordUpload) : content,
       };
@@ -404,29 +559,19 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          request.Headers.Add("X-QQQ-Device-Id", device.DeviceId);
          request.Headers.Add("X-QQQ-Device-Token", device.DeviceToken);
       }
-      HttpResponseMessage response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
-      try
-      {
-         if(!providerDiscovery && _traffic is not null)
-         { response.Content = new TrafficHttpContent(response.Content, _traffic.RecordDownload); }
-         if((int)response.StatusCode is >= 300 and < 400)
-         {
-            throw new QqqSessionException(QqqSessionException.FailureKind.TransportRefused, "Redirected authentication or API requests are refused.");
-         }
-         if(streamContent && response.IsSuccessStatusCode)
-         {
-            response.RequestMessage = null;
-            return response;
-         }
-         await BufferResponseAsync(response, maximumBytes, timeout.Token).ConfigureAwait(false);
-         response.RequestMessage = null;
-         return response;
-      }
-      catch
-      {
-         response.Dispose();
-         throw;
-      }
+      return request;
+   }
+
+
+
+   /// <summary>Logs a request that produced no response headers: cancelled by the caller, timed out, or a connection failure with its inner cause (DNS, TLS, refused).</summary>
+   private void ReportSendFailure(HttpMethod method, string route, long started, Exception exception, CancellationToken cancellationToken)
+   {
+      _diagnostics.Info(cancellationToken.IsCancellationRequested
+         ? $"HTTP {method} {route} was cancelled by the caller after {Elapsed(started)}."
+         : exception is OperationCanceledException
+            ? $"HTTP {method} {route} timed out after {Elapsed(started)} with no response headers."
+            : $"HTTP {method} {route} could not be sent after {Elapsed(started)}: {QqqSessionDiagnostics.Describe(exception)}{(exception.InnerException is null ? "" : " (" + QqqSessionDiagnostics.Describe(exception.InnerException) + ")")}.");
    }
 
 
@@ -435,10 +580,13 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// Reads a response body into memory but never more than the stated limit, whether announced by Content-Length or
    /// discovered while reading, so a hostile or broken server cannot exhaust memory. The buffered content keeps the original headers.
    /// </summary>
-   private static async Task BufferResponseAsync(HttpResponseMessage response, int maximumBytes, CancellationToken token)
+   private async Task BufferResponseAsync(HttpResponseMessage response, int maximumBytes, CancellationToken token)
    {
       if(response.Content.Headers.ContentLength > maximumBytes)
-      { throw InvalidResponse(); }
+      {
+         _diagnostics.Info($"Response rejected: announced length {response.Content.Headers.ContentLength} bytes exceeds the {maximumBytes} byte bound.");
+         throw InvalidResponse();
+      }
       await using Stream input = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
       using var output = new MemoryStream();
       byte[] buffer = new byte[8192];
@@ -446,7 +594,10 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       while((count = await input.ReadAsync(buffer, token).ConfigureAwait(false)) != 0)
       {
          if(output.Length + count > maximumBytes)
-         { throw InvalidResponse(); }
+         {
+            _diagnostics.Info($"Response rejected: the body exceeded the {maximumBytes} byte bound while reading.");
+            throw InvalidResponse();
+         }
          output.Write(buffer, 0, count);
       }
       var buffered = new ByteArrayContent(output.ToArray());
@@ -469,11 +620,23 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          ? value.ValueKind == JsonValueKind.String ? value.GetString() : throw InvalidResponse() : null;
       string? cookie = ReadSessionCookie(response);
       if(body is not null && cookie is not null && !string.Equals(body, cookie, StringComparison.Ordinal))
-      { ClearSession(); throw InvalidResponse(); }
+      {
+         _diagnostics.Info("Session response rejected: the session cookie and the body's session id disagree.");
+         ClearSession();
+         throw InvalidResponse();
+      }
+      if(cookie is null && body is null && _sessionToken is null)
+      { _diagnostics.Info("Session response rejected: no session cookie, no session id in the body and no session already held."); }
       string token = cookie ?? body ?? _sessionToken ?? throw InvalidResponse();
       try
       { SetSession(new QqqSessionCredential(Origin, token).SessionToken); }
-      catch(ArgumentException) { ClearSession(); throw InvalidResponse(); }
+      catch(ArgumentException)
+      {
+         _diagnostics.Info("Session response rejected: the session id is not well formed.");
+         ClearSession();
+         throw InvalidResponse();
+      }
+      _diagnostics.Debug(() => $"Session token adopted from {(cookie is not null && body is not null ? "cookie and body (agreeing)" : cookie is not null ? "the Set-Cookie header" : body is not null ? "the response body" : "the existing session")}; {token.Length} characters; session generation {_generation}.");
    }
 
 
@@ -499,6 +662,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          string name = header.Split('=', 2)[0].Trim();
          if((name is "sessionUUID" or "sessionId") && parsed.GetAllCookies().Count == 0)
          {
+            _diagnostics.Info($"The server deleted the {name} cookie; the session has ended and sign-in is required.");
             ClearSession();
             throw AuthenticationRequired();
          }
@@ -512,7 +676,11 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
                throw InvalidResponse();
             }
             if(cookie.Expired || string.IsNullOrEmpty(cookie.Value))
-            { ClearSession(); throw AuthenticationRequired(); }
+            {
+               _diagnostics.Info($"The server returned an {(cookie.Expired ? "expired" : "empty")} {cookie.Name} cookie; the session has ended and sign-in is required.");
+               ClearSession();
+               throw AuthenticationRequired();
+            }
             token = cookie.Value;
          }
       }
@@ -577,9 +745,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private void CheckAuthorization(HttpResponseMessage response)
    {
       if(response.StatusCode == HttpStatusCode.Unauthorized)
-      { ClearSession(); throw AuthenticationRequired(); }
+      {
+         _diagnostics.Info("The server answered 401 Unauthorized: the session is no longer accepted. Local session cleared; sign-in is required.");
+         ClearSession();
+         throw AuthenticationRequired();
+      }
       if(response.StatusCode == HttpStatusCode.Forbidden)
       {
+         _diagnostics.Info("The server answered 403 Forbidden: the signed-in user or device is not permitted to perform this operation. Signing in again will not help; check permissions and device approval in QQQ.");
          throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "The current QQQ user is not permitted to perform this operation.");
       }
    }
@@ -592,6 +765,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       CheckAuthorization(response);
       if(!response.IsSuccessStatusCode)
       {
+         _diagnostics.Info($"The server answered {(int)response.StatusCode} {response.ReasonPhrase}; the request did not succeed.");
          throw new QqqSessionException(QqqSessionException.FailureKind.TransportRefused, "The QQQ request did not succeed.");
       }
    }
@@ -631,12 +805,16 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
    /// <summary>Deserializes a response into a type, reporting a missing or malformed body as the generic invalid-response failure.</summary>
-   private static T Parse<T>(HttpResponseMessage response)
+   private T Parse<T>(HttpResponseMessage response)
    {
       using JsonDocument document = ParseDocument(response);
       try
       { return document.RootElement.Deserialize<T>(JsonOptions) ?? throw InvalidResponse(); }
-      catch(JsonException) { throw InvalidResponse(); }
+      catch(JsonException exception)
+      {
+         _diagnostics.Info($"Response rejected: the JSON did not match the expected {typeof(T).Name} shape ({exception.Message}).");
+         throw InvalidResponse();
+      }
    }
 
 
@@ -645,7 +823,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// Parses a response as a JSON object with a depth limit and no duplicate property names (a common smuggling trick for
    /// disagreeing parsers). Anything else is an invalid response; the caller owns the returned document.
    /// </summary>
-   private static JsonDocument ParseDocument(HttpResponseMessage response)
+   private JsonDocument ParseDocument(HttpResponseMessage response)
    {
       try
       {
@@ -654,13 +832,20 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          try
          {
             if(document.RootElement.ValueKind != JsonValueKind.Object)
-            { throw InvalidResponse(); }
+            {
+               _diagnostics.Info($"Response rejected: expected a JSON object but received {document.RootElement.ValueKind} (content type {response.Content.Headers.ContentType?.MediaType ?? "none"}). A sign-in page or proxy error page in place of the API is a common cause.");
+               throw InvalidResponse();
+            }
             RejectDuplicateProperties(document.RootElement);
             return document;
          }
          catch { document.Dispose(); throw; }
       }
-      catch(JsonException) { throw InvalidResponse(); }
+      catch(JsonException exception)
+      {
+         _diagnostics.Info($"Response rejected: the body is not valid JSON ({exception.Message}; content type {response.Content.Headers.ContentType?.MediaType ?? "none"}). A sign-in page or proxy error page in place of the API is a common cause.");
+         throw InvalidResponse();
+      }
    }
 
 
@@ -688,15 +873,37 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
    /// <summary>Reads a required identity string that must be non-blank, at most 1024 characters and free of control characters.</summary>
-   private static string IdentityValue(JsonElement root, string name)
+   private string IdentityValue(JsonElement root, string name)
    {
       if(!root.TryGetProperty(name, out JsonElement value) || value.ValueKind != JsonValueKind.String
          || string.IsNullOrWhiteSpace(value.GetString()) || value.GetString()!.Length > 1024 || value.GetString()!.Any(char.IsControl))
       {
+         _diagnostics.Info($"Identity response rejected: '{name}' is missing, blank, not a string, too long or contains control characters.");
          throw InvalidResponse();
       }
       return value.GetString()!;
    }
+
+
+
+   /// <summary>
+   /// Records why an operation failed (type and message only) and returns false, so it can sit in an exception filter and
+   /// leave the exception, its stack and the catch order untouched. Cancellation requested by the caller is noted, not reported as a failure.
+   /// </summary>
+   private bool ReportFailure(string operation, Exception exception)
+   {
+      _diagnostics.Info(exception is OperationCanceledException
+         ? operation + " was cancelled."
+         : exception is QqqSessionException session
+            ? $"{operation} failed ({session.Failure}): {session.Message}"
+            : $"{operation} failed: {QqqSessionDiagnostics.Describe(exception)}");
+      return false;
+   }
+
+
+
+   /// <summary>Milliseconds since a Stopwatch timestamp, for request timing in the log.</summary>
+   private static string Elapsed(long started) => System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms";
 
 
 

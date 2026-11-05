@@ -23,7 +23,7 @@ public static class Program
       ["--apply-update", string request] => ExecuteAsync(() => MsiUpdateInstaller.ApplyAsync(request)),
       ["--auth-callback", string callback] => ExecuteAsync(async () =>
       {
-         await QqqBrowserCallback.ForwardAsync(callback);
+         await QqqBrowserCallback.ForwardFromHandlerAsync(callback);
          return 0;
       }),
       _ => ExecuteAsync(() => DispatchAsync(args)),

@@ -13,14 +13,15 @@ using Qqq.PrintAgent.Windows;
 namespace Qqq.PrintAgent;
 
 /// <summary>
-/// Log settings part of the main window: retention and daily size limits for the shared diagnostic log, and clearing it. The values are
-/// applied by the service, which owns the log files, so the service and companion always share one policy.
+/// Log settings part of the main window: retention, file size rollover, kept segments and debug detail for the shared diagnostic log, and
+/// clearing it. The values are applied by the service, which owns the log files, so the service and companion always share one policy.
 /// </summary>
 public sealed partial class MainWindow
 {
    /// <summary>
-   /// Shows the current retention and daily size limits (with how much of today's limit is used and whether it was reached) in a dialog and,
-   /// if the operator saves valid numbers, sends them to the service. Rotation happens at the start of the next local day.
+   /// Shows the current retention, file size limit, kept segments and debug switch (with the current file's size and how many times it rolled
+   /// over today) in a dialog and, if the operator saves valid values, sends them to the service. Files rotate at the start of the next local
+   /// day and whenever one reaches the size limit.
    /// </summary>
    private async void LogSettings_Click(object sender, RoutedEventArgs e)
    {
@@ -30,22 +31,28 @@ public sealed partial class MainWindow
          return;
       }
       NumberBox retention = new() { Header = "Retention (days)", Minimum = 1, Maximum = 365, Value = settings.RetentionDays, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
-      NumberBox limit = new() { Header = "Daily size limit (MiB)", Minimum = 1, Maximum = 100, Value = settings.MaxDailyMegabytes, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
+      NumberBox limit = new() { Header = "File size limit before rollover (MiB)", Minimum = 1, Maximum = 1024, Value = settings.MaxFileMegabytes, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
+      NumberBox segments = new() { Header = "Rolled-over segments kept per day", Minimum = 1, Maximum = 100, Value = settings.SegmentsPerDay, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
+      ToggleSwitch debug = new() { Header = "Debug logging", OnContent = "On: every request, response and frame is logged", OffContent = "Off: steps, warnings and errors only", IsOn = settings.DebugLogging };
       StackPanel content = new() { Spacing = 12 };
-      content.Children.Add(new TextBlock { Text = "Rotation: daily, at the start of the next local calendar day. These limits apply to both service and companion logs.", TextWrapping = TextWrapping.Wrap });
+      content.Children.Add(new TextBlock { Text = "Logs start a new file each local day and roll over to a numbered segment when a file reaches the size limit; logging never stops because of size. These settings apply to both service and companion logs.", TextWrapping = TextWrapping.Wrap });
       content.Children.Add(retention);
       content.Children.Add(limit);
-      string usage = $"Current daily log: {settings.CurrentDayBytes / (1024d * 1024d):0.0} MiB.";
-      content.Children.Add(new TextBlock { Text = usage + (settings.DailyLimitReached ? " The daily limit has been reached. Increase the limit, clear local logs, or wait until the next local day to resume diagnostic logging." : ""), TextWrapping = TextWrapping.Wrap });
+      content.Children.Add(segments);
+      content.Children.Add(debug);
+      content.Children.Add(new TextBlock { Text = "Debug logging adds request routes, status codes, timings and realtime frames. Credentials, documents and enrollment codes are never logged at any level.", TextWrapping = TextWrapping.Wrap, Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] });
+      string usage = $"Current log file: {settings.CurrentFileBytes / (1024d * 1024d):0.0} MiB; rolled over {settings.SegmentsToday} time(s) today.";
+      content.Children.Add(new TextBlock { Text = usage, TextWrapping = TextWrapping.Wrap });
       var dialog = new ContentDialog { Title = "Log settings", Content = content, PrimaryButtonText = "Save", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
       if(await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary)
       {
-         if(double.IsNaN(retention.Value) || double.IsNaN(limit.Value))
+         if(double.IsNaN(retention.Value) || double.IsNaN(limit.Value) || double.IsNaN(segments.Value))
          {
-            Feedback("Log settings not saved", "Enter valid retention and daily size values.", InfoBarSeverity.Warning);
+            Feedback("Log settings not saved", "Enter valid retention, file size and segment values.", InfoBarSeverity.Warning);
             return;
          }
-         await RunActionAsync(new PipeRequest("set-log-settings", LogSettings: new LogSettings((int)retention.Value, (int)limit.Value)));
+         App.Log.Info($"[Companion] Log settings saved: retention {(int)retention.Value} days, file size {(int)limit.Value} MiB, {(int)segments.Value} segments per day, debug logging {(debug.IsOn ? "on" : "off")}.");
+         await RunActionAsync(new PipeRequest("set-log-settings", LogSettings: new LogSettings((int)retention.Value, (int)limit.Value, (int)segments.Value, debug.IsOn)));
       }
    }
 

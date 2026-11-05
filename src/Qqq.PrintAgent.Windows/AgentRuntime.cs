@@ -7,7 +7,6 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
-using KofTwentyTwo.AppKit.Logging;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -23,7 +22,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private readonly Queue<AgentLogEntry> _logs = new();
    private readonly SemaphoreSlim _pollRequested = new(0, 1);
    private readonly SemaphoreSlim _connectionGate = new(1, 1);
-   private readonly IActivityLog _activityLog = AgentActivityLog.Create(directory);
+   private readonly AgentActivityLog _activityLog = AgentActivityLog.Create(directory);
    private DateTimeOffset? _lastSuccessfulPoll;
    private string? _failure;
    private int _pollIntervalSeconds = 5;
@@ -275,12 +274,23 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
    /// <summary>
    /// Records a service message in the in-memory ring shown to the companion (newest 100) and in the shared activity log.
-   /// The text is redacted first and capped at 1000 characters, so credentials and document content cannot reach either sink.
+   /// The text is redacted first and capped at 1000 characters (4000 for debug detail), so credentials and document content
+   /// cannot reach either sink. DEBUG entries go only to the file, only while debug logging is on, and never displace the
+   /// ring's operational entries.
    /// </summary>
    private void WriteLog(string level, string message)
    {
+      bool debug = string.Equals(level, "DEBUG", StringComparison.Ordinal);
+      if(debug && !_activityLog.IsDebugEnabled)
+      { return; }
       string sanitized = AgentActivityLog.Redact(message);
-      string bounded = sanitized.Length <= 1000 ? sanitized : sanitized[..1000];
+      int cap = debug ? 4000 : 1000;
+      string bounded = sanitized.Length <= cap ? sanitized : sanitized[..cap];
+      if(debug)
+      {
+         _activityLog.Debug("[Service] " + bounded);
+         return;
+      }
       lock(_stateLock)
       {
          _logs.Enqueue(new AgentLogEntry(DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), level, bounded));
@@ -289,12 +299,35 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             _logs.Dequeue();
          }
       }
-      if(string.Equals(level, "ERROR", StringComparison.Ordinal))
-      { _activityLog.Error("[Service] " + bounded); }
-      else
-      { _activityLog.Info("[Service] " + bounded); }
+      switch(level)
+      {
+         case "ERROR":
+            _activityLog.Error("[Service] " + bounded);
+            break;
+         case "WARN":
+            _activityLog.Warning("[Service] " + bounded);
+            break;
+         default:
+            _activityLog.Info("[Service] " + bounded);
+            break;
+      }
       log(bounded);
    }
+
+
+
+   /// <summary>Records a failure with its type and message at ERROR, and the full exception (stack and inner causes) as debug detail.</summary>
+   private void WriteFailure(string context, Exception exception)
+   {
+      WriteLog("ERROR", context + ": " + QqqSessionDiagnostics.Describe(exception));
+      WriteLog("DEBUG", context + " detail: " + exception);
+   }
+
+
+
+   /// <summary>The session client's progress sink: step entries at INFO, request detail at DEBUG, both through the redacting service log.</summary>
+   private QqqSessionDiagnostics SessionDiagnostics() => new(message => WriteLog("INFO", "[Session] " + message),
+      message => WriteLog("DEBUG", "[Session] " + message), () => _activityLog.IsDebugEnabled);
 
 
 
@@ -322,10 +355,10 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          }
          catch(Exception exception) when(exception is not OperationCanceledException || !token.IsCancellationRequested)
          {
-            WriteLog("ERROR", "Local command failed: " + exception.Message);
+            WriteLog("ERROR", "Local command failed: " + QqqSessionDiagnostics.Describe(exception));
             string message = exception is System.Security.Cryptography.CryptographicException
                ? "The saved connection cannot be opened. Open Settings, choose Connect this device or Sign in again, and use a fresh server enrollment code. Existing job history will be preserved."
-               : AgentActivityLog.Redact(exception.Message);
+               : AgentActivityLog.Redact(QqqSessionDiagnostics.Explain(exception));
             try
             {
                using var errorTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -372,6 +405,8 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          case "get-device-profile":
          case "get-log-settings":
          case "set-log-settings":
+         case "get-server-trust":
+         case "set-server-trust":
          case "clear-logs":
             return HandleSettingsCommand(request);
          case "prepare-update":

@@ -117,7 +117,7 @@ public sealed partial class AgentRuntime
                if(exception is QqqSessionException session && session.Failure is QqqSessionException.FailureKind.AuthenticationRequired or QqqSessionException.FailureKind.PermissionDenied)
                { BlockAuthorization(); }
             }
-            WriteLog("ERROR", "Realtime connection stopped: " + exception.Message);
+            WriteFailure("Realtime connection stopped", exception);
          }
          finally
          {
@@ -126,7 +126,12 @@ public sealed partial class AgentRuntime
             SignalPipeline();
          }
          RealtimeSettings settings = _realtimeSettings;
-         await _reconnectRequested.WaitAsync(ReconnectDelay(settings, _reconnectAttempts++, Random.Shared.NextDouble()), token).ConfigureAwait(false);
+         TimeSpan delay = ReconnectDelay(settings, _reconnectAttempts++, Random.Shared.NextDouble());
+         if(!token.IsCancellationRequested)
+         {
+            WriteLog("DEBUG", $"Next realtime connection attempt ({_reconnectAttempts}) in {delay.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s, or sooner on an explicit reconnect request.");
+         }
+         await _reconnectRequested.WaitAsync(delay, token).ConfigureAwait(false);
       }
    }
 
@@ -188,10 +193,12 @@ public sealed partial class AgentRuntime
       Task handshakeWatch = AwaitRealtimeHandshakeAsync(handshake.Token, lifetime.Token);
       try
       {
+         string[] capabilities = supportsMedia ? [.. RealtimeCapabilities, "printer-media-v1"] : RealtimeCapabilities;
+         WriteLog("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
          await channel.SendAsync("HELLO", new
          {
             agentVersion = PrintApiClient.AgentVersion,
-            capabilities = supportsMedia ? [.. RealtimeCapabilities, "printer-media-v1"] : RealtimeCapabilities,
+            capabilities,
             lastAppliedRevision = _controlState.DesiredState.Revision,
             lastSettingsRevision = settings.Revision,
             limits = RealtimeSettings.ClientLimits,
@@ -209,6 +216,44 @@ public sealed partial class AgentRuntime
          SignalPipeline();
          await lifetime.CancelAsync().ConfigureAwait(false);
          await Task.WhenAll(reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
+      }
+   }
+
+
+
+   /// <summary>Parses, validates and persists the settings carried by WELCOME or SETTINGS, refusing a revision older than the one in force, and hands them to the channel.</summary>
+   private void ApplyRealtimeSettings(RealtimeEnvelope envelope, AgentStore store, PrintingRealtimeChannel channel)
+   {
+      JsonElement value = string.Equals(envelope.Type, "WELCOME", StringComparison.Ordinal) ? envelope.Payload.GetProperty("settings") : envelope.Payload;
+      var settings = RealtimeSettings.Parse(value);
+      settings.Validate();
+      if(settings.Revision < _realtimeSettings.Revision)
+      { throw new InvalidDataException("Settings revision regressed."); }
+      store.SaveRealtimeSettings(settings);
+      _realtimeSettings = settings;
+      channel.UpdateSettings(settings);
+   }
+
+
+
+   /// <summary>
+   /// Marks the runtime ready when the acknowledged update is the newest one on the current connection and the desired
+   /// state did not change meanwhile; returns true only on the transition from not ready to ready, so it can be logged once.
+   /// </summary>
+   private bool MarkRealtimeReady(long generation, RealtimeStateUpdate update, AgentControlState saved)
+   {
+      lock(_stateLock)
+      {
+         if(generation != _connectionGeneration || update.Sequence != _stateSequence || saved.DesiredState.Revision != _controlState.DesiredState.Revision)
+         { return false; }
+         bool becameReady = !_realtimeReady;
+         _realtimeReady = true;
+         _transportConnectedBefore = true;
+         _controlReady = true;
+         _controlFailure = null;
+         _failure = null;
+         _reconnectAttempts = 0;
+         return becameReady;
       }
    }
 
@@ -272,6 +317,7 @@ public sealed partial class AgentRuntime
    {
       lock(_stateLock)
       { _lastSuccessfulPoll = ObservationTime; _heartbeatFailure = null; }
+      WriteLog("DEBUG", $"Realtime frame received: {envelope.Type}.");
       if(envelope.Type is "WELCOME" or "PONG")
       {
          string? serverTime = envelope.Payload.GetProperty("serverTime").GetString();
@@ -304,6 +350,7 @@ public sealed partial class AgentRuntime
             break;
          case "ERROR":
             string code = envelope.Payload.GetProperty("code").GetString() ?? "UNKNOWN";
+            WriteLog("WARN", $"The server sent a realtime ERROR frame with code {code}{(envelope.Payload.TryGetProperty("message", out JsonElement detail) && detail.ValueKind == JsonValueKind.String ? ": " + detail.GetString() : "")}.");
             if(code is "AUTHENTICATION_REQUIRED" or "PERMISSION_DENIED" or "AUTHORIZATION_REQUIRED")
             { BlockAuthorization(); }
             throw new IOException("Realtime server response: " + code);
@@ -364,34 +411,18 @@ public sealed partial class AgentRuntime
             { if(generation != _connectionGeneration) { throw new OperationCanceledException(token); } }
             using var store = new AgentStore(directory);
             if(envelope.Type is "WELCOME" or "SETTINGS")
-            {
-               JsonElement value = string.Equals(envelope.Type, "WELCOME", StringComparison.Ordinal) ? envelope.Payload.GetProperty("settings") : envelope.Payload;
-               var settings = RealtimeSettings.Parse(value);
-               settings.Validate();
-               if(settings.Revision < _realtimeSettings.Revision)
-               { throw new InvalidDataException("Settings revision regressed."); }
-               store.SaveRealtimeSettings(settings);
-               _realtimeSettings = settings;
-               channel.UpdateSettings(settings);
-            }
+            { ApplyRealtimeSettings(envelope, store, channel); }
             lock(_stateLock)
             { saved = _controlState; }
             store.SaveControlState(saved);
          }
          finally { _connectionGate.Release(); }
          await channel.SendAsync("STATE_APPLIED", new { lastAppliedRevision = saved.DesiredState.Revision, lastSettingsRevision = _realtimeSettings.Revision }, acknowledged: true, token: token).ConfigureAwait(false);
-         lock(_stateLock)
-         {
-            if(generation == _connectionGeneration && update.Sequence == _stateSequence && saved.DesiredState.Revision == _controlState.DesiredState.Revision)
-            {
-               _realtimeReady = true;
-               _transportConnectedBefore = true;
-               _controlReady = true;
-               _controlFailure = null;
-               _failure = null;
-               _reconnectAttempts = 0;
-            }
-         }
+         bool becameReady = MarkRealtimeReady(generation, update, saved);
+         if(becameReady)
+         { WriteLog("INFO", $"Realtime channel ready after {envelope.Type}: settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision}. Connected to the print server."); }
+         else
+         { WriteLog("DEBUG", $"Realtime {envelope.Type} applied and acknowledged (settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision})."); }
          SignalPipeline();
          RequestStatusSynchronization();
          RequestQueueRefresh();

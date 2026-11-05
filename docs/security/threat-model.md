@@ -35,14 +35,15 @@ The QQQ server supplies assigned document bytes over HTTPS. The Windows LocalSys
 | Rendering/driver execution | Native Windows PDF/GDI/spooler APIs; bounded render dimensions | Disposable child with bounded timeouts and parent-exit cleanup; child retains service privileges, so this is fault isolation, not a security sandbox |
 | RAW ZPL | Explicit compatible queue, trusted server workflow | ZPL can contain printer-control commands; not a sandboxed format |
 | Duplicate output | Persistent receipts and events; uncertain submissions require review | Database and physical printer cannot share a transaction |
-| Tray snapshot/logs | No device credential or document bytes; bounded recent jobs/logs | IDs/errors remain operational data and must be reviewed before sharing |
+| Tray snapshot/logs | No device credential or document bytes; bounded recent jobs/logs; debug logging adds routes, status codes, timings, frame types and certificate identities, never secrets | IDs/errors remain operational data and must be reviewed before sharing |
+| Server certificate trust | Windows machine-store validation for the service and user-store validation for the companion; rejections are logged with the policy error and certificate identity | An administrator may enable "Allow untrusted server certificate" for one named server origin (scheme, host and port) for development; it accepts any certificate (including a forged one) from that server only until turned off, is persisted in the protected store, never applies to another server, and every session created under it is logged with a warning |
 | Software distribution | Public source, pinned actions/dependencies, audited locked restore, checksums and exact-release attestations | Published prereleases remain unsigned; source checks do not qualify installed behavior |
 
 ## Data handling
 
 The service owns `connection.dpapi`, `journal.db` and its WAL. The MSI retains state through uninstall/reinstall. Revoke/decommission the device and resolve pending jobs before deliberately deleting retained state. Only delivered terminal detail whose failures were reviewed is pruned; final-state evidence is retained. Never publish raw state or customer documents.
 
-Service and companion persist serialized, credential-redacted AppKit logs with 30-day retention; recent job snapshots come from durable connection-scoped metadata. Tray colors describe observed connectivity/queue state, not a guarantee of physical printer readiness or completed output.
+Service and companion persist serialized, credential-redacted AppKit logs with 30-day retention, rolling a day's file over to numbered segments at a configurable size (default 100 MiB, at most 10 segments kept per day) rather than suppressing entries; recent job snapshots come from durable connection-scoped metadata. Tray colors describe observed connectivity/queue state, not a guarantee of physical printer readiness or completed output.
 
 ## Follow-up
 

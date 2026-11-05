@@ -12,9 +12,10 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// Retention, daily size cap and clearing for the shared activity log. The service and the companion write the same files,
+/// Retention, size rollover and clearing for the shared activity log. The service and the companion write the same files,
 /// so every change here happens under one cross-process lock file, and every path is checked for links so a planted
-/// link cannot redirect a write or a delete outside the log directory.
+/// link cannot redirect a write or a delete outside the log directory. A file that reaches its size limit is renamed to a
+/// numbered segment of the same day and a fresh file starts; logging never stops because of size.
 /// </summary>
 public sealed partial class AgentActivityLog
 {
@@ -23,13 +24,17 @@ public sealed partial class AgentActivityLog
 
 
 
-   /// <summary>Returns the saved retention and size limits together with today's file size and whether today's cap was reached, for the Settings page.</summary>
+   /// <summary>Returns the saved retention, size and debug settings together with the current file's size and how many segments rolled over today, for the Settings page.</summary>
    public static LogSettings GetSettings(string directory)
    {
       AgentActivityLog log = new(directory);
       using FileStream ownership = log.AcquireOwnership();
       LogSettings settings = log.ReadSettings();
-      return settings with { CurrentDayBytes = File.Exists(log.CurrentLogFilePath) ? new FileInfo(log.CurrentLogFilePath).Length : 0, DailyLimitReached = log.IsCapped(settings) };
+      return settings with
+      {
+         CurrentFileBytes = File.Exists(log.CurrentLogFilePath) ? new FileInfo(log.CurrentLogFilePath).Length : 0,
+         SegmentsToday = log.Segments(DateOnly.FromDateTime(DateTime.Now)).Count,
+      };
    }
 
 
@@ -51,11 +56,13 @@ public sealed partial class AgentActivityLog
       {
          using(FileStream stream = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
          {
-            JsonSerializer.Serialize(stream, new LogSettings(settings.RetentionDays, settings.MaxDailyMegabytes), PrintApiClient.JsonOptions);
+            JsonSerializer.Serialize(stream, new LogSettings(settings.RetentionDays, settings.MaxFileMegabytes, settings.SegmentsPerDay, settings.DebugLogging), PrintApiClient.JsonOptions);
             stream.Flush(flushToDisk: true);
          }
          File.Move(temporary, path, overwrite: true);
+         log._cachedSettings = null;
          log.PruneOwnedLogs(settings.RetentionDays);
+         log.TrimSegments(DateOnly.FromDateTime(DateTime.Now), settings.SegmentsPerDay);
       }
       finally
       {
@@ -68,7 +75,7 @@ public sealed partial class AgentActivityLog
 
 
 
-   /// <summary>Deletes only this application's dated log files, under the same cross-process append lock.</summary>
+   /// <summary>Deletes only this application's dated log files and rolled segments (and any cap marker left by an earlier version), under the same cross-process append lock.</summary>
    public static int ClearLogs(string directory)
    {
       AgentActivityLog log = new(directory);
@@ -79,9 +86,10 @@ public sealed partial class AgentActivityLog
          File.Delete(path);
          count++;
       }
-      foreach(string path in log.OwnedCapMarkers())
+      foreach(string path in Directory.EnumerateFiles(log.LogDirectory, "qqq-print-agent-*.log.capped", SearchOption.TopDirectoryOnly))
       {
-         File.Delete(path);
+         if(!File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+         { File.Delete(path); }
       }
       return count;
    }
@@ -114,13 +122,15 @@ public sealed partial class AgentActivityLog
 
 
 
-   /// <summary>Accepts only retention of 1 to 365 days and a daily size of 1 to 100 MiB, the ranges the Settings page offers.</summary>
+   /// <summary>Accepts only retention of 1 to 365 days, a file size of 1 to 1024 MiB and 1 to 100 kept segments per day, the ranges the Settings page offers.</summary>
    private static void ValidateSettings(LogSettings settings)
    {
       ArgumentOutOfRangeException.ThrowIfLessThan(settings.RetentionDays, 1, nameof(settings));
       ArgumentOutOfRangeException.ThrowIfGreaterThan(settings.RetentionDays, 365, nameof(settings));
-      ArgumentOutOfRangeException.ThrowIfLessThan(settings.MaxDailyMegabytes, 1, nameof(settings));
-      ArgumentOutOfRangeException.ThrowIfGreaterThan(settings.MaxDailyMegabytes, 100, nameof(settings));
+      ArgumentOutOfRangeException.ThrowIfLessThan(settings.MaxFileMegabytes, 1, nameof(settings));
+      ArgumentOutOfRangeException.ThrowIfGreaterThan(settings.MaxFileMegabytes, 1024, nameof(settings));
+      ArgumentOutOfRangeException.ThrowIfLessThan(settings.SegmentsPerDay, 1, nameof(settings));
+      ArgumentOutOfRangeException.ThrowIfGreaterThan(settings.SegmentsPerDay, 100, nameof(settings));
    }
 
 
@@ -151,17 +161,54 @@ public sealed partial class AgentActivityLog
 
 
 
-   /// <summary>Lists only files named like this application's dated logs and that are not links, so clearing or pruning can never touch an unrelated file.</summary>
+   /// <summary>Lists only files named like this application's dated logs or their numbered segments, and that are not links, so clearing or pruning can never touch an unrelated file.</summary>
    private IEnumerable<string> OwnedLogs()
    {
       foreach(string path in Directory.EnumerateFiles(LogDirectory, "qqq-print-agent-*.log", SearchOption.TopDirectoryOnly))
       {
-         string stamp = Path.GetFileNameWithoutExtension(path)[16..];
-         if(DateOnly.TryParseExact(stamp, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _) && !File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+         if(TryParseStamp(path, out _, out _) && !File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
          {
             yield return path;
          }
       }
+   }
+
+
+
+   /// <summary>
+   /// Reads the day and segment number from an owned log name: qqq-print-agent-yyyy-MM-dd.log is segment 0 (the live file) and
+   /// qqq-print-agent-yyyy-MM-dd.N.log (N from 1) is a rolled segment of that day. Anything else is not ours.
+   /// </summary>
+   private static bool TryParseStamp(string path, out DateOnly day, out int segment)
+   {
+      day = default;
+      segment = 0;
+      string name = Path.GetFileNameWithoutExtension(path);
+      if(name.Length < 26)
+      { return false; }
+      string stamp = name[16..];
+      string date = stamp.Length > 10 ? stamp[..10] : stamp;
+      if(!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day))
+      { return false; }
+      if(stamp.Length == 10)
+      { return true; }
+      return stamp[10] == '.' && int.TryParse(stamp[11..], NumberStyles.None, CultureInfo.InvariantCulture, out segment) && segment > 0
+         && stamp[11..].Length <= 9 && stamp[11] != '0';
+   }
+
+
+
+   /// <summary>The rolled segments of one day, oldest first.</summary>
+   private List<(int Segment, string Path)> Segments(DateOnly day)
+   {
+      var segments = new List<(int Segment, string Path)>();
+      foreach(string path in OwnedLogs())
+      {
+         if(TryParseStamp(path, out DateOnly fileDay, out int segment) && fileDay == day && segment > 0)
+         { segments.Add((segment, path)); }
+      }
+      segments.Sort((left, right) => left.Segment.CompareTo(right.Segment));
+      return segments;
    }
 
 
@@ -180,16 +227,7 @@ public sealed partial class AgentActivityLog
       DateOnly cutoff = today.AddDays(-(retentionDays - 1));
       foreach(string path in OwnedLogs())
       {
-         var day = DateOnly.ParseExact(Path.GetFileNameWithoutExtension(path)[16..], "yyyy-MM-dd", CultureInfo.InvariantCulture);
-         if(day < cutoff)
-         {
-            File.Delete(path);
-         }
-      }
-      foreach(string path in OwnedCapMarkers())
-      {
-         string stamp = Path.GetFileName(path)[16..^11];
-         if(DateOnly.ParseExact(stamp, "yyyy-MM-dd", CultureInfo.InvariantCulture) < cutoff)
+         if(TryParseStamp(path, out DateOnly day, out _) && day < cutoff)
          {
             File.Delete(path);
          }
@@ -212,56 +250,49 @@ public sealed partial class AgentActivityLog
 
 
    /// <summary>
-   /// Decides whether today's file has room for one more entry. It allows a margin for the prefix AppKit adds, writes one
-   /// visible warning when the limit is first reached (so the cap is never silent), and leaves a marker so later entries
-   /// are suppressed cheaply until the next local day, a higher limit or clearing. Printing is never affected.
+   /// Rolls today's file over when the next entry would push it past the size limit: the live file is renamed to the next
+   /// numbered segment of the day, the oldest segments beyond the kept count are deleted, and the entry then lands in a
+   /// fresh file. The caller holds the cross-process lock and the AppKit writer opens the file per append, so the rename is
+   /// safe; if another reader (such as the log viewer) holds the file, the rename is skipped and retried on the next entry
+   /// rather than losing the entry. Printing is never affected.
    /// </summary>
-   private bool CanAppend(string message, LogSettings settings)
+   private void RotateIfNeeded(string message, LogSettings settings)
    {
       RejectLink(CurrentLogFilePath);
-      if(IsCapped(settings))
-      {
-         return false;
-      }
-      long length = File.Exists(CurrentLogFilePath) ? new FileInfo(CurrentLogFilePath).Length : 0;
+      if(!File.Exists(CurrentLogFilePath))
+      { return; }
+      long length = new FileInfo(CurrentLogFilePath).Length;
       // AppKit adds a short ASCII timestamp/severity prefix and a newline.
-      long limit = settings.MaxDailyMegabytes * 1024L * 1024L;
+      long limit = settings.MaxFileMegabytes * 1024L * 1024L;
       if(length + Encoding.UTF8.GetByteCount(message) + 640 <= limit)
-      {
-         return true;
-      }
-      if(length + 512 <= limit)
-      {
-         _log.Warning("Daily diagnostic limit reached; further entries are suppressed. Increase the limit or clear logs in Settings, or wait for the next local day. Printing continues.");
-      }
-      string marker = CurrentLogFilePath + ".capped";
-      RejectLink(marker);
-      File.WriteAllText(marker, settings.MaxDailyMegabytes.ToString(CultureInfo.InvariantCulture));
-      return false;
+      { return; }
+      var today = DateOnly.FromDateTime(DateTime.Now);
+      List<(int Segment, string Path)> segments = Segments(today);
+      int next = segments.Count == 0 ? 1 : segments[^1].Segment + 1;
+      string archive = Path.Combine(LogDirectory, "qqq-print-agent-" + today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "." + next.ToString(CultureInfo.InvariantCulture) + ".log");
+      RejectLink(archive);
+      try
+      { File.Move(CurrentLogFilePath, archive); }
+      catch(IOException)
+      { return; }
+      TrimSegments(today, settings.SegmentsPerDay);
+      _log.Info("[Log] Rolled over: the previous " + (length / (1024d * 1024d)).ToString("0.0", CultureInfo.InvariantCulture) + " MiB segment is now "
+         + Path.GetFileName(archive) + "; up to " + settings.SegmentsPerDay.ToString(CultureInfo.InvariantCulture) + " segment(s) per day are kept.");
    }
 
 
 
-   /// <summary>True when today's cap marker exists and records the limit now in force; a marker written under a different limit is stale, so raising the limit resumes logging at once.</summary>
-   private bool IsCapped(LogSettings settings)
+   /// <summary>Deletes the oldest rolled segments of a day beyond the kept count. A segment another process holds open is skipped and retried on the next rollover.</summary>
+   private void TrimSegments(DateOnly day, int keep)
    {
-      string marker = CurrentLogFilePath + ".capped";
-      RejectLink(marker);
-      return File.Exists(marker) && new FileInfo(marker).Length <= 64
-         && string.Equals(File.ReadAllText(marker), settings.MaxDailyMegabytes.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
-   }
-
-
-
-   /// <summary>Lists only cap markers named like this application's dated logs and that are not links, mirroring the log listing.</summary>
-   private IEnumerable<string> OwnedCapMarkers()
-   {
-      foreach(string path in Directory.EnumerateFiles(LogDirectory, "qqq-print-agent-*.log.capped", SearchOption.TopDirectoryOnly))
+      List<(int Segment, string Path)> segments = Segments(day);
+      for(int index = 0; index < segments.Count - keep; index++)
       {
-         string stamp = Path.GetFileName(path)[16..^11];
-         if(DateOnly.TryParseExact(stamp, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _) && !File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+         try
+         { File.Delete(segments[index].Path); }
+         catch(IOException)
          {
-            yield return path;
+            // Held open by a reader; it is retried on the next rollover.
          }
       }
    }

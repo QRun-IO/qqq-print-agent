@@ -229,6 +229,7 @@ public sealed partial class MainWindow : Window, IDisposable
    private async Task ShowConnectionAsync()
    {
       ConnectionDialog.XamlRoot = Content.XamlRoot;
+      await LoadServerTrustAsync();
       await DialogGuard.ShowAsync(ConnectionDialog);
    }
 

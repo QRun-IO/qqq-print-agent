@@ -65,7 +65,7 @@ The client reports the Windows queue's machine-default media as a revision-bound
 | Transport | Outbound authenticated WSS plus same-origin HTTPS document streams, with automatic reconnect |
 | Capacity | Bounded download/print concurrency, staging, bandwidth and timeouts; one download and one print lane by default, ordered per printer |
 | Local history | 50-row pages; default detailed retention 30 days or latest 300,000 detailed jobs, with active/uncertain evidence and duplicate-suppression records retained |
-| Diagnostic logs | Daily rotation; defaults 30 days and 20 MiB per day, configurable in the client |
+| Diagnostic logs | Daily rotation plus size rollover to numbered segments; defaults 30 days, 100 MiB per file and 10 segments per day, with optional debug logging, configurable in the client |
 
 The client supports native printing extension `>=2.0.0 <3.0.0`; optional media negotiation requires stable extension 2.3 or later in that major. Limits are resource bounds, not a printer-throughput guarantee. See [Realtime settings](docs/REALTIME.md) and [History and log limits](docs/SCALABILITY.md).
 

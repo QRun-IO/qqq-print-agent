@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using KofTwentyTwo.AppKit.Logging;
 
@@ -13,6 +14,8 @@ namespace Qqq.PrintAgent.Windows;
 public sealed partial class AgentActivityLog : IActivityLog
 {
    private readonly FileActivityLog _log;
+   private LogSettings? _cachedSettings;
+   private long _cachedSettingsAt;
 
 
 
@@ -26,7 +29,38 @@ public sealed partial class AgentActivityLog : IActivityLog
 
 
    /// <summary>Uses the protected service directory; child files inherit its installed access controls.</summary>
-   public static IActivityLog Create(string directory) => new AgentActivityLog(directory);
+   public static AgentActivityLog Create(string directory) => new(directory);
+
+
+
+   /// <summary>
+   /// True while the saved settings ask for debug detail. The settings file is re-read at most every two seconds, so a toggle
+   /// in the companion reaches both processes quickly without a file read on every candidate debug line.
+   /// </summary>
+   public bool IsDebugEnabled
+   {
+      get
+      {
+         if(_cachedSettings is null || Stopwatch.GetElapsedTime(_cachedSettingsAt) > TimeSpan.FromSeconds(2))
+         {
+            try
+            { _cachedSettings = ReadSettings(); }
+            catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+            { _cachedSettings ??= new LogSettings(); }
+            _cachedSettingsAt = Stopwatch.GetTimestamp();
+         }
+         return _cachedSettings.DebugLogging;
+      }
+   }
+
+
+
+   /// <summary>Writes a debug entry (request-level detail) only while debug logging is enabled; the entry goes through the same locked, redacting path.</summary>
+   public void Debug(string message)
+   {
+      if(IsDebugEnabled)
+      { Write(_log.Info, "[DEBUG] " + message); }
+   }
 
 
 
@@ -103,10 +137,8 @@ public sealed partial class AgentActivityLog : IActivityLog
          LogSettings settings = ReadSettings();
          PruneOwnedLogs(settings.RetentionDays);
          string redacted = Redact(message);
-         if(CanAppend(redacted, settings))
-         {
-            append(redacted);
-         }
+         RotateIfNeeded(redacted, settings);
+         append(redacted);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
       {
