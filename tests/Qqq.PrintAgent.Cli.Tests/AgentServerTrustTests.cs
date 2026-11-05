@@ -33,6 +33,7 @@ public sealed class AgentServerTrustTests
       }
       finally
       {
+         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
          Directory.Delete(directory, recursive: true);
       }
    }
