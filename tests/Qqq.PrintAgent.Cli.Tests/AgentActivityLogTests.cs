@@ -19,7 +19,7 @@ public sealed class AgentActivityLogTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-print-log-tests", Guid.NewGuid().ToString("N"));
       try
       {
-         IActivityLog log = AgentActivityLog.Create(directory);
+         var log = AgentActivityLog.Create(directory);
          log.Info("[Companion] Authorization: Bearer synthetic-bearer deviceToken=synthetic-device enrollmentCode=\"synthetic-code\" https://operator:synthetic-password@example.invalid/");
          log.Error("[Service] Enrollment failed", new InvalidOperationException("password='synthetic-secret' contentBase64=synthetic-document"));
          string text = File.ReadAllText(log.CurrentLogFilePath);
@@ -50,8 +50,8 @@ public sealed class AgentActivityLogTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-print-log-tests", Guid.NewGuid().ToString("N"));
       try
       {
-         IActivityLog service = AgentActivityLog.Create(directory);
-         IActivityLog companion = AgentActivityLog.Create(directory);
+         var service = AgentActivityLog.Create(directory);
+         var companion = AgentActivityLog.Create(directory);
          Assert.Equal(service.CurrentLogFilePath, companion.CurrentLogFilePath);
          await Task.WhenAll(
             Task.Run(() =>

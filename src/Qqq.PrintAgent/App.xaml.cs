@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using KofTwentyTwo.AppKit.Logging;
 using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
 using Qqq.PrintAgent.Windows;
@@ -30,7 +29,7 @@ public partial class App : Application
 
 
    /// <summary>The app-wide activity log.</summary>
-   internal static IActivityLog Log { get; } = AgentActivityLog.Create(AgentStore.DefaultDirectory);
+   internal static AgentActivityLog Log { get; } = AgentActivityLog.Create(AgentStore.DefaultDirectory);
 
 
 

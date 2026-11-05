@@ -28,25 +28,11 @@ public sealed partial class QqqSessionClient
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
       try
       {
+         _diagnostics.Info($"Browser sign-in requested with callback {redirectUri.AbsoluteUri}.");
          QqqAuthenticationMetadata metadata = await AuthenticationCoreAsync(cancellationToken).ConfigureAwait(false);
          QqqAuthenticationMetadata.NativeGrant grant = ValidateNativeGrant(metadata);
-         if(!ValidRedirect(redirectUri) || !grant.RedirectUris.Contains(redirectUri.AbsoluteUri, StringComparer.Ordinal))
-         { throw QqqApiDiscovery.Configuration(); }
-         using HttpResponseMessage response = await SendCoreAsync(new Uri(grant.DiscoveryUrl), HttpMethod.Get, null, MetadataLimit,
-            null, null, null, cancellationToken, providerDiscovery: true).ConfigureAwait(false);
-         RequireSuccess(response);
-         using JsonDocument document = ParseDocument(response);
-         JsonElement provider = document.RootElement;
-         if(!provider.TryGetProperty("issuer", out JsonElement issuer) || issuer.ValueKind != JsonValueKind.String
-            || !string.Equals(issuer.GetString(), grant.Issuer, StringComparison.Ordinal)
-            || !provider.TryGetProperty("authorization_endpoint", out JsonElement authorization) || authorization.ValueKind != JsonValueKind.String
-            || !TryHttps(authorization.GetString(), out Uri? authorizationUri)
-            || !SameOrigin(authorizationUri!, new Uri(grant.Issuer))
-            || !provider.TryGetProperty("code_challenge_methods_supported", out JsonElement methods) || methods.ValueKind != JsonValueKind.Array
-            || !methods.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && string.Equals(value.GetString(), "S256", StringComparison.Ordinal)))
-         {
-            throw QqqApiDiscovery.Configuration();
-         }
+         RequireListedRedirect(grant, redirectUri);
+         Uri authorizationUri = await ProviderAuthorizationEndpointAsync(grant, cancellationToken).ConfigureAwait(false);
          string state = Base64Url(RandomNumberGenerator.GetBytes(32));
          string verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
          var query = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -61,15 +47,73 @@ public sealed partial class QqqSessionClient
             ["code_challenge_method"] = "S256",
             ["code_challenge"] = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))),
          };
-         var builder = new UriBuilder(authorizationUri!)
+         var builder = new UriBuilder(authorizationUri)
          {
             Query = string.Join("&", query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value))),
          };
          ClearSession();
          _browserLogin = new QqqBrowserLogin(builder.Uri, redirectUri, state, verifier, grant.Issuer, _timeProvider.GetTimestamp());
+         _diagnostics.Info($"Browser sign-in attempt started: the authorization page is {QqqSessionDiagnostics.Describe(builder.Uri)} (query not logged); waiting for the callback, which expires after five minutes.");
          return _browserLogin;
       }
+      catch(Exception exception) when(ReportFailure("Browser sign-in start", exception))
+      { throw; }
       finally { _gate.Release(); }
+   }
+
+
+
+   /// <summary>Refuses a callback address that is not an app link or private scheme, or that the server's native grant does not list exactly, saying which in the log.</summary>
+   private void RequireListedRedirect(QqqAuthenticationMetadata.NativeGrant grant, Uri redirectUri)
+   {
+      if(!ValidRedirect(redirectUri))
+      {
+         _diagnostics.Info($"Browser sign-in refused locally: the callback {redirectUri.AbsoluteUri} is not an HTTPS app link or dotted private scheme.");
+         throw QqqApiDiscovery.Configuration();
+      }
+      if(!grant.RedirectUris.Contains(redirectUri.AbsoluteUri, StringComparer.Ordinal))
+      {
+         _diagnostics.Info($"Browser sign-in refused: the server's native grant does not list the callback {redirectUri.AbsoluteUri}; it lists [{string.Join(", ", grant.RedirectUris)}]. Add this callback to the QQQ native session grant.");
+         throw QqqApiDiscovery.Configuration();
+      }
+   }
+
+
+
+   /// <summary>
+   /// Fetches the identity provider's discovery document and returns its authorization endpoint, after checking that the
+   /// provider names the same issuer QQQ advertises, an HTTPS endpoint on that issuer's origin, and S256 support. Each
+   /// shortfall is logged before the generic configuration failure is thrown.
+   /// </summary>
+   private async Task<Uri> ProviderAuthorizationEndpointAsync(QqqAuthenticationMetadata.NativeGrant grant, CancellationToken cancellationToken)
+   {
+      _diagnostics.Info($"Fetching the identity provider's discovery document from {QqqSessionDiagnostics.Describe(new Uri(grant.DiscoveryUrl))}.");
+      using HttpResponseMessage response = await SendCoreAsync(new Uri(grant.DiscoveryUrl), HttpMethod.Get, null, MetadataLimit,
+         null, null, null, cancellationToken, providerDiscovery: true).ConfigureAwait(false);
+      RequireSuccess(response);
+      using JsonDocument document = ParseDocument(response);
+      JsonElement provider = document.RootElement;
+      string? providerIssuer = provider.TryGetProperty("issuer", out JsonElement issuer) && issuer.ValueKind == JsonValueKind.String ? issuer.GetString() : null;
+      string? providerAuthorization = provider.TryGetProperty("authorization_endpoint", out JsonElement authorization) && authorization.ValueKind == JsonValueKind.String ? authorization.GetString() : null;
+      bool s256 = provider.TryGetProperty("code_challenge_methods_supported", out JsonElement methods) && methods.ValueKind == JsonValueKind.Array
+         && methods.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && string.Equals(value.GetString(), "S256", StringComparison.Ordinal));
+      _diagnostics.Info($"Provider discovery: issuer {providerIssuer ?? "(missing)"}, authorization endpoint {providerAuthorization ?? "(missing)"}, S256 {(s256 ? "supported" : "not listed")}.");
+      if(!string.Equals(providerIssuer, grant.Issuer, StringComparison.Ordinal))
+      {
+         _diagnostics.Info($"Browser sign-in refused: the provider's issuer '{providerIssuer}' does not exactly match the issuer QQQ advertises '{grant.Issuer}'.");
+         throw QqqApiDiscovery.Configuration();
+      }
+      if(!TryHttps(providerAuthorization, out Uri? authorizationUri) || !SameOrigin(authorizationUri!, new Uri(grant.Issuer)))
+      {
+         _diagnostics.Info("Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin.");
+         throw QqqApiDiscovery.Configuration();
+      }
+      if(!s256)
+      {
+         _diagnostics.Info("Browser sign-in refused: the provider does not list S256 among its supported code challenge methods.");
+         throw QqqApiDiscovery.Configuration();
+      }
+      return authorizationUri!;
    }
 
 
@@ -90,26 +134,55 @@ public sealed partial class QqqSessionClient
          QqqBrowserLogin? pending = _browserLogin;
          _browserLogin = null;
          TimeSpan age = _timeProvider.GetElapsedTime(attempt.StartedAt);
-         if(!ReferenceEquals(pending, attempt)
-            || age < TimeSpan.Zero || age > TimeSpan.FromMinutes(5)
-            || !callback.IsAbsoluteUri || callback.Fragment.Length != 0 || callback.UserInfo.Length != 0
+         _diagnostics.Info($"Browser callback received at {QqqSessionDiagnostics.Describe(callback)} after {age.TotalSeconds:0} s.");
+         if(!ReferenceEquals(pending, attempt))
+         {
+            _diagnostics.Info("Browser callback refused: it does not belong to the pending sign-in attempt (a new attempt was started, or the attempt was already used).");
+            throw InvalidResponse();
+         }
+         if(age < TimeSpan.Zero || age > TimeSpan.FromMinutes(5))
+         {
+            _diagnostics.Info("Browser callback refused: the attempt is older than five minutes. Start the browser sign-in again.");
+            throw InvalidResponse();
+         }
+         if(!callback.IsAbsoluteUri || callback.Fragment.Length != 0 || callback.UserInfo.Length != 0
             || !string.Equals(callback.GetLeftPart(UriPartial.Path), attempt.RedirectUri.AbsoluteUri, StringComparison.Ordinal))
          {
+            _diagnostics.Info($"Browser callback refused: its address does not match the registered callback {attempt.RedirectUri.AbsoluteUri} exactly, or it carries a fragment or user information.");
             throw InvalidResponse();
          }
          Dictionary<string, string> values = CallbackValues(callback);
-         if(values.ContainsKey("error") || !values.TryGetValue("state", out string? state) || !string.Equals(state, attempt.State, StringComparison.Ordinal)
-            || !values.TryGetValue("code", out string? code) || string.IsNullOrWhiteSpace(code) || code.Length > 4096
-            || (values.TryGetValue("iss", out string? issuer) && !string.Equals(issuer, attempt.Issuer, StringComparison.Ordinal)))
+         _diagnostics.Debug(() => $"Browser callback parameters: [{string.Join(", ", values.Keys)}] (values not logged).");
+         if(values.TryGetValue("error", out string? providerError))
          {
+            _diagnostics.Info($"Browser sign-in refused by the identity provider: error '{providerError}'{(values.TryGetValue("error_description", out string? description) ? " (" + description + ")" : "")}.");
             throw InvalidResponse();
          }
+         if(!values.TryGetValue("state", out string? state) || !string.Equals(state, attempt.State, StringComparison.Ordinal))
+         {
+            _diagnostics.Info("Browser callback refused: the state parameter is missing or does not match this attempt.");
+            throw InvalidResponse();
+         }
+         if(!values.TryGetValue("code", out string? code) || string.IsNullOrWhiteSpace(code) || code.Length > 4096)
+         {
+            _diagnostics.Info("Browser callback refused: no usable authorization code was returned.");
+            throw InvalidResponse();
+         }
+         if(values.TryGetValue("iss", out string? issuer) && !string.Equals(issuer, attempt.Issuer, StringComparison.Ordinal))
+         {
+            _diagnostics.Info($"Browser callback refused: the issuer '{issuer}' differs from the expected '{attempt.Issuer}'.");
+            throw InvalidResponse();
+         }
+         _diagnostics.Info("Browser callback validated; exchanging the authorization code with QQQ for a server-managed session.");
          using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/manageSession"), HttpMethod.Post,
             JsonBody(new { code, codeVerifier = attempt.Verifier, redirectUri = attempt.RedirectUri.AbsoluteUri, authenticationFlow = QqqAuthenticationMetadata.NativeSessionFlow }),
             MetadataLimit, null, null, null, cancellationToken).ConfigureAwait(false);
          RequireSuccess(response);
          AdoptManagedSession(response);
+         _diagnostics.Info("Browser sign-in accepted; a server-managed session is now held.");
       }
+      catch(Exception exception) when(ReportFailure("Browser sign-in completion", exception))
+      { throw; }
       finally { _gate.Release(); }
    }
 
@@ -122,19 +195,46 @@ public sealed partial class QqqSessionClient
    /// </summary>
    private QqqAuthenticationMetadata.NativeGrant ValidateNativeGrant(QqqAuthenticationMetadata metadata)
    {
-      _discovery!.Validate(nativeSession: true);
+      _discovery!.Validate(nativeSession: true, report: _diagnostics.Info);
       QqqAuthenticationMetadata.NativeGrant? grant = metadata.Values?.NativeSessionLogin;
-      if(!string.Equals(Origin.Scheme, "https", StringComparison.Ordinal) || !string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal)
-         || grant is null || !string.Equals(grant.Flow, QqqAuthenticationMetadata.NativeSessionFlow, StringComparison.Ordinal)
-         || !string.Equals(grant.CodeChallengeMethod, "S256", StringComparison.Ordinal) || !string.Equals(grant.Prompt, "login", StringComparison.Ordinal)
-         || !TryHttps(grant.Issuer, out _) || !TryHttps(grant.DiscoveryUrl, out _)
-         || string.IsNullOrWhiteSpace(metadata.Values!.ClientId) || metadata.Values.ClientId.Length > 1024
-         || string.IsNullOrWhiteSpace(metadata.Values.Scopes) || !metadata.Values.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("openid", StringComparer.Ordinal)
-         || grant.RedirectUris is null || grant.RedirectUris.Count is < 1 or > 32
-         || grant.RedirectUris.Any(value => !Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) || !ValidRedirect(uri)))
+      var problems = new List<string>();
+      if(!string.Equals(Origin.Scheme, "https", StringComparison.Ordinal))
+      { problems.Add("the server origin is not HTTPS"); }
+      if(!string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
+      { problems.Add($"authentication type is '{metadata.Type}', not OAUTH2"); }
+      if(grant is null)
+      { problems.Add("no nativeSessionLogin grant is published"); }
+      else
       {
+         if(!string.Equals(grant.Flow, QqqAuthenticationMetadata.NativeSessionFlow, StringComparison.Ordinal))
+         { problems.Add($"grant flow is '{grant.Flow}', expected {QqqAuthenticationMetadata.NativeSessionFlow}"); }
+         if(!string.Equals(grant.CodeChallengeMethod, "S256", StringComparison.Ordinal))
+         { problems.Add($"code challenge method is '{grant.CodeChallengeMethod}', expected S256"); }
+         if(!string.Equals(grant.Prompt, "login", StringComparison.Ordinal))
+         { problems.Add($"prompt is '{grant.Prompt}', expected login"); }
+         if(!TryHttps(grant.Issuer, out _))
+         { problems.Add($"issuer '{grant.Issuer}' is not a plain HTTPS address"); }
+         if(!TryHttps(grant.DiscoveryUrl, out _))
+         { problems.Add($"discovery address '{grant.DiscoveryUrl}' is not a plain HTTPS address"); }
+         if(grant.RedirectUris is null || grant.RedirectUris.Count is < 1 or > 32)
+         { problems.Add($"{grant.RedirectUris?.Count ?? 0} redirect address(es) listed; expected 1 to 32"); }
+         else
+         {
+            string[] invalid = [.. grant.RedirectUris.Where(value => !Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) || !ValidRedirect(uri))];
+            if(invalid.Length != 0)
+            { problems.Add("redirect address(es) not an HTTPS app link or dotted private scheme: " + string.Join(", ", invalid)); }
+         }
+      }
+      if(string.IsNullOrWhiteSpace(metadata.Values?.ClientId) || metadata.Values.ClientId.Length > 1024)
+      { problems.Add("client id is missing or too long"); }
+      if(string.IsNullOrWhiteSpace(metadata.Values?.Scopes) || !metadata.Values.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("openid", StringComparer.Ordinal))
+      { problems.Add($"scopes '{metadata.Values?.Scopes}' do not include openid"); }
+      if(problems.Count != 0)
+      {
+         _diagnostics.Info("Native browser sign-in grant rejected: " + string.Join("; ", problems) + ".");
          throw QqqApiDiscovery.Configuration();
       }
+      _diagnostics.Info($"Native browser sign-in grant accepted: issuer {grant!.Issuer}, {grant.RedirectUris!.Count} redirect address(es).");
       return grant;
    }
 

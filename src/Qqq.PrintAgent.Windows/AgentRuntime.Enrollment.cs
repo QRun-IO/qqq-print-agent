@@ -20,21 +20,28 @@ public sealed partial class AgentRuntime
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
-         IQqqSessionClient session = _sessionClient ?? throw new InvalidOperationException("Sign in to QQQ before enrolling this computer.");
+         WriteLog("INFO", $"Enrollment requested on {request.ServerUrl ?? "(no server)"} with a {(request.EnrollmentCode ?? "").Length}-character enrollment code (never logged), computer name {Environment.MachineName}, agent {PrintApiClient.AgentVersion}.");
+         IQqqSessionClient session = _sessionClient ?? throw Refused("no QQQ session is held; sign in first.", new InvalidOperationException("Sign in to QQQ before enrolling this computer."));
          if(!session.IsAuthenticated || request.ServerUrl is null || !SameOrigin(session.Origin, request.ServerUrl))
          {
-            throw new InvalidOperationException("Sign in to the selected QQQ server before enrollment.");
+            throw Refused(!session.IsAuthenticated ? "the held session is not authenticated." : request.ServerUrl is null ? "no server address was given."
+               : $"the session is for {session.Origin.Authority} but enrollment was requested on {request.ServerUrl}.", new InvalidOperationException("Sign in to the selected QQQ server before enrollment."));
          }
+         WriteLog("INFO", "Step 1 of 4: reading the signed-in identity.");
          QqqSessionBinding identity = await session.GetSessionIdentityAsync(token).ConfigureAwait(false);
          using var api = PrintApiClient.ForSession(session);
+         WriteLog("INFO", "Step 2 of 4: exchanging the enrollment code for a device credential.");
          EnrollmentResponse response = await api.EnrollAsync(new EnrollmentRequest(request.EnrollmentCode ?? "", Environment.MachineName, PrintApiClient.AgentVersion), token).ConfigureAwait(false);
+         WriteLog("INFO", $"Enrollment accepted: device {response.DeviceId}, poll interval {response.PollIntervalSeconds} s. Saving the pairing to protected storage.");
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
          store.SaveConfiguration(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds));
          QqqSessionBinding expected = identity with { DeviceId = response.DeviceId };
          store.SaveAuthentication(new AgentAuthentication(expected, session.ExportCredential()));
          ResetConnectionState();
+         WriteLog("INFO", "Step 3 of 4: binding the new device to the session and confirming the identity.");
          QqqSessionBinding actual = await session.BindDeviceAsync(new QqqDeviceCredential(response.DeviceId, response.DeviceToken), cancellationToken: token).ConfigureAwait(false);
          RequireSameIdentity(expected, actual);
+         WriteLog("INFO", "Step 4 of 4: activating the session for printing.");
          ActivateSession(session, actual, store);
          lock(_stateLock)
          {
@@ -44,6 +51,20 @@ public sealed partial class AgentRuntime
          WakePoll();
          return $"Enrolled device {response.DeviceId}";
       }
+      catch(Exception exception) when(exception is not InvalidOperationException)
+      {
+         WriteFailure("Enrollment failed; any existing pairing is unchanged", exception);
+         throw;
+      }
       finally { _authenticationGate.Release(); }
+   }
+
+
+
+   /// <summary>Logs why an enrollment request was refused before it reached the server, and returns the exception to throw.</summary>
+   private InvalidOperationException Refused(string reason, InvalidOperationException exception)
+   {
+      WriteLog("WARN", "Enrollment refused: " + reason);
+      return exception;
    }
 }

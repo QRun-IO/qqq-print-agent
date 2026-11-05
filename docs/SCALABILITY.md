@@ -50,7 +50,7 @@ Creation time is separate from the latest status-update time. Receipt captures t
 
 ## Logs
 
-AppKit retains its local-midnight daily filename rotation and shared log viewer. Machine-wide settings default to 30 days and 20 MiB per daily file; supported ranges are 1–365 days and 1–100 MiB. Service and companion use one cross-process lock for appends, settings, retention and clearing.
+AppKit retains its local-midnight daily filename rotation and shared log viewer. Machine-wide settings default to 30 days retention, 100 MiB per file and 10 rolled-over segments per day; supported ranges are 1–365 days, 1–1024 MiB and 1–100 segments. A file that reaches its limit is renamed to `qqq-print-agent-yyyy-MM-dd.N.log` and a fresh file continues, so the bound per day is the file size times the kept segments plus the live file, and no entry is ever suppressed. Debug logging (off by default) adds request-level detail. Service and companion use one cross-process lock for appends, rollover, settings, retention and clearing.
 
 At the daily limit, the backend writes a warning when space permits and persists a cap marker. Settings exposes current bytes and whether that day's limit was reached. Further diagnostics are suppressed until the next local day, an increased limit or explicit clearing; printing continues. The cap is visible rather than silently discarding ongoing errors. Detailed high-frequency logs may need a higher limit than the normal three status entries per job used by the synthetic workload.
 

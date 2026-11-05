@@ -24,6 +24,26 @@ public sealed partial class AgentRuntime
          case "set-log-settings":
             AgentActivityLog.SaveSettings(directory, request.LogSettings ?? throw new InvalidOperationException("Log settings are required."));
             return JsonSerializer.Serialize(AgentActivityLog.GetSettings(directory), PrintApiClient.JsonOptions);
+         case "get-server-trust":
+            using(var store = new AgentStore(directory, recoverUnreadableConfiguration: true))
+            {
+               return JsonSerializer.Serialize(store.LoadServerTrust(), PrintApiClient.JsonOptions);
+            }
+         case "set-server-trust":
+            ServerTrust trust = request.ServerTrust ?? throw new InvalidOperationException("Server trust settings are required.");
+            if(trust.AllowUntrustedCertificate && (trust.Origin is null || !Uri.TryCreate(trust.Origin, UriKind.Absolute, out Uri? trusted) || !string.Equals(ServerTrust.Normalize(trusted), trust.Origin, StringComparison.Ordinal)))
+            {
+               throw new InvalidOperationException("Enter the server address before allowing its untrusted certificate; the exception is saved for that one server only.");
+            }
+            trust = trust.AllowUntrustedCertificate ? trust : new ServerTrust();
+            using(var store = new AgentStore(directory, recoverUnreadableConfiguration: true))
+            {
+               store.SaveServerTrust(trust);
+            }
+            WriteLog(trust.AllowUntrustedCertificate ? "WARN" : "INFO", trust.AllowUntrustedCertificate
+               ? $"An administrator ALLOWED untrusted server certificates for {trust.Origin}. The service and companion will accept any certificate, including a forged one, from that server only; use this with a development server and turn it off afterwards."
+               : "Untrusted server certificates are refused again for every server (default). Only certificates Windows trusts for the LocalSystem account are accepted.");
+            return JsonSerializer.Serialize(trust, PrintApiClient.JsonOptions);
          case "clear-logs":
             int deleted = AgentActivityLog.ClearLogs(directory);
             lock(_stateLock)

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.0
+
+Diagnostics for new accounts and servers. The session client now narrates every step of discovery,
+authentication metadata, native grant validation, provider discovery, browser callback handling,
+password sign-in, session restore and renewal, identity checks, device binding and the realtime
+socket upgrade, and says exactly which server-side requirement is missing when it refuses a server;
+the service logs each sign-in, sign-out, enrollment, authorization and reconnect step and every
+failure with its inner causes; the companion logs its side and shows the failure reason in the
+dialog instead of a generic message. TLS certificate rejections are logged with the policy error,
+certificate identity and remedy. A new **Allow untrusted server certificate for this server** option (Connection
+settings, bound to one server origin, persisted in the protected store, honored by the service and
+companion, logged with a warning on every session) supports development servers with self-signed or
+private-authority certificates without weakening any other server connection.
+Log settings gain **Debug logging** (request routes, status codes, timings, realtime frames and
+full failure detail; never credentials) and replace the daily cap that silenced the log with size
+rollover: a file that reaches the limit (default 100 MiB, up to 1024) becomes a numbered segment and
+logging continues, keeping at most a configurable number of segments per day (default 10). No wire
+change; native printing stays 2.3 with wire payload v1.
+
 ## 1.0.1
 
 Packaging fix; no application, wire or dependency change. The `v1.0.0` release run passed
