@@ -1,6 +1,16 @@
 # TODO
 
-## Active: required-nonce native sign-in fix — 2026-11-05
+## Released: 1.2.1 — 2026-11-06
+
+Client 1.2.1 (source `3b9d75d`, GitHub release run 42223525626) is the current stable: signed generic and GG Forge installers on GitHub and, byte-identical, on Gitea. See [RELEASING](RELEASING.md).
+
+- [x] Nonce fix PR 11 (`abc3d0d`) and the OPTIONAL/discovery nonce change (`c59814d`) shipped in `v1.2.0`/`v1.2.1`.
+- [x] Release run 42128511730 on `v1.2.0` failed in `sign (gg-forge)`: `release.yml` array-splatted `-Edition`, binding it positionally to `-CertificateThumbprint`. Fixed in PR 12 (`3b9d75d`); `v1.2.0` stays immutable and unpublished.
+- [x] `v1.2.1` tagged on the merge commit, mirrored to GitHub, signed, assembled and published; checksums, signatures and provenance verified; same assets attached to the Gitea release.
+- [x] Post-merge main checks (ci, codeql, security, scripts, scorecard) green on `b583130`.
+- [ ] Actual native sign-in/sign-out acceptance against the shared provider (the shared-fixture discovery pass is not acceptance).
+
+## Historical: required-nonce native sign-in fix — 2026-11-05 (published in 1.2.x)
 
 The stable printing release below remains accepted historical evidence. The shared-server scanner Authentik requires this fix (`fix/native-login-required-nonce`, integrated on main `f954f11`).
 
@@ -9,7 +19,7 @@ The stable printing release below remains accepted historical evidence. The shar
 - [x] Integrated NativeCI Release build: zero warnings/errors; 352 Windows/CLI tests passed with no failures/skips; source notices passed for 300 tracked files. Existing method-length limit retained; Core.Tests excluded locally.
 - [x] Hosted CI including Core.Tests: GitHub CI on the editions branch carrying this fix passed 182 Core and 352 Windows/CLI tests (run 42078731426, 2026-11-05).
 - [ ] Real shared-provider native login acceptance.
-- [ ] Final published build.
+- [x] Final published build: 1.2.1 (see above).
 
 ## Closed product release — 2026-11-04
 

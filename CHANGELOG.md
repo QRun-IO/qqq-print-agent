@@ -36,6 +36,8 @@ reset with the connection. The activity log viewer has a Clear logs button, the 
 result banner above the form and shows a waiting state during browser sign-in, and the service's sign-in reply
 no longer repeats itself. No wire change.
 
+## 1.1.1
+
 Browser sign-in fix. The companion runs elevated, and its callback inbox pipe was keyed with
 PipeOptions.CurrentUserOnly to the elevated token's default owner (the Administrators group), so
 the protocol handler the browser launches as the ordinary user was refused with "Access to the
