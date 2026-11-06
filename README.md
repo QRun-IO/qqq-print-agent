@@ -8,13 +8,13 @@
 
 Print from **QQQ 4.1+** to local Windows printers without opening inbound network ports. The Windows service opens an authenticated two-way WebSocket to QQQ for commands, status and job notifications. Documents download separately over HTTPS, so a large transfer does not block the control connection. There is no job/control polling fallback.
 
-**Current stable release: [1.0.1](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1).** The service, companion, CLI and MSI are signed with Azure Artifact Signing. The matching server release is [qbit-printing 1.0.0](https://git.kof22.com/QRun-IO/qbit-printing/releases/tag/v1.0.0), using QQQ **4.1.0-RC.21** for native session login, with [protocol 1.0.0](https://git.kof22.com/QRun-IO/qqq-print-protocol/releases/tag/v1.0.0). Product versions are separate from native printing API **2.3**, wire payload **v1** and WebSocket subprotocol `qqq-printing.v1`.
+**Current stable release: [1.2.1](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.2.1)** (generic and GG Forge edition installers). The service, companion, CLI and MSI are signed with Azure Artifact Signing. The matching server release is [qbit-printing 1.1.0](https://git.kof22.com/QRun-IO/qbit-printing/releases/tag/v1.1.0), using QQQ **4.1.0-RC.21** for native session login, with [protocol 1.1.0](https://git.kof22.com/QRun-IO/qqq-print-protocol/releases/tag/v1.1.0); 1.2.1 also works unchanged against qbit-printing 1.0.0. Product versions are separate from native printing API **2.4** (2.3 compatible), wire payload **v1** and WebSocket subprotocol `qqq-printing.v1`.
 
 The setup/status application uses the same [KofTwentyTwo AppKit](https://git.kof22.com/KofTwentyTwo/AppKit) foundation as GCLO and MarkdownViewr.Windows. QQQ's mascot Query appears in About and branded warehouse test documents.
 
 ## Install and connect
 
-1. Download `QqqPrintAgent-v1.0.1-x64.msi` and `SHA256SUMS` from the [stable release](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1). Check the checksum and Authenticode signature as described in [Installation](docs/INSTALLATION.md).
+1. Download `QqqPrintAgent-v1.2.1-x64.msi` (or a client edition such as `GgForgePrintAgent-v1.2.1-x64.msi`; one edition per PC) and `SHA256SUMS` from the [stable release](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.2.1). Check the checksum and Authenticode signature as described in [Installation](docs/INSTALLATION.md).
 2. Install with administrator rights. The MSI installs the automatic Windows service and adds **QQQ Print Agent** under **Print Connectors** in Start.
 3. Open the app and accept its administrator prompt. Choose **Settings → Server connection → Sign in / Connection settings**, enter the QQQ HTTPS server address and select **Discover sign-in options**. Sign in using the advertised username/password or browser flow.
 4. For a new device, create an enrollment code in QQQ under **Printing → Print devices → Actions → Enroll a print device**, then enter it in the client. Existing pairings are reused or explicitly associated with the signed-in account; routine upgrades do not need a replacement pairing.
@@ -55,7 +55,7 @@ The client reports the Windows queue's machine-default media as a revision-bound
 
 ## Requirements and limits
 
-| Area | Stable 1.0.1 behavior |
+| Area | Stable 1.2.1 behavior |
 | --- | --- |
 | Server | QQQ 4.1+; recommended cohort QQQ 4.1.0-RC.21 and qbit-printing 1.0.0, native printing API 2.3 |
 | Windows | x64; Windows 11 used for hardware acceptance; API target Windows 10 build 19041+ |
@@ -87,7 +87,7 @@ git clone https://git.kof22.com/QRun-IO/qqq-print-protocol.git
 git -C qqq-print-protocol checkout 42c0d249f81395f00408ec0f92638dcbbf5deb03
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 1.0.1 -ReleaseVersion 1.0.1
+./build/Build-Installer.ps1 -ProductVersion 1.2.1 -ReleaseVersion 1.2.1
 ```
 
 Run verification only on a permitted Windows test host; host-specific restrictions remain in force. Local packaging is unsigned unless explicitly signed; stable release signing runs through the protected workflow. Neither command installs the service or sends a physical print.
@@ -96,7 +96,7 @@ Run verification only on a permitted Windows test host; host-specific restrictio
 
 ## Release evidence
 
-The signed 1.0.1 release passed its protected build, test, security, CodeQL, script and signing workflow. Published checksums, signatures and provenance were verified. The local 1.0.1 MSI upgrade completed successfully on 2026-11-03 with matching app/service/CLI versions and a running service. Dated hardware and earlier upgrade evidence remains in [Acceptance](docs/ACCEPTANCE.md); current release status is in [Release readiness](docs/RELEASE-READINESS.md). Earlier test results retain their original version and scope.
+The signed 1.2.1 release passed its protected build, test, security, CodeQL, script and per-edition signing workflow (run 42223525626); checksums, Authenticode signatures and provenance attestations were verified on the published generic and GG Forge installers, and the GG Forge installer was upgraded in place on the development PC with pairing, session and settings preserved. The earlier signed 1.0.1 release passed its protected build, test, security, CodeQL, script and signing workflow. Published checksums, signatures and provenance were verified. The local 1.0.1 MSI upgrade completed successfully on 2026-11-03 with matching app/service/CLI versions and a running service. Dated hardware and earlier upgrade evidence remains in [Acceptance](docs/ACCEPTANCE.md); current release status is in [Release readiness](docs/RELEASE-READINESS.md). Earlier test results retain their original version and scope.
 
 ## License and acknowledgments
 

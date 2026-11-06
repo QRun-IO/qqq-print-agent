@@ -1,4 +1,9 @@
-# Session state — 2026-11-05 (evening)
+# Session state — 2026-11-06
+
+## Current — 1.2.1 released; printing cohort protocol 1.1.0 / QBit 1.1.0 / client 1.2.1 complete
+
+Client 1.2.1 (source `3b9d75d18f9cc8b80f4cf6d5aae81cccf8d61243`, GitHub release run 42223525626) is published with signed generic and GG Forge installers on GitHub and, byte-identical, on Gitea; see [RELEASING](RELEASING.md). Protocol 1.1.0 and QBit 1.1.0 (extension 2.4.0, including Remove printers / Remove device) are published. The handoff for the Forge agent, with every version, artifact and hash, is [FORGE-HANDOFF-2026-11-05.md](FORGE-HANDOFF-2026-11-05.md); Forge adoption, pairing tests and installation on its station are that lane's. The installed GG Forge rc.3 on this PC updates to 1.2.1 from its own asset through the in-app updater (not yet exercised). Open elsewhere: Gitea CI quota/runner-fleet work (Praetor lane); docs PRs qbit-printing 29 and qqq-print-protocol 12.
+
 
 ## 1.2.1 — release-pipeline fix after the v1.2.0 tag produced no signed installer
 
