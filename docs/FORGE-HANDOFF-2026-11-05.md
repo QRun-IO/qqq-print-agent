@@ -11,12 +11,14 @@ TC22 → Echo → Z2) are yours. The previous cohort stays available for rollbac
 | Component | Version | Tag / source | Artifact | SHA-256 |
 | --- | --- | --- | --- | --- |
 | Protocol (contract + fixtures) | 1.1.0 | `v1.1.0` at `5005f3c9e27053b6c327bb923695012832c0fdcc` | https://git.kof22.com/QRun-IO/qqq-print-protocol/releases/tag/v1.1.0 — `qqq-print-protocol-1.1.0.tar.gz` | `541f0f3054cbfe9ce16e7dea58fad01b55a7f0e9246ade8f30df1bb826940703` |
-| Printing QBit (server) | **1.1.1**, native printing extension **2.4.0** (1.1.0 is superseded: do not adopt it) | `v1.1.1` at `2a561815fcec8b7c95e76bb4b36fba314f512027`, main run 5976 | Maven `com.kingsrook.qbits:qbit-printing:1.1.1` from `https://git.kof22.com/api/packages/QRun-IO/maven` (repository id `qrun-io`, reader token); same bytes on https://git.kof22.com/QRun-IO/qbit-printing/releases/tag/v1.1.1 | JAR `156720da6928f62d77101521a2953f6e1026d58d02e7fc7815a8c8fcbcedaefa`, POM `2fa451260a26f5b5ede30800d46c78050e223694d3d8dda640f9ca875d120ab0` |
+| Printing QBit (server) | **1.1.2**, native printing extension **2.4.0**, on QQQ **4.1.0-RC.22** from the Gitea registry (1.1.1 is the same code on RC.21 from Maven Central; 1.1.0 is superseded: do not adopt it) | `v1.1.2` at `f5639a98be9a2f15d4c61cf0955fe4ecef85824f`, push build 6435 + tag build 6475 | Maven `com.kingsrook.qbits:qbit-printing:1.1.2` from `https://git.kof22.com/api/packages/QRun-IO/maven` (repository id `qrun-io`, reader token); same bytes on https://git.kof22.com/QRun-IO/qbit-printing/releases/tag/v1.1.2 | JAR `786e6e570c5df29b01529562efb246a4f4562bb1d9fff6bea77d264e0d7536ce`, POM `7691a4e1cb7b03c7a559b0e2b92eacd92f86545b98bddafac86fc70f8602b03d` |
 | Windows print client | **1.2.1** (1.2.0 content + release-pipeline fix; tag v1.2.0 produced no installer) | `v1.2.1` at `3b9d75d18f9cc8b80f4cf6d5aae81cccf8d61243`, GitHub release run 42223525626 | Signed installers: `QqqPrintAgent-v1.2.1-x64.msi` (generic) and `GgForgePrintAgent-v1.2.1-x64.msi` (GG Forge edition), `SHA256SUMS`, on https://github.com/QRun-IO/qqq-print-agent/releases/tag/v1.2.1 and byte-identical on https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.2.1 | generic `09920872b3447f8679b404f2b5ebd7d9fe82204b8007db63d58e4287f436f2eb`, GG Forge `5ce489092c1403449174b8a35eda039cd452e8685cbfe436d99aea3e15a5d8b4`; Authenticode valid (CN=James Maes, Microsoft timestamp); GitHub provenance attestation verified |
 
 Previous cohort for rollback: protocol 1.0.0, QBit 1.0.0 (extension 2.3.0), Windows 1.0.1 / 1.1.1.
 
 **2026-11-06 update (QBit 1.1.1).** Forge's qualification of 1.1.0 found that the realtime upgrade fails before WELCOME behind an ingress that lowercases header names (the device id was read case-sensitively from the WebSocket context; the same defect exists in 1.0.0, which Forge ran with a local patch). 1.1.1 resolves the device once on the authorized upgrade and carries it on the connection, with a regression test that connects with lowercase header names. No contract change: the pairing matrix and everything else in this handoff is unchanged; replace the `1.0.0-forge…headers1` coordinate with the published 1.1.1 and drop the local patch.
+
+**2026-11-06 update (QBit 1.1.2, Gitea-only runtime).** James's direction: every QRun artifact resolves from the QRun-IO Gitea registry, no more Maven Central. 1.1.2 is the 1.1.1 code certified on QQQ **4.1.0-RC.22** (the core version Forge already pins; it exists only in the Gitea registry) with `-Pui-demo verify`, 200 tests, 0 failures, and published by the shared `ci-workflows` pipeline. `qqq-frontend-next` 1.0.0-RC.37 is also mirrored into the registry byte-for-byte from Central. Pin `com.kingsrook.qbits:qbit-printing:1.1.2` together with core 4.1.0-RC.22 and read both from `https://git.kof22.com/api/packages/QRun-IO/maven`; third-party libraries still come through the Maven Central mirror until the registry proxies them. No contract change; pairing matrix unchanged.
 
 ## What changed, by contract
 
@@ -44,8 +46,8 @@ Previous cohort for rollback: protocol 1.0.0, QBit 1.0.0 (extension 2.3.0), Wind
 | Server | Client | Expected |
 | --- | --- | --- |
 | QBit 1.0.0 (2.3.0) | 1.2.1 | No `printer-approval-v1` in HELLO; catalog fallback; everything else as 1.1.1 |
-| QBit 1.1.1 (2.4.0) | 1.0.1 / 1.1.1 | Four-capability HELLO at most; no PRINTERS frame; unchanged behaviour |
-| QBit 1.1.1 (2.4.0) | 1.2.1 | Five-capability HELLO; PRINTERS after inventory and on approval change; Printers page shows Approved / Awaiting approval live |
+| QBit 1.1.2 (2.4.0) | 1.0.1 / 1.1.1 | Four-capability HELLO at most; no PRINTERS frame; unchanged behaviour |
+| QBit 1.1.2 (2.4.0) | 1.2.1 | Five-capability HELLO; PRINTERS after inventory and on approval change; Printers page shows Approved / Awaiting approval live |
 
 ## Evidence
 
