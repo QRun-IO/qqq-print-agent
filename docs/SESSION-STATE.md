@@ -1,5 +1,9 @@
 # Session state — 2026-11-05 (evening)
 
+## 1.2.1 — release-pipeline fix after the v1.2.0 tag produced no signed installer
+
+Protocol 1.1.0 and QBit 1.1.0 are published (see below). PR 10 merged as `c8ea97e` and tag `v1.2.0` was mirrored; GitHub release run 42128511730 failed in `sign (gg-forge)` at "Publish and check the payload": the workflow splatted `-Edition gg-forge` as an array, which PowerShell binds positionally into `CertificateThumbprint`/`TimestampServer`, so `Build-Installer.ps1` refused `-PublishOnly`. Fixed with a hashtable splat (local reproduction of the step publishes the GG Forge payload); version bumped to 1.2.1 because `v1.2.0` is immutable and must not be reused. Next: merge, tag `v1.2.1` on Gitea, mirror, signed release, Gitea mirror of the assets, Forge handoff.
+
 ## Printer approval over the realtime channel (extension 2.4.0) — implemented across three repositories, merges pending
 
 - **Client (this repository), PR 10 head `f1ec404`** on `feat/client-editions-20261105`: operator-catalog fallback (2.3), `printer-approval-v1` negotiation and the authoritative `PRINTERS` frame (2.4), per-printer server state on the Printers page (Server column, summary, details), Clear logs button in the log viewer, pinned sign-in feedback banner, non-repeating sign-in reply. Hosted CI run 42116396114: 197 Core + 362 Windows tests, zero failures. Protocol fixture pin moved to `ac835f8b9396b641b525669249fdb4a1e2a50c99`.

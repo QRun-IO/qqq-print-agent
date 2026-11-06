@@ -2,7 +2,7 @@
 
 Gitea is primary for source branches, reviews and normal pull requests. GitHub is the automatic source shadow. The existing authorized [GitHub release workflow](../.github/workflows/release.yml), its CI/security dependencies and the GitHub release assets remain the signing and installed-updater bridge. Do not retire those Windows workflows or remove the feed as part of ordinary source migration.
 
-Current stable release: **[1.0.1 on Gitea](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1)** and the matching **[GitHub assets](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1)**. The protected [release run](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41532214447) completed signing and publication. The earlier immutable `v1.0.0` tag produced no signed installer; it must not be moved or reused.
+Current stable release: **[1.0.1 on Gitea](https://git.kof22.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1)** and the matching **[GitHub assets](https://github.com/QRun-IO/qqq-print-agent/releases/tag/v1.0.1)**. The protected [release run](https://github.com/QRun-IO/qqq-print-agent/actions/runs/41532214447) completed signing and publication. The earlier immutable `v1.0.0` and `v1.2.0` tags produced no signed installer (`v1.2.0`: the edition sign job's array splat, fixed in 1.2.1); they must not be moved or reused.
 
 ## Stable releases
 
