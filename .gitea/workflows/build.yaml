@@ -41,6 +41,8 @@ jobs:
         $env:PSModulePath = "$modules$([IO.Path]::PathSeparator)$env:PSModulePath"
         pwsh -NoProfile -File ./build/Analyze-Scripts.ps1
         Import-Module Pester -RequiredVersion 5.7.1
+        # The Pester suites assert on child processes' exit codes themselves.
+        $PSNativeCommandUseErrorActionPreference = $false
         $pester = New-PesterConfiguration
         $pester.Run.Path = @('build/Assert-Coverage.Tests.ps1', 'build/Analyze-Scripts.Tests.ps1', 'build/Install-Branded.Tests.ps1', 'build/Test-WindowsSdkInventory.Tests.ps1')
         $pester.Run.PassThru = $true
