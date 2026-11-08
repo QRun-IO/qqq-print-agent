@@ -8,7 +8,7 @@ jobs:
     uses: self:KofTwentyTwo/ci-workflows/.gitea/workflows/windows.yaml@v1
     secrets: inherit
     with:
-      runner: qqq-windows-vm6218
+      runner: qqq-windows-amd64
       commands: |
         $temp = $env:RUNNER_TEMP ?? [IO.Path]::GetTempPath()
         # Protocol fixtures pinned to the revision the verification expects.
