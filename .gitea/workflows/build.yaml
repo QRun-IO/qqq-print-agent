@@ -1,0 +1,65 @@
+name: build
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+jobs:
+  windows:
+    uses: self:KofTwentyTwo/ci-workflows/.gitea/workflows/windows.yaml@native-workflows
+    secrets: inherit
+    with:
+      runner: qqq-windows-vm6218
+      commands: |
+        $temp = $env:RUNNER_TEMP ?? [IO.Path]::GetTempPath()
+        # Protocol fixtures pinned to the revision the verification expects.
+        $protocol = Join-Path $temp "qqq-print-protocol-$env:GITHUB_RUN_ID"
+        git clone --quiet https://git.kof22.com/QRun-IO/qqq-print-protocol.git $protocol
+        git -C $protocol checkout --quiet ac835f8b9396b641b525669249fdb4a1e2a50c99
+        pwsh -NoProfile -File ./build/Verify.ps1 -ProtocolFixtures (Join-Path $protocol fixtures)
+        pwsh -NoProfile -File ./build/Test-WindowsSdkInventory.ps1 -VerifyPackages
+        pwsh -NoProfile -File ./build/Test-BrandedInstaller.ps1
+        pwsh -NoProfile -File ./build/Test-PackagingInputs.ps1
+        # Unsigned MSIs: the base product plus one branded installer per edition. A vX.Y.Z[-rc.N] tag sets the version.
+        $release = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '1.2.1' }
+        $product = $release -replace '-.*$', ''
+        pwsh -NoProfile -File ./build/Build-Installer.ps1 -ProductVersion $product -ReleaseVersion $release
+        $installers = @('QqqPrintAgent')
+        foreach ($folder in Get-ChildItem -LiteralPath editions -Directory | Sort-Object Name) {
+          pwsh -NoProfile -File ./build/Build-Installer.ps1 -ProductVersion $product -ReleaseVersion $release -Edition $folder.Name
+          $installers += (Get-Content -LiteralPath (Join-Path $folder.FullName 'edition.json') -Raw | ConvertFrom-Json).assetPrefix
+        }
+        New-Item -ItemType Directory -Path artifacts/release -Force | Out-Null
+        foreach ($prefix in $installers) {
+          Copy-Item -LiteralPath "artifacts/installer/$prefix-$product-x64.msi" -Destination "artifacts/release/$prefix-v$release-x64.msi"
+        }
+        Copy-Item -LiteralPath build/Install-Branded.ps1, docs/branding.example.json -Destination artifacts/release/
+        # PowerShell scripts: analyzer and Pester rejection-path tests with pinned modules saved to the job's temp directory.
+        $modules = Join-Path $temp "psmodules-$env:GITHUB_RUN_ID"
+        Save-PSResource -Name PSScriptAnalyzer -Version 1.25.0 -Repository PSGallery -TrustRepository -Path $modules
+        Save-PSResource -Name Pester -Version 5.7.1 -Repository PSGallery -TrustRepository -Path $modules
+        $env:PSModulePath = "$modules$([IO.Path]::PathSeparator)$env:PSModulePath"
+        pwsh -NoProfile -File ./build/Analyze-Scripts.ps1
+        Import-Module Pester -RequiredVersion 5.7.1
+        $pester = New-PesterConfiguration
+        $pester.Run.Path = @('build/Assert-Coverage.Tests.ps1', 'build/Analyze-Scripts.Tests.ps1', 'build/Install-Branded.Tests.ps1', 'build/Test-WindowsSdkInventory.Tests.ps1')
+        $pester.Run.PassThru = $true
+        if ((Invoke-Pester -Configuration $pester).Result -ne 'Passed') { throw 'Pester tests failed' }
+      artifacts: |
+        artifacts/release/*.msi
+        artifacts/release/Install-Branded.ps1
+        artifacts/release/branding.example.json
+  scripts:
+    uses: self:KofTwentyTwo/ci-workflows/.gitea/workflows/node.yaml@v1
+    with:
+      node-version: '24'
+      uv: true
+      install: npm ci --ignore-scripts --no-audit --no-fund
+      commands: |
+        uv sync --locked
+        uv run --locked --no-sync python .github/scripts/test-script-quality.py
+        uv run --locked --no-sync python .github/scripts/check-script-quality.py
+        npm run typecheck
+        npm run lint
+        python3 .github/scripts/test-source-headers.py
+        python3 .github/scripts/check-source-headers.py
+        node --test tools/virtual-agent/test/virtual-agent.test.mjs
