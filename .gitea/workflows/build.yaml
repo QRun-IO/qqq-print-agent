@@ -5,7 +5,7 @@ on:
     tags: ['v*']
 jobs:
   windows:
-    uses: self:KofTwentyTwo/ci-workflows/.gitea/workflows/windows.yaml@native-workflows
+    uses: self:KofTwentyTwo/ci-workflows/.gitea/workflows/windows.yaml@v1
     secrets: inherit
     with:
       runner: qqq-windows-vm6218
