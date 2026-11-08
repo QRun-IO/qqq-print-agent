@@ -35,6 +35,7 @@ jobs:
         Copy-Item -LiteralPath build/Install-Branded.ps1, docs/branding.example.json -Destination artifacts/release/
         # PowerShell scripts: analyzer and Pester rejection-path tests with pinned modules saved to the job's temp directory.
         $modules = Join-Path $temp "psmodules-$env:GITHUB_RUN_ID"
+        New-Item -ItemType Directory -Force -Path $modules | Out-Null
         Save-PSResource -Name PSScriptAnalyzer -Version 1.25.0 -Repository PSGallery -TrustRepository -Path $modules
         Save-PSResource -Name Pester -Version 5.7.1 -Repository PSGallery -TrustRepository -Path $modules
         $env:PSModulePath = "$modules$([IO.Path]::PathSeparator)$env:PSModulePath"
