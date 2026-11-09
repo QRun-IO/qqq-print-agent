@@ -19,7 +19,7 @@ jobs:
         pwsh -NoProfile -File ./build/Test-WindowsSdkInventory.ps1 -VerifyPackages
         pwsh -NoProfile -File ./build/Test-BrandedInstaller.ps1
         pwsh -NoProfile -File ./build/Test-PackagingInputs.ps1
-        whoami; (Get-Service msiserver).Status; sc.exe sdshow msiserver; try { Start-Service msiserver -ErrorAction Stop; 'msiserver started' } catch { 'msiserver start failed: ' + $_.Exception.Message }; (Get-Service msiserver).Status
+        $ErrorActionPreference = 'Continue'; sc.exe query msiserver; sc.exe qc msiserver; sc.exe sdshow msiserver; sc.exe start msiserver; Get-Item 'HKLM:\SYSTEM\CurrentControlSet\Services\msiserver' | Out-String; msiexec /? | Select-Object -First 1; $ErrorActionPreference = 'Stop'
         # Unsigned MSIs: the base product plus one branded installer per edition. A vX.Y.Z[-rc.N] tag sets the version.
         $release = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '1.2.1' }
         $product = $release -replace '-.*$', ''
