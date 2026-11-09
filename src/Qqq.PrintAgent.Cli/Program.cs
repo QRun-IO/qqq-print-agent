@@ -126,6 +126,10 @@ public static class Program
       };
       string response = await send(request);
       Console.WriteLine(response);
+      if(args[0] is "sign-out" && !response.StartsWith("Error:", StringComparison.Ordinal))
+      {
+         Console.WriteLine("The identity provider's browser session is not ended from the command line; use Sign out in the QQQ Print Agent app to end it too.");
+      }
       return response.StartsWith("Error:", StringComparison.Ordinal) ? 1 : 0;
    }
 

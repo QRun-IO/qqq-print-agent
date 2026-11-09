@@ -46,6 +46,16 @@ public sealed class QqqApiDiscovery
 
 
 
+   /// <summary>The UI API capability that says logout can return the identity provider's end-session data.</summary>
+   public const string NativeSessionLogoutFeature = "nativeSessionLogout";
+
+
+
+   /// <summary>True when the server is a plain 1.10+ release that advertises provider sign-out. The capability is additive and never inferred from native sign-in support.</summary>
+   public bool SupportsNativeSessionLogout => Features?.Contains(NativeSessionLogoutFeature, StringComparer.Ordinal) == true && SupportedVersion(ApiVersion, 10);
+
+
+
    /// <summary>True when the server advertises that it validates the native sign-in nonce at exchange.</summary>
    public bool ValidatesNativeSessionNonce => Features?.Contains(NonceValidationFeature, StringComparer.Ordinal) == true;
 

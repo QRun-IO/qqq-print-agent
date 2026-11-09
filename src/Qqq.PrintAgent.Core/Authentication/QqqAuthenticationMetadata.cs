@@ -22,6 +22,19 @@ public sealed class QqqAuthenticationMetadata
       public string BaseUrl { get; init; } = "";
       public string Scopes { get; init; } = "";
       public NativeGrant? NativeSessionLogin { get; init; }
+
+      /// <summary>The server's opt-in to provider sign-out (OIDC RP-initiated logout) with the exact callbacks it will accept; absent on servers that do not offer it.</summary>
+      public NativeLogout? NativeSessionLogout { get; init; }
+   }
+
+
+
+   /// <summary>The server's declaration that it can return the provider's end-session data at logout: flow name and the exact post-logout callbacks.</summary>
+   public sealed class NativeLogout
+   {
+      public const string RpInitiatedFlow = "OIDC_RP_INITIATED_LOGOUT";
+      public string Flow { get; init; } = "";
+      public IReadOnlyList<string> PostLogoutRedirectUris { get; init; } = [];
    }
 
 

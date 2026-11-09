@@ -234,7 +234,11 @@ public sealed partial class MainWindow
 
 
 
-   /// <summary>Asks the service to sign out and forget its session, then drops the window's own sign-in client. Pairing and job history are not removed.</summary>
+   /// <summary>
+   /// Asks the service to sign out and forget its session, then drops the window's own sign-in client. The identity provider is meant
+   /// to be invisible, so the service also returns the provider's own sign-out when the server offers one and this window opens it in
+   /// the browser: staying signed in to the provider would let the next sign-in skip the credential prompt. Pairing and job history are not removed.
+   /// </summary>
    private async void SignOut_Click(object sender, RoutedEventArgs e)
    {
       if(_busy)
@@ -243,11 +247,23 @@ public sealed partial class MainWindow
       try
       {
          App.Log.Info("[Companion] Sign-out requested; asking the service to end the session.");
-         string result = await _sendRequest(new PipeRequest("sign-out"));
+         string result = await _sendRequest(new PipeRequest("sign-out", PostLogoutRedirectUri: QqqBrowserCallback.RedirectUri));
          _signInClient?.Dispose();
          _signInClient = null;
-         App.Log.Info("[Companion] Service sign-out result: " + result);
-         Feedback("Account sign-out", result, result.StartsWith("Error:", StringComparison.Ordinal) ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);
+         PipeSignOutResult? outcome = ReadSignOutResult(result);
+         string message = outcome?.Message ?? result;
+         App.Log.Info("[Companion] Service sign-out result: " + message + (outcome?.ProviderLogout is null ? "" : " The identity provider sign-out is ready; opening it in the browser."));
+         InfoBarSeverity severity = message.StartsWith("Error:", StringComparison.Ordinal) ? InfoBarSeverity.Warning : InfoBarSeverity.Informational;
+         if(outcome?.ProviderLogout is { } providerLogout)
+         {
+            Feedback("Account sign-out", message + " Finish signing out of the identity provider on the page that opened in your browser.", severity);
+            bool providerEnded = await CompleteProviderSignOutAsync(providerLogout);
+            Feedback("Account sign-out", providerEnded ? message + " The identity provider session ended too, so the next sign-in asks for credentials."
+               : message + " The identity provider sign-out was opened in your browser but did not confirm; close that page and sign out there if it is still open.",
+               providerEnded ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+         }
+         else
+         { Feedback("Account sign-out", message, severity); }
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
       {
@@ -255,6 +271,46 @@ public sealed partial class MainWindow
          ServiceUnavailable();
       }
       finally { SetBusy(false); }
+   }
+
+
+
+   /// <summary>Reads the service's sign-out reply: structured text when a provider sign-out was requested, or null for a plain message or an error text.</summary>
+   private static PipeSignOutResult? ReadSignOutResult(string response)
+   {
+      if(response.StartsWith("Error:", StringComparison.Ordinal))
+      { return null; }
+      try
+      { return JsonSerializer.Deserialize<PipeSignOutResult>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions); }
+      catch(JsonException)
+      { return null; }
+   }
+
+
+
+   /// <summary>
+   /// Opens the identity provider's end-session page in the default browser and waits up to two minutes for the browser to return
+   /// to this application's registered callback with this sign-out's own state. The inbox is opened first so a fast redirect is not lost.
+   /// The request carries a sensitive token hint, so only its host is logged. Returns whether the provider confirmed.
+   /// </summary>
+   private static async Task<bool> CompleteProviderSignOutAsync(QqqProviderLogout logout)
+   {
+      try
+      {
+         using QqqBrowserCallback inbox = new();
+         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(2));
+         App.Log.Info("[Companion] Opening the identity provider's sign-out page in the default browser (" + logout.EndSessionUri.Authority + ").");
+         _ = Process.Start(new ProcessStartInfo(logout.EndSessionUri.AbsoluteUri) { UseShellExecute = true });
+         Uri callback = await inbox.ReceiveAsync(timeout.Token);
+         bool matched = logout.Matches(callback);
+         App.Log.Info("[Companion] Identity provider sign-out callback " + (matched ? "matched." : "did not match this sign-out."));
+         return matched;
+      }
+      catch(Exception exception) when(exception is OperationCanceledException or IOException or InvalidDataException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+      {
+         App.Log.Warning("[Companion] Identity provider sign-out was not confirmed: " + QqqSessionDiagnostics.Describe(exception));
+         return false;
+      }
    }
 
 

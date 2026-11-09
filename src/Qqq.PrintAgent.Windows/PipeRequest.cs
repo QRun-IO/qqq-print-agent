@@ -13,7 +13,7 @@ public sealed record PipeRequest(string Operation, string? ServerUrl = null, str
    string? JobId = null, string? Format = null, bool ConfirmDuplicateRisk = false, JobQuery? JobQuery = null, LogSettings? LogSettings = null,
    Qqq.PrintAgent.Core.Printing.DeviceProfile? DeviceProfile = null, PrinterProfile? PrinterProfile = null, string? TestProfile = null,
    Qqq.PrintAgent.Core.Authentication.QqqSessionCredential? SessionCredential = null, bool ClaimLegacyDevice = false, bool StartNewPairing = false,
-   ServerTrust? ServerTrust = null)
+   ServerTrust? ServerTrust = null, string? PostLogoutRedirectUri = null)
 {
    /// <summary>Returns a fixed label instead of the generated record text, so logging a request can never reveal a session credential or enrollment code.</summary>
    public override string ToString() => "Print agent management request (credentials redacted)";
