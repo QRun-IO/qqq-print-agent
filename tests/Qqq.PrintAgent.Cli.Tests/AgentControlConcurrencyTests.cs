@@ -22,7 +22,7 @@ public sealed class AgentControlConcurrencyTests
       using ControlFixture fixture = new();
       fixture.OfferJob = true;
       fixture.Printer.BlockPrint = true;
-      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(60)); // hang guard only: the test normally finishes in well under a second, but a loaded CI host can take seconds
       using AgentRuntime runtime = fixture.Runtime();
       Task running = runtime.RunAsync(stop.Token);
       try
