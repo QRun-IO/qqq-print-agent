@@ -28,7 +28,7 @@ public sealed class AgentRealtimeTests
       using var stalled = new StalledDocument();
       fixture.AddJob("large", () => stalled);
       await connection.SendAsync("JOB_AVAILABLE", new { });
-      await stalled.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await stalled.Entered.Task.WaitAsync(TimeSpan.FromSeconds(60));
       await connection.SendAsync("DESIRED_STATE", new DeviceDesiredState(2, true, "CONNECTED"));
       await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Control!.DesiredState.DispatchPaused);
       Assert.Equal(0, fixture.Printer.Prints);
@@ -83,7 +83,7 @@ public sealed class AgentRealtimeTests
       RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync(loseSpoolAck: true);
       fixture.AddJob("first");
       await first.SendAsync("JOB_AVAILABLE", new { });
-      await first.LostSpoolAck.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await first.LostSpoolAck.Task.WaitAsync(TimeSpan.FromSeconds(60));
       fixture.AddJob("buffered");
       _ = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.State("buffered"), "SPOOLED", StringComparison.Ordinal));

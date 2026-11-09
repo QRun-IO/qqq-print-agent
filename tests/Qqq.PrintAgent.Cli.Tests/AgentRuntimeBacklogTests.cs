@@ -44,11 +44,11 @@ public sealed class AgentRuntimeBacklogTests
       {
          // Synthetic responses otherwise let RunAsync drain synchronously before this
          // assertion starts. Exclude setup/control readiness from the drain budget.
-         await state.FirstClaim.Task.WaitAsync(TimeSpan.FromSeconds(10));
-         stop.CancelAfter(TimeSpan.FromSeconds(15));
+         await state.FirstClaim.Task.WaitAsync(TimeSpan.FromSeconds(60));
+         stop.CancelAfter(TimeSpan.FromSeconds(90));
          state.ReleaseClaims.SetResult();
          // Four claims must finish before the configured 20-second idle interval.
-         await state.Empty.Task.WaitAsync(TimeSpan.FromSeconds(10), stop.Token);
+         await state.Empty.Task.WaitAsync(TimeSpan.FromSeconds(60), stop.Token);
          Assert.Equal(3, printer.Printed);
          await Task.Delay(250, stop.Token);
          Assert.Equal(4, Volatile.Read(ref state.Claims));

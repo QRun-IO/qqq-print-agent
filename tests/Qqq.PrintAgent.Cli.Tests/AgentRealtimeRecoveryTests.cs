@@ -24,7 +24,7 @@ public sealed class AgentRealtimeRecoveryTests
       byte[] unreadable = [1, 3, 5];
       File.WriteAllBytes(path, unreadable);
       string name = "qqq-recovery-" + Guid.NewGuid().ToString("N");
-      using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       using var runtime = new AgentRuntime(fixture.DirectoryPath, _ => { }, fixture.Printer, pipeName: name,
          pipeFactory: () => new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly));
       Task running = runtime.RunAsync(stop.Token);

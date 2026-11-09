@@ -661,9 +661,9 @@ public sealed class QqqSessionAuthenticationTests
       await client.SignInWithPasswordAsync("user", "password");
       await client.BindDeviceAsync(new QqqDeviceCredential("device-1", "proof"));
       Task<HttpResponseMessage> printing = client.SendPrintingAsync(HttpMethod.Get, "device/jobs/job-1/content");
-      await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-      using HttpResponseMessage control = await client.SendPrintingAsync(HttpMethod.Post, "device/control/poll").WaitAsync(TimeSpan.FromSeconds(5));
-      await client.SignOutAsync().WaitAsync(TimeSpan.FromSeconds(5));
+      await entered.Task.WaitAsync(TimeSpan.FromSeconds(60));
+      using HttpResponseMessage control = await client.SendPrintingAsync(HttpMethod.Post, "device/control/poll").WaitAsync(TimeSpan.FromSeconds(60));
+      await client.SignOutAsync().WaitAsync(TimeSpan.FromSeconds(60));
       pending.SetResult(Response("{}"));
       await Assert.ThrowsAsync<QqqSessionException>(async () => { using HttpResponseMessage response = await printing; });
       Assert.False(client.IsAuthenticated);

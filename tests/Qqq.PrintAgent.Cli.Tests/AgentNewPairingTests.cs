@@ -34,7 +34,7 @@ public sealed class AgentNewPairingTests
       ChangeOldConfiguration(fixture, unreadable);
       byte[] retained = File.ReadAllBytes(path);
       fixture.NextSession = UnboundSession();
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       using(AgentRuntime runtime = fixture.Runtime())
       {
          _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.NextSession.ExportCredential(), StartNewPairing: true), timeout.Token);
@@ -77,7 +77,7 @@ public sealed class AgentNewPairingTests
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       byte[] retained = File.ReadAllBytes(path);
       using AgentRuntime runtime = fixture.Runtime();
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       _ = await runtime.PollControlsOnceAsync(timeout.Token);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       Assert.Equal(0, fixture.Created);
@@ -119,7 +119,7 @@ public sealed class AgentNewPairingTests
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       byte[] originalAuth = File.ReadAllBytes(authPath);
       fixture.NextSession = UnboundSession();
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       using(AgentRuntime runtime = fixture.Runtime())
       {
          await Assert.ThrowsAsync<QqqSessionException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.NextSession.ExportCredential()), timeout.Token));

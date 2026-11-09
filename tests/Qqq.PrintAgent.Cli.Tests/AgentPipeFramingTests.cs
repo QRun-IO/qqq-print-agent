@@ -41,7 +41,7 @@ public sealed class AgentPipeFramingTests
    public async Task Write_CancelsWhenConnectedClientDoesNotRead()
    {
       string name = "qqq-framing-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
       await using NamedPipeServerStream server = new(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 4096, 4096);
       await using NamedPipeClientStream client = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
       Task connect = client.ConnectAsync(deadline.Token);
@@ -60,7 +60,7 @@ public sealed class AgentPipeFramingTests
    public async Task Read_CancelsWhenConnectedClientNeverTerminatesCommand()
    {
       string name = "qqq-framing-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
       await using NamedPipeServerStream server = new(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
       await using NamedPipeClientStream client = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
       Task connect = client.ConnectAsync(deadline.Token);

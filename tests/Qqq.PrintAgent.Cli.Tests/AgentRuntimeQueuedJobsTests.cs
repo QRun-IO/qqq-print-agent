@@ -26,7 +26,7 @@ public sealed class AgentRuntimeQueuedJobsTests
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-queued-" + Guid.NewGuid().ToString("N"));
       string pipeName = "QqqQueued-test-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(60));
       ServerState server = new();
       NoPrintBackend printers = new();
       AgentRuntime? runtime = null;

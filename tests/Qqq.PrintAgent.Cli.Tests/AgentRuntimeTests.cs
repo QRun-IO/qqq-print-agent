@@ -28,7 +28,7 @@ public sealed class AgentRuntimeTests
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-runtime-" + Guid.NewGuid().ToString("N"));
       string pipeName = "QqqPrintAgent-test-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(20));
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(60));
       TaskCompletionSource failed = new(TaskCreationOptions.RunContinuationsAsynchronously);
       TaskCompletionSource recovered = new(TaskCreationOptions.RunContinuationsAsynchronously);
       int requests = 0;

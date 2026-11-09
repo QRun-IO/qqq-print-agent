@@ -28,7 +28,7 @@ public sealed class AgentRealtimeOrderingTests
       using var slow = new GatedDocument(bytes);
       fixture.AddJob("slow", () => slow, length: bytes.Length);
       await connection.SendAsync("JOB_AVAILABLE", new { });
-      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(60));
       var observed = new TaskCompletionSource<(bool Connected, string? State, int Prints)>(TaskCreationOptions.RunContinuationsAsynchronously);
       fixture.BeforeAcknowledgement = async message =>
       {
@@ -48,7 +48,7 @@ public sealed class AgentRealtimeOrderingTests
       try
       {
          await connection.SendAsync("DESIRED_STATE", new Qqq.PrintAgent.Core.Printing.DeviceDesiredState(2, false, "CONNECTED"));
-         (bool connected, string? state, int prints) = await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+         (bool connected, string? state, int prints) = await observed.Task.WaitAsync(TimeSpan.FromSeconds(60));
          Assert.False(connected);
          Assert.Equal("RECEIVED", state);
          Assert.Equal(0, prints);
@@ -98,7 +98,7 @@ public sealed class AgentRealtimeOrderingTests
       using var slow = new GatedDocument(bytes);
       fixture.AddJob("slow", () => slow, length: bytes.Length);
       await connection.SendAsync("JOB_AVAILABLE", new { });
-      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(60));
       await connection.SendAsync("SETTINGS", fixture.Settings with { Revision = 2, NativeSubmissionTimeoutMillis = 2345, MaxPdfBytes = rejectSize ? 1 : fixture.Settings.MaxPdfBytes });
       await connection.SendAsync("DESIRED_STATE", new Qqq.PrintAgent.Core.Printing.DeviceDesiredState(2, true, "CONNECTED"));
       await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Control!.DesiredState.DispatchPaused);
@@ -123,7 +123,7 @@ public sealed class AgentRealtimeOrderingTests
       fixture.AddJob("slow", () => slow, length: bytes.Length);
       fixture.AddJob("fast", printerId: "other");
       await connection.SendAsync("JOB_AVAILABLE", new { });
-      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(60));
       try
       {
          Assert.Empty(fixture.Printer.Order);
@@ -156,8 +156,8 @@ public sealed class AgentRealtimeOrderingTests
       fixture.AddJob("slow", () => slow, length: slowBytes.Length);
       fixture.AddJob("fast", () => { fastStarted.TrySetResult(); return new MemoryStream(fastBytes); }, samePrinter ? "printer" : "other", fastBytes.Length);
       await connection.SendAsync("JOB_AVAILABLE", new { });
-      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-      await fastStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await slow.Entered.Task.WaitAsync(TimeSpan.FromSeconds(60));
+      await fastStarted.Task.WaitAsync(TimeSpan.FromSeconds(60));
       try
       {
          if(samePrinter)

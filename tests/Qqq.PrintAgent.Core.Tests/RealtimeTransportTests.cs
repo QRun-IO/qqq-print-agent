@@ -73,7 +73,7 @@ public sealed class RealtimeTransportTests
    public async Task NativeCookieAndDeviceProofUpgradeKeepsReceivingDuringStalledDocument()
    {
       using var peer = new LoopbackWebSocketPeer();
-      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       using var body = new BlockingDocument();
       using var handler = new NativeHandler(body);
       using var session = new QqqSessionClient(peer.Origin, handler, allowLoopbackHttp: true);

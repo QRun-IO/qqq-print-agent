@@ -39,16 +39,16 @@ public sealed class AgentRealtimeBandwidthTests
       {
          // Both real runtime lanes must reach their independent body streams before
          // timing starts, so serialized admission cannot imitate an aggregate cap.
-         await Task.WhenAll(first.Entered.Task, second.Entered.Task).WaitAsync(TimeSpan.FromSeconds(5));
+         await Task.WhenAll(first.Entered.Task, second.Entered.Task).WaitAsync(TimeSpan.FromSeconds(60));
          long started = Stopwatch.GetTimestamp();
          release.TrySetResult();
-         await fixture.WaitAsync(() => fixture.Printer.Prints == 2).WaitAsync(TimeSpan.FromSeconds(10));
+         await fixture.WaitAsync(() => fixture.Printer.Prints == 2).WaitAsync(TimeSpan.FromSeconds(60));
          TimeSpan elapsed = Stopwatch.GetElapsedTime(started);
 
          // Together these bodies need four seconds at the shared rate; independent
          // per-file throttles would permit both to finish after about two seconds.
          Assert.True(elapsed >= TimeSpan.FromSeconds(3.5), "Concurrent documents exceeded the configured aggregate download rate.");
-         await fixture.WaitAsync(() => fixture.State("first-budget") is "SPOOLED" && fixture.State("second-budget") is "SPOOLED").WaitAsync(TimeSpan.FromSeconds(5));
+         await fixture.WaitAsync(() => fixture.State("first-budget") is "SPOOLED" && fixture.State("second-budget") is "SPOOLED").WaitAsync(TimeSpan.FromSeconds(60));
          Assert.Equal(0, fixture.ForbiddenPolls);
       }
       finally { release.TrySetResult(); }

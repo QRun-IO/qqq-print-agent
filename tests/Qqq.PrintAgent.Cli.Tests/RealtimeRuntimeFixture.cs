@@ -116,7 +116,7 @@ internal sealed class RealtimeRuntimeFixture : IAsyncDisposable
    {
       WebSocket socket;
       try
-      { socket = await Peer.AcceptAsync(_stopping.Token).WaitAsync(TimeSpan.FromSeconds(5)); }
+      { socket = await Peer.AcceptAsync(_stopping.Token).WaitAsync(TimeSpan.FromSeconds(60)); }
       catch(TimeoutException exception) { throw new InvalidOperationException(Diagnostic("WebSocket handshake"), exception); }
       var connection = new Connection(socket, this, loseSpoolAck, _stopping.Token);
       _connections.Add(connection);

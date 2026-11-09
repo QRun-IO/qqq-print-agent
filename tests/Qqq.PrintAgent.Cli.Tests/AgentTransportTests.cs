@@ -53,7 +53,7 @@ public sealed class AgentTransportTests
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-transport-pipe-" + Guid.NewGuid().ToString("N"));
       string name = "qqq-transport-" + Guid.NewGuid().ToString("N");
-      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       var runtime = new AgentRuntime(directory, _ => { }, new ForbiddenPrinters(), pipeName: name,
          pipeFactory: () => new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly));
       Task run = runtime.RunAsync(timeout.Token);

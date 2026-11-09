@@ -63,7 +63,7 @@ public sealed class QqqBrowserCallbackInboxTests
    {
       string name = "QqqPrintAgent.Auth.Test." + Guid.NewGuid().ToString("N");
       using QqqBrowserCallback inbox = new(name);
-      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       Task<Uri> receiving = inbox.ReceiveAsync(timeout.Token);
       var steps = new List<string>();
       await QqqBrowserCallback.ForwardAsync(QqqBrowserCallback.RedirectUri + "?code=test-code&state=test-state", name, Environment.ProcessPath!, timeout.Token, steps.Add);

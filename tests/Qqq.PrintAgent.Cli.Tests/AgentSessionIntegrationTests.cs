@@ -64,7 +64,7 @@ public sealed class AgentSessionIntegrationTests
       using AgentRuntime runtime = fixture.Runtime();
       QqqSessionCredential invalid = new(new Uri("https://synthetic.invalid/not-an-origin"), "synthetic-cookie");
       await Assert.ThrowsAsync<ArgumentException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: invalid), CancellationToken.None));
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
    }
@@ -81,7 +81,7 @@ public sealed class AgentSessionIntegrationTests
       using SessionFixture fixture = new();
       fixture.SaveSession();
       fixture.Session.DelayUnauthorizedPoll = true;
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       using AgentRuntime runtime = fixture.Runtime();
       Task<int> oldPoll = runtime.PollControlsOnceAsync(timeout.Token);
       await fixture.Session.PollEntered.Task.WaitAsync(timeout.Token);

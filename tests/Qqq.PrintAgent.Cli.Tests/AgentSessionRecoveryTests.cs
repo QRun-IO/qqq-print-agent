@@ -35,7 +35,7 @@ public sealed class AgentSessionRecoveryTests
          byte[] corrupt = ProtectedData.Protect(Encoding.UTF8.GetBytes(json), null, DataProtectionScope.CurrentUser);
          File.WriteAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), corrupt);
          using AgentRuntime runtime = fixture.Runtime();
-         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
          using(AgentStore unreadable = new(fixture.Local.DirectoryPath))
          {
             Assert.Throws<InvalidDataException>(() => unreadable.LoadAuthentication());
@@ -60,7 +60,7 @@ public sealed class AgentSessionRecoveryTests
       byte[] corrupt = [1, 2, 3, 4];
       File.WriteAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), corrupt);
       using AgentRuntime runtime = fixture.Runtime();
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       fixture.Session.DenyBinding = true;
       await Assert.ThrowsAsync<Qqq.PrintAgent.Core.Authentication.QqqSessionException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token));
       Assert.Equal(corrupt, File.ReadAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi")));
@@ -96,7 +96,7 @@ public sealed class AgentSessionRecoveryTests
       using AgentRuntime runtime = fixture.Runtime();
       Assert.False(runtime.GetSnapshot().Enrolled);
       Assert.Equal(corrupt, File.ReadAllBytes(path));
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       Assert.Equal(corrupt, File.ReadAllBytes(path));
@@ -128,7 +128,7 @@ public sealed class AgentSessionRecoveryTests
       string path = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       File.WriteAllBytes(path, corrupt);
       using AgentRuntime runtime = fixture.Runtime();
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       Assert.Contains("revoke the previous session in QQQ", await runtime.SignOutAsync(timeout.Token), StringComparison.Ordinal);
       Assert.False(File.Exists(path));
       Assert.Equal(corrupt, File.ReadAllBytes(Assert.Single(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"))));

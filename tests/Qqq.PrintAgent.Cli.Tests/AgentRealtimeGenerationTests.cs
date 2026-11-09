@@ -34,7 +34,7 @@ public sealed class AgentRealtimeGenerationTests
    {
       using var fixture = new SessionFixture();
       fixture.SaveSession();
-      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       var replacementEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

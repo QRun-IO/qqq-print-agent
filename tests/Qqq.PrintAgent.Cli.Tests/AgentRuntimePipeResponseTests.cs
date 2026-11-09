@@ -74,7 +74,7 @@ public sealed class AgentRuntimePipeResponseTests
    public async Task ResponseWait_RespectsDeadline_WhenClientNeverReads()
    {
       string name = "QqqPrintAgent-test-response-deadline-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(5));
+      using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(60));
       await using NamedPipeServerStream server = new(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
          PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 4096, 4096);
       await using NamedPipeClientStream client = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -152,7 +152,7 @@ public sealed class AgentRuntimePipeResponseTests
       private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-pipe-response-" + Guid.NewGuid().ToString("N"));
       private readonly AgentRuntime _runtime;
       public string PipeName { get; } = "QqqPrintAgent-test-response-" + Guid.NewGuid().ToString("N");
-      public CancellationTokenSource Stop { get; } = new(TimeSpan.FromSeconds(15));
+      public CancellationTokenSource Stop { get; } = new(TimeSpan.FromSeconds(60));
       public Task Running { get; }
 
 

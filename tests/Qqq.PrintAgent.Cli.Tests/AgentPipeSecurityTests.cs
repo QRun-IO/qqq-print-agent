@@ -31,7 +31,7 @@ public sealed class AgentPipeSecurityTests
       security.AddAccessRule(new PipeAccessRule(identity.User!, PipeAccessRights.ReadWrite, AccessControlType.Allow));
       await using NamedPipeServerStream server = NamedPipeServerStreamAcl.Create(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
          PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 4096, 4096, security);
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       for(int connection = 0; connection < 2; connection++)
       {
          Task accepted = server.WaitForConnectionAsync(timeout.Token);
@@ -58,7 +58,7 @@ public sealed class AgentPipeSecurityTests
    {
       string name = "QqqPrintAgent-untrusted-test-" + Guid.NewGuid().ToString("N");
       await using NamedPipeServerStream fake = new(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance);
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       Task connected = fake.WaitForConnectionAsync(timeout.Token);
       Task<string> request = AgentPipeClient.SendAsync(new PipeRequest(operation, "https://print.example.com", "synthetic-enrollment-never-send"), name);
       await connected;

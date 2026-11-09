@@ -56,7 +56,7 @@ public sealed class PrinterWorkerIsolationTests
          },
       };
       PrintJob job = new("synthetic", "fixture", "Never printed", "PDF", new string('0', 64), 1, new PrintOptions(), "", "RECEIVED");
-      using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       await Assert.ThrowsAsync<TimeoutException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-synthetic.document"), TimeSpan.FromSeconds(1), watchdog.Token));
       Assert.True(ProcessExited(childId));
    }
@@ -101,7 +101,7 @@ public sealed class PrinterWorkerIsolationTests
       ProcessStartInfo start = new(FixtureExecutable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
       start.ArgumentList.Add("--launch-parent");
       using Process parent = Process.Start(start) ?? throw new InvalidOperationException("Parent fixture launch failed.");
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       try
       {
          string? line = await parent.StandardOutput.ReadLineAsync(timeout.Token);

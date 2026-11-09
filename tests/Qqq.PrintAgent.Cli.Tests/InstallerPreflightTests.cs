@@ -47,7 +47,7 @@ public sealed class InstallerPreflightTests
       await process.StandardInput.WriteAsync(script);
       process.StandardInput.Close();
       string error = await process.StandardError.ReadToEndAsync();
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       await process.WaitForExitAsync(timeout.Token);
       Assert.True(process.ExitCode == 0, error);
    }

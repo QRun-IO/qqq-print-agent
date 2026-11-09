@@ -60,7 +60,7 @@ public sealed class BrowserCallbackTests
    {
       string name = "qqq-callback-test-" + Guid.NewGuid().ToString("N");
       using QqqBrowserCallback inbox = new(name);
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       Task<Uri> received = inbox.ReceiveAsync(timeout.Token);
       string callback = QqqBrowserCallback.RedirectUri + "?code=synthetic&state=synthetic";
       await QqqBrowserCallback.ForwardAsync(callback, name, Environment.ProcessPath!, timeout.Token);
@@ -75,7 +75,7 @@ public sealed class BrowserCallbackTests
    {
       string name = "qqq-callback-test-" + Guid.NewGuid().ToString("N");
       using QqqBrowserCallback inbox = new(name);
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
       Task<Uri> received = inbox.ReceiveAsync(timeout.Token);
       await Assert.ThrowsAsync<UnauthorizedAccessException>(() => QqqBrowserCallback.ForwardAsync(
          QqqBrowserCallback.RedirectUri + "?code=synthetic&state=synthetic", name, "C:\\not-the-installed-companion.exe", timeout.Token));

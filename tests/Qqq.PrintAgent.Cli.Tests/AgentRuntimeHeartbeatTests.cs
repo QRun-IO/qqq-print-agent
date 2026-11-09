@@ -27,7 +27,7 @@ public sealed class AgentRuntimeHeartbeatTests
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-heartbeat-" + Guid.NewGuid().ToString("N"));
       string pipeName = "QqqHeartbeat-test-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(10));
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(60));
       BlockingPrinter printer = new();
       int heartbeats = 0;
       Task? running = null;

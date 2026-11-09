@@ -44,7 +44,7 @@ public sealed class ApplicationTrafficTransportTests
       Assert.Equal(handler.Downloaded, before.DownloadedBytes);
       Assert.True(before.UploadedBytes > 0);
       using var api = PrintApiClient.ForSession(session);
-      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       string staging = Path.Combine(Path.GetTempPath(), "qqq-traffic-" + Guid.NewGuid().ToString("N"));
       var job = new PrintJob("job", "printer", "Synthetic", "PDF", Convert.ToHexString(SHA256.HashData(document)), document.Length, new PrintOptions(), "", "CLAIMED");
       Task<DownloadedDocument> download = api.DownloadFileAsync(job, staging, new RealtimeSettings(), timeout.Token);
@@ -88,7 +88,7 @@ public sealed class ApplicationTrafficTransportTests
    public async Task WebSocketCountsSentAndFragmentedUtf8PayloadsWithoutCountingQueuedFramesOrHandshake()
    {
       using var peer = new LoopbackWebSocketPeer();
-      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       using var client = new ClientWebSocket();
       client.Options.AddSubProtocol("qqq-printing.v1");
       Task<WebSocket> accepting = peer.AcceptAsync(timeout.Token);

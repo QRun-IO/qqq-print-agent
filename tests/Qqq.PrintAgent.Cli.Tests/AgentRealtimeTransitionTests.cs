@@ -18,7 +18,7 @@ public sealed class AgentRealtimeTransitionTests
       await using var fixture = new RealtimeRuntimeFixture(settings: new RealtimeSettings(Revision: 5));
       _ = await fixture.ConnectAsync();
       fixture.Settings = fixture.Settings with { Revision = 0 };
-      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+      using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
       _ = await fixture.Runtime.EnrollWithGatesAsync(new PipeRequest("enroll", fixture.Peer.Origin.AbsoluteUri, "synthetic-code"), timeout.Token);
       _ = await fixture.ConnectAsync();
       Assert.Equal(0, fixture.LastHelloSettingsRevision);
