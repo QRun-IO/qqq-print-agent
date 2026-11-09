@@ -56,6 +56,19 @@ public interface IQqqSessionClient : IDisposable
 
 
 
+   /// <summary>
+   /// Ends the session like <see cref="SignOutAsync"/> and also asks the server for the identity provider's sign-out, returned for the
+   /// host to open in the browser so the provider's own session ends too. Null means there is nothing to open (no session, a
+   /// password server, or a server without provider sign-out); the local session is forgotten either way. The default only signs out.
+   /// </summary>
+   async Task<QqqProviderLogout?> SignOutWithProviderAsync(Uri postLogoutRedirectUri, CancellationToken cancellationToken = default)
+   {
+      await SignOutAsync(cancellationToken).ConfigureAwait(false);
+      return null;
+   }
+
+
+
    /// <summary>Returns the credential that lets a later start restore this session; it is the only secret the caller persists.</summary>
    QqqSessionCredential ExportCredential();
 

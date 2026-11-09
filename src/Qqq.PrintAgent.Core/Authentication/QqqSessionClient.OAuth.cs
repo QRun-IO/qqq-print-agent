@@ -45,6 +45,8 @@ public sealed partial class QqqSessionClient
             ["state"] = state,
             ["nonce"] = nonce,
             ["prompt"] = grant.Prompt,
+            // prompt=login alone was seen reusing a retained provider session on real Authentik; max_age=0 makes any session too old.
+            ["max_age"] = "0",
             ["code_challenge_method"] = "S256",
             ["code_challenge"] = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))),
          };

@@ -442,7 +442,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          case "sign-in":
             return await SignInAsync(request, token).ConfigureAwait(false);
          case "sign-out":
-            return await SignOutAsync(token).ConfigureAwait(false);
+            return await SignOutAsync(request.PostLogoutRedirectUri, token).ConfigureAwait(false);
          case "reconnect":
             return ReconnectLocal();
          case "test-print":

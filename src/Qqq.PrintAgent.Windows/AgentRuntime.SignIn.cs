@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json;
 using Qqq.PrintAgent.Core;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
@@ -119,8 +120,25 @@ public sealed partial class AgentRuntime
 
 
    /// <summary>Runs sign-out as a connection transition, so it cannot overlap a claim or a printing job.</summary>
-   internal async Task<string> SignOutAsync(CancellationToken token)
-      => await ConnectionTransitionAsync(() => SignOutCoreAsync(token), token).ConfigureAwait(false);
+   internal async Task<string> SignOutAsync(CancellationToken token) => await SignOutAsync(null, token).ConfigureAwait(false);
+
+
+
+   /// <summary>
+   /// Runs sign-out as a connection transition. When the companion passes the application's registered callback, the identity
+   /// provider's own sign-out is requested too and the reply is a <see cref="PipeSignOutResult"/> carrying it for the companion to open in
+   /// the browser; without a callback (the command line) only the QQQ session ends and the reply is plain text.
+   /// </summary>
+   internal async Task<string> SignOutAsync(string? postLogoutRedirectUri, CancellationToken token)
+   {
+      Uri? redirect = null;
+      if(postLogoutRedirectUri is not null && (!string.Equals(postLogoutRedirectUri, QqqBrowserCallback.RedirectUri, StringComparison.Ordinal)
+         || !Uri.TryCreate(postLogoutRedirectUri, UriKind.Absolute, out redirect)))
+      {
+         throw new InvalidOperationException("The sign-out callback is not this application's registered callback.");
+      }
+      return await ConnectionTransitionAsync(() => SignOutCoreAsync(redirect, token), token).ConfigureAwait(false);
+   }
 
 
 
@@ -129,7 +147,7 @@ public sealed partial class AgentRuntime
    /// sign-in is checked against the same user. An unreadable saved session is moved aside, not deleted. The server session is ended when
    /// it can be, and the local client and connection state are always cleared, even if ending it on the server fails.
    /// </summary>
-   private async Task<string> SignOutCoreAsync(CancellationToken token)
+   private async Task<string> SignOutCoreAsync(Uri? postLogoutRedirect, CancellationToken token)
    {
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);
       try
@@ -145,6 +163,7 @@ public sealed partial class AgentRuntime
          {
             store.SaveAuthentication(new AgentAuthentication(saved.Binding, null));
          }
+         QqqProviderLogout? providerLogout = null;
          try
          {
             if(_sessionClient is null && saved?.Credential is not null)
@@ -155,7 +174,10 @@ public sealed partial class AgentRuntime
             }
             if(_sessionClient is not null)
             {
-               await _sessionClient.SignOutAsync(token).ConfigureAwait(false);
+               if(postLogoutRedirect is null)
+               { await _sessionClient.SignOutAsync(token).ConfigureAwait(false); }
+               else
+               { providerLogout = await _sessionClient.SignOutWithProviderAsync(postLogoutRedirect, token).ConfigureAwait(false); }
             }
             else
             { WriteLog("INFO", "No session to end on the server; local state cleared."); }
@@ -172,9 +194,11 @@ public sealed partial class AgentRuntime
             ResetConnectionState();
             WriteLog("INFO", "Signed out locally. Device pairing and print history were preserved.");
          }
-         return unreadableSession
+         string message = unreadableSession
             ? $"Signed out locally. Unreadable session data was preserved for recovery; revoke the previous session in {AppIdentity.ServerName}. Device pairing and print history were preserved."
             : "Signed out. Device pairing and print history were preserved.";
+         // The hint inside the provider request is sensitive: it goes only into the reply, never into the log.
+         return postLogoutRedirect is null ? message : JsonSerializer.Serialize(new PipeSignOutResult(message, providerLogout), PrintApiClient.JsonOptions);
       }
       finally { _authenticationGate.Release(); }
    }

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Sign-out now ends the identity provider's browser session as well as the QQQ session, and every browser
+sign-in sends `max_age=0` beside `prompt=login`, so the next sign-in always asks for credentials (the provider
+must stay invisible to users). The companion's Sign out asks the service to log out with the application's
+registered callback; when the server advertises `nativeSessionLogout` (UI API 1.10 or later) and lists that
+callback, the server returns the provider's end-session data, Core checks it against the issuer QQQ advertises
+and the provider's own discovery (HTTPS end-session endpoint on the issuer's origin, exact callback, bounded
+hint), and the companion opens it in the browser and waits for the state-matched return. A server without the
+capability gets the ordinary logout, and the log says the provider session was not ended. The command-line
+`sign-out` cannot open the companion's callback inbox, so it still ends only the QQQ session and says so.
+No change to pairing, history or the printing protocol.
+
 ## 1.2.1
 
 Release-pipeline fix only; same source as 1.2.0 otherwise. The stable release workflow's per-edition

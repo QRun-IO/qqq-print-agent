@@ -122,6 +122,24 @@ internal sealed class SessionFixture : IDisposable
 
 
 
+      /// <summary>The scripted provider sign-out the fake server returns at logout; null means the server offers none.</summary>
+      internal QqqProviderLogout? ProviderLogout { get; set; }
+
+      /// <summary>The callback the service asked the provider to return to, or null when only the QQQ session was ended.</summary>
+      internal Uri? RequestedLogoutRedirect { get; private set; }
+
+
+
+      /// <summary>Marks the session signed out, records which callback was asked for and returns the scripted provider sign-out.</summary>
+      public Task<QqqProviderLogout?> SignOutWithProviderAsync(Uri postLogoutRedirectUri, CancellationToken cancellationToken = default)
+      {
+         IsAuthenticated = false;
+         RequestedLogoutRedirect = postLogoutRedirectUri;
+         return Task.FromResult(ProviderLogout);
+      }
+
+
+
       /// <summary>Returns the scripted principal, tenant and device binding.</summary>
       public Task<QqqSessionBinding> GetSessionIdentityAsync(CancellationToken cancellationToken = default) => Task.FromResult(Binding);
 
