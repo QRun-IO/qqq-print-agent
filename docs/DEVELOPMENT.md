@@ -28,6 +28,15 @@ Check out this repository and the protocol repository as siblings, then pin the 
 
 This performs locked restore, Release solution build, core tests and Windows/CLI tests, with coverage/TRX output under TestResults, and then fails if an assembly's merged line coverage is below its minimum in `build/minimum-coverage.json`. UI tests compile in the solution but are not automatically run by hosted CI. Use an elevated interactive desktop and `K22_UITEST_EXE` for those tests.
 
+## Testing the service runtime
+
+`AgentRuntime` reaches QQQ in one way: a signed-in session and the realtime channel opened through it. Its constructor takes no API client, so a test cannot make it do anything the installed service does not. Windows-layer tests (`tests/Qqq.PrintAgent.Cli.Tests`) use hand-written fakes at the boundaries:
+
+- `RealtimeRuntimeFixture` runs a runtime on a temporary store, signs it in through a real `QqqSessionClient` whose HTTP goes to a scripted handler, and connects it over a loopback WebSocket to a scripted peer. A test sends the server's frames (WELCOME, DESIRED_STATE, SETTINGS, COMMAND, JOB_AVAILABLE, PRINTERS), reads what the agent sent, talks to the runtime over its management pipe, and can restart the runtime on the same store. The peer can acknowledge a message, refuse it with an ERROR frame, or drop the connection without acknowledging it; the fake printer can hold a submission open and script a spooler cancellation.
+- `SessionFixture` supplies a fake session with no network, for decisions about sign-in, pairing and the protected files. Where a test needs authorization evaluated once it calls `EnsureAuthorizationAsync`, the check the reconnect loop and the heartbeat make.
+
+Wait for the event (a recorded message, a log line, a signal from a fake) with `fixture.WaitAsync`, never for a length of time. Where the runtime itself waits on the clock, which today is the heartbeat interval, pass a `ManualTimeProvider` and let an interval pass with `fixture.HeartbeatAsync`. To show that something did not happen, find an event that can only follow it: commands are handled in arrival order, claims are made one at a time, and frames on one socket arrive in the order they were sent.
+
 ## Local server and CLI
 
 Use a disposable native QQQ host from the sibling qbit-printing project, using qbit-printing 1.0.0 on QQQ 4.1.0-RC.21 and advertising native printing API 2.3. Sign in through the companion's advertised QQQ authentication flow before using normal CLI commands. The service owns the session, device proof and unattended printing. A bearer-only demo is not a compatible realtime host.

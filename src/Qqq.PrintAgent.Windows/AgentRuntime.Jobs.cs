@@ -73,7 +73,7 @@ public sealed partial class AgentRuntime
       {
          throw new InvalidOperationException("Server actions are unavailable while disconnected by the administrator or awaiting authorization/control negotiation. Local history is preserved.");
       }
-      AgentConfiguration configuration = store.LoadConfiguration() ?? throw new InvalidOperationException("Connect this device in Settings first.");
+      _ = store.LoadConfiguration() ?? throw new InvalidOperationException("Connect this device in Settings first.");
       if(string.Equals(request.Operation, "test-print", StringComparison.Ordinal))
       {
          PrinterInfo printer = _printers.Discover().SingleOrDefault(p => string.Equals(p.PrinterId, request.PrinterId, StringComparison.Ordinal))
