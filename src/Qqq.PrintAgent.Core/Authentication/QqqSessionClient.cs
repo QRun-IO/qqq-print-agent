@@ -108,6 +108,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _diagnostics.Info($"TLS certificate for {host} is NOT trusted by Windows ({errors}) but was accepted because untrusted certificates are allowed for this server: {summary}.");
          return true;
       }
+      Volatile.Write(ref _certificateRejection, new QqqCertificateRejection(errors, certificate?.Subject, certificate?.Issuer,
+         certificate?.NotBefore.ToUniversalTime(), certificate?.NotAfter.ToUniversalTime(), certificate?.Thumbprint));
       _diagnostics.Info($"TLS certificate for {host} rejected: {errors}. Certificate: {summary}. "
          + (errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors)
             ? "Windows does not trust the issuing authority for the account this process runs as (the service runs as LocalSystem and reads the machine store, not your user store). Install the issuer's root certificate in the Local Machine Trusted Root store, or enable 'Allow untrusted server certificate' in Connection settings for a development server."
@@ -379,6 +381,21 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    {
       if(_discovery is not null)
       { return _discovery; }
+      QqqApiDiscovery discovery = await FetchDiscoveryAsync(cancellationToken).ConfigureAwait(false);
+      discovery.Validate(report: _diagnostics.Info);
+      _discovery = discovery;
+      return discovery;
+   }
+
+
+
+   /// <summary>
+   /// Requests the discovery document and parses it without judging or caching it, so the throwing path
+   /// (<see cref="DiscoverCoreAsync"/>) and the compatibility check, which reports the same shortfalls as values, read the
+   /// server in exactly the same way. Callers hold the client gate.
+   /// </summary>
+   private async Task<QqqApiDiscovery> FetchDiscoveryAsync(CancellationToken cancellationToken)
+   {
       _diagnostics.Info($"Discovering QQQ at {Origin.Authority}: requesting /qqq/v1/version.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/version"), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken).ConfigureAwait(false);
@@ -386,8 +403,6 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       QqqApiDiscovery discovery = Parse<QqqApiDiscovery>(response);
       _diagnostics.Info("Discovery received: " + discovery.Describe());
       _diagnostics.Debug(() => $"Discovery features: [{string.Join(", ", discovery.Features ?? [])}]; client channels: [{string.Join(", ", discovery.ClientChannels ?? [])}].");
-      discovery.Validate(report: _diagnostics.Info);
-      _discovery = discovery;
       return discovery;
    }
 
@@ -402,6 +417,27 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       await DiscoverCoreAsync(cancellationToken).ConfigureAwait(false);
       if(_authentication is not null)
       { return _authentication; }
+      QqqAuthenticationMetadata metadata = await FetchAuthenticationAsync(cancellationToken).ConfigureAwait(false);
+      if(!string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal) && !string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
+      {
+         _diagnostics.Info($"Authentication type '{metadata.Type}' is not supported; only TABLE_BASED and OAUTH2 are.");
+         throw QqqApiDiscovery.Configuration();
+      }
+      if(string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
+      { ValidateNativeGrant(metadata); }
+      _authentication = metadata;
+      return metadata;
+   }
+
+
+
+   /// <summary>
+   /// Requests the authentication metadata and parses it without judging or caching it, for the same reason discovery is
+   /// fetched separately: the sign-in path throws on an unsupported server, and the compatibility check reports it.
+   /// Callers hold the client gate and have already discovered the server.
+   /// </summary>
+   private async Task<QqqAuthenticationMetadata> FetchAuthenticationAsync(CancellationToken cancellationToken)
+   {
       _diagnostics.Info("Requesting authentication metadata from /qqq/v1/metaData/authentication.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/metaData/authentication"), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken).ConfigureAwait(false);
@@ -412,14 +448,6 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       _diagnostics.Debug(() => grant is null
          ? $"Provider values present: {metadata.Values is not null}; client id {(string.IsNullOrEmpty(metadata.Values?.ClientId) ? "(none)" : "present")}; scopes '{metadata.Values?.Scopes}'."
          : $"Native grant: flow {grant.Flow}, challenge {grant.CodeChallengeMethod}, prompt {grant.Prompt}, issuer {grant.Issuer}, discovery {grant.DiscoveryUrl}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{string.Join(", ", grant.RedirectUris ?? [])}], scopes '{metadata.Values?.Scopes}'.");
-      if(!string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal) && !string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
-      {
-         _diagnostics.Info($"Authentication type '{metadata.Type}' is not supported; only TABLE_BASED and OAUTH2 are.");
-         throw QqqApiDiscovery.Configuration();
-      }
-      if(string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
-      { ValidateNativeGrant(metadata); }
-      _authentication = metadata;
       return metadata;
    }
 
