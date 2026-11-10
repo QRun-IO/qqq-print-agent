@@ -407,7 +407,7 @@ public sealed class AgentRemoteControlTests
       }
       await fixture.RestartAsync();
       AgentControlState loaded = fixture.Runtime.GetSnapshot().Control!;
-      Assert.False(loaded.AuthorizationRequired);
+      Assert.DoesNotContain("authorizationRequired", JsonSerializer.Serialize(loaded, PrintApiClient.JsonOptions), StringComparison.OrdinalIgnoreCase);
       Assert.Equal("checking support", AgentControlLabels.Support(loaded.Support));
       _ = await fixture.ConnectAsync();
       AgentSnapshot connected = fixture.Runtime.GetSnapshot();
