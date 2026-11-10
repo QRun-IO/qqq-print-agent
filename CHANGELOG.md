@@ -72,14 +72,42 @@ Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the install
 The companion's presentation logic moved out of the views into a new UI-free assembly,
 `Qqq.PrintAgent.Presentation`, gated at 100% line coverage ([ADR-0003](docs/adr/0003-version-2.md)): one typed
 client for the local service pipe, the texts and enablement rules of the printer, job, footer and settings
-views, the Jobs page's paging and sorting state, and the connection dialog's sign-in flow as a state machine.
-What the operator sees is the same, with three exceptions at the edges. A local pipe failure of a kind the
-window did not handle before (a failed Windows call while verifying the service, or an oversized pipe message)
-now shows the same "service unavailable" or "not completed" message as the other pipe failures instead of
-being lost. A service error shown as "Action could not be completed" no longer starts with a space. And the
-companion writes a line to the activity log when a request to the local service fails and when it answers
-again; a failure that repeats is debug detail, so the status polls do not fill the log. The pipe's wire
-format and the service are unchanged.
+views, the Jobs page's paging and sorting state, and the connection dialog's flow (discovery, sign-in, sign-out,
+enrollment, certificate exception) as a state machine. The pipe's wire format and the service are unchanged.
+What the operator sees is the same except for the following, each of them deliberate:
+
+- **The companion keeps no session after sign-in.** Once the service confirms that it took over the session, the
+  companion discards its own copy, so the service is the only process holding it. The password form and the
+  browser button disappear with it; signing in again starts with **Discover sign-in options**. They also disappear
+  after **Sign out** and after a cancelled or timed-out browser sign-in, where they used to stay visible without
+  doing anything.
+- **"Not sent" and "sent, result unknown" are told apart.** The pipe client now reports whether a failed request
+  ever left (`AgentPipeClient.SendReportingPhaseAsync`, `AgentPipeNotSentException`). An enrollment that never
+  reached the service (nothing listening, pipe refused, service not verified) is shown as **Service unavailable**,
+  because the code was not used; it used to say the code might have been consumed. An enrollment whose reply was
+  lost (the pipe closed mid-reply, an oversize reply) now says **Enrollment could not be confirmed**; it used to
+  say the service was unavailable.
+- **Pipe failures the window did not handle are handled.** A failure while verifying the service (including a
+  service process that ends between the connection and the check), an oversize pipe message, and a malformed
+  callback written to the browser sign-in inbox now show the same "service unavailable" or "not completed" message
+  as the other failures instead of escaping the handler. The identity check itself now answers every failure to
+  carry it out with its one "not the installed Windows print service" refusal; the command-line tool therefore
+  prints that sentence where it used to print the underlying Windows or .NET message.
+- **Full details** no longer opens a dialog for a details reply that names another job or has no job or events;
+  the message was already shown, and the dialog used to open anyway.
+- A service error shown as **Action could not be completed** no longer starts with a space. A sign-out reply
+  that is a document without a message is treated as unreadable and never shown as text (it is the reply that
+  carries the identity provider's token hint). A timestamp without an offset is read as UTC, not as this
+  computer's local time; the service writes offsets, so this is a safeguard. A log-settings reply of JSON `null`
+  shows **Log settings unavailable** instead of doing nothing.
+
+Activity log changes: the first failed request to the local service per operation is a warning that names the
+cause and whether the request was sent, the same failure repeating is a debug line, each failure keeps its full
+exception as debug detail, and the first answer afterwards is noted once, so the status polls do not fill the log.
+Discovery logs the entered address as scheme, host, port and path only, and does not log an address it cannot
+read. A browser sign-in whose hand-over to the service times out is still shown as "Browser sign-in canceled", but
+the log no longer claims that no callback arrived. A sign-out without an answer says whether the session may have
+ended anyway. "Print device enrollment completed." now carries the `[Companion]` prefix.
 
 ## 1.2.1
 

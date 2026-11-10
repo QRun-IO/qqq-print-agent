@@ -27,7 +27,7 @@ Check out this repository and the protocol repository as siblings, then pin the 
 ./build/Verify.ps1
 ```
 
-This performs locked restore, Release solution build, core tests, Windows/CLI tests and presentation tests, with coverage/TRX output under TestResults, and then fails if an assembly's merged line coverage is below its minimum in `build/minimum-coverage.json`. UI tests compile in the solution but are not automatically run by hosted CI. Use an elevated interactive desktop and `K22_UITEST_EXE` for those tests.
+This performs locked restore, Release solution build, core tests, Windows/CLI tests and presentation tests, with coverage/TRX output under TestResults, and then fails if an assembly's merged line coverage is below its minimum in `build/minimum-coverage.json`. For a change to the companion's presentation logic the quick loop is `dotnet test tests/Qqq.PrintAgent.Presentation.Tests -c Release -p:Platform=x64`; that suite needs no service, pipe or desktop and its assembly is gated at 100%. UI tests compile in the solution but are not automatically run by hosted CI. Use an elevated interactive desktop and `K22_UITEST_EXE` for those tests.
 
 ## Testing the service runtime
 
