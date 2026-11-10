@@ -39,7 +39,9 @@ public sealed partial class QqqSessionClient
          var uri = new UriBuilder(new Uri(Origin, PrintingPath + "device/realtime")) { Scheme = string.Equals(Origin.Scheme, "https", StringComparison.Ordinal) ? "wss" : "ws" };
          _diagnostics.Info($"Opening the realtime socket to {QqqSessionDiagnostics.Describe(uri.Uri)} with subprotocol qqq-printing.v1 (session cookie and device proof attached; heartbeat every {heartbeatInterval.TotalSeconds:0} s, timeout {heartbeatTimeout.TotalSeconds:0} s).");
          long started = System.Diagnostics.Stopwatch.GetTimestamp();
-         await socket.ConnectAsync(uri.Uri, invoker, cancellationToken).ConfigureAwait(false);
+         try
+         { await socket.ConnectAsync(uri.Uri, invoker, cancellationToken).ConfigureAwait(false); }
+         finally { AdoptSocketAffinity(socket); }
          _diagnostics.Info($"Realtime socket upgraded in {Elapsed(started)}; server selected subprotocol {socket.SubProtocol ?? "(none)"}.");
          await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
          try
@@ -77,7 +79,7 @@ public sealed partial class QqqSessionClient
 
 
    /// <summary>
-   /// The HTTP invoker for the WebSocket upgrade: no redirects, no cookie jar (the cookie is attached by hand) and the same
+   /// The HTTP invoker for the WebSocket upgrade: no redirects, no cookie jar (the cookies are attached by hand) and the same
    /// certificate policy as the HTTP client, so a rejected or explicitly allowed certificate is logged the same way. See the
    /// MA0039 note on the constructor.
    /// </summary>
@@ -99,12 +101,16 @@ public sealed partial class QqqSessionClient
 
 
 
-   /// <summary>Sets the subprotocol, session cookie, origin, client channel, device proof and keep-alive on a socket before it connects; the caller holds the gate.</summary>
+   /// <summary>
+   /// Sets the subprotocol, cookies, origin, client channel, device proof and keep-alive on a socket before it connects; the
+   /// caller holds the gate. The upgrade carries the load balancer's cookies beside the session, so the socket opens on the
+   /// node this client's HTTP requests already reach, and that node then serves its claims and downloads too.
+   /// </summary>
    private void ConfigureSocket(ClientWebSocket socket, QqqDeviceCredential device, TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout)
    {
       socket.Options.AddSubProtocol("qqq-printing.v1");
       socket.Options.CollectHttpResponseDetails = true;
-      socket.Options.SetRequestHeader("Cookie", CookieHeader());
+      socket.Options.SetRequestHeader("Cookie", WithAffinity(CookieHeader()));
       socket.Options.SetRequestHeader("Origin", Origin.GetLeftPart(UriPartial.Authority));
       socket.Options.SetRequestHeader("X-QQQ-Client", ClientChannel);
       socket.Options.SetRequestHeader("X-QQQ-Device-Id", device.DeviceId);

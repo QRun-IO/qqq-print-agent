@@ -21,6 +21,9 @@ internal sealed class LoopbackWebSocketPeer : IDisposable
    internal Uri Origin { get; }
    internal Dictionary<string, string> Headers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+   /// <summary>Extra header lines for the next answer, such as the Set-Cookie a load balancer adds; empty unless a test fills it.</summary>
+   internal List<string> AnswerHeaders { get; } = [];
+
 
 
    /// <summary>Starts listening on an ephemeral loopback port, so each test gets its own address and nothing else on the machine can connect.</summary>
@@ -38,6 +41,31 @@ internal sealed class LoopbackWebSocketPeer : IDisposable
    /// </summary>
    internal async Task<WebSocket> AcceptAsync(CancellationToken token)
    {
+      NetworkStream stream = await ReadUpgradeAsync(token);
+      // RFC6455 requires SHA-1 for the public handshake challenge; this is not an authentication digest.
+#pragma warning disable CA5350
+      string accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(Headers["Sec-WebSocket-Key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+#pragma warning restore CA5350
+      byte[] response = Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: qqq-printing.v1\r\n{ExtraHeaders()}\r\n");
+      await stream.WriteAsync(response, token);
+      return WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, SubProtocol = "qqq-printing.v1" });
+   }
+
+
+
+   /// <summary>Accepts one connection, records the upgrade request's headers and refuses the upgrade with the given status line, as a server or a load balancer in front of it does when it cannot serve the socket.</summary>
+   internal async Task RefuseAsync(string status, CancellationToken token)
+   {
+      NetworkStream stream = await ReadUpgradeAsync(token);
+      await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n{ExtraHeaders()}\r\n"), token);
+      await stream.FlushAsync(token);
+   }
+
+
+
+   /// <summary>Accepts one connection, requires the realtime path and records the upgrade request's headers.</summary>
+   private async Task<NetworkStream> ReadUpgradeAsync(CancellationToken token)
+   {
       TcpClient client = await _listener.AcceptTcpClientAsync(token);
       _clients.Add(client);
       NetworkStream stream = client.GetStream();
@@ -51,14 +79,13 @@ internal sealed class LoopbackWebSocketPeer : IDisposable
          string[] pair = line.Split(':', 2);
          Headers[pair[0]] = pair[1].Trim();
       }
-      // RFC6455 requires SHA-1 for the public handshake challenge; this is not an authentication digest.
-#pragma warning disable CA5350
-      string accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(Headers["Sec-WebSocket-Key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
-#pragma warning restore CA5350
-      byte[] response = Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: qqq-printing.v1\r\n\r\n");
-      await stream.WriteAsync(response, token);
-      return WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, SubProtocol = "qqq-printing.v1" });
+      return stream;
    }
+
+
+
+   /// <summary>The extra answer header lines, each terminated, or nothing.</summary>
+   private string ExtraHeaders() => string.Concat(AnswerHeaders.Select(header => header + "\r\n"));
 
 
 
