@@ -14,9 +14,9 @@ bundle with SHA256SUMS. It takes no certificate, timestamp server or payload inp
 [CmdletBinding()]
 param(
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = '1.2.1',
+   [string] $ProductVersion = '1.2.2',
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '1.2.1'
+   [string] $ReleaseVersion = '1.2.2'
 )
 
 $ErrorActionPreference = 'Stop'

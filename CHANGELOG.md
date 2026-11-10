@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.2
 
 Sign-out now ends the identity provider's browser session as well as the QQQ session, and every browser
 sign-in sends `max_age=0` beside `prompt=login`, so the next sign-in always asks for credentials (the provider
@@ -11,7 +11,7 @@ and the provider's own discovery (HTTPS end-session endpoint on the issuer's ori
 hint), and the companion opens it in the browser and waits for the state-matched return. A server without the
 capability gets the ordinary logout, and the log says the provider session was not ended. The command-line
 `sign-out` cannot open the companion's callback inbox, so it still ends only the QQQ session and says so.
-No change to pairing, history or the printing protocol.
+No change to pairing, history or the printing protocol, and no other application change since 1.2.1.
 
 ## 1.2.1
 

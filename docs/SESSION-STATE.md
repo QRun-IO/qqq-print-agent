@@ -1,3 +1,9 @@
+# Session state — 2026-11-09
+
+## Current — 1.2.2 prepared (sign-out fix); not tagged, signed or released
+
+Version 1.2.2 carries only the sign-out fix merged in PR 18 (`a695996`): sign-out ends the identity provider's session and every browser sign-in sends `max_age=0`. No other application change since `v1.2.1`. The release change follows the 1.2.1 commit: `VersionPrefix`, the CI and packaging version defaults and the CHANGELOG heading. On the release branch, on the development PC: locked NativeCI restore, Release x64 build with `-warnaserror` (0 warnings, 0 errors), 377 Windows/CLI tests passed with no failures or skips, source notices verified for 319 tracked files, PowerShell analysis clean (17 scripts). Core.Tests was not built locally (Defender quarantine unchanged), so `Verify.ps1` was not run here; hosted CI is the evidence for it. 1.2.1 stays the current stable until a signed 1.2.2 is published. Next: merge, tag `v1.2.2` on the merge commit, signed generic and GG Forge installers, release with checksums computed after signing, install on the print station. The server must advertise `nativeSessionLogout` and the provider must end its session on the invalidation flow for the fix to take effect.
+
 # Session state — 2026-11-06
 
 ## Current — 1.2.1 released; printing cohort protocol 1.1.0 / QBit 1.1.0 / client 1.2.1 complete
