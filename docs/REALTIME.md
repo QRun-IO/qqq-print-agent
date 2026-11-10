@@ -26,8 +26,13 @@ is restricted to explicit loopback development.
 The service owns separate connection, receive, send, synchronization, command
 and job workers. Settings, desired state, commands, inventory, job events and
 receipts use small bounded WebSocket messages. A job notification wakes a finite
-HTTPS claim drain. It stops when the queue is empty or capacity is occupied and
-resumes on a committed notification or released capacity. There is no periodic
+HTTPS claim drain, called a wave. A wave claims jobs one at a time while a
+download slot is free, waits for a slot when all are occupied, and stops
+claiming at the first claim that finds the queue empty or fails. It stays open
+until the jobs it claimed have finished. A notification that arrives while a
+wave is open is remembered but not acted on at once: the job it announces is
+claimed by the next wave, which starts only after the open wave's in-flight
+jobs have finished, even when that job is for an idle printer. There is no periodic
 HTTP job/control/receipt fetch and no polling fallback. WebSocket liveness and
 normal QQQ session renewal do not query the job queue.
 
