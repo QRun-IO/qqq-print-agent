@@ -50,6 +50,39 @@ public sealed class AgentStoreTests
 
 
 
+   /// <summary>
+   /// Many stores opened at once on one new journal all succeed and each can write its profile: schema creation and migration
+   /// are serialized for that journal, whichever store gets there first. The directory is addressed in two letter cases,
+   /// because Windows treats them as the same journal and so must the lock.
+   /// </summary>
+   [Fact]
+   public async Task ConcurrentOpensOfOneNewJournal_AllSucceedAndShareItsSchema()
+   {
+      string directory = Path.Combine(Path.GetTempPath(), "qqq-concurrent-open-" + Guid.NewGuid().ToString("N"));
+      try
+      {
+         using var start = new ManualResetEventSlim();
+         Task[] opens = Enumerable.Range(0, 16).Select(index => Task.Run(() =>
+         {
+            start.Wait();
+            using AgentStore store = new(index % 2 == 0 ? directory : directory.ToUpperInvariant());
+            store.SavePrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), new PrinterProfile("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+         })).ToArray();
+         start.Set();
+         await Task.WhenAll(opens);
+         using AgentStore reopened = new(directory);
+         Assert.All(Enumerable.Range(0, 16), index => Assert.Equal("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            reopened.GetPrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)).DisplayName));
+      }
+      finally
+      {
+         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+         Directory.Delete(directory, recursive: true);
+      }
+   }
+
+
+
    /// <summary>Document and printer names at the protocol maximum of 1,024 characters are stored whole, survive a restart, and remain searchable by prefix, so long names are never silently truncated in the history.</summary>
    [Fact]
    public void JobDetails_PreserveFullProtocolLengthNamesAcrossRestart()

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,9 +27,19 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
    private readonly SqliteConnection _database;
    private readonly string _directory;
-   private static readonly Lock SchemaLock = new();
+   private static readonly ConcurrentDictionary<string, Lock> SchemaLocks = new(StringComparer.OrdinalIgnoreCase);
    private string _connectionScope = "unenrolled";
    private bool _configurationRecoveryRequired;
+
+
+
+   /// <summary>
+   /// The lock that serializes schema creation and migration for this journal. Every store this process opens on the same
+   /// directory shares it, so two of them cannot both add a column or a table. Stores on different directories do not wait
+   /// for each other: their journals are separate files, and a single lock for the whole process made every open queue behind
+   /// every other one.
+   /// </summary>
+   private Lock SchemaLock => SchemaLocks.GetOrAdd(_directory, static _ => new Lock());
 
 
 
@@ -58,7 +69,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
 
    /// <summary>
-   /// Creates or migrates the schema under a process-wide lock: events, exposure, per-job summaries, and the added
+   /// Creates or migrates the schema under this journal's schema lock: events, exposure, per-job summaries, and the added
    /// timestamp and scope columns, with legacy rows assigned to the current scope. Job summaries are rebuilt from the latest
    /// event only the first time that table appears. The migration runs in a transaction so a failure leaves the old schema usable.
    /// </summary>
