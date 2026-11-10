@@ -7,10 +7,10 @@ There are two levels. A **client edition** is a separate, fully branded build an
 Add a folder under `editions/` (see [editions/README.md](../editions/README.md)) with `edition.json`, `app-icon.svg`, `app.ico` and an optional `logo.png`, then build with:
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 2.0.0 -ReleaseVersion 2.0.0 -Edition gg-forge
+./build/Build-Installer.ps1 -Edition gg-forge
 ```
 
-The result is `artifacts/installer/<assetPrefix>-<version>-x64.msi`, for example `GgForgePrintAgent-1.2.0-x64.msi`. Installed, it shows the client's name and mark on the splash, About, window title, tray tooltip, Start menu, Programs list and service; Task Manager and file properties show the client's product, company and description; and the in-app updater follows `<assetPrefix>-v<version>-x64.msi` on the release feed. CI builds every edition's unsigned installer, and the stable release workflow signs and publishes one MSI per edition beside the generic one, all listed in the same `SHA256SUMS`. An edition installer forces its client's labels over any labels an earlier install stored.
+The result is `artifacts/installer/<assetPrefix>-<version>-x64.msi`, for example `GgForgePrintAgent-2.0.0-x64.msi`. Installed, it shows the client's name and mark on the splash, About, window title, tray tooltip, Start menu, Programs list and service; Task Manager and file properties show the client's product, company and description; and the in-app updater follows `<assetPrefix>-v<version>-x64.msi` on the release feed. CI builds every edition's unsigned installer, and the stable release workflow signs and publishes one MSI per edition beside the generic one, all listed in the same `SHA256SUMS`. An edition installer forces its client's labels over any labels an earlier install stored.
 
 An edition's descriptor can also name the server as its users know it (`serverName`, used in sign-in and status text instead of QQQ) and leave the Query mascot and License sections out of About (`aboutMascot`, `aboutLicense`); the generic build keeps all of them. Editions share application id, data paths, executable file names, the install directory, the protocol handler, the MSI upgrade identity and the signing identity, so an edition installer upgrades the generic build and other editions in place and keeps the pairing and history. Deployment branding below still applies on top of an edition.
 

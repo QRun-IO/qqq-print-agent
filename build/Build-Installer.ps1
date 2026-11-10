@@ -4,12 +4,13 @@
 
 [CmdletBinding()]
 param(
-   # Both default to the reviewed source version (VersionPrefix in Directory.Build.props), so a caller that names
-   # no version cannot disagree with the source. Name -ReleaseVersion X.Y.Z-rc.N for a test build.
+   # Left out, ProductVersion is the reviewed source version (Get-SourceVersion.ps1) and ReleaseVersion is
+   # ProductVersion, so a caller that names no version cannot disagree with the source. Name
+   # -ReleaseVersion X.Y.Z-rc.N for a test build.
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = ([xml](Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'Directory.Build.props') -Raw)).SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText,
+   [string] $ProductVersion,
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = $ProductVersion,
+   [string] $ReleaseVersion,
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [switch] $PublishOnly,
@@ -24,6 +25,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$sourceVersion = & (Join-Path $PSScriptRoot 'Get-SourceVersion.ps1')
+if(-not $ProductVersion) { $ProductVersion = $sourceVersion }
+if(-not $ReleaseVersion) { $ReleaseVersion = $ProductVersion }
 if($ReleaseVersion.Split('-')[0] -cne $ProductVersion)
 {
    throw 'The MSI ProductVersion must match the numeric core of ReleaseVersion.'
@@ -33,8 +37,7 @@ if($numericVersion.Major -gt 255 -or $numericVersion.Minor -gt 255 -or $numericV
 {
    throw 'ProductVersion exceeds the Windows Installer limits (255.255.65535).'
 }
-[xml]$versionProperties = Get-Content -LiteralPath (Join-Path $projectRoot 'Directory.Build.props') -Raw
-if($versionProperties.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText -cne $ProductVersion)
+if($sourceVersion -cne $ProductVersion)
 {
    throw 'ProductVersion must match the reviewed source VersionPrefix in Directory.Build.props.'
 }

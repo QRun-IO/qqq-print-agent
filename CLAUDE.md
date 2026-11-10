@@ -40,7 +40,7 @@ The gate (`build/Assert-Coverage.ps1`) merges both suites' reports line by line 
 Packaging (unsigned self-contained x64 MSI; never installs or prints):
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 2.0.0 -ReleaseVersion 2.0.0
+./build/Build-Installer.ps1            # version from Directory.Build.props; -ReleaseVersion X.Y.Z-rc.N for a test build
 ./build/Package-Release.ps1            # runs the CI packaging checks and assembles artifacts/release
 ```
 

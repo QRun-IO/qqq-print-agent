@@ -8,8 +8,8 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $builder = Join-Path $PSScriptRoot 'Build-Installer.ps1'
-[xml]$properties = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'Directory.Build.props') -Raw
-$current = $properties.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText
+$sourceVersion = Join-Path $PSScriptRoot 'Get-SourceVersion.ps1'
+$current = & $sourceVersion
 
 function Assert-PackageRejected([string] $Product, [string] $Release, [string] $Expected)
 {
@@ -23,6 +23,30 @@ function Assert-PackageRejected([string] $Product, [string] $Release, [string] $
    if($message -notlike "*$Expected*") { throw "Packaging did not reject the expected boundary: $Expected. Actual: $message" }
 }
 
+function Assert-SourceVersionRejected([string] $Content, [string] $Expected)
+{
+   <#
+   .SYNOPSIS
+   Confirm the source-version reader refuses a properties file it cannot take a numeric version from.
+   #>
+   $file = Join-Path ([IO.Path]::GetTempPath()) ('qqq-source-version-' + [Guid]::NewGuid().ToString('N') + '.props')
+   $message = ''
+   try
+   {
+      if($Content) { Set-Content -LiteralPath $file -Value $Content }
+      try { & $sourceVersion -PropertiesPath $file | Out-Null }
+      catch { $message = $_.Exception.Message }
+   }
+   finally
+   {
+      if(Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file -Force }
+   }
+   if($message -notlike "*$Expected*") { throw "The source version reader did not refuse: $Expected. Actual: $message" }
+}
+
+Assert-SourceVersionRejected -Content '' -Expected 'does not exist'
+Assert-SourceVersionRejected -Content '<Project><PropertyGroup /></Project>' -Expected 'VersionPrefix not found'
+Assert-SourceVersionRejected -Content '<Project><PropertyGroup><VersionPrefix>2.0.0-beta</VersionPrefix></PropertyGroup></Project>' -Expected 'not a numeric X.Y.Z version'
 Assert-PackageRejected -Product $current -Release '999.0.0-rc.1' -Expected 'numeric core'
 Assert-PackageRejected -Product '256.0.0' -Release '256.0.0-rc.1' -Expected 'Windows Installer limits'
 Assert-PackageRejected -Product '0.0.0' -Release '0.0.0-rc.1' -Expected 'reviewed source VersionPrefix'
