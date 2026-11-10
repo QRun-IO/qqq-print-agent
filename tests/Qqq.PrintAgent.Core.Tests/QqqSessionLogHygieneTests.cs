@@ -25,8 +25,8 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// </summary>
 public sealed class QqqSessionLogHygieneTests
 {
-   /// <summary>Longer than the longest line the list and value limits allow: a discovery summary of 32 extensions and 32 channels, each value cut at 80 units.</summary>
-   private const int LongestLine = 12_000;
+   /// <summary>Longer than the longest line the list and value limits allow: 32 listed callback addresses, each cut at 512 units.</summary>
+   private const int LongestLine = 17_000;
 
    private const string Marker = "INFO forged";
    private static readonly Uri Redirect = new(ScriptedServer.Callback);
@@ -238,6 +238,60 @@ public sealed class QqqSessionLogHygieneTests
          Assert.Equal(certificate.Thumbprint, rejection.Thumbprint);
       }
       AssertPrintableAndBounded(lines, "TLS certificate for printing.example.invalid rejected: RemoteCertificateChainErrors.");
+   }
+
+
+
+   /// <summary>
+   /// The cut must not hide what an operator compares. The contract lets a principal and a tenant run to 200
+   /// characters; when the server reports a different identity for a held session, the log names the old and the new
+   /// one, and two that share their first 191 characters are both there in full, so the difference can be seen.
+   /// </summary>
+   [Fact]
+   public async Task IdentityValuesAreLoggedInFullSoAChangeCanBeSeen()
+   {
+      string shared = new('p', 191);
+      string before = shared + "-before-x";
+      string after = shared + "-after--x";
+      Assert.Equal(200, after.Length);
+      var lines = new List<string>();
+      using ScriptedServer server = ScriptedServer.SignedIn()
+         .Add(new JsonObject { ["principalId"] = before, ["tenantId"] = before, ["deviceId"] = "device-1" }.ToJsonString())
+         .Add("""{"uuid":"session"}""")
+         .Add(new JsonObject { ["principalId"] = after, ["tenantId"] = after, ["deviceId"] = "device-1" }.ToJsonString());
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: Diagnostics(lines));
+      await client.SignInWithPasswordAsync("synthetic-user", "synthetic-password");
+      await client.BindDeviceAsync(new QqqDeviceCredential("device-1", "synthetic-proof"));
+      Assert.Contains($"Device device-1 bound to principal {before} in tenant {before}.", lines, StringComparer.Ordinal);
+      await Assert.ThrowsAsync<QqqSessionException>(() => client.ResumeSessionAsync());
+      Assert.Contains($"Session identity: principal {after}, tenant {after}, device device-1.", lines, StringComparer.Ordinal);
+      Assert.Contains($"Identity changed: the session was bound to principal {before} in tenant {before}; the server now reports principal {after} in tenant {after}. Session cleared.", lines, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// When the server does not list the callback this agent uses, the log names the callbacks it does list, because
+   /// that line is what the operator registers the callback from. Listed addresses longer than the short cut, and
+   /// alike at their beginnings, are shown in full; one longer than the long cut is still cut.
+   /// </summary>
+   [Fact]
+   public async Task ListedCallbackAddressesAreLoggedInFull()
+   {
+      string first = "io.qrun.qqq-print-agent:/oauth/" + new string('a', 250) + "/first";
+      string second = "io.qrun.qqq-print-agent:/oauth/" + new string('a', 250) + "/second";
+      string overlong = "io.qrun.qqq-print-agent:/oauth/" + new string('b', 600);
+      JsonObject description = JsonNode.Parse(ScriptedServer.OAuth)!.AsObject();
+      description["values"]!["nativeSessionLogin"]!["redirectUris"] = new JsonArray(first, second, overlong);
+      var lines = new List<string>();
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery).Add(description.ToJsonString());
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: Diagnostics(lines));
+      await Assert.ThrowsAsync<QqqSessionException>(() => client.BeginBrowserLoginAsync(Redirect));
+      string refusal = Assert.Single(lines, line => line.StartsWith("Browser sign-in refused: the server's native grant does not list the callback ", StringComparison.Ordinal));
+      Assert.Contains($"it lists [{first}, {second}, {overlong[..512]}...]. Add this callback", refusal, StringComparison.Ordinal);
+      Assert.Contains(lines, line => line.StartsWith("Native grant: ", StringComparison.Ordinal) && line.Contains($"[{first}, {second}, {overlong[..512]}...]", StringComparison.Ordinal));
+      AssertPrintableAndBounded(lines);
    }
 
 

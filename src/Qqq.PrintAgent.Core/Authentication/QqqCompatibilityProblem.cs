@@ -23,7 +23,11 @@ public sealed record QqqCompatibilityProblem(QqqCompatibilityIssue Issue, string
    /// <summary>The most UTF-16 units a detail holds before it is cut.</summary>
    internal const int DetailLimit = 512;
 
-   /// <summary>The most UTF-16 units shown of longer text the server can influence: an address, a certificate name, an error description, a failure's message.</summary>
+   /// <summary>
+   /// The most UTF-16 units shown of longer text the server can influence: an address, a certificate name, an error
+   /// description, a failure's message, and the identity values and listed addresses an operator has to compare. The
+   /// short limit would cut two identifiers that share their first 80 characters to the same text.
+   /// </summary>
    internal const int TextLimit = 512;
 
    /// <summary>The most values of a server-supplied list that are shown; the rest are counted.</summary>
@@ -86,8 +90,8 @@ public sealed record QqqCompatibilityProblem(QqqCompatibilityIssue Issue, string
 
 
 
-   /// <summary>Joins a server-supplied list for display: each value printable, at most <see cref="ListLimit"/> of them, and a count of the rest, so neither one value nor the number of values can make a line long.</summary>
-   internal static string PrintableList(IEnumerable<string?>? values) => BoundedList((values ?? []).Select(value => Printable(value)));
+   /// <summary>Joins a server-supplied list for display: each value printable and cut at the given limit, at most <see cref="ListLimit"/> of them, and a count of the rest, so neither one value nor the number of values can make a line unbounded.</summary>
+   internal static string PrintableList(IEnumerable<string?>? values, int limit = ValueLimit) => BoundedList((values ?? []).Select(value => Printable(value, limit)));
 
 
 

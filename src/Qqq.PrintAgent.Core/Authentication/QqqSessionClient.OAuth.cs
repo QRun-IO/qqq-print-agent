@@ -84,7 +84,7 @@ public sealed partial class QqqSessionClient
       }
       if(!grant.RedirectUris.Contains(redirectUri.AbsoluteUri, StringComparer.Ordinal))
       {
-         _diagnostics.Info($"Browser sign-in refused: the server's native grant does not list the callback {redirectUri.AbsoluteUri}; it lists [{ShownList(grant.RedirectUris)}]. Add this callback to the QQQ native session grant.");
+         _diagnostics.Info($"Browser sign-in refused: the server's native grant does not list the callback {redirectUri.AbsoluteUri}; it lists [{ShownAddresses(grant.RedirectUris)}]. Add this callback to the QQQ native session grant.");
          throw QqqApiDiscovery.Configuration();
       }
    }

@@ -324,7 +324,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _device = credential;
          _binding = identity;
          _generation++;
-         _diagnostics.Info($"Device {credential.DeviceId} bound to principal {Shown(identity.PrincipalId)} in tenant {Shown(identity.TenantId)}.");
+         _diagnostics.Info($"Device {credential.DeviceId} bound to principal {ShownText(identity.PrincipalId)} in tenant {ShownText(identity.TenantId)}.");
          return identity;
       }
       catch(Exception exception)
@@ -466,7 +466,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       _diagnostics.Info($"Authentication metadata: type {Shown(metadata.Type)}, provider '{Shown(metadata.Name)}', native browser sign-in {(grant is null ? "not offered" : "offered")}.");
       _diagnostics.Debug(() => grant is null
          ? $"Provider values present: {metadata.Values is not null}; client id {(string.IsNullOrEmpty(metadata.Values?.ClientId) ? "(none)" : "present")}; scopes '{Shown(metadata.Values?.Scopes)}'."
-         : $"Native grant: flow {Shown(grant.Flow)}, challenge {Shown(grant.CodeChallengeMethod)}, prompt {Shown(grant.Prompt)}, issuer {ShownText(grant.Issuer)}, discovery {ShownText(grant.DiscoveryUrl)}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{ShownList(grant.RedirectUris)}], scopes '{Shown(metadata.Values?.Scopes)}'.");
+         : $"Native grant: flow {Shown(grant.Flow)}, challenge {Shown(grant.CodeChallengeMethod)}, prompt {Shown(grant.Prompt)}, issuer {ShownText(grant.Issuer)}, discovery {ShownText(grant.DiscoveryUrl)}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{ShownAddresses(grant.RedirectUris)}], scopes '{Shown(metadata.Values?.Scopes)}'.");
       return metadata;
    }
 
@@ -509,14 +509,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       string tenant = IdentityValue(root, "tenantId");
       string? device = root.TryGetProperty("deviceId", out JsonElement value) && value.ValueKind != JsonValueKind.Null ? IdentityValue(root, "deviceId") : null;
       var identity = new QqqSessionBinding(Origin, principal, tenant, device);
-      _diagnostics.Info($"Session identity: principal {Shown(principal)}, tenant {Shown(tenant)}, device {(device is null ? "(none)" : Shown(device))}.");
+      _diagnostics.Info($"Session identity: principal {ShownText(principal)}, tenant {ShownText(tenant)}, device {(device is null ? "(none)" : ShownText(device))}.");
       if((_binding is not null && (!string.Equals(_binding.PrincipalId, principal, StringComparison.Ordinal)
             || !string.Equals(_binding.TenantId, tenant, StringComparison.Ordinal)))
          || (credential is not null && !string.Equals(credential.DeviceId, device, StringComparison.Ordinal)))
       {
          _diagnostics.Info(_binding is not null && (!string.Equals(_binding.PrincipalId, principal, StringComparison.Ordinal) || !string.Equals(_binding.TenantId, tenant, StringComparison.Ordinal))
-            ? $"Identity changed: the session was bound to principal {Shown(_binding.PrincipalId)} in tenant {Shown(_binding.TenantId)}; the server now reports principal {Shown(principal)} in tenant {Shown(tenant)}. Session cleared."
-            : $"Device mismatch: proof was sent for device {credential!.DeviceId} but the server reports device {(device is null ? "(none)" : Shown(device))}. Session cleared.");
+            ? $"Identity changed: the session was bound to principal {ShownText(_binding.PrincipalId)} in tenant {ShownText(_binding.TenantId)}; the server now reports principal {ShownText(principal)} in tenant {ShownText(tenant)}. Session cleared."
+            : $"Device mismatch: proof was sent for device {credential!.DeviceId} but the server reports device {(device is null ? "(none)" : ShownText(device))}. Session cleared.");
          ClearSession();
          throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "The server returned a different principal or device binding.");
       }
@@ -969,13 +969,18 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>The same for longer text the server can influence: an address, a certificate name, an error description or a failure's message.</summary>
+   /// <summary>The same for longer text the server can influence: an address, a certificate name, an error description, a failure's message, or an identity value, which the contract lets run to 200 characters and which an operator compares with another.</summary>
    private static string ShownText(string? value) => QqqCompatibilityProblem.Printable(value, QqqCompatibilityProblem.TextLimit);
 
 
 
    /// <summary>The same for a list the server supplied: each value printable, the list cut at a fixed number of values and the rest counted.</summary>
    private static string ShownList(IEnumerable<string?>? values) => QqqCompatibilityProblem.PrintableList(values);
+
+
+
+   /// <summary>The same for a list of addresses the operator has to compare with one of their own, such as the callbacks a server lists: each is shown up to the longer limit, so two that share a long beginning still differ in the log.</summary>
+   private static string ShownAddresses(IEnumerable<string?>? values) => QqqCompatibilityProblem.PrintableList(values, QqqCompatibilityProblem.TextLimit);
 
 
 
