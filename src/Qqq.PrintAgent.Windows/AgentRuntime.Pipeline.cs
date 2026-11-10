@@ -142,7 +142,7 @@ public sealed partial class AgentRuntime
       await using IAsyncDisposable? lane = await AcquireDownloadLaneAsync(wave, token).ConfigureAwait(false);
       if(lane is null)
       { return false; }
-      using var store = new AgentStore(directory);
+      using AgentStore store = OpenStore(recover: false);
       if(store.LoadConfiguration() is null)
       { return false; }
       using PrintApiClient api = CreateApi();

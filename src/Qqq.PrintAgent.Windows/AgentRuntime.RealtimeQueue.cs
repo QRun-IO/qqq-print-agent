@@ -23,7 +23,7 @@ public sealed partial class AgentRuntime
          { continue; }
          try
          {
-            using var store = new AgentStore(directory);
+            using AgentStore store = OpenStore(recover: false);
             AgentConfiguration? configuration = store.LoadConfiguration();
             if(configuration is null)
             { continue; }

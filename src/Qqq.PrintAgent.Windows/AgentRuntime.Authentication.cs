@@ -41,7 +41,7 @@ public sealed partial class AgentRuntime
       if(sessionFactory is not null)
       { return sessionFactory(origin); }
       ServerTrust trust;
-      using(var store = new AgentStore(directory, recoverUnreadableConfiguration: true))
+      using(AgentStore store = OpenStore(recover: true))
       { trust = store.LoadServerTrust(); }
       bool allowUntrusted = trust.AppliesTo(origin);
       if(allowUntrusted)
@@ -87,7 +87,7 @@ public sealed partial class AgentRuntime
             // Whoever held the gate (a sign-out, a failed enrollment) blocked authorization while this call was waiting.
             return false;
          }
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         using AgentStore store = OpenStore(recover: true);
          AgentAuthentication? saved = LoadSavedSession(store, forRecovery: false);
          AgentConfiguration? configuration = store.LoadConfiguration();
          if(saved?.Credential is null || (saved.Binding.HasApprovedDevice

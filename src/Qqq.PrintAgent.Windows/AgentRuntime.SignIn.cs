@@ -39,7 +39,7 @@ public sealed partial class AgentRuntime
          candidate = NewSession(credential.Origin);
          _log.Write("INFO", "Step 1 of 4: verifying the companion's session with the server.");
          await candidate.RestoreSessionAsync(credential, token).ConfigureAwait(false);
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         using AgentStore store = OpenStore(recover: true);
          AgentConfiguration? configuration = store.LoadConfiguration();
          _log.Write("INFO", "Step 2 of 4: reading the session identity. Saved pairing: "
             + (configuration is null ? "none (this computer has never been enrolled)." : $"server {configuration.ServerUrl}, device {configuration.DeviceId}."));
@@ -152,7 +152,7 @@ public sealed partial class AgentRuntime
       {
          _log.Write("INFO", "Sign-out requested: blocking printing, removing the saved session credential and ending the server session. Pairing and history are kept.");
          BlockAuthorization();
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         using AgentStore store = OpenStore(recover: true);
          AgentAuthentication? saved = LoadSavedSession(store, forRecovery: true);
          bool unreadableSession = store.QuarantineUnreadableAuthentication() || store.StagedPairing is StagedPairingOutcome.CompletedAfterQuarantine or StagedPairingOutcome.SetAside;
          if(unreadableSession)

@@ -85,7 +85,7 @@ public sealed partial class AgentRuntime
             return "Disconnected by the administrator. The realtime control channel remains active; ask the server administrator to reconnect this device.";
          }
       }
-      using AgentStore store = new(directory);
+      using AgentStore store = OpenStore(recover: false);
       if(store.LoadConfiguration() is null)
       {
          return "Not enrolled. Open Connection settings to connect this device.";

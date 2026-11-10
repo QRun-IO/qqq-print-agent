@@ -64,6 +64,16 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
    /// <summary>
+   /// Opens the journal and the protected files of the state directory for one unit of work. Every part of the runtime
+   /// opens its store here, so what a store is opened for is decided in one place. With <paramref name="recover"/> a saved
+   /// connection that can no longer be read is set aside instead of failing the open, which the paths that must keep
+   /// working without a readable pairing (status, sign-in, enrollment, settings) ask for.
+   /// </summary>
+   private AgentStore OpenStore(bool recover) => new(directory, recoverUnreadableConfiguration: recover);
+
+
+
+   /// <summary>
    /// Builds the API client for one unit of work, bound to the live QQQ session and the current realtime channel. It fails
    /// when no channel exists, so no HTTP-only path can claim work, and it fails with the channel-closed type, because the
    /// caller only found the connection gone and that is never the reason the connection ended.
@@ -110,7 +120,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// <summary>Current local observations, with no token or document content.</summary>
    public AgentSnapshot GetSnapshot()
    {
-      using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+      using AgentStore store = OpenStore(recover: true);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
       var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location, printer.MediaProfiles, ServerStateFor(printer.PrinterId, exposed.Contains(printer.PrinterId)))).ToList();
@@ -250,7 +260,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             {
                throw new InvalidOperationException("PrinterId and Exposed are required.");
             }
-            using(AgentStore store = new(directory))
+            using(AgentStore store = OpenStore(recover: false))
             {
                store.SetExposure(request.PrinterId, request.Exposed.Value, _printers.Discover());
             }

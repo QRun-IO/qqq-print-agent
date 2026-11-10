@@ -54,7 +54,7 @@ public sealed partial class AgentRuntime
    /// </summary>
    private async Task RunRealtimeAsync(CancellationToken token)
    {
-      using(var store = new AgentStore(directory, recoverUnreadableConfiguration: true))
+      using(AgentStore store = OpenStore(recover: true))
       {
          _realtimeSettings = store.LoadRealtimeSettings();
          _controlState = store.LoadControlState();
@@ -486,7 +486,7 @@ public sealed partial class AgentRuntime
          {
             lock(_stateLock)
             { if(generation != _connectionGeneration) { throw new OperationCanceledException(token); } }
-            using var store = new AgentStore(directory);
+            using AgentStore store = OpenStore(recover: false);
             if(envelope.Type is "WELCOME" or "SETTINGS")
             { ApplyRealtimeSettings(envelope, store, channel); }
             saved = PersistControlState(store);

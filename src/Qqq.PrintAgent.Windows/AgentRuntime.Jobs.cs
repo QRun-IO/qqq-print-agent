@@ -22,7 +22,7 @@ public sealed partial class AgentRuntime
    /// </summary>
    private async Task<string> HandleJobCommandAsync(PipeRequest request, CancellationToken token)
    {
-      using AgentStore store = new(directory);
+      using AgentStore store = OpenStore(recover: false);
       if(string.Equals(request.Operation, "query-jobs", StringComparison.Ordinal))
       {
          JobSnapshot[] queued;

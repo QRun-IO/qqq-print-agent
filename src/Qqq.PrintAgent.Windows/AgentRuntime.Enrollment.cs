@@ -71,7 +71,7 @@ public sealed partial class AgentRuntime
          ////////////////////////////////////////////////////////////////////
          _log.Write("INFO", "Step 4 of 4: saving the pairing to protected storage and activating the session for printing.");
          AgentAuthentication authentication = new(actual, session.ExportCredential());
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         using AgentStore store = OpenStore(recover: true);
          store.StagePairing(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds), authentication);
          progress = EnrollmentProgress.Saved;
          FinishStagedPairing(store);
