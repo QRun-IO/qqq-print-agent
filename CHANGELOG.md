@@ -73,7 +73,11 @@ The companion's presentation logic moved out of the views into a new UI-free ass
 `Qqq.PrintAgent.Presentation`, gated at 100% line coverage ([ADR-0003](docs/adr/0003-version-2.md)): one typed
 client for the local service pipe, the texts and enablement rules of the printer, job, footer and settings
 views, the Jobs page's paging and sorting state, and the connection dialog's flow (discovery, sign-in, sign-out,
-enrollment, certificate exception) as a state machine. The pipe's wire format and the service are unchanged.
+enrollment, certificate exception) as a state machine. The pipe's wire format is unchanged except for one member:
+the `control` object of the status snapshot (also printed by the command line's `snapshot`) no longer carries
+`authorizationRequired`. Only the polling prerelease ever set it; it had been always false since, and the footer
+sentence it selected, "Server authorization required — sign in again", could no longer appear. Missing authorization
+is shown from the authentication status, as before.
 What the operator sees is the same except for the following, each of them deliberate:
 
 - **The companion keeps no session after sign-in.** Once the service confirms that it took over the session, the
@@ -97,7 +101,15 @@ What the operator sees is the same except for the following, each of them delibe
     completed** after a hand-over whose reply was lost: the service may complete the sign-in in all of these.
     "Canceled" is now only said when nothing was handed to the service;
   - a sign-out says **Sign-out could not be confirmed** and that the session may have ended, instead of **Service
-    unavailable**. This includes a sign-out the service answered with a document the companion cannot read.
+    unavailable**. This includes a sign-out the service answered with a document the companion cannot read;
+  - a change to the certificate exception says **Certificate exception could not be confirmed**, instead of **Service
+    unavailable** with the checkbox put back. The service may hold either value, so the checkbox is shown
+    undetermined and its label says the last change was not confirmed; the companion applies no exception meanwhile,
+    and the setting is read again as soon as the service answers a status request;
+  - an action on a printer or a job (test print, retry, cancel, saving details) that never left this computer says
+    **Request not sent. Nothing was sent to the local service, so nothing was changed**, with the reason. It used to
+    say **Result could not be confirmed** and that the request might already have reached the printer, which stays
+    the message for an action that did leave.
 - **Pipe failures the window did not handle are handled.** A failure while verifying the service, an oversize pipe
   message, and a malformed callback written to the browser sign-in inbox now show the same "service unavailable"
   or "not completed" message as the other failures instead of escaping the handler. The identity check itself now
@@ -114,6 +126,11 @@ What the operator sees is the same except for the following, each of them delibe
 - **Closing the window during an operation is quiet.** The operation ends by itself; it used to be able to fail
   with "Cannot access a disposed object", shown and logged as a discovery or sign-in failure, and could still send
   its request to the service after the window had closed.
+- **An update the service is not ready for says why.** When jobs claimed before the update's pause are still
+  running after the preparation limit, the in-app update shows the service's own sentence ("Not ready for update:
+  1 job(s) were still in progress after 25 seconds. They will finish; try the update again afterwards.") after "The
+  update was not started, and the current version remains installed." Any other answer is shown as an answer the
+  update could not use. Both used to follow "Let active printing finish and try again", whatever the service said.
 - **Full details** no longer opens a dialog for a details reply that names another job or has no job or events;
   the message was already shown, and the dialog used to open anyway.
 - A service error shown as **Action could not be completed** no longer starts with a space. A sign-out reply
