@@ -8,9 +8,10 @@ using Qqq.PrintAgent.Windows;
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// The one-time enrollment code is a secret. It comes from an environment variable or from standard input (piped in, or
-/// typed at a prompt without being shown), never from the command line; it goes to the service in the enrollment request
-/// and nowhere else; and nothing the tool prints ever contains it, whether the enrollment works, is refused or cannot be sent.
+/// The one-time enrollment code is a secret. It comes from an environment variable or from standard input (piped in
+/// without a prompt, or typed at a console prompt without being shown), never from the command line; it goes to the
+/// service in the enrollment request and nowhere else; and nothing the tool prints ever contains it, whether the
+/// enrollment works, is refused or cannot be sent.
 /// </summary>
 public sealed class CliEnrollmentCodeTests
 {
@@ -40,12 +41,12 @@ public sealed class CliEnrollmentCodeTests
 
 
 
-   /// <summary>With the variable missing or blank and standard input redirected, the code is the line that is piped in. The prompt goes to standard error and its line is ended there, so standard output holds the service's reply and nothing else, and no key is read from a console that is not there.</summary>
+   /// <summary>With the variable missing or blank and standard input redirected, the code is the line that is piped in, read without a prompt: standard output holds the service's reply and nothing else, standard error stays empty, and no key is read from a console that is not there.</summary>
    [Theory]
    [InlineData(null)]
    [InlineData("")]
    [InlineData("   ")]
-   public async Task CodePipedIn_IsReadAsALineWithThePromptOnStandardError(string? variable)
+   public async Task CodePipedIn_IsReadAsALineWithoutAPrompt(string? variable)
    {
       using CliFixture cli = new() { Reply = "Enrolled." };
       cli.Variables["QQQ_PRINT_ENROLLMENT_CODE"] = variable;
@@ -58,12 +59,30 @@ public sealed class CliEnrollmentCodeTests
       Assert.Equal(0, cli.KeysRead);
       Assert.Equal(new PipeRequest("enroll", Server, Code), Assert.Single(cli.Sent));
       Assert.Equal("Enrolled.\n", cli.Output);
-      Assert.Equal(Prompt, cli.Error);
+      Assert.Equal("", cli.Error);
    }
 
 
 
-   /// <summary>At a console the code is read key by key up to Enter, and every key is read without being shown. Standard input is not read as a line, and the prompt line is ended on standard error because the Enter was not shown either.</summary>
+   /// <summary>A scripted enrollment that succeeds writes nothing at all to standard error, whether the code came from the variable or was piped in. Windows PowerShell treats any standard error output of a native program as an error, and with ErrorActionPreference set to Stop that would end the script after the single-use code was already spent.</summary>
+   [Theory]
+   [InlineData("variable")]
+   [InlineData("piped")]
+   public async Task SuccessfulScriptedEnrollment_WritesNothingToStandardError(string source)
+   {
+      using CliFixture cli = new() { Reply = "Enrolled device synthetic-device-7." };
+      Supply(cli, source, Code);
+
+      int exitCode = await cli.RunAsync("enroll", "--server", Server);
+
+      Assert.Equal(0, exitCode);
+      Assert.Equal(0, cli.Error.Length);
+      Assert.Equal("Enrolled device synthetic-device-7.\n", cli.Output);
+   }
+
+
+
+   /// <summary>At a console the operator is prompted on standard error and the code is read key by key up to Enter, every key without being shown. Standard input is not read as a line, and the prompt line is ended on standard error because the Enter was not shown either.</summary>
    [Fact]
    public async Task CodeTypedAtTheConsole_IsReadWithoutBeingShown()
    {
@@ -111,6 +130,46 @@ public sealed class CliEnrollmentCodeTests
 
 
 
+   /// <summary>The typed line also ends on a key that carries a line-end character without being the Enter key: Ctrl+M, which a console reports as the M key with a carriage return, and a bare carriage return or line feed delivered by a terminal that pastes or forwards text. Keys after it are left unread.</summary>
+   [Theory]
+   [InlineData(ConsoleKey.M, '\r')]
+   [InlineData(ConsoleKey.None, '\r')]
+   [InlineData(ConsoleKey.None, '\n')]
+   [InlineData(ConsoleKey.J, '\n')]
+   public async Task TypingAtTheConsole_EndsOnALineEndCharacterWithoutTheEnterKey(ConsoleKey key, char character)
+   {
+      using CliFixture cli = new() { Reply = "Enrolled.", InputRedirected = false };
+      cli.Type(Code);
+      cli.Press(key, character);
+      cli.Type("typed-after-the-line-end");
+
+      int exitCode = await cli.RunAsync("enroll", "--server", Server);
+
+      Assert.Equal(0, exitCode);
+      Assert.Equal(Code, Assert.Single(cli.Sent).EnrollmentCode);
+      Assert.Equal("typed-after-the-line-end".Length, cli.Keys.Count);
+      Assert.Equal(Prompt, cli.Error);
+   }
+
+
+
+   /// <summary>When reading keys fails, the prompt line is ended before the failure is reported, so the message starts on its own line instead of running on from "Enrollment code: ". Nothing is sent.</summary>
+   [Fact]
+   public async Task KeyReadFailure_EndsThePromptLineBeforeTheMessage()
+   {
+      using CliFixture cli = new() { InputRedirected = false };
+      cli.Type("synthetic-co");
+
+      int exitCode = await cli.RunAsync("enroll", "--server", Server);
+
+      Assert.Equal(1, exitCode);
+      Assert.Empty(cli.Sent);
+      Assert.Equal("", cli.Output);
+      Assert.Equal(Prompt + "The fixture has no more keys to press.\n", cli.Error);
+   }
+
+
+
    /// <summary>White space around the code is dropped, whichever way it arrives, and white space inside it is kept. A code never begins or ends with white space, but a shell can add some: cmd's "echo CODE | ..." pipes a trailing space.</summary>
    [Theory]
    [InlineData("variable", "  synthetic-code-4471 ", "synthetic-code-4471")]
@@ -130,14 +189,14 @@ public sealed class CliEnrollmentCodeTests
 
 
 
-   /// <summary>When no code is available (redirected input is at its end or holds a blank line, or the operator presses only Enter or spaces), enrollment fails: the prompt line is ended, then one line on standard error says why, the exit code is 1, standard output is empty and no request reaches the service.</summary>
+   /// <summary>When no code is available, enrollment fails with one line on standard error that says why, exit code 1, nothing on standard output and no request to the service. With redirected input (at its end, or holding a blank line) that line is all standard error gets; at a console (only Enter or spaces pressed) it follows the ended prompt line.</summary>
    [Theory]
-   [InlineData("piped", null)]
-   [InlineData("piped", "")]
-   [InlineData("piped", "  ")]
-   [InlineData("typed", "")]
-   [InlineData("typed", "   ")]
-   public async Task NoCodeAtAll_FailsWithoutContactingTheService(string source, string? given)
+   [InlineData("piped", null, "")]
+   [InlineData("piped", "", "")]
+   [InlineData("piped", "  ", "")]
+   [InlineData("typed", "", Prompt)]
+   [InlineData("typed", "   ", Prompt)]
+   public async Task NoCodeAtAll_FailsWithoutContactingTheService(string source, string? given, string prompt)
    {
       using CliFixture cli = new();
       if(given is not null)
@@ -150,7 +209,7 @@ public sealed class CliEnrollmentCodeTests
       Assert.Equal(1, exitCode);
       Assert.Empty(cli.Sent);
       Assert.Equal("", cli.Output);
-      Assert.Equal(Prompt + "Enrollment code is required.\n", cli.Error);
+      Assert.Equal(prompt + "Enrollment code is required.\n", cli.Error);
    }
 
 

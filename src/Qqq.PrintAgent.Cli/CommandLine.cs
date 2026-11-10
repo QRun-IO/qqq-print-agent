@@ -43,7 +43,9 @@ internal sealed class CommandLine(CommandLineHost host)
       Every command is carried out by the installed print service, which owns the sign-in, the pairing and all printing.
       Run from an administrator prompt, and sign in through the companion app first.
       The enrollment code is read from the QQQ_PRINT_ENROLLMENT_CODE environment variable, or else from standard input:
-      typed at a prompt, where it is not shown, or piped in. It is never accepted on the command line.
+      at a Windows console it is prompted for and not shown; redirected input is read as one line, without a prompt.
+      An unattended caller must set the variable or redirect input, or the prompt waits for a key.
+      The code is never accepted on the command line.
       Exit code: 0 on success; 1 when the arguments are wrong, the service cannot be reached or the service reports an error.
       """.ReplaceLineEndings();
 
@@ -233,7 +235,8 @@ internal sealed class CommandLine(CommandLineHost host)
 
    /// <summary>
    /// Reads the one-time enrollment code from the environment, or else from standard input, so the code never appears in
-   /// the command line or shell history. It is passed to the service and nowhere else: this class never prints it.
+   /// the command line or shell history. It is passed to the service and nowhere else: this class never prints it. With
+   /// the variable or redirected input nothing is written, so standard error stays empty unless something fails.
    /// Surrounding white space is dropped, because a code never has any and a shell can add it (cmd's "echo CODE | ..."
    /// sends a trailing space).
    /// </summary>
@@ -242,15 +245,14 @@ internal sealed class CommandLine(CommandLineHost host)
       string? code = host.ReadEnvironmentVariable(EnrollmentCodeVariable);
       if(string.IsNullOrWhiteSpace(code))
       {
-         ///////////////////////////////////////////////////////////////////////////
-         // the prompt goes to standard error, so a script that pipes the code in //
-         // and captures standard output gets the service's reply and nothing     //
-         // else. neither way of reading echoes the line end, so the prompt line  //
-         // is ended here, before the reply or an error message is written        //
-         ///////////////////////////////////////////////////////////////////////////
-         host.Error.Write("Enrollment code: ");
-         code = host.IsInputRedirected() ? host.ReadLine() : ReadWithoutEcho();
-         host.Error.WriteLine();
+         //////////////////////////////////////////////////////////////////////////////
+         // redirected input is read silently. a prompt would be the only thing on   //
+         // standard error in a successful scripted enrollment, and Windows          //
+         // PowerShell turns any standard error output of a native program into an   //
+         // error, which with ErrorActionPreference Stop ends the script after the   //
+         // single-use code has already been spent                                   //
+         //////////////////////////////////////////////////////////////////////////////
+         code = host.IsInputRedirected() ? host.ReadLine() : PromptWithoutEcho();
       }
       return !string.IsNullOrWhiteSpace(code) ? code.Trim() : throw new InvalidOperationException("Enrollment code is required.");
    }
@@ -258,24 +260,35 @@ internal sealed class CommandLine(CommandLineHost host)
 
 
    /// <summary>
-   /// Reads one line from the console key by key without showing it, so a code typed at the prompt is not left on the
-   /// screen or in a terminal recording. Enter ends the line, Backspace removes the last character typed, and keys that
-   /// produce no character (arrows, function keys) are ignored.
+   /// Prompts at the console and reads one line key by key without showing it, so a typed code is not left on the screen
+   /// or in a terminal recording. The prompt goes to standard error, so it appears even when standard output is captured.
+   /// Enter ends the line, and so does a key that carries a carriage return or line feed without being the Enter key
+   /// (Ctrl+M, or a line end pasted by a terminal). Backspace removes the last character typed, and keys that produce no
+   /// printable character (arrows, function keys) are ignored. The line end that ended the read was not shown either, so
+   /// the prompt line is ended here, also when reading fails, before anything else is written.
    /// </summary>
-   private string ReadWithoutEcho()
+   private string PromptWithoutEcho()
    {
-      StringBuilder typed = new();
-      for(ConsoleKeyInfo key = host.ReadKey(true); key.Key != ConsoleKey.Enter; key = host.ReadKey(true))
+      host.Error.Write("Enrollment code: ");
+      try
       {
-         if(key.Key == ConsoleKey.Backspace)
+         StringBuilder typed = new();
+         for(ConsoleKeyInfo key = host.ReadKey(true); key.Key != ConsoleKey.Enter && key.KeyChar is not ('\r' or '\n'); key = host.ReadKey(true))
          {
-            typed.Length = Math.Max(0, typed.Length - 1);
+            if(key.Key == ConsoleKey.Backspace)
+            {
+               typed.Length = Math.Max(0, typed.Length - 1);
+            }
+            else if(!char.IsControl(key.KeyChar))
+            {
+               typed.Append(key.KeyChar);
+            }
          }
-         else if(!char.IsControl(key.KeyChar))
-         {
-            typed.Append(key.KeyChar);
-         }
+         return typed.ToString();
       }
-      return typed.ToString();
+      finally
+      {
+         host.Error.WriteLine();
+      }
    }
 }

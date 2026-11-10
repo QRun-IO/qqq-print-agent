@@ -91,7 +91,7 @@ public sealed class CliProcessTests
 
 
 
-   /// <summary>The real executable, with no enrollment code in its environment and standard input closed, reads redirected input as a line, finds none, and stops there: the prompt and the reason are on standard error, standard output is empty and the exit code is 1. It fails before any request would be sent, so the service is not contacted.</summary>
+   /// <summary>The real executable, with no enrollment code in its environment and standard input closed, sees that input is redirected, reads it as a line without prompting, finds none, and stops there: the reason is the only thing on standard error, standard output is empty and the exit code is 1. It fails before any request would be sent, so the service is not contacted. A binding that took redirected input for a console would prompt and then fail reading a key, which this output excludes.</summary>
    [Fact]
    public async Task Enroll_WithNoCodeAndClosedInput_FailsBeforeContactingTheService()
    {
@@ -99,12 +99,18 @@ public sealed class CliProcessTests
 
       Assert.Equal(1, exitCode);
       Assert.Equal("", output);
-      Assert.Equal("Enrollment code: " + Environment.NewLine + "Enrollment code is required." + Environment.NewLine, error);
+      Assert.Equal("Enrollment code is required." + Environment.NewLine, error);
    }
 
 
 
-   /// <summary>The real binding for "is standard input redirected" reports the console's own answer for input, not for output or error.</summary>
+   /// <summary>
+   /// Executes the real binding for "is standard input redirected" in this process, and nothing more: it compares the
+   /// binding with the property it should read, so it would not notice most wrong bindings. What proves the two branches
+   /// is elsewhere. The redirected branch is proved by Enroll_WithNoCodeAndClosedInput_FailsBeforeContactingTheService,
+   /// which runs the real executable with redirected input. The console branch is proved against fake keys in
+   /// CliEnrollmentCodeTests; no test here has a real console to type at.
+   /// </summary>
    [Fact]
    public void InputRedirectionBinding_ReportsTheConsoleState()
    {
