@@ -76,7 +76,7 @@ public sealed partial class AgentRuntime
       }
       while(!token.IsCancellationRequested)
       {
-         await _pollRequested.WaitAsync(token).ConfigureAwait(false);
+         await _claimsRequested.WaitAsync(token).ConfigureAwait(false);
          if(!_realtimeReady || _transitioning)
          { continue; }
          using var wave = CancellationTokenSource.CreateLinkedTokenSource(token);

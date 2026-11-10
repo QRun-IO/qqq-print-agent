@@ -79,7 +79,7 @@ public sealed partial class AgentRuntime
                lock(_stateLock)
                { _inventoryReady = true; }
                SignalPipeline();
-               WakePoll();
+               WakeClaims();
             }
             // A 2.4 server pushes approval in a PRINTERS frame after this inventory; an older server's operator catalog is read instead.
             if(!ApprovalNegotiated)

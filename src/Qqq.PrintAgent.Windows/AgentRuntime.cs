@@ -25,10 +25,10 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private readonly Lock _stateLock = new();
    private readonly IPrinterBackend _printers = printerBackend ?? new WindowsPrinters();
    private readonly Queue<AgentLogEntry> _logs = new();
-   private readonly SemaphoreSlim _pollRequested = new(0, 1);
+   private readonly SemaphoreSlim _claimsRequested = new(0, 1);
    private readonly SemaphoreSlim _connectionGate = new(1, 1);
    private readonly AgentActivityLog _activityLog = AgentActivityLog.Create(directory);
-   private DateTimeOffset? _lastSuccessfulPoll;
+   private DateTimeOffset? _lastServerContact;
    private IReadOnlyList<JobSnapshot> _queuedJobs = [];
    private long _queueGeneration;
    private TimeProvider Clock => timeProvider ?? TimeProvider.System;
@@ -39,7 +39,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// <summary>No persistent database handles are held by the runtime.</summary>
    public void Dispose()
    {
-      _pollRequested.Dispose();
+      _claimsRequested.Dispose();
       _connectionGate.Dispose();
       _controlExecutionGate.Dispose();
       _authenticationGate.Dispose();
@@ -94,14 +94,14 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// Wakes the claim loop. The single-slot semaphore coalesces repeated wake-ups into one pass, so a burst of job
    /// notifications cannot queue unbounded work; the status and queue-preview refreshes are requested alongside.
    /// </summary>
-   private void WakePoll()
+   private void WakeClaims()
    {
       RequestStatusSynchronization();
       RequestQueueRefresh();
       lock(_stateLock)
       {
-         if(_pollRequested.CurrentCount == 0)
-         { _pollRequested.Release(); }
+         if(_claimsRequested.CurrentCount == 0)
+         { _claimsRequested.Release(); }
       }
    }
 
@@ -133,8 +133,8 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          }).ToArray();
          jobs = jobs.Concat(_queuedJobs.Where(queued => !jobs.Any(local => string.Equals(local.JobId, queued.JobId, StringComparison.Ordinal))))
             .Select(job => job.PrinterName is null ? job with { PrinterName = printers.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal))?.Name } : job).ToArray();
-         bool connected = configuration is not null && NormalTrafficAllowed && _heartbeatFailure is null && _lastSuccessfulPoll is not null
-            && ObservationTime - _lastSuccessfulPoll.Value < TimeSpan.FromSeconds(_realtimeSettings.HeartbeatTimeoutSeconds);
+         bool connected = configuration is not null && NormalTrafficAllowed && _heartbeatFailure is null && _lastServerContact is not null
+            && ObservationTime - _lastServerContact.Value < TimeSpan.FromSeconds(_realtimeSettings.HeartbeatTimeoutSeconds);
          bool printerIssue = !printers.Any(printer => printer.Exposed) || printers.Any(printer => printer.Exposed && !string.Equals(printer.Status, "READY", StringComparison.Ordinal));
          bool jobFailure = attentionCount > 0;
          string health = !connected || jobFailure ? "RED" : printerIssue ? "ORANGE" : "GREEN";
@@ -149,7 +149,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             health = "RED";
             status = _authenticationMessage;
          }
-         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot(), PrinterSync: printerSync);
+         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastServerContact?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot(), PrinterSync: printerSync);
       }
    }
 
@@ -313,7 +313,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             {
                store.SetExposure(request.PrinterId, request.Exposed.Value, _printers.Discover());
             }
-            WakePoll();
+            WakeClaims();
             WriteLog("INFO", request.Exposed.Value ? "A printer was shared with the server." : "A printer was hidden from the server.");
             return JsonSerializer.Serialize(GetSnapshot(), PrintApiClient.JsonOptions);
          case "enroll":

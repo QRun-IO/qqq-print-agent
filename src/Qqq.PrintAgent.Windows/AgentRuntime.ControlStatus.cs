@@ -97,7 +97,7 @@ public sealed partial class AgentRuntime
             return signInRequired;
          }
       }
-      WakePoll();
+      WakeClaims();
       lock(_stateLock)
       {
          _realtimeLifetime?.Cancel();

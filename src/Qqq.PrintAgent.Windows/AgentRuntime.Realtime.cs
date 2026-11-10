@@ -388,7 +388,7 @@ public sealed partial class AgentRuntime
    private void ReceiveRealtime(RealtimeEnvelope envelope, ChannelWriter<RealtimeStateUpdate> updates, ChannelWriter<RealtimeEnvelope> commands)
    {
       lock(_stateLock)
-      { _lastSuccessfulPoll = ObservationTime; _heartbeatFailure = null; }
+      { _lastServerContact = ObservationTime; _heartbeatFailure = null; }
       WriteLog("DEBUG", $"Realtime frame received: {envelope.Type}.");
       if(envelope.Type is "WELCOME" or "PONG")
       {
@@ -415,7 +415,7 @@ public sealed partial class AgentRuntime
             { throw new IOException("Realtime command queue is full."); }
             break;
          case "JOB_AVAILABLE":
-            WakePoll();
+            WakeClaims();
             RequestQueueRefresh();
             break;
          case "PRINTERS":
@@ -501,7 +501,7 @@ public sealed partial class AgentRuntime
          RequestStatusSynchronization();
          RequestQueueRefresh();
          if(envelope.Type is "WELCOME" or "DESIRED_STATE")
-         { WakePoll(); }
+         { WakeClaims(); }
       }
    }
 }

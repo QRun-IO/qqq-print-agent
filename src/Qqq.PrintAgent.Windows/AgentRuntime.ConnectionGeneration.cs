@@ -31,7 +31,7 @@ public sealed partial class AgentRuntime
          if(_reconnectRequested.CurrentCount == 0)
          { _reconnectRequested.Release(); }
          _connectionGeneration++;
-         _lastSuccessfulPoll = null;
+         _lastServerContact = null;
          _heartbeatFailure = null;
          _controlState = AgentControlState.Initial;
          _realtimeSettings = settings;

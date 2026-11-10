@@ -72,7 +72,7 @@ public sealed partial class AgentRuntime
          default:
             throw new InvalidOperationException("Unknown settings command.");
       }
-      WakePoll();
+      WakeClaims();
       return JsonSerializer.Serialize(GetSnapshot(), PrintApiClient.JsonOptions);
    }
 }

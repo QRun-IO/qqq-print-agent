@@ -110,7 +110,7 @@ public sealed partial class AgentRuntime
       {
          _updatePauseUntil = default;
       }
-      WakePoll();
+      WakeClaims();
       SignalPipeline();
       WriteLog("INFO", "Printing resumed after the application update attempt.");
       return "Printing resumed.";
@@ -132,7 +132,7 @@ public sealed partial class AgentRuntime
          _updatePauseUntil = default;
       }
       WriteLog("WARN", "The update pause ran out without the updater resuming printing; printing continues.");
-      WakePoll();
+      WakeClaims();
       SignalPipeline();
    }
 }

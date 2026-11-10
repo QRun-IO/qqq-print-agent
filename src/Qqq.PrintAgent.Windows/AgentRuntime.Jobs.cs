@@ -95,7 +95,7 @@ public sealed partial class AgentRuntime
          }
       }
       WriteLog("INFO", "Server accepted operator action " + request.Operation + ".");
-      WakePoll();
+      WakeClaims();
       return string.IsNullOrEmpty(queuedJob) ? "The server accepted the cancellation before dispatch." : "Queued on the server. The new job will appear here when this device receives it.";
    }
 

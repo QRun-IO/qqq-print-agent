@@ -72,7 +72,7 @@ public sealed partial class AgentRuntime
          WriteLog("INFO", "Step 4 of 4: making the verified session current and saving it to protected storage.");
          ActivateSession(candidate, binding, store);
          previous?.Dispose();
-         WakePoll();
+         WakeClaims();
          WriteLog("INFO", "Sign-in complete. " + _authenticationMessage);
          return SignInReply();
       }
