@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -29,12 +28,13 @@ public sealed partial class PrintApiClient : IDisposable
 
    /// <summary>
    /// Creates a client for one server. The address must be HTTPS, or HTTP only on loopback for local development. Responses
-   /// are limited to 2 MiB and requests to 60 seconds, and a bearer token is attached only when one is supplied (the legacy
-   /// diagnostic path); native sessions authenticate through the session client instead. The download limits are
-   /// counted on the supplied clock, the system clock by default. The 60 second request limit is
-   /// not: it is <c>HttpClient.Timeout</c>, which the platform enforces on the system clock whatever clock is supplied.
+   /// are limited to 2 MiB and requests to 60 seconds. The client holds no credential and attaches none to a request: the
+   /// product builds it only through <see cref="ForSession"/>, whose handler sends every request through the signed-in
+   /// session, and the session adds what authenticates it. The download limits are counted on the supplied clock, the
+   /// system clock by default. The 60 second request limit is not: it is <c>HttpClient.Timeout</c>, which the platform
+   /// enforces on the system clock whatever clock is supplied.
    /// </summary>
-   public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null)
+   public PrintApiClient(string serverUrl, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null)
    {
       Uri uri = new(serverUrl.TrimEnd('/') + "/printing/v1/");
       if(!string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && !(string.Equals(uri.Scheme, "http", StringComparison.Ordinal) && uri.IsLoopback))
@@ -46,18 +46,14 @@ public sealed partial class PrintApiClient : IDisposable
       _http.BaseAddress = uri;
       _http.Timeout = TimeSpan.FromSeconds(60);
       _http.MaxResponseContentBufferSize = 2 * 1024 * 1024;
-      if(token is not null)
-      {
-         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-      }
    }
 
 
 
-   /// <summary>Enrolls this computer with a short-lived code and returns the device identity and its secondary proof. A protocol version other than 1 is rejected rather than guessed at.</summary>
+   /// <summary>Enrolls this computer with a short-lived code, on the enrollment route of the signed-in session, and returns the device identity and its secondary proof. A protocol version other than 1 is rejected rather than guessed at.</summary>
    public async Task<EnrollmentResponse> EnrollAsync(EnrollmentRequest request, CancellationToken token = default)
    {
-      using HttpResponseMessage response = await _http.PostAsJsonAsync(_nativeSession ? "devices/enroll" : "enroll", request, JsonOptions, token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _http.PostAsJsonAsync("devices/enroll", request, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
       EnrollmentResponse result = await response.Content.ReadFromJsonAsync<EnrollmentResponse>(token).ConfigureAwait(false)
          ?? throw new InvalidDataException("Missing enrollment response.");

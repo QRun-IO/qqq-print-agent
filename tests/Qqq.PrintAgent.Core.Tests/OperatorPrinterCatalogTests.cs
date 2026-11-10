@@ -51,7 +51,7 @@ public sealed class OperatorPrinterCatalogTests
    [Fact]
    public async Task Catalog_RequiresTheSignedInSession()
    {
-      using PrintApiClient api = new("https://synthetic.invalid", "device-token");
+      using PrintApiClient api = new("https://synthetic.invalid");
       await Assert.ThrowsAsync<InvalidOperationException>(() => api.OperatorPrintersAsync(CancellationToken.None));
    }
 

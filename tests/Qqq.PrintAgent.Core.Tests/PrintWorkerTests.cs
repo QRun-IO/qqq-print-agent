@@ -204,7 +204,7 @@ public sealed class PrintWorkerTests
 
 
 
-   /// <summary>The API client refuses a plain http address for a remote host, so a device token cannot be sent unencrypted.</summary>
+   /// <summary>The API client refuses a plain http address for a remote host, so nothing it sends can travel unencrypted.</summary>
    [Fact]
    public void Client_RejectsPlaintextRemoteServer()
    {

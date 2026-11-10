@@ -23,29 +23,26 @@ public sealed class PrintApiClientTests
 
 
    /// <summary>
-   /// Enrollment posts the code, device name and agent version to the route of its transport (the device route with a
-   /// token, the native route through a session) and returns the identity from the shared fixture. The request and the
-   /// response, which carry the enrollment code and the new device token, print as redacted labels.
+   /// Enrollment posts the code, device name and agent version to the session's enrollment route and returns the
+   /// identity from the shared fixture. The request and the response, which carry the enrollment code and the new device
+   /// token, print as redacted labels.
    /// </summary>
-   [Theory]
-   [InlineData(false, "/printing/v1/enroll")]
-   [InlineData(true, "devices/enroll")]
-   public async Task EnrollmentPostsToTheRouteOfItsTransport(bool throughSession, string route)
+   [Fact]
+   public async Task EnrollmentPostsToTheSessionsEnrollmentRoute()
    {
       string fixture = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "fixtures", "enroll.response.json"));
-      using var server = new ScriptedServer();
       using var session = new FakeSessionClient();
-      server.Add(fixture);
       session.Answer(fixture);
-      using PrintApiClient api = throughSession ? PrintApiClient.ForSession(session) : new PrintApiClient("https://synthetic.invalid", handler: server);
+      using var api = PrintApiClient.ForSession(session);
       var request = new EnrollmentRequest("SYNTHETIC-CODE", "Front desk", "2.0.0");
       EnrollmentResponse response = await api.EnrollAsync(request);
       Assert.Equal(1, response.ProtocolVersion);
       Assert.NotEmpty(response.DeviceId);
       Assert.NotEmpty(response.DeviceToken);
-      string body = throughSession ? Assert.Single(session.Printing).Body! : Assert.Single(server.Requests).Body!;
-      Assert.Equal(route, throughSession ? session.Printing[0].Path : server.Requests[0].Uri.AbsolutePath);
-      using var sent = JsonDocument.Parse(body);
+      (HttpMethod method, string route, string? body) = Assert.Single(session.Printing);
+      Assert.Equal(HttpMethod.Post, method);
+      Assert.Equal("devices/enroll", route);
+      using var sent = JsonDocument.Parse(body!);
       Assert.Equal("SYNTHETIC-CODE", sent.RootElement.GetProperty("enrollmentCode").GetString());
       Assert.Equal("Front desk", sent.RootElement.GetProperty("deviceName").GetString());
       Assert.Equal("2.0.0", sent.RootElement.GetProperty("agentVersion").GetString());
@@ -174,7 +171,8 @@ public sealed class PrintApiClientTests
    /// <summary>
    /// An operator action goes to its own route with a fresh request identifier; only a test print carries a test profile,
    /// and a retry states that the operator accepted the duplicate risk. The new job identifier is returned when the server
-   /// gives one.
+   /// gives one. The client itself attaches no credential to the request: what authenticates it is added by the session
+   /// it is sent through.
    /// </summary>
    [Theory]
    [InlineData("test-print", "/printing/v1/device/test-print", """{"jobId":"job-9"}""", "job-9")]
@@ -188,6 +186,7 @@ public sealed class PrintApiClientTests
       Assert.Equal(expected, await api.OperatorActionAsync(operation, "job/1", "printer1", "ZPL", confirmDuplicateRisk: true, "LABEL_4X6_203", CancellationToken.None));
       ScriptedRequest request = Assert.Single(server.Requests);
       Assert.Equal(route, request.Uri.AbsolutePath);
+      Assert.True(request.IsPublic);
       using var sent = JsonDocument.Parse(request.Body!);
       Assert.Equal("printer1", sent.RootElement.GetProperty("printerId").GetString());
       Assert.True(sent.RootElement.GetProperty("confirmDuplicateRisk").GetBoolean());

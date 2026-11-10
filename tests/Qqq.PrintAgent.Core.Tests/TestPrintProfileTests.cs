@@ -34,7 +34,7 @@ public sealed class TestPrintProfileTests
    public async Task SelectedMediaProfile_IsIncludedInActualTestPrintRequest(string format, string profile)
    {
       using CaptureHandler handler = new();
-      using PrintApiClient api = new("https://synthetic.invalid", "synthetic-token", handler);
+      using PrintApiClient api = new("https://synthetic.invalid", handler);
       string job = await api.OperatorActionAsync("test-print", null, "queue-1", format, false, profile, CancellationToken.None);
       Assert.Equal("new-test-job", job);
       Assert.Equal("/printing/v1/device/test-print", handler.Path);
@@ -55,7 +55,7 @@ public sealed class TestPrintProfileTests
    public async Task ExistingCaller_KeepsLegacyShapeWithoutNullTestProfile()
    {
       using CaptureHandler handler = new();
-      using PrintApiClient api = new("https://synthetic.invalid", "synthetic-token", handler);
+      using PrintApiClient api = new("https://synthetic.invalid", handler);
       await api.OperatorActionAsync("test-print", null, "queue-1", "PDF", false, CancellationToken.None);
       Assert.False(handler.Body.TryGetProperty("testProfile", out _));
       Assert.Equal(4, handler.Body.EnumerateObject().Count());
@@ -73,7 +73,7 @@ public sealed class TestPrintProfileTests
    public async Task Profile_IsNeverSentForOtherOperatorActions(string operation)
    {
       using CaptureHandler handler = new();
-      using PrintApiClient api = new("https://synthetic.invalid", "synthetic-token", handler);
+      using PrintApiClient api = new("https://synthetic.invalid", handler);
       await api.OperatorActionAsync(operation, "existing-job", null, null, true, "LABEL_4X6_600", CancellationToken.None);
       Assert.False(handler.Body.TryGetProperty("testProfile", out _));
       Assert.True(handler.Body.GetProperty("confirmDuplicateRisk").GetBoolean());

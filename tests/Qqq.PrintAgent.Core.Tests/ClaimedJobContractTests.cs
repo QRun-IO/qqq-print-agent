@@ -893,6 +893,6 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>A device-token API client over the fake server; nothing leaves the process.</summary>
-   private static PrintApiClient Api(FakePrintServer server) => new("http://localhost", "synthetic-device-token", server);
+   /// <summary>An API client over the fake server; nothing leaves the process.</summary>
+   private static PrintApiClient Api(FakePrintServer server) => new("http://localhost", server);
 }
