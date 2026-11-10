@@ -172,9 +172,10 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    /// <summary>
    /// Saves the device connection protected for the service account with DPAPI, writing a temporary file and moving it into
    /// place so a crash cannot leave a half-written secret. When recovery was needed, the unreadable file is copied aside
-   /// first, so nothing is destroyed. The plaintext buffer is zeroed on every path.
+   /// first, so nothing is destroyed. The plaintext buffer is zeroed on every path. Within the product only pairing writes
+   /// the connection, so this is not part of the store's public surface.
    /// </summary>
-   public void SaveConfiguration(AgentConfiguration config)
+   internal void SaveConfiguration(AgentConfiguration config)
    {
       byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(config, PrintApiClient.JsonOptions);
       try
