@@ -141,7 +141,7 @@ Access, as the code has it:
 The snapshot is one aggregated document, so the companion asks once for everything instead of once per server and per view:
 
 - Once: the computer's printers, service state, update state, log settings, and the state of the stored data (ready, upgrade incomplete with the file it stopped at, or written by a newer build).
-- Per server: identifier, name, address, position; health and its status text; the attention count that drives health; authentication (signed in, as whom, authorization blocked and why); paired flag and device identifier; transport state and the realtime meter; control state (desired state, last command); shared printers with each one's server-side approval; and whether stored state is unreadable.
+- Per server: identifier, name, address, position; health and its status text; the attention count that drives health; authentication (signed in, as whom, authorization blocked and why); paired flag and device identifier; transport state and the realtime meter; control state (desired state, last command); shared printers with each one's server-side approval; whether the certificate exception is on and the two origins it covers; and whether stored state is unreadable.
 - Jobs stay paged and are queried per server.
 
 The companion keeps polling the snapshot, every five seconds as today. A change notification pushed by the service is not part of 2.0: one aggregated request already removes the cost that made polling a problem, and a push channel is a second protocol to secure and test.
@@ -171,7 +171,7 @@ Certificate exception:
 - A server with the exception switched on says so in the snapshot, and the companion shows it on the server's node and its Connection page for as long as it is on, so a development setting is not forgotten.
 - If a server later names a different sign-in provider, the exception does not follow it: sign-in fails as untrusted and the operator accepts the new origin or does not.
 - An exception carried over from 1.x covers the server's origin. The provider's origin is recorded from the first sign-in description the service reads after the upgrade, and logged. The companion's sign-in uses the same exception for the same two origins, from the snapshot, so the two cannot disagree about what is accepted.
-- Core needs the per-origin check in place of the one switch; that closes audit finding C9.
+- Core needs the per-origin check in place of the one switch. That closes the first half of audit finding C9; its second half, binding the discovery address to the issuer's origin, is separate Core work.
 
 Removing a server:
 
