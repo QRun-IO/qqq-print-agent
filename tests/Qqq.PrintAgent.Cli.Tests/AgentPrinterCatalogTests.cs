@@ -39,7 +39,7 @@ public sealed class AgentPrinterCatalogTests
    public async Task UnsharedPrinter_IsNotShared_NotAwaitingApproval()
    {
       await using RealtimeRuntimeFixture fixture = new();
-      using(AgentStore store = new(fixture.DirectoryPath))
+      using(AgentStore store = TestState.OpenStore(fixture.DirectoryPath))
       { store.SetExposure("other", false, fixture.Printer.Discover()); }
       await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));

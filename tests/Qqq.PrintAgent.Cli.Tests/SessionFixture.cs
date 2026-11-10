@@ -116,7 +116,7 @@ internal sealed class SessionFixture : IDisposable
    /// <summary>Stores the fake session's binding and credential as if the user had already signed in, so a runtime can resume it.</summary>
    internal void SaveSession()
    {
-      using AgentStore store = new(Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(Local.DirectoryPath);
       store.SaveAuthentication(new AgentAuthentication(Session.Binding, Session.ExportCredential()));
    }
 

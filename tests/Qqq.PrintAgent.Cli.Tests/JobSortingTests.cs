@@ -120,7 +120,7 @@ public sealed class JobSortingTests
       /// <summary>Creates the store (and with it the journal schema) in a fresh temporary directory, then opens the journal for direct access.</summary>
       public Fixture()
       {
-         Store = new AgentStore(_directory);
+         Store = TestState.OpenStore(_directory);
          _database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "journal.db") }.ToString());
          _database.Open();
       }

@@ -22,7 +22,7 @@ public sealed class AgentJobPageTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-page-queue-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using AgentStore store = new(directory);
+         using AgentStore store = TestState.OpenStore(directory);
          store.Record("local", new PrintEvent("local-event", "SPOOLED"));
          store.Record("duplicate", new PrintEvent("duplicate-event", "SPOOLED"));
          JobSnapshot[] queued = [new("cloud", "QUEUED", "now", null, null, "laser", "Warehouse", "Packing slip", CreatedAt: "2099-01-01T00:00:00.0000000+00:00"), new("duplicate", "QUEUED", "now", null, null)];

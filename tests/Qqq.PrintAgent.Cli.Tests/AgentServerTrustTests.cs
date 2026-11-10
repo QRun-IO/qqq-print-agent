@@ -17,12 +17,12 @@ public sealed class AgentServerTrustTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-trust-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore store = new(directory))
+         using(AgentStore store = TestState.OpenStore(directory))
          {
             Assert.False(store.LoadServerTrust().AllowUntrustedCertificate);
             store.SaveServerTrust(new ServerTrust(AllowUntrustedCertificate: true, Origin: "https://127.0.0.1:18581"));
          }
-         using(AgentStore store = new(directory, recoverUnreadableConfiguration: true))
+         using(AgentStore store = TestState.OpenStore(directory, recoverUnreadableConfiguration: true))
          {
             ServerTrust trust = store.LoadServerTrust();
             Assert.True(trust.AllowUntrustedCertificate);

@@ -40,7 +40,7 @@ public sealed class AgentRealtimeRecoveryTests
          await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
          File.WriteAllBytes(path, original);
       }
-      using var store = new AgentStore(fixture.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal("SPOOLED", store.GetState("job"));
       Assert.Contains("printer", store.GetExposedPrinterIds());
    }

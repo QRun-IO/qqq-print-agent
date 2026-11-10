@@ -53,7 +53,7 @@ public sealed class AgentRuntimeQueuedJobsTests
    /// <summary>What the local journal holds for a job; null means the job was never received by this computer.</summary>
    private static JobDetailsSnapshot? Details(RealtimeRuntimeFixture fixture, string jobId)
    {
-      using AgentStore store = new(fixture.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
       return store.GetJobDetails(jobId);
    }
 }

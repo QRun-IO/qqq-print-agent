@@ -19,14 +19,14 @@ public sealed class PrinterExposureTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-exposure-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore store = new(directory))
+         using(AgentStore store = TestState.OpenStore(directory))
          {
             Assert.Empty(store.GetExposedPrinterIds());
             Assert.Throws<InvalidOperationException>(() => store.SetExposure("missing", true, []));
             Assert.Throws<InvalidOperationException>(() => store.SetExposure("interactive", true, [new PrinterInfo("interactive", "Print to File", "Driver", "FILE:", "UNKNOWN", [])]));
             store.SetExposure("p1", true, new FakePrinter().Discover());
          }
-         using(AgentStore restored = new(directory))
+         using(AgentStore restored = TestState.OpenStore(directory))
          {
             Assert.Contains("p1", restored.GetExposedPrinterIds());
             restored.SetExposure("p1", false, []);
@@ -65,7 +65,7 @@ public sealed class PrinterExposureTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-snapshot-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore store = new(directory))
+         using(AgentStore store = TestState.OpenStore(directory))
          {
             store.SaveConfiguration(new AgentConfiguration("https://example.com", "d1", "secret-never-in-snapshot"));
             store.SetExposure("p1", true, new FakePrinter().Discover());

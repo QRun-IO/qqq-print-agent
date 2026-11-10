@@ -88,7 +88,7 @@ public sealed class AgentSessionIntegrationTests
       fixture.AssertSentNothing(fixture.Session);
       Assert.Contains(fixture.Logs, line => line.StartsWith("No saved QQQ session", StringComparison.Ordinal));
       Assert.False(runtime.GetSnapshot().Connected);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("device", store.LoadConfiguration()!.DeviceId);
       Assert.Equal("SPOOLED", store.GetState("job"));
    }
@@ -185,7 +185,7 @@ public sealed class AgentSessionIntegrationTests
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       Assert.Equal(1, fixture.Created);
       fixture.AssertSentNothing(fixture.Session);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("principal", store.LoadAuthentication()!.Binding.PrincipalId);
    }
 
@@ -210,7 +210,7 @@ public sealed class AgentSessionIntegrationTests
       await fixture.RunOnePassAsync(runtime);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       fixture.AssertSentNothing(fixture.Session);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Null(store.LoadAuthentication()!.Credential);
       Assert.Equal("principal", store.LoadAuthentication()!.Binding.PrincipalId);
       Assert.Equal("device", store.LoadConfiguration()!.DeviceId);

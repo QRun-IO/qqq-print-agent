@@ -4,7 +4,6 @@
  */
 
 using Microsoft.Data.Sqlite;
-using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
@@ -22,7 +21,7 @@ internal static class JournalFiles
    {
       foreach(string directory in directories)
       {
-         using var journal = new SqliteConnection(AgentStore.JournalConnectionString(directory));
+         using var journal = new SqliteConnection(TestState.JournalConnectionString(directory));
          SqliteConnection.ClearPool(journal);
       }
    }

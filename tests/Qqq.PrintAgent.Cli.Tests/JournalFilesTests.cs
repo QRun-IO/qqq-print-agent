@@ -29,7 +29,7 @@ public sealed class JournalFilesTests
       string root = Path.Combine(Path.GetTempPath(), "qqq-journal-files-" + Guid.NewGuid().ToString("N"));
       string released = Path.Combine(root, "released");
       string opened = Path.Combine(root, "opened");
-      using(AgentStore seeded = new(released))
+      using(AgentStore seeded = TestState.OpenStore(released))
       { Assert.Null(seeded.GetState("none")); }
       using var stop = new CancellationTokenSource();
       var releasing = new Thread(() =>
@@ -42,7 +42,7 @@ public sealed class JournalFilesTests
       {
          for(int attempt = 0; attempt < 2500; attempt++)
          {
-            using AgentStore store = new(opened);
+            using AgentStore store = TestState.OpenStore(opened);
             Assert.Null(store.GetState("none"));
          }
       }

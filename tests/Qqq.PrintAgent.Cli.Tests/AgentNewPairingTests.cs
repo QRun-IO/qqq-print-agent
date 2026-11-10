@@ -52,14 +52,14 @@ public sealed class AgentNewPairingTests
          Assert.True(restarted.GetSnapshot().Authentication!.Authorized);
          Assert.Equal(new[] { "devices/enroll" }, fixture.NextSession.Paths, StringComparer.Ordinal);
       }
-      using(AgentStore store = new(fixture.Local.DirectoryPath))
+      using(AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath))
       {
          Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
          Assert.Null(store.GetState("job"));
          Assert.Contains("printer", store.GetExposedPrinterIds());
       }
       File.WriteAllBytes(path, original);
-      using AgentStore originalStore = new(fixture.Local.DirectoryPath);
+      using AgentStore originalStore = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("SPOOLED", originalStore.GetState("job"));
    }
 
@@ -96,7 +96,7 @@ public sealed class AgentNewPairingTests
       }
       else
       {
-         using AgentStore store = new(fixture.Local.DirectoryPath);
+         using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
          store.SaveConfiguration(new AgentConfiguration("https://old-server.invalid", "old-device", "synthetic-old-proof"));
       }
    }
@@ -148,14 +148,14 @@ public sealed class AgentNewPairingTests
          Assert.True(restarted.GetSnapshot().Authentication!.Authorized);
          Assert.Equal(new[] { "devices/enroll", "devices/enroll" }, fixture.NextSession.Paths, StringComparer.Ordinal);
       }
-      using(AgentStore store = new(fixture.Local.DirectoryPath))
+      using(AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath))
       {
          Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
          Assert.Null(store.GetState("job"));
          Assert.Contains("printer", store.GetExposedPrinterIds());
       }
       File.WriteAllBytes(path, original);
-      using AgentStore originalStore = new(fixture.Local.DirectoryPath);
+      using AgentStore originalStore = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("SPOOLED", originalStore.GetState("job"));
    }
 
@@ -207,7 +207,7 @@ public sealed class AgentNewPairingTests
          Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
       }
       Assert.Equal(unreadable ? 1 : 0, Directory.GetFiles(fixture.Local.DirectoryPath, "connection.recovery-*.dpapi").Length);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
       Assert.Null(store.GetState("job"));
    }
@@ -499,12 +499,12 @@ public sealed class AgentNewPairingTests
       Stage(fixture, "replacement-device", "https://synthetic.invalid/");
       using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
       {
-         using AgentStore blocked = new(fixture.Local.DirectoryPath);
+         using AgentStore blocked = TestState.OpenStore(fixture.Local.DirectoryPath);
          Assert.Equal("replacement-device", blocked.LoadAuthentication()!.Binding.DeviceId);
          Assert.Equal(StagedPairingOutcome.Deferred, blocked.StagedPairing);
          Assert.True(File.Exists(StagedSession(fixture)));
       }
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("replacement-device", store.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.Completed, store.StagedPairing);
       Assert.False(File.Exists(StagedSession(fixture)));
@@ -522,7 +522,7 @@ public sealed class AgentNewPairingTests
       byte[] unreadable = [9, 8, 7];
       File.WriteAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), unreadable);
       Stage(fixture, "replacement-device", "https://synthetic.invalid/");
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("replacement-device", store.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.CompletedAfterQuarantine, store.StagedPairing);
       Assert.Equal(unreadable, File.ReadAllBytes(Assert.Single(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"))));
@@ -548,7 +548,7 @@ public sealed class AgentNewPairingTests
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       Stage(fixture, leftover is "another-device" ? "interrupted-device" : "device", leftover is "another-server" ? "https://elsewhere.invalid/" : "https://synthetic.invalid/");
-      using(AgentStore setup = new(fixture.Local.DirectoryPath))
+      using(AgentStore setup = TestState.OpenStore(fixture.Local.DirectoryPath))
       {
          setup.SaveConfiguration(new AgentConfiguration("https://synthetic.invalid", "device", "synthetic-token"));
       }
@@ -560,7 +560,7 @@ public sealed class AgentNewPairingTests
          File.Delete(authPath);
       }
       byte[]? stored = File.Exists(authPath) ? File.ReadAllBytes(authPath) : null;
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       AgentAuthentication? loaded = store.LoadAuthentication();
       Assert.Equal(StagedPairingOutcome.Discarded, store.StagedPairing);
       Assert.False(File.Exists(StagedSession(fixture)));
@@ -578,7 +578,7 @@ public sealed class AgentNewPairingTests
       fixture.SaveSession();
       byte[] unreadable = [2, 4, 6];
       File.WriteAllBytes(StagedSession(fixture), unreadable);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("device", store.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.SetAside, store.StagedPairing);
       Assert.False(File.Exists(StagedSession(fixture)));
@@ -597,14 +597,14 @@ public sealed class AgentNewPairingTests
       using SessionFixture fixture = new();
       fixture.SaveSession();
       Stage(fixture, "first-device", "https://synthetic.invalid/");
-      using(AgentStore store = new(fixture.Local.DirectoryPath))
+      using(AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath))
       {
          store.SaveAuthentication(new AgentAuthentication(fixture.Session.Binding with { DeviceId = "first-device" }, fixture.Session.ExportCredential()));
       }
       Assert.False(File.Exists(StagedSession(fixture)));
       Stage(fixture, "second-device", "https://synthetic.invalid/");
       Stage(fixture, "third-device", "https://synthetic.invalid/");
-      using AgentStore reader = new(fixture.Local.DirectoryPath);
+      using AgentStore reader = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("third-device", reader.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.Completed, reader.StagedPairing);
       Assert.Equal("third-device", reader.LoadConfiguration()!.DeviceId);
@@ -630,13 +630,13 @@ public sealed class AgentNewPairingTests
       { File.Copy(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), StagedSession(fixture)); }
       using(FileStream held = new(StagedSession(fixture), FileMode.Open, FileAccess.Read, FileShare.Read))
       {
-         using AgentStore blocked = new(fixture.Local.DirectoryPath);
+         using AgentStore blocked = TestState.OpenStore(fixture.Local.DirectoryPath);
          Assert.Equal("device", blocked.LoadAuthentication()!.Binding.DeviceId);
          Assert.Equal(StagedPairingOutcome.None, blocked.StagedPairing);
          Assert.True(File.Exists(StagedSession(fixture)));
          Assert.Empty(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"));
       }
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("device", store.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(unreadable ? StagedPairingOutcome.SetAside : StagedPairingOutcome.Discarded, store.StagedPairing);
       Assert.False(File.Exists(StagedSession(fixture)));
@@ -660,13 +660,13 @@ public sealed class AgentNewPairingTests
       File.SetLastWriteTimeUtc(StagedSession(fixture), DateTime.UtcNow.AddHours(1));
       using(FileStream held = new(StagedSession(fixture), FileMode.Open, FileAccess.Read, FileShare.Read))
       {
-         using AgentStore saving = new(fixture.Local.DirectoryPath);
+         using AgentStore saving = TestState.OpenStore(fixture.Local.DirectoryPath);
          saving.SaveAuthentication(new AgentAuthentication(fixture.Session.Binding with { DeviceId = null }, fixture.Session.ExportCredential()));
       }
       Assert.True(File.Exists(StagedSession(fixture)));
       Assert.True(File.GetLastWriteTimeUtc(authPath) > File.GetLastWriteTimeUtc(StagedSession(fixture)));
       byte[] saved = File.ReadAllBytes(authPath);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Null(store.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.Discarded, store.StagedPairing);
       Assert.Equal(saved, File.ReadAllBytes(authPath));
@@ -689,7 +689,7 @@ public sealed class AgentNewPairingTests
       File.SetLastWriteTimeUtc(authPath, DateTime.UtcNow.AddHours(1));
       Stage(fixture, "replacement-device", "https://synthetic.invalid/");
       Assert.Equal(File.GetLastWriteTimeUtc(authPath), File.GetLastWriteTimeUtc(StagedSession(fixture)));
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("replacement-device", store.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.Completed, store.StagedPairing);
       Assert.False(File.Exists(StagedSession(fixture)));
@@ -701,7 +701,7 @@ public sealed class AgentNewPairingTests
    private static void Stage(SessionFixture fixture, string deviceId, string sessionOrigin)
    {
       Uri origin = new(sessionOrigin);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using AgentStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       store.StagePairing(new AgentConfiguration("https://synthetic.invalid", deviceId, "synthetic-" + deviceId),
          new AgentAuthentication(new QqqSessionBinding(origin, "principal", "tenant", deviceId), new QqqSessionCredential(origin, "synthetic-qqq-cookie")));
    }

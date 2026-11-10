@@ -26,7 +26,7 @@ public sealed class AgentStoreTests
       try
       {
          // Initialize the Windows SQLite provider through a separate valid store.
-         using(AgentStore valid = new(Path.Combine(directory, "valid")))
+         using(AgentStore valid = TestState.OpenStore(Path.Combine(directory, "valid")))
          {
             Assert.Null(valid.GetState("none"));
          }
@@ -38,7 +38,7 @@ public sealed class AgentStoreTests
             command.CommandText = "CREATE TABLE events(unexpected TEXT)";
             command.ExecuteNonQuery();
          }
-         Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => new AgentStore(directory));
+         Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => TestState.OpenStore(directory));
          JournalFiles.Release(directory);
          using FileStream exclusive = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
          Assert.True(exclusive.Length > 0);
@@ -75,7 +75,7 @@ public sealed class AgentStoreTests
             {
                if(!together.SignalAndWait(TimeSpan.FromSeconds(30)))
                { throw new TimeoutException("The stores did not all become ready to open."); }
-               using AgentStore store = new(spellings[index % spellings.Length]);
+               using AgentStore store = TestState.OpenStore(spellings[index % spellings.Length]);
                store.SavePrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), new PrinterProfile("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             }
             catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException or TimeoutException or BarrierPostPhaseException)
@@ -86,7 +86,7 @@ public sealed class AgentStoreTests
          foreach(Thread open in opens)
          { open.Join(); }
          Assert.Empty(failures);
-         using AgentStore reopened = new(directory);
+         using AgentStore reopened = TestState.OpenStore(directory);
          Assert.All(Enumerable.Range(0, stores), index => Assert.Equal("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
             reopened.GetPrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)).DisplayName));
       }
@@ -113,7 +113,7 @@ public sealed class AgentStoreTests
       string free = Path.Combine(root, "free");
       try
       {
-         using(AgentStore first = new(held))
+         using(AgentStore first = TestState.OpenStore(held))
          { Assert.Null(first.GetState("none")); }
          Exception? failure = null;
          using var finished = new ManualResetEventSlim();
@@ -121,14 +121,14 @@ public sealed class AgentStoreTests
          {
             try
             {
-               using AgentStore other = new(free);
+               using AgentStore other = TestState.OpenStore(free);
                other.SavePrinterProfile("printer", new PrinterProfile("Free queue"));
             }
             catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException)
             { failure = exception; }
             finally { finished.Set(); }
          });
-         Lock schemaLock = AgentStore.SchemaLockFor(held);
+         Lock schemaLock = TestState.SchemaLockFor(held);
          bool finishedWhileHeld;
          lock(schemaLock)
          {
@@ -139,10 +139,10 @@ public sealed class AgentStoreTests
          Assert.True(finishedWhileHeld, "A store on another folder waited for this journal's schema lock.");
          Assert.Null(failure);
          // Compared as locks, not as objects: a lock passed as an object would lose its meaning to the compiler.
-         Assert.True(schemaLock == AgentStore.SchemaLockFor(held.ToUpperInvariant()));
-         Assert.True(schemaLock == AgentStore.SchemaLockFor(held + Path.DirectorySeparatorChar));
-         Assert.True(schemaLock != AgentStore.SchemaLockFor(free));
-         using AgentStore reopened = new(free);
+         Assert.True(schemaLock == TestState.SchemaLockFor(held.ToUpperInvariant()));
+         Assert.True(schemaLock == TestState.SchemaLockFor(held + Path.DirectorySeparatorChar));
+         Assert.True(schemaLock != TestState.SchemaLockFor(free));
+         using AgentStore reopened = TestState.OpenStore(free);
          Assert.Equal("Free queue", reopened.GetPrinterProfile("printer").DisplayName);
       }
       finally
@@ -162,12 +162,12 @@ public sealed class AgentStoreTests
       string printerName = new string('p', 1024);
       try
       {
-         using(AgentStore store = new(directory))
+         using(AgentStore store = TestState.OpenStore(directory))
          {
             store.TrackJob(new PrintJob("long-job", "printer", title, "PDF", "00", 1, new PrintOptions(), "", "CLAIMED"), printerName);
             store.Record("long-job", new PrintEvent("received", "RECEIVED"));
          }
-         using AgentStore restored = new(directory);
+         using AgentStore restored = TestState.OpenStore(directory);
          JobDetailsSnapshot details = Assert.IsType<JobDetailsSnapshot>(restored.GetJobDetails("long-job"));
          Assert.Equal(title, details.Job.Title);
          Assert.Equal(printerName, details.Job.PrinterName);
@@ -188,7 +188,7 @@ public sealed class AgentStoreTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-job-attention-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using AgentStore store = new(directory);
+         using AgentStore store = TestState.OpenStore(directory);
          store.Record("old-failure", new PrintEvent("old-event", "OUTCOME_UNKNOWN"));
          for(int index = 0; index < 55; index++)
          {
@@ -220,7 +220,7 @@ public sealed class AgentStoreTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-job-details-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore store = new(directory))
+         using(AgentStore store = TestState.OpenStore(directory))
          {
             PrintJob job = new("job", "printer", "Packing slip", "PDF", "00", 1, new PrintOptions(), "", "CLAIMED");
             store.TrackJob(job, "Warehouse Laser");
@@ -232,7 +232,7 @@ public sealed class AgentStoreTests
             Assert.Equal(0, store.NeedsAttentionCount());
             Assert.Single(store.Pending()); // Operator review cannot acknowledge server delivery.
          }
-         using(AgentStore restored = new(directory))
+         using(AgentStore restored = TestState.OpenStore(directory))
          {
             JobDetailsSnapshot details = Assert.IsType<JobDetailsSnapshot>(restored.GetJobDetails("job"));
             Assert.Equal("Packing slip", details.Job.Title);
@@ -264,7 +264,7 @@ public sealed class AgentStoreTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-job-retention-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using AgentStore store = new(directory);
+         using AgentStore store = TestState.OpenStore(directory);
          store.Record("completed", new PrintEvent("completed-event", "SPOOLED", SpoolerJobId: "123"));
          store.Acknowledge("completed-event");
          store.Record("unreviewed", new PrintEvent("unreviewed-event", "OUTCOME_UNKNOWN"));
@@ -311,7 +311,7 @@ public sealed class AgentStoreTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-print-recovery-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore original = new(directory))
+         using(AgentStore original = TestState.OpenStore(directory))
          {
             original.SaveConfiguration(new AgentConfiguration("https://example.com", "old-device", "old-token"));
             original.Record("old-job", new PrintEvent("old-event", "SUBMITTING"));
@@ -319,9 +319,9 @@ public sealed class AgentStoreTests
          string path = Path.Combine(directory, "connection.dpapi");
          byte[] unreadable = [1, 2, 3, 4];
          File.WriteAllBytes(path, unreadable);
-         Assert.Throws<System.Security.Cryptography.CryptographicException>(() => new AgentStore(directory));
+         Assert.Throws<System.Security.Cryptography.CryptographicException>(() => TestState.OpenStore(directory));
          Assert.Equal(unreadable, File.ReadAllBytes(path));
-         using(AgentStore recovery = new(directory, recoverUnreadableConfiguration: true))
+         using(AgentStore recovery = TestState.OpenStore(directory, recoverUnreadableConfiguration: true))
          {
             Assert.Empty(recovery.Pending());
             Assert.Empty(recovery.Incomplete());
@@ -351,11 +351,11 @@ public sealed class AgentStoreTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-print-test-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore store = new(directory))
+         using(AgentStore store = TestState.OpenStore(directory))
          {
             store.Record("j1", new PrintEvent("e1", "SUBMITTING"));
          }
-         using(AgentStore restored = new(directory))
+         using(AgentStore restored = TestState.OpenStore(directory))
          {
             Assert.Equal("SUBMITTING", restored.GetState("j1"));
             Assert.Single(restored.Pending());
@@ -378,7 +378,7 @@ public sealed class AgentStoreTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-print-test-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using AgentStore store = new(directory);
+         using AgentStore store = TestState.OpenStore(directory);
          AgentConfiguration configuration = new("https://example.com", "test-device", "not-a-real-secret");
          store.SaveConfiguration(configuration);
          Assert.Equal(configuration, store.LoadConfiguration());
@@ -406,10 +406,10 @@ public sealed class AgentStoreTests
       {
          AgentConfiguration original = new("https://example.com", "device-a", "old-token");
          AgentConfiguration replacement = new("https://other.example.com", "device-b", "new-token");
-         using AgentStore oldWorker = new(directory);
+         using AgentStore oldWorker = TestState.OpenStore(directory);
          oldWorker.SaveConfiguration(original);
          oldWorker.Record("j1", new PrintEvent("e1", "SUBMITTING"));
-         using(AgentStore management = new(directory))
+         using(AgentStore management = TestState.OpenStore(directory))
          {
             management.SaveConfiguration(replacement);
             Assert.Empty(management.Pending());
@@ -420,7 +420,7 @@ public sealed class AgentStoreTests
          // An in-flight old worker retains its original scope rather than the new credentials.
          Assert.Single(oldWorker.Pending());
          oldWorker.Record("j1", new PrintEvent("e2", "OUTCOME_UNKNOWN"));
-         using(AgentStore newWorker = new(directory))
+         using(AgentStore newWorker = TestState.OpenStore(directory))
          {
             Assert.Equal(replacement, newWorker.LoadConfiguration());
             Assert.Empty(newWorker.Pending());
@@ -451,7 +451,7 @@ public sealed class AgentStoreTests
       try
       {
          AgentConfiguration original = new("https://example.com", "device-a", "old-token");
-         using(AgentStore initial = new(directory))
+         using(AgentStore initial = TestState.OpenStore(directory))
          {
             initial.SaveConfiguration(original);
             initial.Record("legacy", new PrintEvent("legacy-event", "RECEIVED"));
@@ -464,7 +464,7 @@ public sealed class AgentStoreTests
             command.CommandText = "DROP INDEX IF EXISTS events_outbox; DROP INDEX IF EXISTS events_job; DROP TABLE local_jobs; ALTER TABLE events DROP COLUMN connection_id";
             command.ExecuteNonQuery();
          }
-         using(AgentStore migrated = new(directory))
+         using(AgentStore migrated = TestState.OpenStore(directory))
          {
             Assert.Equal("RECEIVED", Assert.Single(migrated.Incomplete()).State);
             Assert.Empty(migrated.Pending());

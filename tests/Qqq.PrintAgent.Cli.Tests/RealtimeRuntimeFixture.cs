@@ -82,7 +82,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
       Server = new ScriptedPrintServer { PrintingVersion = printingVersion, HttpFault = httpFault };
       _timeProvider = timeProvider;
       Settings = (settings ?? Settings) with { MaxConcurrentDownloads = downloads };
-      using(var store = new AgentStore(DirectoryPath))
+      using(AgentStore store = TestState.OpenStore(DirectoryPath))
       {
          store.SaveConfiguration(new AgentConfiguration(Peer.Origin.AbsoluteUri, "device", "synthetic-proof"));
          store.SaveAuthentication(new AgentAuthentication(new QqqSessionBinding(Peer.Origin, "user", "tenant", "device"), new QqqSessionCredential(Peer.Origin, "synthetic-session")));
@@ -288,7 +288,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    /// <summary>Reads a job's recorded state from the agent's durable store, independent of what the agent reported over the wire.</summary>
    internal string? State(string id)
    {
-      using var store = new AgentStore(DirectoryPath);
+      using AgentStore store = TestState.OpenStore(DirectoryPath);
       return store.GetState(id);
    }
 
