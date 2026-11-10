@@ -16,8 +16,17 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 internal sealed partial class RealtimeRuntimeFixture
 {
+   /// <summary>Counts the claims that reached the server, whatever they were answered.</summary>
    internal int Claims;
+
+
+
+   /// <summary>True when the newest answered claim found the queue empty, which is how a claim drain ends.</summary>
    internal volatile bool LastClaimWasEmpty;
+
+
+
+   /// <summary>Counts requests to a polling or control route, which the realtime path must never make; each is also refused.</summary>
    internal int ForbiddenPolls;
 
 

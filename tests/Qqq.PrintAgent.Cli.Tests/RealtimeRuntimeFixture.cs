@@ -29,19 +29,72 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 {
+   /// <summary>The loopback listener the agent's WebSocket connects to; its origin is the server address saved in the store.</summary>
    internal LoopbackWebSocketPeer Peer { get; } = new();
+
+
+
+   /// <summary>The temporary folder that holds the agent's store, removed when the fixture is disposed.</summary>
    internal string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "qqq-native-runtime-" + Guid.NewGuid().ToString("N"));
+
+
+
+   /// <summary>The private name of the runtime's management pipe, so tests running side by side never share one.</summary>
    internal string PipeName { get; } = "qqq-realtime-fixture-" + Guid.NewGuid().ToString("N");
+
+
+
+   /// <summary>The realtime settings the server sends in WELCOME: short reconnect delays without jitter, everything else at its default.</summary>
    internal RealtimeSettings Settings { get; set; } = new(Revision: 1, ReconnectMinDelayMillis: 100, ReconnectMaxDelayMillis: 1000, ReconnectJitterPercent: 0);
+
+
+
+   /// <summary>The server's queue of jobs waiting to be claimed, oldest first.</summary>
    internal ConcurrentQueue<PrintJob> Queue { get; } = new();
+
+
+
+   /// <summary>How each job's document is served when the agent downloads it, by job id.</summary>
    internal ConcurrentDictionary<string, Func<Stream>> Documents { get; } = new(StringComparer.Ordinal);
+
+
+
+   /// <summary>Every message the agent sent on any connection, in the order the server received them.</summary>
    internal ConcurrentQueue<RealtimeEnvelope> Messages { get; } = new();
+
+
+
+   /// <summary>The runtime's log lines, in order.</summary>
    internal ConcurrentQueue<string> Logs { get; } = new();
+
+
+
+   /// <summary>The fake printer behind both shared queues.</summary>
    internal SyntheticFilePrinter Printer { get; } = new();
+
+
+
+   /// <summary>The runtime under test; replaced by <see cref="RestartAsync"/>.</summary>
    internal AgentRuntime Runtime { get; private set; }
+
+
+
+   /// <summary>When set, the server holds a RECEIVED event (and so the claimed job) until the test completes it.</summary>
    internal TaskCompletionSource? ReceivedRelease { get; set; }
+
+
+
+   /// <summary>When set, the server holds its acknowledgement of STATE_APPLIED until the test completes it, which keeps the agent from becoming ready.</summary>
    internal TaskCompletionSource? StateAppliedRelease { get; set; }
+
+
+
+   /// <summary>Runs for every agent message before the server answers it; a test awaits inside it to hold one acknowledgement back.</summary>
    internal Func<RealtimeEnvelope, Task>? BeforeAcknowledgement { get; set; }
+
+
+
+   /// <summary>The settings revision the agent reported in its latest HELLO.</summary>
    internal long LastHelloSettingsRevision;
 
 
@@ -100,7 +153,8 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
    private readonly Lock _claimLock = new();
    private PrintJob? _claimed;
-   private readonly CancellationTokenSource _stopping = new(TimeSpan.FromSeconds(30));
+   private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(30);
+   private readonly CancellationTokenSource _stopping = new();
    private readonly List<Connection> _connections = [];
    private readonly TimeProvider? _timeProvider;
    private CancellationTokenSource _running;
@@ -179,7 +233,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    /// the desired state and settings, and waits until the agent has applied them. With a connected desired state that means the
    /// agent reports itself connected; with a disconnected one, or when the test says traffic stays restricted, it means the
    /// transport is up, because ordinary traffic is then deliberately not allowed. A server channel that dies early fails with
-   /// a redacted diagnostic instead of hanging; the only time limit is the fixture's own.
+   /// a redacted diagnostic instead of hanging; the only time limit is the fixture's limit for one wait.
    /// </summary>
    internal async Task<Connection> ConnectAsync(bool loseSpoolAck = false, DeviceDesiredState? desiredState = null, bool restricted = false)
    {
@@ -211,15 +265,16 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    /// </summary>
    private async Task<(WebSocket Socket, RealtimeEnvelope Hello)> AcceptAgentAsync()
    {
+      using CancellationTokenSource wait = WaitScope();
       while(true)
       {
          WebSocket? socket = null;
          try
          {
-            socket = await Peer.AcceptAsync(_stopping.Token);
-            return (socket, await LoopbackWebSocketPeer.ReceiveAsync(socket, _stopping.Token));
+            socket = await Peer.AcceptAsync(wait.Token);
+            return (socket, await LoopbackWebSocketPeer.ReceiveAsync(socket, wait.Token));
          }
-         catch(OperationCanceledException exception) when(_stopping.IsCancellationRequested)
+         catch(OperationCanceledException exception) when(wait.IsCancellationRequested)
          { throw new InvalidOperationException(Diagnostic("WebSocket handshake"), exception); }
          catch(Exception exception) when(exception is IOException or WebSocketException)
          { socket?.Dispose(); }
@@ -266,26 +321,42 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
 
-   /// <summary>Polls a condition every 20 ms until it holds, and on the fixture's 30-second limit fails with a diagnostic naming the awaited expression.</summary>
+   /// <summary>
+   /// A cancellation source for one wait. It is cancelled when that wait has taken 30 seconds of real time, or when the
+   /// fixture is disposed. The limit belongs to the wait: the runtime and its connections are stopped only by disposing the
+   /// fixture, so a test made of many waits is not cut off by the time they took together.
+   /// </summary>
+   private CancellationTokenSource WaitScope()
+   {
+      var scope = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
+      scope.CancelAfter(WaitLimit);
+      return scope;
+   }
+
+
+
+   /// <summary>Polls a condition every 20 ms until it holds, and when this wait reaches its 30-second limit fails with a diagnostic naming the awaited expression.</summary>
    internal async Task WaitAsync(Func<bool> predicate, [CallerArgumentExpression(nameof(predicate))] string stage = "")
    {
+      using CancellationTokenSource wait = WaitScope();
       try
       {
          while(!predicate())
-         { await Task.Delay(20, _stopping.Token); }
+         { await Task.Delay(20, wait.Token); }
       }
-      catch(OperationCanceledException exception) when(_stopping.IsCancellationRequested)
+      catch(OperationCanceledException exception) when(wait.IsCancellationRequested)
       { throw new TimeoutException(Diagnostic(stage), exception); }
    }
 
 
 
-   /// <summary>Waits for a signal a test double raises (a held claim arrived, a print started) under the fixture's limit, failing with the same diagnostic as a timed-out condition.</summary>
+   /// <summary>Waits for a signal a test double raises (a held claim arrived, a print started) under the same limit for one wait, failing with the same diagnostic as a timed-out condition.</summary>
    internal async Task WaitAsync(Task signal, [CallerArgumentExpression(nameof(signal))] string stage = "")
    {
+      using CancellationTokenSource wait = WaitScope();
       try
-      { await signal.WaitAsync(_stopping.Token); }
-      catch(OperationCanceledException exception) when(_stopping.IsCancellationRequested)
+      { await signal.WaitAsync(wait.Token); }
+      catch(OperationCanceledException exception) when(wait.IsCancellationRequested)
       { throw new TimeoutException(Diagnostic(stage), exception); }
    }
 
@@ -326,13 +397,14 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
 
-   /// <summary>Sends one command over the runtime's management pipe, as the companion and command line do, and returns the reply.</summary>
+   /// <summary>Sends one command over the runtime's management pipe, as the companion and command line do, and returns the reply; the exchange is one wait under the fixture's limit.</summary>
    internal async Task<string> PipeAsync(PipeRequest request)
    {
+      using CancellationTokenSource wait = WaitScope();
       await using NamedPipeClientStream pipe = new(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-      await pipe.ConnectAsync(_stopping.Token);
-      await AgentPipeFraming.WriteAsync(pipe, JsonSerializer.Serialize(request, PrintApiClient.JsonOptions), AgentPipeFraming.MaximumCommandCharacters, _stopping.Token);
-      return await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, _stopping.Token);
+      await pipe.ConnectAsync(wait.Token);
+      await AgentPipeFraming.WriteAsync(pipe, JsonSerializer.Serialize(request, PrintApiClient.JsonOptions), AgentPipeFraming.MaximumCommandCharacters, wait.Token);
+      return await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, wait.Token);
    }
 
 
