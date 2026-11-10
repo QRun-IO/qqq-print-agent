@@ -20,6 +20,8 @@ internal sealed class ScriptedWebSocket : WebSocket
    private readonly Channel<(byte[] Bytes, WebSocketMessageType Type, bool End)> _incoming = Channel.CreateUnbounded<(byte[], WebSocketMessageType, bool)>();
    private readonly Channel<string> _sent = Channel.CreateUnbounded<string>();
    private WebSocketState _state = WebSocketState.Open;
+   private WebSocketCloseStatus? _closeStatus;
+   private string? _closeDescription;
    private int _aborts;
    private bool _disposed;
 
@@ -40,13 +42,18 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
-   /// <inheritdoc/>
-   public override WebSocketCloseStatus? CloseStatus => null;
+   /// <summary>Every graceful close requested of the socket, in order.</summary>
+   internal List<string> Closes { get; } = [];
 
 
 
    /// <inheritdoc/>
-   public override string? CloseStatusDescription => null;
+   public override WebSocketCloseStatus? CloseStatus => _closeStatus;
+
+
+
+   /// <inheritdoc/>
+   public override string? CloseStatusDescription => _closeDescription;
 
 
 
@@ -105,13 +112,25 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
-   /// <inheritdoc/>
-   public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) => throw new NotSupportedException("The channel never closes gracefully.");
+   /// <summary>Records a full close and marks the socket closed.</summary>
+   public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+   {
+      Closes.Add($"close {closeStatus} {statusDescription}");
+      _closeStatus = closeStatus;
+      _closeDescription = statusDescription;
+      _state = WebSocketState.Closed;
+      return Task.CompletedTask;
+   }
 
 
 
-   /// <inheritdoc/>
-   public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) => throw new NotSupportedException("The channel never closes gracefully.");
+   /// <summary>Records a close of the sending side only.</summary>
+   public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+   {
+      Closes.Add($"close-output {closeStatus} {statusDescription}");
+      _state = WebSocketState.CloseSent;
+      return Task.CompletedTask;
+   }
 
 
 

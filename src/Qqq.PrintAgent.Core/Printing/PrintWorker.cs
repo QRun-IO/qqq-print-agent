@@ -88,7 +88,9 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          if(job is null)
          { return default; }
          Track(job, inventory);
-         if(IsFinal(journal.GetState(job.JobId)))
+         // A job recorded as submitting was handed to a printer once already and never concluded. Whoever recovers the
+         // journal reports it as OUTCOME_UNKNOWN; claiming it again must never print it a second time.
+         if(journal.GetState(job.JobId) is { } state && (IsFinal(state) || string.Equals(state, "SUBMITTING", StringComparison.Ordinal)))
          { return default; }
          options?.ActiveJobChanged?.Invoke(job);
          try
@@ -194,6 +196,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       using DownloadedDocument? file = options?.StagingDirectory is null ? null : await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, token, options.ThrottleDownloadAsync).ConfigureAwait(false);
       byte[]? content = file is null ? await api.DownloadAsync(job, token).ConfigureAwait(false) : null;
       attempt.Download = attempt.Lap();
+      if(file is not null && printers is not IFilePrinterBackend)
+      { throw new InvalidOperationException("File printing is required."); }
       RequireCurrentPrinter(job);
       attempt.Revalidate = attempt.Lap();
 
@@ -247,14 +251,15 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
    /// <summary>
-   /// Hands the verified staged file, or the in-memory content for a backend without file support, to the native printer
-   /// and returns its spooler receipt. This is the only step after which an outcome is uncertain.
+   /// Hands the verified staged file to a backend that takes files, or the in-memory content to one that does not, and
+   /// returns its spooler receipt. This is the only step after which an outcome is uncertain, so whether the backend can
+   /// take the staged file was settled before the job was recorded as submitting.
    /// </summary>
    private Task<string> SubmitNativeAsync(PrintJob job, DownloadedDocument? file, byte[]? content, RealtimeSettings submissionSettings, CancellationToken token)
    {
-      return file is not null && printers is IFilePrinterBackend files
-         ? files.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
-         : printers.PrintAsync(job, content ?? throw new InvalidOperationException("File printing is required."), token);
+      return file is not null
+         ? ((IFilePrinterBackend)printers).PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
+         : printers.PrintAsync(job, content!, token);
    }
 
 

@@ -177,8 +177,13 @@ internal sealed class RecordingJournal : IJobJournal
 
 
 
-   /// <summary>Events the server has not yet acknowledged, in the order they were recorded.</summary>
-   public IReadOnlyList<(string JobId, PrintEvent Event)> Pending() => [.. _events.Where(entry => !_acknowledged.Contains(entry.Event.EventId))];
+   /// <summary>The most undelivered events one call returns, as the durable journal hands them out in bounded batches; unlimited by default.</summary>
+   internal int BatchLimit { get; set; } = int.MaxValue;
+
+
+
+   /// <summary>Events the server has not yet acknowledged, in the order they were recorded, at most one batch.</summary>
+   public IReadOnlyList<(string JobId, PrintEvent Event)> Pending() => [.. _events.Where(entry => !_acknowledged.Contains(entry.Event.EventId)).Take(BatchLimit)];
 
 
 

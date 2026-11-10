@@ -32,11 +32,6 @@ internal sealed class Deadline : IDisposable
 
 
 
-   /// <summary>True once the limit itself ran out, which tells a timeout apart from the caller giving up.</summary>
-   internal bool Expired => _limit.IsCancellationRequested;
-
-
-
    /// <summary>Stops the clock and releases both sources; the token must not be used afterwards.</summary>
    public void Dispose()
    {

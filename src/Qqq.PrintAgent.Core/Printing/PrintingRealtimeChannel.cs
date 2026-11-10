@@ -156,8 +156,9 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    {
       byte[] buffer = new byte[8192];
       using var message = new MemoryStream();
-      while(!token.IsCancellationRequested)
+      while(true)
       {
+         token.ThrowIfCancellationRequested();
          ValueWebSocketReceiveResult result = await socket.ReceiveAsync(buffer.AsMemory(), token).ConfigureAwait(false);
          traffic?.RecordDownload(result.Count);
          if(result.MessageType == WebSocketMessageType.Close)
