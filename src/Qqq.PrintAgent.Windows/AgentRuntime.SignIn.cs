@@ -49,7 +49,7 @@ public sealed partial class AgentRuntime
             WriteLog("WARN", $"Sign-in refused: a new pairing needs a session without device proof, but the session already names device {binding.DeviceId}.");
             throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, $"New pairing requires a fresh {AppIdentity.ServerName} session without device proof.");
          }
-         AgentAuthentication? saved = store.LoadAuthenticationForRecovery();
+         AgentAuthentication? saved = LoadSavedSession(store, forRecovery: true);
          if(!request.StartNewPairing && configuration is not null && SameOrigin(credential.Origin, configuration.ServerUrl))
          {
             WriteLog("INFO", $"Step 3 of 4: the session is for the paired server; binding device {configuration.DeviceId}{(request.ClaimLegacyDevice ? " and claiming it as a legacy device" : "")}.");
@@ -155,8 +155,8 @@ public sealed partial class AgentRuntime
          WriteLog("INFO", "Sign-out requested: blocking printing, removing the saved session credential and ending the server session. Pairing and history are kept.");
          BlockAuthorization();
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
-         AgentAuthentication? saved = store.LoadAuthenticationForRecovery();
-         bool unreadableSession = store.QuarantineUnreadableAuthentication();
+         AgentAuthentication? saved = LoadSavedSession(store, forRecovery: true);
+         bool unreadableSession = store.QuarantineUnreadableAuthentication() || store.StagedPairing is StagedPairingOutcome.CompletedAfterQuarantine;
          if(unreadableSession)
          { WriteLog("WARN", $"The saved session data could not be read and was moved aside for recovery; revoke the previous session in {AppIdentity.ServerName}."); }
          if(saved is not null)

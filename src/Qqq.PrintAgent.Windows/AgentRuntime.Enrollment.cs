@@ -36,8 +36,8 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Exchanges the enrollment code for a device credential using the live user session on the selected server, binds the
    /// new device to that session and checks the identity again. Only then are the stored pairing and stored session replaced,
-   /// one straight after the other, and the connection state reset, so a refused or interrupted bind leaves both files as they
-   /// were. Authentication changes are serialized by a gate.
+   /// as one staged step, and the connection state reset, so a refused or interrupted bind leaves both files as they were.
+   /// Authentication changes are serialized by a gate.
    /// </summary>
    private async Task<string> EnrollNativeAsync(PipeRequest request, CancellationToken token)
    {
@@ -74,7 +74,8 @@ public sealed partial class AgentRuntime
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
          store.StagePairing(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds), authentication);
          progress = EnrollmentProgress.Saved;
-         store.CompleteStagedPairing();
+         if(store.CompleteStagedPairing() is StagedPairingOutcome.Deferred)
+         { throw new IOException("The session saved with the new pairing could not be moved into place yet."); }
          ResetConnectionState();
          ActivateSession(session, actual, store);
          progress = EnrollmentProgress.Activated;
