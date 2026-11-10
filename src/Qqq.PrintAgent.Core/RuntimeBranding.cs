@@ -23,19 +23,29 @@ public sealed record RuntimeBranding(string? DisplayName = null, string? Company
    /// labels anyway, and labels left by an earlier generic install must not relabel the edition. The branding file still wins.
    /// </summary>
    public static RuntimeBranding LoadMachine(bool includeInstallerLabels = true)
+      => LoadMachine(DefaultPath, includeInstallerLabels && OperatingSystem.IsWindows() ? MachineInstallerLabels.Read : null);
+
+
+
+   /// <summary>
+   /// Reads a branding file and, when a reader for the installer's persisted labels is given, fills in the display and
+   /// company names the file leaves out. The file always wins, a label that is blank, over-long or carries control
+   /// characters is ignored, and a reader that cannot reach its store leaves the file's branding as it is. Taking the
+   /// path and the reader as arguments keeps the machine's ProgramData folder and registry out of the rules.
+   /// </summary>
+   internal static RuntimeBranding LoadMachine(string path, Func<string, string?>? installerLabel)
    {
-      RuntimeBranding branding = Load(DefaultPath);
-      if(!OperatingSystem.IsWindows() || !includeInstallerLabels)
+      RuntimeBranding branding = Load(path);
+      if(installerLabel is null)
       {
          return branding;
       }
       try
       {
-         using Microsoft.Win32.RegistryKey? key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\QRunIO\PrintAgent");
          return branding with
          {
-            DisplayName = branding.DisplayName ?? ValidMachineLabel(key?.GetValue("DisplayName") as string),
-            CompanyName = branding.CompanyName ?? ValidMachineLabel(key?.GetValue("CompanyName") as string),
+            DisplayName = branding.DisplayName ?? ValidMachineLabel(installerLabel("DisplayName")),
+            CompanyName = branding.CompanyName ?? ValidMachineLabel(installerLabel("CompanyName")),
          };
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
