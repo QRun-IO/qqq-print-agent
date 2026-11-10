@@ -89,8 +89,7 @@ public sealed class JobCreationTimeTests
    /// <summary>Runs raw SQL against the journal file directly, bypassing the store, to simulate an older schema or tampered timestamps.</summary>
    private static void Execute(string directory, string sql)
    {
-      using SqliteConnection connection = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "journal.db") }.ToString());
-      connection.Open();
+      using SqliteConnection connection = TestState.OpenJournal(directory);
       using SqliteCommand command = connection.CreateCommand();
       command.CommandText = sql;
       command.ExecuteNonQuery();

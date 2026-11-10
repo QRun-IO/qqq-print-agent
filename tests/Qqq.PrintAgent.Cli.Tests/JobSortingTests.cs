@@ -121,8 +121,7 @@ public sealed class JobSortingTests
       public Fixture()
       {
          Store = TestState.OpenStore(_directory);
-         _database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "journal.db") }.ToString());
-         _database.Open();
+         _database = TestState.OpenJournal(_directory);
       }
 
 

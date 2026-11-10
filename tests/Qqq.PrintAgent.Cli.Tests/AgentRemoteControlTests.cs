@@ -398,9 +398,8 @@ public sealed class AgentRemoteControlTests
       await using RealtimeRuntimeFixture fixture = new();
       using(AgentStore store = TestState.OpenStore(fixture.DirectoryPath))
       { store.SaveControlState(AgentControlState.Initial); }
-      using(var journal = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Path.Combine(fixture.DirectoryPath, "journal.db") }.ToString()))
+      using(Microsoft.Data.Sqlite.SqliteConnection journal = TestState.OpenJournal(fixture.DirectoryPath))
       {
-         journal.Open();
          using Microsoft.Data.Sqlite.SqliteCommand overwrite = journal.CreateCommand();
          overwrite.CommandText = """UPDATE control_state SET json='{"support":"LEGACY","desiredState":{"revision":0,"dispatchPaused":false,"connectionState":"CONNECTED"},"authorizationRequired":true}'""";
          Assert.Equal(1, overwrite.ExecuteNonQuery());

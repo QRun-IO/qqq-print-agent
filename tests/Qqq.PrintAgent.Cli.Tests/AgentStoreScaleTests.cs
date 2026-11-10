@@ -168,12 +168,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
 
 
    /// <summary>Opens a direct connection to the store's journal file for seeding and tampering.</summary>
-   private static SqliteConnection Open(string directory)
-   {
-      SqliteConnection database = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "journal.db") }.ToString());
-      database.Open();
-      return database;
-   }
+   private static SqliteConnection Open(string directory) => TestState.OpenJournal(directory);
 
 
 

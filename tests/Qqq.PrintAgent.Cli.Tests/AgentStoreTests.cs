@@ -31,9 +31,8 @@ public sealed class AgentStoreTests
             Assert.Null(valid.GetState("none"));
          }
          string path = Path.Combine(directory, "journal.db");
-         using(var database = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+         using(Microsoft.Data.Sqlite.SqliteConnection database = TestState.OpenJournal(directory))
          {
-            database.Open();
             using Microsoft.Data.Sqlite.SqliteCommand command = database.CreateCommand();
             command.CommandText = "CREATE TABLE events(unexpected TEXT)";
             command.ExecuteNonQuery();
@@ -457,9 +456,8 @@ public sealed class AgentStoreTests
             initial.Record("legacy", new PrintEvent("legacy-event", "RECEIVED"));
             initial.Acknowledge("legacy-event");
          }
-         using(var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(directory, "journal.db")}"))
+         using(Microsoft.Data.Sqlite.SqliteConnection connection = TestState.OpenJournal(directory))
          {
-            connection.Open();
             using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
             command.CommandText = "DROP INDEX IF EXISTS events_outbox; DROP INDEX IF EXISTS events_job; DROP TABLE local_jobs; ALTER TABLE events DROP COLUMN connection_id";
             command.ExecuteNonQuery();
