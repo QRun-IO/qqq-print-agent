@@ -132,8 +132,8 @@ public sealed class AgentPrinterCatalogTests
    /// <summary>
    /// The reason logged for a connection the reader ended is the frame it rejected, even while a send is waiting for an
    /// acknowledgement. The server holds back the inventory acknowledgement and then sends the malformed frame, so the channel
-   /// fails that pending send at the same moment; the log must still name the frame, not the secondary "closed before
-   /// acknowledgement" failure. The failure is logged before the service reconnects, so the test waits for that line.
+   /// fails that pending send at the same moment; the log must still name the frame, not the "closed before acknowledgement"
+   /// that only followed from it. The failure is logged before the service reconnects, so the test waits for that line.
    /// </summary>
    [Fact]
    public async Task MalformedPrintersFrame_IsTheLoggedReasonEvenWhileASendAwaitsAcknowledgement()
@@ -156,7 +156,7 @@ public sealed class AgentPrinterCatalogTests
          await first.SendAsync("PRINTERS", new { nothing = true });
          await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("Realtime connection stopped", StringComparison.Ordinal)));
          string stopped = fixture.Logs.First(line => line.Contains("Realtime connection stopped", StringComparison.Ordinal));
-         Assert.Contains("PRINTERS frame has no printers list", stopped, StringComparison.Ordinal);
+         Assert.Contains("InvalidDataException: The PRINTERS frame has no printers list.", stopped, StringComparison.Ordinal);
          Assert.DoesNotContain("before acknowledgement", stopped, StringComparison.Ordinal);
       }
       finally { release.TrySetResult(); }

@@ -56,6 +56,11 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
 
+   /// <summary>When true, the server closes the socket with a close frame straight after refusing a message, as a server that gives up on a misbehaving client does.</summary>
+   internal bool CloseAfterRefusal { get; set; }
+
+
+
    /// <summary>Returns true for an agent message the server must receive and then drop the connection without acknowledging, as a network failure at that exact moment would.</summary>
    internal Func<RealtimeEnvelope, bool>? LoseAcknowledgementOf { get; set; }
 

@@ -151,6 +151,29 @@ public sealed class AgentRemoteControlTests
 
 
 
+   /// <summary>
+   /// The server refuses a receipt and then closes the socket with a close frame. The connection's logged reason is the
+   /// refusal, which is what an operator has to act on, and not "Server closed the realtime connection", which only followed
+   /// from it. The receipt stays pending and the cancel has run once.
+   /// </summary>
+   [Fact]
+   public async Task RefusedReceiptFollowedByServerCloseIsLoggedAsTheRefusal()
+   {
+      await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
+      fixture.RefuseWith = message => message.Type is "COMMAND_RECEIPT" ? "CONFLICT" : null;
+      fixture.CloseAfterRefusal = true;
+      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await connection.SendAsync("COMMAND", RealtimeRuntimeFixture.Command());
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal)));
+      string stopped = fixture.Logs.First(line => line.Contains(Stopped, StringComparison.Ordinal));
+      Assert.Contains("Realtime operation was rejected: CONFLICT", stopped, StringComparison.Ordinal);
+      Assert.DoesNotContain("Server closed", stopped, StringComparison.Ordinal);
+      Assert.Equal(1, PendingReceipts(fixture));
+      Assert.Equal(1, fixture.Printer.Cancellations);
+   }
+
+
+
    /// <summary>After a pause at revision 5, an older revision (4) or a different instruction claiming the same revision (5, resumed) is refused as a protocol violation that ends the connection, so a delayed or conflicting frame cannot resume a device the operator paused.</summary>
    [Fact]
    public async Task OlderOrConflictingRevisionCannotResumePausedDevice()

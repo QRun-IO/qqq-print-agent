@@ -103,7 +103,13 @@ internal sealed partial class RealtimeRuntimeFixture
                return;
             }
             if(fixture.RefuseWith?.Invoke(message) is string code)
-            { await SendErrorAsync(message.MessageId, code); continue; }
+            {
+               await SendErrorAsync(message.MessageId, code);
+               if(!fixture.CloseAfterRefusal)
+               { continue; }
+               await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "refused", token);
+               return;
+            }
             await SendAsync("ACK", new { acknowledgedMessageId = message.MessageId });
             if(message.Type is "STATE_APPLIED" && fixture.ResendUnappliedState && _newestDesired is DeviceDesiredState unapplied
                && message.Payload.GetProperty("lastAppliedRevision").GetInt64() < unapplied.Revision)

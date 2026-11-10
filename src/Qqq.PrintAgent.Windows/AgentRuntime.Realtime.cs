@@ -197,15 +197,7 @@ public sealed partial class AgentRuntime
       Task handshakeWatch = AwaitRealtimeHandshakeAsync(handshake.Token, lifetime.Token);
       try
       {
-         WriteLog("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
-         await channel.SendAsync("HELLO", new
-         {
-            agentVersion = PrintApiClient.AgentVersion,
-            capabilities,
-            lastAppliedRevision = _controlState.DesiredState.Revision,
-            lastSettingsRevision = settings.Revision,
-            limits = RealtimeSettings.ClientLimits,
-         }, token: lifetime.Token).ConfigureAwait(false);
+         await SendHelloAsync(channel, capabilities, settings, lifetime.Token).ConfigureAwait(false);
          await Task.WhenAny(reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
       }
       finally
@@ -218,24 +210,51 @@ public sealed partial class AgentRuntime
          }
          SignalPipeline();
          await lifetime.CancelAsync().ConfigureAwait(false);
-         await CompleteConnectionAsync(reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
+         await CompleteConnectionAsync(other => WriteLog("DEBUG", "Realtime connection also failed with: " + QqqSessionDiagnostics.Describe(other)),
+            reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
       }
    }
 
 
 
+   /// <summary>Sends HELLO, the first message on a socket: the agent version, this socket's capabilities, the revisions already applied and the ceilings this client can honor.</summary>
+   private async Task SendHelloAsync(PrintingRealtimeChannel channel, string[] capabilities, RealtimeSettings settings, CancellationToken token)
+   {
+      WriteLog("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
+      await channel.SendAsync("HELLO", new
+      {
+         agentVersion = PrintApiClient.AgentVersion,
+         capabilities,
+         lastAppliedRevision = _controlState.DesiredState.Revision,
+         lastSettingsRevision = settings.Revision,
+         limits = RealtimeSettings.ClientLimits,
+      }, token: token).ConfigureAwait(false);
+   }
+
+
+
    /// <summary>
-   /// Waits for every task of a finished connection and reports why it ended. When the reader itself failed (a frame it
-   /// rejected, a socket the server closed), that is the cause: the channel then fails every send still waiting for an
-   /// acknowledgement, and one of those secondary failures can complete before the reader's own task does. Waiting for all of
-   /// them reports whichever failed first in time, so the reader's failure is rethrown in preference and the log names the
-   /// frame or closure instead of "closed before acknowledgement".
+   /// Waits for every task of a finished connection and rethrows one failure as the reason it ended; the others go to
+   /// <paramref name="alsoFailed"/>. Which task completes first is a matter of scheduling, so the reason is chosen by what
+   /// each failure is. A worker that failed with anything other than a plain I/O error has a reason of its own (a refusal, a
+   /// timeout, a session the server ended) and comes first, also when the server closed the socket straight afterwards and
+   /// the reader failed with that. A worker's plain I/O error only says the connection was gone when it tried to use it;
+   /// then the reader's failure (a frame it rejected, a socket the server closed) is the reason, and the worker's failure,
+   /// which carries that as its cause, is detail.
    /// </summary>
-   internal static async Task CompleteConnectionAsync(Task reader, params Task[] workers)
+   internal static async Task CompleteConnectionAsync(Action<Exception> alsoFailed, Task reader, params Task[] workers)
    {
       var all = Task.WhenAll([reader, .. workers]);
       await all.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-      await (reader.IsFaulted ? reader : all).ConfigureAwait(false);
+      Exception? readerFailure = reader.Exception?.InnerException;
+      Exception[] failures = all.Exception is null ? [] : [.. all.Exception.InnerExceptions];
+      Exception? reason = failures.FirstOrDefault(failure => !ReferenceEquals(failure, readerFailure) && failure.GetType() != typeof(IOException))
+         ?? readerFailure ?? (failures.Length > 0 ? failures[0] : null);
+      foreach(Exception other in failures.Where(failure => !ReferenceEquals(failure, reason)))
+      { alsoFailed(other); }
+      if(reason is not null)
+      { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(reason); }
+      await all.ConfigureAwait(false);
    }
 
 
