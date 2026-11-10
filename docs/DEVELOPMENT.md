@@ -69,7 +69,7 @@ The worker persists receipt and SUBMITTING before invoking Windows. It records S
 ## Packaging
 
 ```powershell
-./build/Build-Installer.ps1 -ProductVersion 1.0.1 -ReleaseVersion 1.0.1
+./build/Build-Installer.ps1 -ProductVersion 2.0.0 -ReleaseVersion 2.0.0
 ```
 
 MSI ProductVersion is numeric; assembly/package informational version may contain the prerelease suffix. Service, companion and CLI are published into separate self-contained runtime directories and shipped in one machine MSI. Do not reintroduce the template's per-user Velopack updater.
