@@ -23,7 +23,7 @@ public sealed class AgentRealtimeOrderingTests
    public async Task OlderStateAckCannotReleaseSubmissionBeforeNewSettingsAreAcknowledged()
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-slow");
       using var slow = new GatedDocument(bytes);
       fixture.AddJob("slow", () => slow, length: bytes.Length);
@@ -65,7 +65,7 @@ public sealed class AgentRealtimeOrderingTests
    public async Task StickyClaimIsNotRequestedAgainBeforeReceivedAcknowledgement()
    {
       await using var fixture = new RealtimeRuntimeFixture(downloads: 2);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       fixture.ReceivedRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
       fixture.AddJob("first");
       fixture.AddJob("second", printerId: "other");
@@ -93,7 +93,7 @@ public sealed class AgentRealtimeOrderingTests
    public async Task SubmissionUsesCurrentPolicyAfterTransferAndPauseOnlyStopsNewClaims(bool rejectSize)
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-slow");
       using var slow = new GatedDocument(bytes);
       fixture.AddJob("slow", () => slow, length: bytes.Length);
@@ -117,7 +117,7 @@ public sealed class AgentRealtimeOrderingTests
    public async Task IncreasingConcurrencyStartsWaitingOtherPrinterDuringAnActiveDownload()
    {
       await using var fixture = new RealtimeRuntimeFixture(downloads: 1);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-slow");
       using var slow = new GatedDocument(bytes);
       fixture.AddJob("slow", () => slow, length: bytes.Length);
@@ -148,7 +148,7 @@ public sealed class AgentRealtimeOrderingTests
    public async Task ParallelDownloadsPreserveQueueOrderWithoutBlockingDifferentPrinters(bool samePrinter)
    {
       await using var fixture = new RealtimeRuntimeFixture(downloads: 2);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] slowBytes = Encoding.ASCII.GetBytes("%PDF-synthetic-slow");
       byte[] fastBytes = Encoding.ASCII.GetBytes("%PDF-synthetic-fast");
       using var slow = new GatedDocument(slowBytes);

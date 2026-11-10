@@ -22,7 +22,7 @@ public sealed class AgentTransportTests
    public async Task DispatchDisconnectKeepsWebSocketConnectedAndReconnectPreservesTrafficTotals()
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       AgentTransportSnapshot before = fixture.Runtime.GetTransportSnapshot();
       Assert.Equal("WS", before.Protocol);
       Assert.Equal("CONNECTED", before.State);

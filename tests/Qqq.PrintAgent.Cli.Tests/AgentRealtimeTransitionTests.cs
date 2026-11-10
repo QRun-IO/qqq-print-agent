@@ -35,7 +35,7 @@ public sealed class AgentRealtimeTransitionTests
    public async Task CommandWaitingForStateAcknowledgementRunsAsSoonAsNegotiationCompletes()
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       fixture.StateAppliedRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
       await connection.SendAsync("DESIRED_STATE", new DeviceDesiredState(2, true, "CONNECTED"));
       await fixture.WaitAsync(() => fixture.Messages.Any(message => message.Type is "STATE_APPLIED" && message.Payload.GetProperty("lastAppliedRevision").GetInt64() == 2));

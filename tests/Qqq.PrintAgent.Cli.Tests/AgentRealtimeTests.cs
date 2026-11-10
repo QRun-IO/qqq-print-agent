@@ -24,7 +24,7 @@ public sealed class AgentRealtimeTests
    public async Task PauseAndCancelRemainResponsiveDuringLargeDownloadWithoutHttpPolling()
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       using var stalled = new StalledDocument();
       fixture.AddJob("large", () => stalled);
       await connection.SendAsync("JOB_AVAILABLE", new { });
@@ -80,7 +80,7 @@ public sealed class AgentRealtimeTests
    public async Task ReconnectReplaysLostSpoolReceiptAndDrainsBufferedJobsWithoutPrintingAgain()
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync(loseSpoolAck: true);
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync(loseSpoolAck: true);
       fixture.AddJob("first");
       await first.SendAsync("JOB_AVAILABLE", new { });
       await first.LostSpoolAck.Task.WaitAsync(TimeSpan.FromSeconds(5));

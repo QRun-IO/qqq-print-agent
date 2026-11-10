@@ -31,7 +31,7 @@ public sealed class AgentRealtimeRestartTests
       Assert.Equal("OUTCOME_UNKNOWN", fixture.State("submitting"));
       Assert.Equal("FAILED", fixture.State("received"));
       fixture.AddJob("submitting");
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => Reported(fixture, "submitting", "OUTCOME_UNKNOWN") is not null && Reported(fixture, "received", "FAILED") is not null);
       Assert.Contains("inspect the printer", Reported(fixture, "submitting", "OUTCOME_UNKNOWN"), StringComparison.Ordinal);
       Assert.Contains("before native submission", Reported(fixture, "received", "FAILED"), StringComparison.Ordinal);
@@ -59,7 +59,7 @@ public sealed class AgentRealtimeRestartTests
    {
       await using RealtimeRuntimeFixture fixture = new();
       fixture.Printer.BlockPrint = true;
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       fixture.AddJob("job");
       await first.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(fixture.Printer.Entered.Task);
@@ -70,7 +70,7 @@ public sealed class AgentRealtimeRestartTests
       Assert.Equal("OUTCOME_UNKNOWN", fixture.State("job"));
       int claims = fixture.Claims;
       fixture.AddJob("job");
-      RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection second = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => Reported(fixture, "job", "OUTCOME_UNKNOWN") is not null);
       await fixture.WaitAsync(() => fixture.Claims > claims);
       await second.SendAsync("JOB_AVAILABLE", new { });

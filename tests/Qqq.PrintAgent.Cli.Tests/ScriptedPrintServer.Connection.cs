@@ -10,15 +10,15 @@ using Qqq.PrintAgent.Testing;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
-/// <summary>The realtime peer's side of the fixture: one accepted WebSocket and the pump that answers the agent on it.</summary>
-internal sealed partial class RealtimeRuntimeFixture
+/// <summary>The realtime side of the scripted server: one accepted WebSocket and the pump that answers the agent on it.</summary>
+internal sealed partial class ScriptedPrintServer
 {
    /// <summary>
    /// The server side of one accepted WebSocket. A background pump records every agent message, acknowledges it (the server's
    /// durable-receipt promise), answers pings, releases claimed jobs on RECEIVED, and can refuse a message with an ERROR frame or
    /// drop the connection at a chosen message to simulate losing an acknowledgement.
    /// </summary>
-   internal sealed class Connection(WebSocket socket, RealtimeRuntimeFixture fixture, bool loseSpoolAck, CancellationToken token) : IAsyncDisposable
+   internal sealed class Connection(WebSocket socket, ScriptedPrintServer server, bool loseSpoolAck, CancellationToken token) : IAsyncDisposable
    {
       private readonly SemaphoreSlim _send = new(1, 1);
       private Task _pump = Task.CompletedTask;
@@ -42,7 +42,7 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
-      /// <summary>Completed when the connection dropped a message the fixture was told to lose, so a test can wait for that exact moment before reconnecting.</summary>
+      /// <summary>Completed when the connection dropped a message the server was told to lose, so a test can wait for that exact moment before reconnecting.</summary>
       internal TaskCompletionSource LostAcknowledgement { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 
@@ -81,11 +81,11 @@ internal sealed partial class RealtimeRuntimeFixture
          while(!token.IsCancellationRequested)
          {
             RealtimeEnvelope message = await LoopbackWebSocketPeer.ReceiveAsync(socket, token);
-            fixture.Messages.Enqueue(message);
-            if(fixture.BeforeAcknowledgement is not null)
-            { await fixture.BeforeAcknowledgement(message); }
-            if(message.Type is "STATE_APPLIED" && fixture.StateAppliedRelease is not null)
-            { await fixture.StateAppliedRelease.Task.WaitAsync(token); }
+            server.Messages.Enqueue(message);
+            if(server.BeforeAcknowledgement is not null)
+            { await server.BeforeAcknowledgement(message); }
+            if(message.Type is "STATE_APPLIED" && server.StateAppliedRelease is not null)
+            { await server.StateAppliedRelease.Task.WaitAsync(token); }
             if(message.Type is "JOB_EVENT" && message.Payload.GetProperty("event").GetProperty("status").GetString() is "RECEIVED")
             { await ReleaseClaimAsync(message); }
             if(message.Type is "PING")
@@ -96,25 +96,25 @@ internal sealed partial class RealtimeRuntimeFixture
                socket.Abort();
                return;
             }
-            if(fixture.LoseAcknowledgementOf?.Invoke(message) == true)
+            if(server.LoseAcknowledgementOf?.Invoke(message) == true)
             {
                LostAcknowledgement.TrySetResult();
                socket.Abort();
                return;
             }
-            if(fixture.RefuseWith?.Invoke(message) is string code)
+            if(server.RefuseWith?.Invoke(message) is string code)
             {
                await SendErrorAsync(message.MessageId, code);
-               if(!fixture.CloseAfterRefusal)
+               if(!server.CloseAfterRefusal)
                { continue; }
                await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "refused", token);
                return;
             }
             // Set before the acknowledgement leaves: the agent may claim as soon as it reads it.
             if(message.Type is "STATE_APPLIED")
-            { fixture._claimsAllowed = true; }
+            { server._claimsAllowed = true; }
             await SendAsync("ACK", new { acknowledgedMessageId = message.MessageId });
-            if(message.Type is "STATE_APPLIED" && fixture.ResendUnappliedState && _newestDesired is DeviceDesiredState unapplied
+            if(message.Type is "STATE_APPLIED" && server.ResendUnappliedState && _newestDesired is DeviceDesiredState unapplied
                && message.Payload.GetProperty("lastAppliedRevision").GetInt64() < unapplied.Revision)
             { await SendAsync("DESIRED_STATE", unapplied); }
          }
@@ -125,12 +125,12 @@ internal sealed partial class RealtimeRuntimeFixture
       /// <summary>Frees the server's claimed job once its RECEIVED event arrived, after any hold the test placed on that event.</summary>
       private async Task ReleaseClaimAsync(RealtimeEnvelope message)
       {
-         if(fixture.ReceivedRelease is not null)
-         { await fixture.ReceivedRelease.Task.WaitAsync(token); }
-         lock(fixture._claimLock)
+         if(server.ReceivedRelease is not null)
+         { await server.ReceivedRelease.Task.WaitAsync(token); }
+         lock(server._claimLock)
          {
-            if(string.Equals(fixture._claimed?.JobId, message.Payload.GetProperty("jobId").GetString(), StringComparison.Ordinal))
-            { fixture._claimed = null; }
+            if(string.Equals(server._claimed?.JobId, message.Payload.GetProperty("jobId").GetString(), StringComparison.Ordinal))
+            { server._claimed = null; }
          }
       }
 
