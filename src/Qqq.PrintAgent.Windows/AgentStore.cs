@@ -37,9 +37,10 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    /// The lock that serializes schema creation and migration for this journal. Every store this process opens on the same
    /// directory shares it, so two of them cannot both add a column or a table. Stores on different directories do not wait
    /// for each other: their journals are separate files, and a single lock for the whole process made every open queue behind
-   /// every other one.
+   /// every other one. The lock is found by the directory's full path without a trailing separator and without regard to
+   /// letter case, so every spelling Windows resolves to the same folder finds the same lock.
    /// </summary>
-   private Lock SchemaLock => SchemaLocks.GetOrAdd(_directory, static _ => new Lock());
+   private Lock SchemaLock => SchemaLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(_directory), static _ => new Lock());
 
 
 

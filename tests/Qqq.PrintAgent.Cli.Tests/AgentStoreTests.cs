@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Collections.Concurrent;
+using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
@@ -52,33 +54,111 @@ public sealed class AgentStoreTests
 
    /// <summary>
    /// Many stores opened at once on one new journal all succeed and each can write its profile: schema creation and migration
-   /// are serialized for that journal, whichever store gets there first. The directory is addressed in two letter cases,
-   /// because Windows treats them as the same journal and so must the lock.
+   /// are serialized for that journal, whichever store gets there first. Each store opens on a thread of its own, and a
+   /// barrier lets them go only when all sixteen are ready, so the opens really do overlap whatever the thread pool is doing.
+   /// The directory is addressed in three spellings (as given, in upper case, and with a trailing separator), because Windows
+   /// treats them as the same journal and so must the lock.
    /// </summary>
    [Fact]
-   public async Task ConcurrentOpensOfOneNewJournal_AllSucceedAndShareItsSchema()
+   public void ConcurrentOpensOfOneNewJournal_AllSucceedAndShareItsSchema()
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-concurrent-open-" + Guid.NewGuid().ToString("N"));
+      string[] spellings = [directory, directory.ToUpperInvariant(), directory + Path.DirectorySeparatorChar];
+      int stores = 16;
       try
       {
-         using var start = new ManualResetEventSlim();
-         Task[] opens = Enumerable.Range(0, 16).Select(index => Task.Run(() =>
+         using var together = new Barrier(stores);
+         var failures = new ConcurrentQueue<Exception>();
+         Thread[] opens = Enumerable.Range(0, stores).Select(index => new Thread(() =>
          {
-            start.Wait();
-            using AgentStore store = new(index % 2 == 0 ? directory : directory.ToUpperInvariant());
-            store.SavePrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), new PrinterProfile("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            try
+            {
+               if(!together.SignalAndWait(TimeSpan.FromSeconds(30)))
+               { throw new TimeoutException("The stores did not all become ready to open."); }
+               using AgentStore store = new(spellings[index % spellings.Length]);
+               store.SavePrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), new PrinterProfile("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            }
+            catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException or TimeoutException or BarrierPostPhaseException)
+            { failures.Enqueue(exception); }
          })).ToArray();
-         start.Set();
-         await Task.WhenAll(opens);
+         foreach(Thread open in opens)
+         { open.Start(); }
+         foreach(Thread open in opens)
+         { open.Join(); }
+         Assert.Empty(failures);
          using AgentStore reopened = new(directory);
-         Assert.All(Enumerable.Range(0, 16), index => Assert.Equal("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+         Assert.All(Enumerable.Range(0, stores), index => Assert.Equal("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
             reopened.GetPrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)).DisplayName));
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+         SqliteConnection.ClearAllPools();
          Directory.Delete(directory, recursive: true);
       }
+   }
+
+
+
+   /// <summary>
+   /// Stores on different directories do not wait for each other. Another connection holds a write transaction on one
+   /// journal, so a store opening that journal stays busy inside its schema lock. A store on a second directory is then
+   /// opened and used, which must not have to wait: had it waited, it could only have got through after the first open gave
+   /// up, and that open would have failed. Once the transaction is released the first open completes without error.
+   /// </summary>
+   [Fact]
+   public void StoresOnDifferentDirectories_DoNotWaitForEachOther()
+   {
+      string root = Path.Combine(Path.GetTempPath(), "qqq-separate-journals-" + Guid.NewGuid().ToString("N"));
+      string busy = Path.Combine(root, "busy");
+      Directory.CreateDirectory(busy);
+      try
+      {
+         // Loads the SQLite provider and the store's types, so the thread below can wait in one place only: its busy journal.
+         using(AgentStore warm = new(Path.Combine(root, "warm")))
+         { Assert.Null(warm.GetState("none")); }
+         using var holder = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(busy, "journal.db"), Pooling = false }.ToString());
+         holder.Open();
+         Execute(holder, "BEGIN IMMEDIATE");
+         Exception? failure = null;
+         var opening = new Thread(() =>
+         {
+            try
+            {
+               using AgentStore store = new(busy);
+            }
+            catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException)
+            { failure = exception; }
+         });
+         opening.Start();
+         // The open retries a busy journal by sleeping between attempts, and it does so inside the journal's schema lock.
+         Assert.True(SpinWait.SpinUntil(() => opening.ThreadState.HasFlag(ThreadState.WaitSleepJoin), TimeSpan.FromSeconds(30)));
+         using(AgentStore other = new(Path.Combine(root, "free")))
+         {
+            other.SavePrinterProfile("printer", new PrinterProfile("Free queue"));
+            Assert.Equal("Free queue", other.GetPrinterProfile("printer").DisplayName);
+         }
+         Assert.True(opening.IsAlive);
+         Execute(holder, "ROLLBACK");
+         Assert.True(opening.Join(TimeSpan.FromSeconds(60)));
+         Assert.Null(failure);
+      }
+      finally
+      {
+         SqliteConnection.ClearAllPools();
+         Directory.Delete(root, recursive: true);
+      }
+   }
+
+
+
+   /// <summary>Runs one statement on a raw connection to a journal.</summary>
+   private static void Execute(SqliteConnection connection, string statement)
+   {
+      using SqliteCommand command = connection.CreateCommand();
+#pragma warning disable CA2100 // The statement is a constant written in this file.
+      command.CommandText = statement;
+#pragma warning restore CA2100
+      command.ExecuteNonQuery();
    }
 
 
