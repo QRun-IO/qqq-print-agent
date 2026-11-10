@@ -4,7 +4,6 @@
  */
 
 using Qqq.PrintAgent.Core.Printing;
-using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
@@ -16,9 +15,10 @@ public sealed class AgentRuntimeBacklogTests
 {
    /// <summary>
    /// Three jobs wait on the server while a claim drain is already in progress. That one drain claims and prints all three in
-   /// order with no further signal from the server. It ends at the first empty claim, or, when the server fails instead, after
-   /// each of its lanes has tried once. One more drain is pending from a wake-up that arrived meanwhile and ends the same way;
-   /// after that no claim is made until the server announces a job, which is then drained by exactly one job claim and one empty one.
+   /// order with no further signal from the server. It ends at the first claim that finds the queue empty, or, when the server
+   /// answers 503 instead, at that one failed claim: the other lanes do not repeat it, and it is logged once. One more drain is
+   /// pending from a wake-up that arrived meanwhile and ends the same way after a single claim; after that no claim is made
+   /// until the server announces a job, which is then drained by exactly one job claim and one empty one.
    ///
    /// The claim counts are exact, with no waiting to see whether more arrive, because every wake-up is accounted for before
    /// claims are let through. The first claim is held at the server, so one drain is in progress. The WELCOME wake-up was
@@ -45,8 +45,7 @@ public sealed class AgentRuntimeBacklogTests
       fixture.AddJob("job2");
       fixture.AddJob("job3");
       fixture.ClaimHold.SetResult();
-      int endOfDrain = failWhenEmpty ? AgentRuntime.DrainLanes : 1;
-      int idle = 3 + (2 * endOfDrain);
+      const int idle = 3 + 2;
       await fixture.WaitAsync(() => fixture.Claims == idle);
       Assert.Equal(new[] { "job1", "job2", "job3" }, fixture.Printer.Order, StringComparer.Ordinal);
       Assert.All(new[] { "job1", "job2", "job3" }, job => Assert.Equal("SPOOLED", fixture.State(job)));
@@ -55,7 +54,7 @@ public sealed class AgentRuntimeBacklogTests
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(() => fixture.State("late") is "SPOOLED" && fixture.LastClaimWasEmpty);
       Assert.Equal(idle + 2, fixture.Claims);
-      Assert.Equal(failWhenEmpty ? 2 * AgentRuntime.DrainLanes : 0, fixture.Logs.Count(line => line.StartsWith("Print lane stopped", StringComparison.Ordinal)));
+      Assert.Equal(failWhenEmpty ? 2 : 0, fixture.Logs.Count(line => line.StartsWith("Print lane stopped", StringComparison.Ordinal)));
       Assert.Equal(4, fixture.Printer.Prints);
       Assert.False(fixture.Running.IsCompleted);
       Assert.Equal(0, fixture.ForbiddenPolls);

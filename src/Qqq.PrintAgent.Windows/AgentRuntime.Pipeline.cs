@@ -105,70 +105,107 @@ public sealed partial class AgentRuntime
 
 
    /// <summary>
-   /// One lane of a wave: acquire a download slot, then run the worker once to claim and process a single job with fresh
-   /// store and API objects. Realtime lanes neither recover journal leftovers nor resynchronize inventory, because the
-   /// runtime does that once. The first lane to find the queue empty marks the wave drained so the others stop claiming,
-   /// and a failing lane logs and ends without stopping the service.
+   /// One lane of a wave: it repeats single passes until a pass says to stop, the wave is cancelled or the connection is
+   /// being replaced. A failing pass ends the lane without stopping the service.
    /// </summary>
    private async Task DrainLaneAsync(string staging, PipelineWave wave, CancellationToken token)
    {
       while(!token.IsCancellationRequested && !_transitioning)
       {
+         var held = new LaneJob();
          try
          {
-            await using IAsyncDisposable? lane = await AcquireDownloadLaneAsync(wave, token).ConfigureAwait(false);
-            if(lane is null)
+            if(!await RunLaneOnceAsync(staging, wave, held, token).ConfigureAwait(false))
             { return; }
-            using var store = new AgentStore(directory);
-            AgentConfiguration? configuration = store.LoadConfiguration();
-            if(configuration is null)
-            { return; }
-            using PrintApiClient api = CreateApi();
-            using var jobCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
-            PrintJob? active = null;
-            var options = new PrintWorkerOptions
-            {
-               StagingDirectory = staging,
-               Settings = _realtimeSettings,
-               CurrentSettings = () => _realtimeSettings,
-               CanSubmit = () => NormalTrafficAllowed && !UpdatePaused && !_transitioning,
-               RecoverIncomplete = false,
-               SynchronizeInventory = false,
-               EventGate = _eventDeliveryGate,
-               ClaimGate = _claimGate,
-               ThrottleDownloadAsync = ThrottleDownloadAsync,
-               CanClaim = () => !wave.Drained,
-               ReserveDocumentAsync = ReserveDocumentAsync,
-               AcquireSubmissionAsync = AcquireSubmissionAsync,
-               ActiveJobChanged = job =>
-               {
-                  lock(_stateLock)
-                  {
-                     if(active is not null)
-                     { CompleteTicket(active); _activeTransfers.Remove(active.JobId); }
-                     active = job;
-                     if(job is not null)
-                     { RegisterTicket(job); _activeTransfers[job.JobId] = jobCancellation; }
-                  }
-               },
-            };
-            ExposedPrinterBackend printers = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
-            bool processed = await new PrintWorker(api, printers, store, message => WriteLog("INFO", message),
-               () => DispatchAllowed && !UpdatePaused && !_transitioning, () => _realtimeReady, options).RunOnceAsync(jobCancellation.Token).ConfigureAwait(false);
-            if(!processed)
-            {
-               lock(_stateLock)
-               { wave.Drained = true; }
-               SignalPipeline();
-               return;
-            }
          }
          catch(Exception exception) when(exception is not OperationCanceledException || !token.IsCancellationRequested)
          {
-            WriteLog("ERROR", "Print lane stopped: " + exception.Message);
+            StopLane(wave, held, exception);
             return;
          }
       }
+   }
+
+
+
+   /// <summary>
+   /// Ends a lane whose pass failed. A failure before the lane held a job (the claim itself, or delivering earlier receipts)
+   /// says the server cannot be asked right now, so the wave is marked drained and the other lanes do not repeat the same
+   /// failing request; it is logged once for the wave. A failure while a job was held concerns that job only: it is logged and
+   /// the other lanes carry on.
+   /// </summary>
+   private void StopLane(PipelineWave wave, LaneJob held, Exception exception)
+   {
+      bool report = true;
+      if(!held.Claimed)
+      {
+         lock(_stateLock)
+         {
+            report = !wave.Failed;
+            wave.Failed = true;
+            wave.Drained = true;
+         }
+         SignalPipeline();
+      }
+      if(report)
+      { WriteLog("ERROR", "Print lane stopped: " + exception.Message); }
+   }
+
+
+
+   /// <summary>
+   /// One pass of a lane: acquire a download slot, then run the worker once to claim and process a single job with fresh
+   /// store and API objects. Realtime lanes neither recover journal leftovers nor resynchronize inventory, because the
+   /// runtime does that once. It returns false when the lane should stop: the wave has drained, the computer is not
+   /// enrolled, or this pass found the queue empty, in which case it marks the wave drained so the others stop claiming.
+   /// </summary>
+   private async Task<bool> RunLaneOnceAsync(string staging, PipelineWave wave, LaneJob held, CancellationToken token)
+   {
+      await using IAsyncDisposable? lane = await AcquireDownloadLaneAsync(wave, token).ConfigureAwait(false);
+      if(lane is null)
+      { return false; }
+      using var store = new AgentStore(directory);
+      if(store.LoadConfiguration() is null)
+      { return false; }
+      using PrintApiClient api = CreateApi();
+      using var jobCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+      PrintJob? active = null;
+      var options = new PrintWorkerOptions
+      {
+         StagingDirectory = staging,
+         Settings = _realtimeSettings,
+         CurrentSettings = () => _realtimeSettings,
+         CanSubmit = () => NormalTrafficAllowed && !UpdatePaused && !_transitioning,
+         RecoverIncomplete = false,
+         SynchronizeInventory = false,
+         EventGate = _eventDeliveryGate,
+         ClaimGate = _claimGate,
+         ThrottleDownloadAsync = ThrottleDownloadAsync,
+         CanClaim = () => !wave.Drained,
+         ReserveDocumentAsync = ReserveDocumentAsync,
+         AcquireSubmissionAsync = AcquireSubmissionAsync,
+         ActiveJobChanged = job =>
+         {
+            lock(_stateLock)
+            {
+               if(active is not null)
+               { CompleteTicket(active); _activeTransfers.Remove(active.JobId); }
+               active = job;
+               if(job is not null)
+               { held.Claimed = true; RegisterTicket(job); _activeTransfers[job.JobId] = jobCancellation; }
+            }
+         },
+      };
+      ExposedPrinterBackend printers = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
+      bool processed = await new PrintWorker(api, printers, store, message => WriteLog("INFO", message),
+         () => DispatchAllowed && !UpdatePaused && !_transitioning, () => _realtimeReady, options).RunOnceAsync(jobCancellation.Token).ConfigureAwait(false);
+      if(!processed)
+      {
+         lock(_stateLock)
+         { wave.Drained = true; }
+         SignalPipeline();
+      }
+      return processed;
    }
 
 
@@ -199,10 +236,19 @@ public sealed partial class AgentRuntime
 
 
 
-   /// <summary>State shared by the lanes of one wave: set when a lane found no more work, read by the others so they stop claiming.</summary>
+   /// <summary>State shared by the lanes of one wave: drained once a lane found no more work or could not ask for it, which the others read so they stop claiming; failed once that reason was a failure, so it is logged a single time.</summary>
    private sealed class PipelineWave
    {
       public volatile bool Drained;
+      public bool Failed;
+   }
+
+
+
+   /// <summary>What one pass of a lane got hold of: whether it claimed a job, which decides what a failure of that pass means.</summary>
+   private sealed class LaneJob
+   {
+      public bool Claimed;
    }
 
 
