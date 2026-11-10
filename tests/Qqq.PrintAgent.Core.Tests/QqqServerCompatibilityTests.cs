@@ -538,7 +538,41 @@ public sealed class QqqServerCompatibilityTests
 
 
 
-   /// <summary>A server that stops answering between discovery and the sign-in description is unreachable, not "no sign-in method": the operator should retry, not reconfigure.</summary>
+   /// <summary>
+   /// A certificate refused while the sign-in description is read is reported exactly as one refused at discovery: a
+   /// secure connection failure at the security stage, with the certificate itself, so the wizard can show what an
+   /// exception would trust. The discovery that was read before it is still returned.
+   /// </summary>
+   [Fact]
+   public async Task CertificateRefusedAtTheSignInDescriptionIsReportedWithTheCertificate()
+   {
+      using X509Certificate2 certificate = SelfSigned("CN=Synthetic Local Authority");
+      using var server = new ScriptedServer();
+      QqqSessionClient? client = null;
+      server.Add(ScriptedServer.Discovery).AddAsync(_ =>
+      {
+         Assert.False(client!.EvaluateCertificate("printing.example.invalid", certificate, SslPolicyErrors.RemoteCertificateChainErrors));
+         return Task.FromException<HttpResponseMessage>(new HttpRequestException(HttpRequestError.SecureConnectionError, "The SSL connection could not be established.",
+            new AuthenticationException("The remote certificate was rejected by the provided RemoteCertificateValidationCallback.")));
+      });
+      using(client = new QqqSessionClient(ScriptedServer.Origin, server))
+      {
+         QqqServerCompatibility result = await client.CheckCompatibilityAsync();
+         QqqCompatibilityProblem problem = Assert.Single(result.Problems);
+         Assert.Equal(QqqCompatibilityIssue.SecureConnectionFailed, problem.Issue);
+         Assert.Equal("Windows does not trust the authority that issued the server's certificate", problem.Detail);
+         Assert.Equal(QqqCompatibilityStage.Security, result.FailedStage);
+         Assert.NotNull(result.Discovery);
+         Assert.Equal(QqqSignInMethods.None, result.SignInMethods);
+         QqqCertificateRejection rejection = Assert.IsType<QqqCertificateRejection>(result.Certificate);
+         Assert.Equal(certificate.Thumbprint, rejection.Thumbprint);
+         Assert.True(rejection.IsUntrustedAuthority);
+      }
+   }
+
+
+
+   /// <summary>A server that stops answering between discovery and the sign-in description is unreachable, not "no sign-in method": the operator should retry, not reconfigure, and no certificate is shown beside a failure that no certificate caused.</summary>
    [Fact]
    public async Task ConnectionLostBeforeTheSignInDescriptionIsUnreachable()
    {
@@ -549,15 +583,25 @@ public sealed class QqqServerCompatibilityTests
       Assert.Equal(QqqCompatibilityIssue.ServerUnreachable, Assert.Single(result.Problems).Issue);
       Assert.Equal(QqqCompatibilityStage.Connection, result.FailedStage);
       Assert.NotNull(result.Discovery);
+      Assert.Null(result.Certificate);
    }
 
 
 
-   /// <summary>The caller's own cancellation is not a finding about the server: it propagates, at either request, so a closed wizard does not show "unreachable".</summary>
+   /// <summary>
+   /// The caller's own cancellation is not a finding about the server: it propagates, at either request, so a closed
+   /// wizard does not show "unreachable". It also wins when another failure surfaces at the same moment, whether that
+   /// failure would have been a finding (the connection dropping as the request is abandoned) or would have propagated
+   /// on its own (a programming error): the caller asked to stop and is told it stopped.
+   /// </summary>
    [Theory]
-   [InlineData(0)]
-   [InlineData(1)]
-   public async Task CallerCancellationPropagatesInsteadOfBecomingAProblem(int requestsBeforeCancel)
+   [InlineData(0, "cancellation")]
+   [InlineData(1, "cancellation")]
+   [InlineData(0, "connection-failure")]
+   [InlineData(1, "connection-failure")]
+   [InlineData(0, "unrelated-failure")]
+   [InlineData(1, "unrelated-failure")]
+   public async Task CallerCancellationPropagatesInsteadOfBecomingAProblem(int requestsBeforeCancel, string surfaced)
    {
       using var cancellation = new CancellationTokenSource();
       using var server = new ScriptedServer();
@@ -566,6 +610,10 @@ public sealed class QqqServerCompatibilityTests
       server.AddAsync(async token =>
       {
          await cancellation.CancelAsync();
+         if(string.Equals(surfaced, "connection-failure", StringComparison.Ordinal))
+         { throw new HttpRequestException(HttpRequestError.ConnectionError, "The connection was reset as the request was abandoned."); }
+         if(string.Equals(surfaced, "unrelated-failure", StringComparison.Ordinal))
+         { throw new InvalidOperationException("Synthetic programming error."); }
          token.ThrowIfCancellationRequested();
          return ScriptedServer.Json("{}");
       });

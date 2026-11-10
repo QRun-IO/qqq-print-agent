@@ -22,6 +22,7 @@ public sealed partial class QqqSessionClient
    /// afresh each time, so a retry after the operator fixed something sees the fix. An unreachable address, a refused
    /// certificate, an answer that is not QQQ discovery, a missing or unusable printing extension and an unsupported
    /// sign-in description are each returned as problems; only the caller's own cancellation and programming errors throw.
+   /// A certificate the client refused is returned with the problem at whichever of the two requests it was refused.
    /// Passing the browser callback the host will use also checks that the server lists it, so the wizard never offers a
    /// browser button that cannot work. A fully usable answer is cached exactly as <see cref="DiscoverAsync"/> would.
    /// </summary>
@@ -35,21 +36,41 @@ public sealed partial class QqqSessionClient
          QqqApiDiscovery discovery;
          try
          { discovery = await FetchDiscoveryAsync(keepSession: true, cancellationToken).ConfigureAwait(false); }
-         catch(Exception exception) when(!cancellationToken.IsCancellationRequested
-            && QqqServerCompatibility.FromFailure(exception, QqqCompatibilityIssue.NotQqqServer, "discovery", Volatile.Read(ref _certificateRejection)) is { } unreadable)
+         catch(Exception exception)
          {
-            return Report(new QqqServerCompatibility([unreadable], null, QqqSignInMethods.None,
-               unreadable.Issue == QqqCompatibilityIssue.SecureConnectionFailed ? Volatile.Read(ref _certificateRejection) : null));
+            if(Unreadable(exception, QqqCompatibilityIssue.NotQqqServer, "discovery", cancellationToken) is not { } unreadable)
+            { throw; }
+            return Report(new QqqServerCompatibility([unreadable], null, QqqSignInMethods.None, RefusedCertificate(unreadable)));
          }
          List<QqqCompatibilityProblem> problems = discovery.Problems(nativeSession: false, realtime: true);
          if(problems.Count != 0)
          { return Report(new QqqServerCompatibility(problems, discovery, QqqSignInMethods.None)); }
          _discovery = discovery;
          (QqqSignInMethods methods, QqqCompatibilityProblem? signIn) = await SignInMethodsAsync(discovery, browserRedirect, cancellationToken).ConfigureAwait(false);
-         return Report(new QqqServerCompatibility(signIn is null ? [] : [signIn], discovery, methods));
+         return Report(new QqqServerCompatibility(signIn is null ? [] : [signIn], discovery, methods, RefusedCertificate(signIn)));
       }
       finally { _gate.Release(); }
    }
+
+
+
+   /// <summary>
+   /// Turns a failed public request into the problem it stands for, or null for a failure that says nothing about the
+   /// server and must keep propagating. The caller's cancellation is checked first and thrown from here, so it wins
+   /// over whatever failure surfaced at the same moment: a wizard that was closed must see its own cancellation, not
+   /// "unreachable" and not a connection error.
+   /// </summary>
+   private QqqCompatibilityProblem? Unreadable(Exception exception, QqqCompatibilityIssue issue, string document, CancellationToken cancellationToken)
+   {
+      cancellationToken.ThrowIfCancellationRequested();
+      return QqqServerCompatibility.FromFailure(exception, issue, document, Volatile.Read(ref _certificateRejection));
+   }
+
+
+
+   /// <summary>The certificate this check refused, when that is what the problem reports; null for every other problem, so a certificate is never shown beside a failure it did not cause.</summary>
+   private QqqCertificateRejection? RefusedCertificate(QqqCompatibilityProblem? problem)
+      => problem?.Issue == QqqCompatibilityIssue.SecureConnectionFailed ? Volatile.Read(ref _certificateRejection) : null;
 
 
 
@@ -64,9 +85,12 @@ public sealed partial class QqqSessionClient
       QqqAuthenticationMetadata metadata;
       try
       { metadata = await FetchAuthenticationAsync(keepSession: true, cancellationToken).ConfigureAwait(false); }
-      catch(Exception exception) when(!cancellationToken.IsCancellationRequested
-         && QqqServerCompatibility.FromFailure(exception, QqqCompatibilityIssue.SignInUnavailable, "sign-in description", Volatile.Read(ref _certificateRejection)) is { } unreadable)
-      { return (QqqSignInMethods.None, unreadable); }
+      catch(Exception exception)
+      {
+         if(Unreadable(exception, QqqCompatibilityIssue.SignInUnavailable, "sign-in description", cancellationToken) is not { } unreadable)
+         { throw; }
+         return (QqqSignInMethods.None, unreadable);
+      }
       if(string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal))
       {
          _authentication = metadata;
