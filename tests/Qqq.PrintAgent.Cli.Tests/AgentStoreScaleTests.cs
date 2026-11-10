@@ -60,8 +60,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -95,8 +94,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -130,8 +128,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 

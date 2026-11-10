@@ -53,8 +53,7 @@ internal sealed class EnrolledStateFixture : IDisposable
    /// <summary>Clears SQLite's pool so the files unlock, and deletes the temporary state folder.</summary>
    public void Dispose()
    {
-      Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-      Directory.Delete(DirectoryPath, recursive: true);
+      JournalFiles.Delete(DirectoryPath);
    }
 
 

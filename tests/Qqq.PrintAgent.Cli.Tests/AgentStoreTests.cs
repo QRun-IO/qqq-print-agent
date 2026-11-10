@@ -39,14 +39,13 @@ public sealed class AgentStoreTests
             command.ExecuteNonQuery();
          }
          Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => new AgentStore(directory));
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+         JournalFiles.Release(directory);
          using FileStream exclusive = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
          Assert.True(exclusive.Length > 0);
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -64,6 +63,7 @@ public sealed class AgentStoreTests
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-concurrent-open-" + Guid.NewGuid().ToString("N"));
       string[] spellings = [directory, directory.ToUpperInvariant(), directory + Path.DirectorySeparatorChar];
+      // Each spelling is a connection string of its own, so each has a pool of its own to release before the folder can go.
       int stores = 16;
       try
       {
@@ -92,8 +92,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory, spellings);
       }
    }
 
@@ -144,8 +143,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(root, recursive: true);
+         JournalFiles.Delete(root);
       }
    }
 
@@ -185,8 +183,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -215,8 +212,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -259,8 +255,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -307,8 +302,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -352,8 +346,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -380,8 +373,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -403,8 +395,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -451,8 +442,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -495,8 +485,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 

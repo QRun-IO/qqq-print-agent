@@ -444,7 +444,6 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
       await StopAsync();
       Peer.Dispose();
       _stopping.Dispose();
-      Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-      Directory.Delete(DirectoryPath, recursive: true);
+      JournalFiles.Delete(DirectoryPath);
    }
 }

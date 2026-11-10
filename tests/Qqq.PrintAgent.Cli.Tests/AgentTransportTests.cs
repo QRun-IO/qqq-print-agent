@@ -78,8 +78,7 @@ public sealed class AgentTransportTests
          { await run; }
          catch(OperationCanceledException) { }
          runtime.Dispose();
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 

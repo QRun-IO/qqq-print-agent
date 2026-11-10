@@ -45,6 +45,16 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
 
    /// <summary>
+   /// The connection string every store uses for the journal in a folder. SQLite keeps one pool of idle connections per
+   /// connection string, so this text also names the journal's pool; a test that must delete a journal releases that pool by
+   /// it, and no other.
+   /// </summary>
+   internal static string JournalConnectionString(string directory)
+      => new SqliteConnectionStringBuilder { DataSource = Path.Combine(Path.GetFullPath(directory), "journal.db") }.ToString();
+
+
+
+   /// <summary>
    /// Opens (creating if needed) the journal under the protected state directory and brings its schema up to date. With
    /// recovery enabled, an unreadable saved connection no longer blocks opening: the store switches to an isolated scope so
    /// old evidence is kept but never attached to a replacement identity. On any failure the connection is closed.
@@ -54,7 +64,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       _directory = Path.GetFullPath(directory);
       Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(_directory);
       Directory.CreateDirectory(_directory);
-      _database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "journal.db") }.ToString());
+      _database = new SqliteConnection(JournalConnectionString(_directory));
       try
       {
          _database.Open();

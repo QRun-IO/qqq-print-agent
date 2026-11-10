@@ -35,8 +35,7 @@ public sealed class PrinterExposureTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -83,8 +82,7 @@ public sealed class PrinterExposureTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 

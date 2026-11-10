@@ -187,8 +187,7 @@ public sealed class JobSortingTests
       {
          Store.Dispose();
          _database.Dispose();
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(_directory, recursive: true);
+         JournalFiles.Delete(_directory);
       }
    }
 }
