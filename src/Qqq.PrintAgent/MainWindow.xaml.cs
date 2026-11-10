@@ -14,6 +14,7 @@ using Qqq.PrintAgent.Presentation;
 using Qqq.PrintAgent.Presentation.Printers;
 using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Presentation.Shell;
+using Qqq.PrintAgent.Presentation.SignIn;
 using Qqq.PrintAgent.Windows;
 using PrintersSummaryText = Qqq.PrintAgent.Presentation.Printers.PrintersSummary;
 
@@ -23,7 +24,6 @@ namespace Qqq.PrintAgent;
 /// <summary>AppKit companion for enrollment and diagnostics of the machine print service.</summary>
 public sealed partial class MainWindow : Window, IDisposable
 {
-   private readonly Func<PipeRequest, Task<string>> _sendRequest;
    private readonly ServiceClient _service;
    private readonly TimestampFormat _time = new();
    private readonly AppSettings _settings = AppIdentity.SettingsStore.Load();
@@ -53,9 +53,11 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Allows the native regression host to use synthetic service responses without printing.</summary>
    internal MainWindow(Func<PipeRequest, Task<string>> sendRequest)
    {
-      _sendRequest = sendRequest ?? throw new ArgumentNullException(nameof(sendRequest));
-      _service = new ServiceClient(_sendRequest, new CompanionLog(), AppIdentity.ServerName);
+      CompanionLog log = new();
+      _service = new ServiceClient(sendRequest ?? throw new ArgumentNullException(nameof(sendRequest)), log, AppIdentity.ServerName);
+      _signIn = new SignInFlow(_service, new QqqSignInSessionFactory(), new DefaultBrowserLauncher(), new BrowserCallbackSource(), log);
       InitializeComponent();
+      _signIn.PropertyChanged += SignIn_PropertyChanged;
       ApplyBranding();
       this.ResizeForDpi(1100, 760);
       this.SetMinimumSize(800, 560);
@@ -124,8 +126,7 @@ public sealed partial class MainWindow : Window, IDisposable
    /// <summary>Release the tray icon and polling timer when the companion exits.</summary>
    public void Dispose()
    {
-      _browserSignInCancellation?.Cancel();
-      _signInClient?.Dispose();
+      _signIn.Dispose();
       if(_updatesClosed)
       {
          return;
@@ -232,53 +233,6 @@ public sealed partial class MainWindow : Window, IDisposable
       ConnectionDialog.XamlRoot = Content.XamlRoot;
       await LoadServerTrustAsync();
       await DialogGuard.ShowAsync(ConnectionDialog);
-   }
-
-
-
-   /// <summary>Enroll through the service; the UI never receives or stores the device token.</summary>
-   private async void Enroll_Click(object sender, RoutedEventArgs e)
-   {
-      if(_busy)
-      {
-         return;
-      }
-      string address = ServerBox.Text.Trim();
-      if(!Uri.TryCreate(address, UriKind.Absolute, out Uri? server)
-         || (!string.Equals(server.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) && !(server.IsLoopback && string.Equals(server.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal)))
-         || !string.IsNullOrEmpty(server.UserInfo) || !string.IsNullOrEmpty(server.Query) || !string.IsNullOrEmpty(server.Fragment)
-         || string.IsNullOrWhiteSpace(EnrollmentBox.Password))
-      {
-         Feedback("Check the connection details", "Enter an HTTPS server address and the enrollment code from the server. Localhost HTTP is supported for development.", InfoBarSeverity.Warning);
-         return;
-      }
-      SetBusy(true);
-      try
-      {
-         Feedback("Connecting", "The service is enrolling this device with the server…", InfoBarSeverity.Informational);
-         string result = await _sendRequest(new PipeRequest("enroll", address.TrimEnd('/'), EnrollmentBox.Password.Trim()));
-         if(!result.StartsWith("Enrolled device ", StringComparison.Ordinal))
-         {
-            Feedback("Enrollment failed", result + " If the code expired or was already used, generate a fresh code in the server. Your previous connection is retained unless enrollment completes.", InfoBarSeverity.Error);
-            return;
-         }
-         Feedback("Device connected", result + ". Select which printers to expose here, then approve the discovered queues in the server.", InfoBarSeverity.Success);
-         StatusText.Text = result;
-         App.Log.Info("Print device enrollment completed.");
-      }
-      catch(OperationCanceledException)
-      {
-         Feedback("Enrollment could not be confirmed", "The request timed out. Check the device list in the server before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", InfoBarSeverity.Warning);
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
-      {
-         ServiceUnavailable();
-      }
-      finally
-      {
-         EnrollmentBox.Password = string.Empty;
-         SetBusy(false);
-      }
    }
 
 

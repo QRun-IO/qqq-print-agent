@@ -65,6 +65,18 @@ public sealed class SignInFlowPasswordTests
 
 
 
+   /// <summary>The pairing box maps to a choice by position: the second entry claims a legacy device, the third starts a new pairing, and the first, no selection or anything unexpected keeps the current pairing.</summary>
+   [Theory]
+   [InlineData(0, PairingChoice.KeepCurrent)]
+   [InlineData(1, PairingChoice.ClaimLegacyDevice)]
+   [InlineData(2, PairingChoice.StartNewPairing)]
+   [InlineData(-1, PairingChoice.KeepCurrent)]
+   [InlineData(7, PairingChoice.KeepCurrent)]
+   public void PairingBox_MapsToAChoiceAndDefaultsToKeeping(int selectedIndex, PairingChoice expected)
+      => Assert.Equal(expected, PairingSelection.FromIndex(selectedIndex));
+
+
+
    /// <summary>The pairing choice travels as the two flags the service reads and is named in the log; keeping the current pairing sets neither.</summary>
    [Theory]
    [InlineData(PairingChoice.KeepCurrent, false, false, "keep the current pairing")]
