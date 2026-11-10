@@ -146,7 +146,7 @@ internal static class PrintJobContract
       if(!PrintApiClient.ValidControlId(jobId))
       { return null; }
       return new PrintJob(jobId, PrintApiClient.ValidControlId(printerId) ? printerId : "", title is { Length: <= TitleLimit } ? title : "", IsToken(format) ? format : "",
-         "", 0, new PrintOptions(), createdAt is { Length: <= TimestampLimit } ? createdAt : "", "CLAIMED");
+         "", 0, new PrintOptions(), createdAt is { Length: <= TimestampLimit } ? createdAt : "", PrintJobState.Claimed);
    }
 
 

@@ -22,8 +22,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       // A recovered job must be reported even when the server never claims it again.
       foreach((string jobId, string previousState) in options?.RecoverIncomplete == false ? [] : journal.Incomplete())
       {
-         Record(jobId, previousState is "SUBMITTING" ? "OUTCOME_UNKNOWN" : "FAILED",
-            previousState is "SUBMITTING" ? "Agent restarted during submission; inspect the printer before reprinting." : "Agent stopped before submitting this job; submit a new job if printing is still needed.");
+         Record(jobId, previousState is PrintJobState.Submitting ? PrintJobState.OutcomeUnknown : PrintJobState.Failed,
+            previousState is PrintJobState.Submitting ? "Agent restarted during submission; inspect the printer before reprinting." : "Agent stopped before submitting this job; submit a new job if printing is still needed.");
       }
       await FlushAsync(token).ConfigureAwait(false);
       if(canSynchronize?.Invoke() == false)
@@ -90,18 +90,18 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          Track(job, inventory);
          // A job recorded as submitting was handed to a printer once already and never concluded. Whoever recovers the
          // journal reports it as OUTCOME_UNKNOWN; claiming it again must never print it a second time.
-         if(journal.GetState(job.JobId) is { } state && (IsFinal(state) || string.Equals(state, "SUBMITTING", StringComparison.Ordinal)))
+         if(journal.GetState(job.JobId) is { } state && (PrintJobState.IsFinal(state) || string.Equals(state, PrintJobState.Submitting, StringComparison.Ordinal)))
          { return default; }
          options?.ActiveJobChanged?.Invoke(job);
          try
          {
-            Record(job, "RECEIVED");
+            Record(job, PrintJobState.Received);
             // The server replays CLAIMED until RECEIVED commits. Serialize admission through its ACK.
             await FlushAsync(token).ConfigureAwait(false);
          }
          catch
          {
-            Record(job, "FAILED", "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
+            Record(job, PrintJobState.Failed, "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
             options?.ActiveJobChanged?.Invoke(null);
             throw;
          }
@@ -121,11 +121,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// </summary>
    private async Task<bool> RefuseAsync(PrintJob rejected, string reason, IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
-      if(IsFinal(journal.GetState(rejected.JobId)))
+      if(PrintJobState.IsFinal(journal.GetState(rejected.JobId)))
       { return false; }
       Track(rejected, inventory);
-      Record(rejected, "RECEIVED");
-      Record(rejected, "FAILED", reason + " No bytes were submitted.");
+      Record(rejected, PrintJobState.Received);
+      Record(rejected, PrintJobState.Failed, reason + " No bytes were submitted.");
       await FlushAsync(token).ConfigureAwait(false);
       return true;
    }
@@ -139,10 +139,6 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       journal.TrackJob(job, string.IsNullOrWhiteSpace(printer?.DisplayName) ? printer?.Name : printer.DisplayName);
    }
 
-
-
-   /// <summary>True for a state after which a job is never worked on again: spooled, completed, failed or of unknown outcome.</summary>
-   private static bool IsFinal(string? state) => state is "SPOOLED" or "SPOOLER_COMPLETED" or "FAILED" or "OUTCOME_UNKNOWN";
 
 
 
@@ -161,7 +157,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, JobAttempt attempt, CancellationToken token)
    {
       Track(job, inventory);
-      if(IsFinal(journal.GetState(job.JobId)))
+      if(PrintJobState.IsFinal(journal.GetState(job.JobId)))
       {
          return false;
       }
@@ -171,7 +167,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       { await SubmitJobAsync(job, attempt, token).ConfigureAwait(false); }
       catch(Exception exception)
       {
-         Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? "OUTCOME_UNKNOWN" : "FAILED", exception.Message);
+         Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? PrintJobState.OutcomeUnknown : PrintJobState.Failed, exception.Message);
       }
       log?.Invoke(attempt.TimingMessage(job.JobId));
       if(!token.IsCancellationRequested)
@@ -203,7 +199,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
       await using IAsyncDisposable? submission = options?.AcquireSubmissionAsync is null ? null : await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
       RequireSubmitAllowed("Dispatch is paused before native submission.");
-      Record(job, "SUBMITTING");
+      Record(job, PrintJobState.Submitting);
       await FlushAsync(token).ConfigureAwait(false);
       attempt.Gate = attempt.Lap();
       RequireSubmitAllowed("Dispatch stopped before native submission; no bytes were submitted.");
@@ -215,7 +211,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       attempt.Restart();
       string spoolId = await SubmitNativeAsync(job, file, content, submissionSettings, token).ConfigureAwait(false);
       attempt.Submit = attempt.Lap();
-      Record(job, "SPOOLED", spoolerJobId: spoolId);
+      Record(job, PrintJobState.Spooled, spoolerJobId: spoolId);
       attempt.Spooled = true;
    }
 
