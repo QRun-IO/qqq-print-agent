@@ -11,8 +11,10 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>
 /// A print worker composed the way the service composes one, so a worker test runs the code the product runs. The API
 /// client carries a realtime channel, so job events travel as acknowledged frames; documents are staged to a folder
-/// and handed to the printer as files; and every hook the runtime supplies is present, each one permissive until a
-/// test replaces it through <see cref="Options"/> or the two predicates. The fake server answers each JOB_EVENT
+/// and handed to the printer as files, through the exposure filter the service puts in front of its backend; and every
+/// hook the runtime supplies is present, each one permissive until a test replaces it through <see cref="Options"/>
+/// or the two predicates. The one layer of the service's composition that is missing is the profile wrapper between
+/// the filter and the backend, which lives in the Windows layer and only adds display names. The fake server answers each JOB_EVENT
 /// frame: it records the event and acknowledges it, or, when the test's hook throws for it, refuses it with an ERROR
 /// frame, which fails that one delivery and leaves the connection up. A test that needs the connection itself to go
 /// away calls <see cref="Drop"/> and, later, <see cref="Reconnect"/>.
@@ -70,6 +72,11 @@ internal sealed class WorkerHarness : IAsyncDisposable
 
 
 
+   /// <summary>The printers the operator shares, which the exposure filter in front of the printer reads on every call; the fake's one queue by default.</summary>
+   internal HashSet<string> Exposed { get; } = new(StringComparer.Ordinal) { "printer1" };
+
+
+
    /// <summary>Every line the worker logged, in order.</summary>
    internal List<string> Log { get; } = [];
 
@@ -110,8 +117,8 @@ internal sealed class WorkerHarness : IAsyncDisposable
 
 
 
-   /// <summary>Builds a worker from the current parts, as the runtime builds one for each pass of a lane.</summary>
-   internal PrintWorker Worker() => new(Api, Printer, Journal, Log.Add, () => CanDispatch(), () => CanSynchronize(), Options);
+   /// <summary>Builds a worker from the current parts, as the runtime builds one for each pass of a lane, with a new exposure filter in front of the printer.</summary>
+   internal PrintWorker Worker() => new(Api, new ExposedPrinterBackend(Printer, () => Exposed), Journal, Log.Add, () => CanDispatch(), () => CanSynchronize(), Options);
 
 
 
