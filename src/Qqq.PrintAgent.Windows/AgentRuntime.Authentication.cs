@@ -131,7 +131,21 @@ public sealed partial class AgentRuntime
    /// </summary>
    private AgentAuthentication? LoadSavedSession(AgentStore store, bool forRecovery)
    {
-      AgentAuthentication? saved = forRecovery ? store.LoadAuthenticationForRecovery() : store.LoadAuthentication();
+      try
+      {
+         return forRecovery ? store.LoadAuthenticationForRecovery() : store.LoadAuthentication();
+      }
+      finally
+      {
+         NoteStagedPairing(store);
+      }
+   }
+
+
+
+   /// <summary>Writes the log line for what the store last did about a staged pairing change, including when the read that did it then failed.</summary>
+   private void NoteStagedPairing(AgentStore store)
+   {
       switch(store.StagedPairing)
       {
          case StagedPairingOutcome.Completed:
@@ -141,10 +155,11 @@ public sealed partial class AgentRuntime
             WriteLog("WARN", "Finished a pairing change that was interrupted: the session saved with the new pairing is now in place, and the earlier session data, which could not be read, was moved aside for recovery.");
             break;
          case StagedPairingOutcome.Deferred:
-            WriteLog("WARN", "A pairing change is waiting to finish: the session saved with the new pairing is in use but could not be moved into place yet, and will be tried again.");
+            WriteLog("WARN", "A pairing change is waiting to finish: the session saved with the new pairing is in use but could not be moved into place yet, and will be tried again. Reason: "
+               + (store.StagedPairingFailure is null ? "not recorded." : QqqSessionDiagnostics.Describe(store.StagedPairingFailure)));
             break;
          case StagedPairingOutcome.Discarded:
-            WriteLog("INFO", "Discarded a session left over from a pairing change that did not replace the pairing.");
+            WriteLog("INFO", "Discarded a session left over from a pairing change: it did not belong to the stored pairing, or the stored session already did.");
             break;
          case StagedPairingOutcome.SetAside:
             WriteLog("WARN", "A session staged for a pairing change could not be read and was moved aside for recovery.");
@@ -152,7 +167,6 @@ public sealed partial class AgentRuntime
          default:
             break;
       }
-      return saved;
    }
 
 

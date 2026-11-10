@@ -74,8 +74,7 @@ public sealed partial class AgentRuntime
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
          store.StagePairing(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds), authentication);
          progress = EnrollmentProgress.Saved;
-         if(store.CompleteStagedPairing() is StagedPairingOutcome.Deferred)
-         { throw new IOException("The session saved with the new pairing could not be moved into place yet."); }
+         FinishStagedPairing(store);
          ResetConnectionState();
          ActivateSession(session, actual, store);
          progress = EnrollmentProgress.Activated;
@@ -93,6 +92,27 @@ public sealed partial class AgentRuntime
          throw;
       }
       finally { _authenticationGate.Release(); }
+   }
+
+
+
+   /// <summary>
+   /// Moves the session staged with the new pairing into place. When that cannot happen yet the enrollment fails with the
+   /// cause, having already saved everything a sign-in or a restart needs to finish it. An earlier session that could not
+   /// be read is reported, because it was moved aside rather than replaced.
+   /// </summary>
+   private void FinishStagedPairing(AgentStore store)
+   {
+      switch(store.CompleteStagedPairing())
+      {
+         case StagedPairingOutcome.Deferred:
+            throw new IOException("The session saved with the new pairing could not be moved into place yet.", store.StagedPairingFailure);
+         case StagedPairingOutcome.CompletedAfterQuarantine:
+            WriteLog("WARN", "The earlier session data could not be read and was moved aside for recovery.");
+            break;
+         default:
+            break;
+      }
    }
 
 
