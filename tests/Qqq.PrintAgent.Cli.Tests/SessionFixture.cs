@@ -4,7 +4,6 @@
  */
 
 using System.Collections.Concurrent;
-using System.IO.Pipes;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -39,20 +38,13 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-   /// <summary>The management pipe of the runtime built last.</summary>
-   internal string PipeName { get; private set; } = "";
-
-
-
    /// <summary>
    /// Builds a runtime on a private pipe and this fixture's clock whose session factory hands out the scripted sessions in
    /// priority order (custom factory, next session, default) and counts each creation.
    /// </summary>
-   internal AgentRuntime Runtime()
+   internal SingleServerHarness Runtime()
    {
-      string pipe = PipeName = "qqq-session-fixture-" + Guid.NewGuid().ToString("N");
-      return new(Local.DirectoryPath, Logs.Enqueue, Local.Printer, pipeName: pipe,
-         pipeFactory: () => new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
+      return new(Local.DirectoryPath, Logs.Enqueue, Local.Printer,
          sessionFactory: origin =>
          {
             Created++;
@@ -67,9 +59,9 @@ internal sealed class SessionFixture : IDisposable
    /// the clock first. A first evaluation restores the saved session; every later one therefore renews it with the server
    /// and checks the identity again, which is what makes a later evaluation a real check.
    /// </summary>
-   internal Task<bool> EvaluateAsync(AgentRuntime runtime, CancellationToken token = default)
+   internal Task<bool> EvaluateAsync(SingleServerHarness runtime, CancellationToken token = default)
    {
-      Clock.Advance(AgentRuntime.SessionResumeInterval);
+      Clock.Advance(SingleServerHarness.SessionResumeInterval);
       return runtime.EnsureAuthorizationAsync(token);
    }
 
@@ -81,7 +73,7 @@ internal sealed class SessionFixture : IDisposable
    /// the realtime socket. Waiting for the backoff, which is a timer on this fixture's clock, is what proves the pass is
    /// over: a test that then finds no attempt knows none was made, not that none had been made yet.
    /// </summary>
-   internal async Task RunOnePassAsync(AgentRuntime runtime)
+   internal async Task RunOnePassAsync(SingleServerHarness runtime)
    {
       using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
       Task running = runtime.RunAsync(guard.Token);

@@ -199,7 +199,7 @@ public sealed class ProviderSignOutTests
       using SessionFixture fixture = new();
       QqqProviderLogout logout = new(new Uri(EndSession + "?id_token_hint=" + Hint + "&state=s"), Redirect, "s");
       fixture.Session.ProviderLogout = logout;
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential(), ClaimLegacyDevice: true), CancellationToken.None);
       string reply = await runtime.SignOutAsync(QqqBrowserCallback.RedirectUri, CancellationToken.None);
       PipeSignOutResult result = JsonSerializer.Deserialize<PipeSignOutResult>(reply, PrintApiClient.JsonOptions)!;
@@ -221,7 +221,7 @@ public sealed class ProviderSignOutTests
    public async Task ServiceRefusesAnyOtherCallback()
    {
       using SessionFixture fixture = new();
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       _ = await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SignOutAsync("https://evil.example.invalid/cb", CancellationToken.None));
    }
 

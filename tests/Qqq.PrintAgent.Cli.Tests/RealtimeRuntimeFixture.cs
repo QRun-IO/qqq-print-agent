@@ -6,11 +6,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.IO.Pipes;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
-using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
@@ -53,7 +51,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
    /// <summary>The runtime under test; replaced by <see cref="RestartAsync"/>.</summary>
-   internal AgentRuntime Runtime { get; private set; }
+   internal SingleServerHarness Runtime { get; private set; }
 
 
 
@@ -105,10 +103,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    {
       Server.EndClaimSpan();
       _running = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-      Runtime = new AgentRuntime(DirectoryPath, Logs.Enqueue, Printer, pipeName: PipeName,
-         pipeFactory: () => new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
-         sessionFactory: Server.CreateSession, timeProvider: _timeProvider)
-      { ControlResultSaving = () => ControlResultSaving?.Invoke() };
+      Runtime = new SingleServerHarness(DirectoryPath, Logs.Enqueue, Printer, Server.CreateSession, _timeProvider, PipeName, controlResultSaving: () => ControlResultSaving?.Invoke());
       Running = Runtime.RunAsync(_running.Token);
    }
 
@@ -274,10 +269,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    internal async Task<string> PipeAsync(PipeRequest request)
    {
       using CancellationTokenSource wait = WaitScope();
-      await using NamedPipeClientStream pipe = new(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-      await pipe.ConnectAsync(wait.Token);
-      await AgentPipeFraming.WriteAsync(pipe, JsonSerializer.Serialize(request, PrintApiClient.JsonOptions), AgentPipeFraming.MaximumCommandCharacters, wait.Token);
-      return await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, wait.Token);
+      return await Runtime.PipeAsync(request, wait.Token);
    }
 
 

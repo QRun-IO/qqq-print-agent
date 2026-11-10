@@ -4,7 +4,6 @@
  */
 
 using Qqq.PrintAgent.Core.Printing;
-using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
@@ -27,7 +26,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var worker = new TaskCompletionSource();
       var idle = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task, idle.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task, idle.Task);
       reader.SetException(new IOException("Server closed the realtime connection."));
       idle.SetCanceled();
       Assert.False(completion.IsCompleted);
@@ -51,7 +50,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var reader = new TaskCompletionSource();
       var sender = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, sender.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, sender.Task);
       sender.SetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", frame));
       Assert.False(completion.IsCompleted);
       reader.SetException(frame);
@@ -72,7 +71,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var reader = new TaskCompletionSource();
       var worker = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
       reader.SetException(new System.Net.WebSockets.WebSocketException("The remote party closed the WebSocket connection without completing the close handshake."));
       Assert.False(completion.IsCompleted);
       var full = new IOException("Realtime output queue is full; reconnect is required.");
@@ -90,7 +89,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var reader = new TaskCompletionSource();
       var worker = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
       worker.SetException(new RealtimeChannelClosedException("The realtime connection is unavailable.", null));
       var regressed = new InvalidDataException("Desired state revision regressed.");
       reader.SetException(regressed);
@@ -107,7 +106,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var reader = new TaskCompletionSource();
       var worker = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
       reader.SetException(new IOException("Server closed the realtime connection."));
       worker.SetException(new Qqq.PrintAgent.Core.Authentication.QqqSessionException(Qqq.PrintAgent.Core.Authentication.QqqSessionException.FailureKind.AuthenticationRequired, "Synthetic session ended."));
       _ = await Assert.ThrowsAsync<Qqq.PrintAgent.Core.Authentication.QqqSessionException>(() => completion);
@@ -125,7 +124,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var reader = new TaskCompletionSource();
       var worker = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
       Exception failure = plainIoError ? new IOException("Realtime output queue is full; reconnect is required.") : new TimeoutException("Synthetic acknowledgement timeout.");
       worker.SetException(failure);
       reader.SetCanceled();
@@ -142,7 +141,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var reader = new TaskCompletionSource();
       var worker = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
       reader.SetCanceled();
       worker.SetCanceled();
       _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completion);
@@ -163,7 +162,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var worker = new TaskCompletionSource();
       var watchdog = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task, watchdog.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task, watchdog.Task);
       reader.SetResult();
       worker.SetCanceled();
       watchdog.SetCanceled();
@@ -180,7 +179,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var reader = new TaskCompletionSource();
       var worker = new TaskCompletionSource();
       List<Exception> detail = [];
-      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      Task completion = SingleServerHarness.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
       var failure = new TimeoutException("Synthetic acknowledgement timeout.");
       worker.SetException(failure);
       reader.SetResult();

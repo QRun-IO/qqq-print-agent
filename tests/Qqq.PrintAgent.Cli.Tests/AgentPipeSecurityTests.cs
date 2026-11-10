@@ -22,7 +22,7 @@ public sealed class AgentPipeSecurityTests
    public async Task ExplicitClientRightsConnectWithoutPermissionToCreateServerInstances()
    {
       string name = "QqqPrintAgent-acl-test-" + Guid.NewGuid().ToString("N");
-      PipeSecurity security = AgentRuntime.CreatePipeSecurity();
+      PipeSecurity security = SingleServerHarness.CreatePipeSecurity();
       Assert.All(security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<PipeAccessRule>()
          .Where(rule => string.Equals(rule.IdentityReference.Value, "S-1-5-32-544", StringComparison.Ordinal)),
          rule => Assert.False(rule.PipeAccessRights.HasFlag(PipeAccessRights.CreateNewInstance)));

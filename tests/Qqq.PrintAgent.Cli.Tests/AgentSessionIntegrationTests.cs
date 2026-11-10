@@ -26,7 +26,7 @@ public sealed class AgentSessionIntegrationTests
    {
       using SessionFixture fixture = new();
       fixture.SaveSession();
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       Assert.True(await runtime.EnsureAuthorizationAsync(CancellationToken.None));
       fixture.Session.ResumeFailure = QqqSessionException.FailureKind.TransportRefused;
       await Assert.ThrowsAsync<QqqSessionException>(() => fixture.EvaluateAsync(runtime));
@@ -49,7 +49,7 @@ public sealed class AgentSessionIntegrationTests
       File.Delete(Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi"));
       fixture.Session.Binding = fixture.Session.Binding with { DeviceId = null };
       fixture.SaveSession();
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       await fixture.RunOnePassAsync(runtime);
       Assert.True(runtime.GetSnapshot().Authentication!.SignedIn);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
@@ -66,7 +66,7 @@ public sealed class AgentSessionIntegrationTests
       using SessionFixture fixture = new();
       fixture.Factory = origin => string.Equals(origin.AbsolutePath, "/", StringComparison.Ordinal)
          ? fixture.Session : new QqqSessionClient(origin);
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       QqqSessionCredential invalid = new(new Uri("https://synthetic.invalid/not-an-origin"), "synthetic-cookie");
       await Assert.ThrowsAsync<ArgumentException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: invalid), CancellationToken.None));
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
@@ -82,7 +82,7 @@ public sealed class AgentSessionIntegrationTests
    {
       using SessionFixture fixture = new();
       fixture.Local.SeedSpooledJob();
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       await fixture.RunOnePassAsync(runtime);
       Assert.Equal(0, fixture.Created);
       fixture.AssertSentNothing(fixture.Session);
@@ -103,17 +103,14 @@ public sealed class AgentSessionIntegrationTests
    public async Task ReconnectWithoutAUsableSignInSaysASignInIsRequired()
    {
       using SessionFixture fixture = new();
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       using CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
       Task running = runtime.RunAsync(stop.Token);
       try
       {
          while(fixture.Clock.PendingTimers == 0)
          { await Task.Delay(10, stop.Token); }
-         await using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", fixture.PipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
-         await pipe.ConnectAsync(stop.Token);
-         await AgentPipeFraming.WriteAsync(pipe, JsonSerializer.Serialize(new PipeRequest("reconnect"), PrintApiClient.JsonOptions), AgentPipeFraming.MaximumCommandCharacters, stop.Token);
-         string reply = await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, stop.Token);
+         string reply = await runtime.PipeAsync(new PipeRequest("reconnect"), stop.Token);
          Assert.StartsWith("Sign-in is required", reply, StringComparison.Ordinal);
          Assert.DoesNotContain("Connection retry requested.", fixture.Logs, StringComparer.Ordinal);
          fixture.AssertSentNothing(fixture.Session);
@@ -146,7 +143,7 @@ public sealed class AgentSessionIntegrationTests
          throw new OperationCanceledException(token);
       };
       using CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       Task running = runtime.RunAsync(stop.Token);
       try
       {
@@ -183,7 +180,7 @@ public sealed class AgentSessionIntegrationTests
       using SessionFixture fixture = new();
       fixture.SaveSession();
       fixture.Session.Binding = fixture.Session.Binding with { PrincipalId = "different-user" };
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       await fixture.RunOnePassAsync(runtime);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       Assert.Equal(1, fixture.Created);
@@ -204,7 +201,7 @@ public sealed class AgentSessionIntegrationTests
    {
       using SessionFixture fixture = new();
       fixture.Local.SeedSpooledJob();
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       PipeRequest request = new("sign-in", SessionCredential: fixture.Session.ExportCredential(), ClaimLegacyDevice: true);
       Assert.DoesNotContain("synthetic-qqq-cookie", request.ToString(), StringComparison.Ordinal);
       _ = await runtime.SignInAsync(request, CancellationToken.None);

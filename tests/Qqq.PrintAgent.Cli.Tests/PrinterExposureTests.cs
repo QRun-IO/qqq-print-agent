@@ -71,7 +71,7 @@ public sealed class PrinterExposureTests
             store.SetExposure("p1", true, new FakePrinter().Discover());
             store.Record("j1", new PrintEvent("e1", "SPOOLED", SpoolerJobId: "123"));
          }
-         using AgentRuntime runtime = new(directory, _ => { }, new FakePrinter());
+         using SingleServerHarness runtime = new(directory, _ => { }, new FakePrinter());
          AgentSnapshot snapshot = runtime.GetSnapshot();
          Assert.True(snapshot.Enrolled);
          Assert.False(snapshot.Connected);

@@ -35,13 +35,13 @@ public sealed class AgentNewPairingTests
       byte[] retained = File.ReadAllBytes(path);
       fixture.NextSession = UnboundSession();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using(AgentRuntime runtime = fixture.Runtime())
+      using(SingleServerHarness runtime = fixture.Runtime())
       {
          _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.NextSession.ExportCredential(), StartNewPairing: true), timeout.Token);
          Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       }
       fixture.NextSession = UnboundSession();
-      using(AgentRuntime restarted = fixture.Runtime())
+      using(SingleServerHarness restarted = fixture.Runtime())
       {
          await fixture.RunOnePassAsync(restarted);
          Assert.True(restarted.GetSnapshot().Authentication!.SignedIn);
@@ -76,7 +76,7 @@ public sealed class AgentNewPairingTests
       ChangeOldConfiguration(fixture, unreadable);
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       byte[] retained = File.ReadAllBytes(path);
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
       await fixture.RunOnePassAsync(runtime);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
@@ -120,7 +120,7 @@ public sealed class AgentNewPairingTests
       byte[] originalAuth = File.ReadAllBytes(authPath);
       fixture.NextSession = UnboundSession();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using(AgentRuntime runtime = fixture.Runtime())
+      using(SingleServerHarness runtime = fixture.Runtime())
       {
          await Assert.ThrowsAsync<QqqSessionException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.NextSession.ExportCredential()), timeout.Token));
          Assert.Equal(original, File.ReadAllBytes(path));
@@ -132,7 +132,7 @@ public sealed class AgentNewPairingTests
          Assert.Empty(fixture.NextSession.Paths);
       }
       fixture.NextSession = UnboundSession();
-      using(AgentRuntime restarted = fixture.Runtime())
+      using(SingleServerHarness restarted = fixture.Runtime())
       {
          await fixture.RunOnePassAsync(restarted);
          Assert.True(restarted.GetSnapshot().Authentication!.SignedIn);
@@ -185,7 +185,7 @@ public sealed class AgentNewPairingTests
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       fixture.NextSession = UnboundSession();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using(AgentRuntime runtime = fixture.Runtime())
+      using(SingleServerHarness runtime = fixture.Runtime())
       {
          _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.NextSession.ExportCredential(), StartNewPairing: true), timeout.Token);
          byte[] signedIn = File.ReadAllBytes(authPath);
@@ -228,7 +228,7 @@ public sealed class AgentNewPairingTests
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       byte[] original = File.ReadAllBytes(path);
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
       _ = await fixture.EvaluateAsync(runtime, timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
@@ -266,7 +266,7 @@ public sealed class AgentNewPairingTests
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       byte[] original = File.ReadAllBytes(path);
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
       _ = await fixture.EvaluateAsync(runtime, timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
@@ -313,7 +313,7 @@ public sealed class AgentNewPairingTests
       byte[] original = File.ReadAllBytes(path);
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      AgentRuntime runtime = fixture.Runtime();
+      SingleServerHarness runtime = fixture.Runtime();
       try
       {
          _ = await fixture.EvaluateAsync(runtime, timeout.Token);
@@ -363,7 +363,7 @@ public sealed class AgentNewPairingTests
       using SessionFixture fixture = new();
       fixture.SaveSession();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using(AgentRuntime runtime = fixture.Runtime())
+      using(SingleServerHarness runtime = fixture.Runtime())
       {
          _ = await fixture.EvaluateAsync(runtime, timeout.Token);
          Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
@@ -376,7 +376,7 @@ public sealed class AgentNewPairingTests
          Assert.False(File.Exists(StagedSession(fixture)));
       }
       fixture.Session.ExportsBeforeFailure = null;
-      using AgentRuntime restarted = fixture.Runtime();
+      using SingleServerHarness restarted = fixture.Runtime();
       _ = await fixture.EvaluateAsync(restarted, timeout.Token);
       AgentSnapshot recovered = restarted.GetSnapshot();
       Assert.True(recovered.Authentication!.Authorized);
@@ -397,7 +397,7 @@ public sealed class AgentNewPairingTests
       fixture.SaveSession();
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       _ = await fixture.EvaluateAsync(runtime, timeout.Token);
       using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
       {
@@ -432,7 +432,7 @@ public sealed class AgentNewPairingTests
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       _ = await fixture.EvaluateAsync(runtime, timeout.Token);
       using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
       {
@@ -475,7 +475,7 @@ public sealed class AgentNewPairingTests
          Stage(fixture, "device", "https://synthetic.invalid/");
       }
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       string reply = await runtime.SignOutAsync(timeout.Token);
       Assert.Contains("revoke the previous session", reply, StringComparison.Ordinal);
       Assert.Contains(runtime.GetSnapshot().Logs, entry => entry.Message.Contains(

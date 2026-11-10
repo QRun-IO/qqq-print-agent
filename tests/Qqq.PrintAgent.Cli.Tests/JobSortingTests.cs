@@ -37,7 +37,7 @@ public sealed class JobSortingTests
       Assert.Throws<ArgumentException>(() => fixture.Store.QueryJobs(new JobQuery(SortBy: "title; DELETE FROM local_jobs")));
       // A distant corrupt payload would expose any accidental whole-history materialization.
       fixture.Execute("UPDATE local_jobs SET last_event_json='invalid-json' WHERE job_id='job09999'");
-      Assert.Equal(100, AgentRuntime.QueryJobsWithQueue(fixture.Store, new JobQuery(Offset: 5000, PageSize: 100), cloud).Jobs.Count);
+      Assert.Equal(100, SingleServerHarness.QueryJobsWithQueue(fixture.Store, new JobQuery(Offset: 5000, PageSize: 100), cloud).Jobs.Count);
    }
 
 
@@ -56,7 +56,7 @@ public sealed class JobSortingTests
          JobQuery pageQuery = query with { Offset = offset, PageSize = 100 };
          JobPage page = store.QueryJobs(pageQuery);
          Assert.Equal(expectedLocal.Skip(offset).Take(100).Select(job => job.JobId), page.Jobs.Select(job => job.JobId), StringComparer.Ordinal);
-         JobPage merged = AgentRuntime.QueryJobsWithQueue(store, pageQuery, cloud);
+         JobPage merged = SingleServerHarness.QueryJobsWithQueue(store, pageQuery, cloud);
          Assert.Equal(expectedAll.Skip(offset).Take(100).Select(job => job.JobId), merged.Jobs.Select(job => job.JobId), StringComparer.Ordinal);
          Assert.Equal(expectedAll.Length, merged.TotalCount);
          Assert.True(merged.ServerQueueLimited);

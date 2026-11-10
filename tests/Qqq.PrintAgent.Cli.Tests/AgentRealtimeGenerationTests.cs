@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.IO.Pipes;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
@@ -20,7 +19,7 @@ public sealed class AgentRealtimeGenerationTests
    [InlineData(12, 0, 24000)]
    [InlineData(12, 1, 30000)]
    public void ReconnectJitterRespectsConfiguredHardDelayBounds(int attempt, double sample, int expected)
-      => Assert.Equal(TimeSpan.FromMilliseconds(expected), AgentRuntime.ReconnectDelay(new RealtimeSettings(), attempt, sample));
+      => Assert.Equal(TimeSpan.FromMilliseconds(expected), SingleServerHarness.ReconnectDelay(new RealtimeSettings(), attempt, sample));
 
 
 
@@ -54,9 +53,7 @@ public sealed class AgentRealtimeGenerationTests
          },
       };
       int sessions = 0;
-      string pipe = "qqq-generation-" + Guid.NewGuid().ToString("N");
-      using var runtime = new AgentRuntime(fixture.Local.DirectoryPath, _ => { }, fixture.Local.Printer, pipeName: pipe,
-         pipeFactory: () => new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
+      using var runtime = new SingleServerHarness(fixture.Local.DirectoryPath, _ => { }, fixture.Local.Printer,
          sessionFactory: _ => Interlocked.Increment(ref sessions) == 1 ? fixture.Session : replacement);
       Task running = runtime.RunAsync(timeout.Token);
       try

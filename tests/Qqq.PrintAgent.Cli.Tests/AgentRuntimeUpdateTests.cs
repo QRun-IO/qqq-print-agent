@@ -165,9 +165,9 @@ public sealed class AgentRuntimeUpdateTests
       try
       {
          Task<string> preparation = fixture.PipeAsync(new PipeRequest("prepare-update"));
-         await fixture.WaitAsync(() => clock.HasTimerDueIn(AgentRuntime.UpdatePreparationLimit));
+         await fixture.WaitAsync(() => clock.HasTimerDueIn(SingleServerHarness.UpdatePreparationLimit));
          Assert.False(preparation.IsCompleted);
-         clock.Advance(AgentRuntime.UpdatePreparationLimit);
+         clock.Advance(SingleServerHarness.UpdatePreparationLimit);
          string reply = await preparation;
          Assert.StartsWith("Not ready for update: 1 job(s) were still in progress", reply, StringComparison.Ordinal);
          Assert.Equal("The update was not started, and the current version remains installed. " + reply, MsiUpdateService.PreparationNotCompleted(reply));
@@ -203,8 +203,8 @@ public sealed class AgentRuntimeUpdateTests
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(() => fixture.Claims > claims);
       Task<string> preparation = fixture.PipeAsync(new PipeRequest("prepare-update"));
-      await fixture.WaitAsync(() => clock.HasTimerDueIn(AgentRuntime.UpdatePreparationLimit));
-      clock.Advance(AgentRuntime.UpdatePreparationLimit);
+      await fixture.WaitAsync(() => clock.HasTimerDueIn(SingleServerHarness.UpdatePreparationLimit));
+      clock.Advance(SingleServerHarness.UpdatePreparationLimit);
       string reply = await preparation;
       Assert.StartsWith("Not ready for update: a claim was still in progress after 25 seconds.", reply, StringComparison.Ordinal);
       Assert.DoesNotContain("job(s)", reply, StringComparison.Ordinal);
@@ -373,7 +373,7 @@ public sealed class AgentRuntimeUpdateTests
       await fixture.WaitAsync(() => fixture.Count("HEARTBEAT") > heartbeats);
       Assert.StartsWith(Paused, fixture.Runtime.GetSnapshot().Status, StringComparison.Ordinal);
       Assert.Null(fixture.State("waiting"));
-      clock.Advance(AgentRuntime.UpdatePauseDuration);
+      clock.Advance(SingleServerHarness.UpdatePauseDuration);
       await fixture.WaitAsync(() => fixture.State("waiting") is "SPOOLED");
       Assert.Contains(fixture.Logs, line => line.StartsWith("The update pause ran out", StringComparison.Ordinal));
       Assert.False(fixture.Runtime.GetSnapshot().Status.StartsWith(Paused, StringComparison.Ordinal));

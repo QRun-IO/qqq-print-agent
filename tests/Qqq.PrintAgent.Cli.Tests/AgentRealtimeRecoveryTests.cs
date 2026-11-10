@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.IO.Pipes;
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
@@ -23,17 +22,12 @@ public sealed class AgentRealtimeRecoveryTests
       byte[] original = File.ReadAllBytes(path);
       byte[] unreadable = [1, 3, 5];
       File.WriteAllBytes(path, unreadable);
-      string name = "qqq-recovery-" + Guid.NewGuid().ToString("N");
       using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-      using var runtime = new AgentRuntime(fixture.DirectoryPath, _ => { }, fixture.Printer, pipeName: name,
-         pipeFactory: () => new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly));
+      using var runtime = new SingleServerHarness(fixture.DirectoryPath, _ => { }, fixture.Printer);
       Task running = runtime.RunAsync(stop.Token);
       try
       {
-         await using var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
-         await pipe.ConnectAsync(stop.Token);
-         await AgentPipeFraming.WriteAsync(pipe, JsonSerializer.Serialize(new PipeRequest("snapshot"), PrintApiClient.JsonOptions), AgentPipeFraming.MaximumCommandCharacters, stop.Token);
-         string response = await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, stop.Token);
+         string response = await runtime.PipeAsync(new PipeRequest("snapshot"), stop.Token);
          AgentSnapshot snapshot = JsonSerializer.Deserialize<AgentSnapshot>(response, PrintApiClient.JsonOptions)!;
          Assert.False(snapshot.Enrolled);
          Assert.False(snapshot.Connected);

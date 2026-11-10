@@ -86,7 +86,7 @@ public sealed class AgentPrinterCatalogTests
       await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
       int reads = fixture.CatalogRequests;
-      int rounds = (int)Math.Ceiling(AgentRuntime.CatalogRefreshInterval / TimeSpan.FromSeconds(fixture.Settings.HeartbeatIntervalSeconds));
+      int rounds = (int)Math.Ceiling(SingleServerHarness.CatalogRefreshInterval / TimeSpan.FromSeconds(fixture.Settings.HeartbeatIntervalSeconds));
       Assert.True(rounds >= 3);
       for(int round = 1; round < rounds; round++)
       {
