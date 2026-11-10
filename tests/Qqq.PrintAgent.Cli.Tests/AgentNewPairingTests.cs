@@ -43,7 +43,7 @@ public sealed class AgentNewPairingTests
       fixture.NextSession = UnboundSession();
       using(AgentRuntime restarted = fixture.Runtime())
       {
-         _ = await restarted.PollControlsOnceAsync(timeout.Token);
+         _ = await restarted.EnsureAuthorizationAsync(timeout.Token);
          Assert.True(restarted.GetSnapshot().Authentication!.SignedIn);
          Assert.False(restarted.GetSnapshot().Authentication!.Authorized);
          Assert.Empty(fixture.NextSession.Paths);
@@ -78,7 +78,7 @@ public sealed class AgentNewPairingTests
       byte[] retained = File.ReadAllBytes(path);
       using AgentRuntime runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       Assert.Equal(0, fixture.Created);
       Assert.Empty(fixture.Session.Paths);
@@ -134,7 +134,7 @@ public sealed class AgentNewPairingTests
       fixture.NextSession = UnboundSession();
       using(AgentRuntime restarted = fixture.Runtime())
       {
-         _ = await restarted.PollControlsOnceAsync(timeout.Token);
+         _ = await restarted.EnsureAuthorizationAsync(timeout.Token);
          Assert.True(restarted.GetSnapshot().Authentication!.SignedIn);
          Assert.False(restarted.GetSnapshot().Authentication!.Authorized);
          Assert.Empty(fixture.NextSession.Paths);
@@ -230,7 +230,7 @@ public sealed class AgentNewPairingTests
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using AgentRuntime runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
       byte[] session = File.ReadAllBytes(authPath);
       fixture.Session.FailBindingTransport = connectionLost;
@@ -241,7 +241,7 @@ public sealed class AgentNewPairingTests
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
       fixture.Session.FailBindingTransport = false;
       fixture.Session.DenyBinding = false;
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
       AgentSnapshot afterNextPass = runtime.GetSnapshot();
       Assert.True(afterNextPass.Authentication!.Authorized);
       Assert.Equal("device", afterNextPass.DeviceId);
@@ -268,7 +268,7 @@ public sealed class AgentNewPairingTests
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using AgentRuntime runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
       byte[] session = File.ReadAllBytes(authPath);
       fixture.Session.BindAsAnotherPrincipal = failingStep is "identity";
@@ -316,7 +316,7 @@ public sealed class AgentNewPairingTests
       AgentRuntime runtime = fixture.Runtime();
       try
       {
-         _ = await runtime.PollControlsOnceAsync(timeout.Token);
+         _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
          Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
          // An open handle that does not share deletion keeps the session file from being replaced, as a scanner or backup might.
          using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -334,7 +334,7 @@ public sealed class AgentNewPairingTests
          {
             runtime.Dispose();
             runtime = fixture.Runtime();
-            _ = await runtime.PollControlsOnceAsync(timeout.Token);
+            _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
          }
          else
          {
@@ -365,7 +365,7 @@ public sealed class AgentNewPairingTests
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
       using(AgentRuntime runtime = fixture.Runtime())
       {
-         _ = await runtime.PollControlsOnceAsync(timeout.Token);
+         _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
          Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
          // The first export builds the session to save; the second, during activation, is the one that fails.
          fixture.Session.ExportsBeforeFailure = 1;
@@ -377,7 +377,7 @@ public sealed class AgentNewPairingTests
       }
       fixture.Session.ExportsBeforeFailure = null;
       using AgentRuntime restarted = fixture.Runtime();
-      _ = await restarted.PollControlsOnceAsync(timeout.Token);
+      _ = await restarted.EnsureAuthorizationAsync(timeout.Token);
       AgentSnapshot recovered = restarted.GetSnapshot();
       Assert.True(recovered.Authentication!.Authorized);
       Assert.Equal("replacement-device", recovered.DeviceId);
@@ -398,7 +398,7 @@ public sealed class AgentNewPairingTests
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
       using AgentRuntime runtime = fixture.Runtime();
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
       using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
       {
          _ = await Assert.ThrowsAnyAsync<Exception>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
@@ -433,7 +433,7 @@ public sealed class AgentNewPairingTests
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
       using AgentRuntime runtime = fixture.Runtime();
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      _ = await runtime.EnsureAuthorizationAsync(timeout.Token);
       using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
       {
          _ = await Assert.ThrowsAnyAsync<Exception>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));

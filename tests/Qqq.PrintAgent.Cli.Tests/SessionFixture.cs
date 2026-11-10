@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.IO.Pipes;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -13,8 +14,9 @@ using Qqq.PrintAgent.Windows;
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// Test harness for signed-in (QQQ session) behavior: a control fixture plus a scriptable fake session that records the
-/// printing requests it receives and can fail resume, deny device binding or stall a poll. No network or real sign-in is used.
+/// Test harness for signed-in (QQQ session) behavior: an enrolled local state plus a scriptable fake session that records the
+/// printing requests it receives and can fail resume, deny device binding or hold the realtime socket open. No network or real
+/// sign-in is used.
 /// </summary>
 internal sealed class SessionFixture : IDisposable
 {
@@ -26,13 +28,23 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-   /// <summary>Builds a runtime whose session factory hands out the scripted sessions in priority order (custom factory, next session, default) and counts each creation.</summary>
-   internal AgentRuntime Runtime() => new(Local.DirectoryPath, _ => { }, Local.Printer, sessionFactory: origin =>
+   /// <summary>
+   /// Builds a runtime on a private pipe whose session factory hands out the scripted sessions in priority order (custom
+   /// factory, next session, default) and counts each creation. The session renewal interval is zero, so every authorization
+   /// evaluation after the first renews the session.
+   /// </summary>
+   internal AgentRuntime Runtime()
    {
-      Created++;
-      return Factory?.Invoke(origin) ?? NextSession ?? Session;
-   })
-   { SessionResumeInterval = TimeSpan.Zero };
+      string pipe = "qqq-session-fixture-" + Guid.NewGuid().ToString("N");
+      return new(Local.DirectoryPath, _ => { }, Local.Printer, pipeName: pipe,
+         pipeFactory: () => new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
+         sessionFactory: origin =>
+         {
+            Created++;
+            return Factory?.Invoke(origin) ?? NextSession ?? Session;
+         })
+      { SessionResumeInterval = TimeSpan.Zero };
+   }
 
 
 
@@ -52,8 +64,8 @@ internal sealed class SessionFixture : IDisposable
 
    /// <summary>
    /// In-memory stand-in for the signed-in QQQ session client. It accepts a restore, can be told to fail resume or deny binding,
-   /// answers the device enroll and control poll with canned responses, and refuses the browser and password sign-in calls this
-   /// fixture never needs.
+   /// answers device enrollment with a canned response, and refuses the browser and password sign-in calls this fixture never
+   /// needs.
    /// </summary>
    internal sealed class FakeSession : IQqqSessionClient
    {
@@ -77,7 +89,6 @@ internal sealed class SessionFixture : IDisposable
       private string? _deviceBeforeIssue;
       internal string? RevokedDeviceId;
       internal HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
-      internal bool DelayUnauthorizedPoll { get; set; }
       internal Func<CancellationToken, Task<System.Net.WebSockets.WebSocket>>? ConnectRealtime { get; set; }
 
 
@@ -85,12 +96,6 @@ internal sealed class SessionFixture : IDisposable
       /// <summary>Opens the realtime channel through the scripted connector; without one the realtime path is unsupported in that test.</summary>
       public Task<System.Net.WebSockets.WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
          => ConnectRealtime?.Invoke(cancellationToken) ?? throw new NotSupportedException();
-
-
-
-      /// <summary>Completed when a control poll has reached the fake session, so a test can act while that poll is still in flight.</summary>
-      internal TaskCompletionSource PollEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-      internal TaskCompletionSource ReleasePoll { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 
 
@@ -200,30 +205,22 @@ internal sealed class SessionFixture : IDisposable
 
 
       /// <summary>
-      /// Records the requested path. Device enrollment returns a replacement device and token (or the scripted error status). A
-      /// poll can be held open and then fail as an old-session denial, to test a session replaced mid-request; otherwise it
-      /// returns a normal connected control poll.
+      /// Records the requested path. Device enrollment returns a replacement device and token (or the scripted error status).
+      /// Nothing else is expected over HTTP from a runtime that has no realtime socket, so any other path gets an empty object
+      /// with the scripted status and the recorded path shows the test what was asked.
       /// </summary>
-      public async Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
+      public Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
       {
          Paths.Add(relativePath);
          if(string.Equals(relativePath, "devices/enroll", StringComparison.Ordinal))
          {
-            if(Status != HttpStatusCode.OK)
+            if(Status == HttpStatusCode.OK)
             {
-               return new HttpResponseMessage(Status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+               _issuedDeviceId = "replacement-device";
+               return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new EnrollmentResponse(1, "replacement-device", "replacement-token", 5), PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") });
             }
-            _issuedDeviceId = "replacement-device";
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new EnrollmentResponse(1, "replacement-device", "replacement-token", 5), PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") };
          }
-         if(DelayUnauthorizedPoll)
-         {
-            PollEntered.TrySetResult();
-            await ReleasePoll.Task.WaitAsync(cancellationToken);
-            throw new QqqSessionException(QqqSessionException.FailureKind.AuthenticationRequired, "Synthetic old-session denial.");
-         }
-         object body = new DeviceControlPoll(1, DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), 5, new DeviceDesiredState(1, false, "CONNECTED"), []);
-         return new HttpResponseMessage(Status) { Content = new StringContent(JsonSerializer.Serialize(body, PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") };
+         return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") });
       }
 
 
