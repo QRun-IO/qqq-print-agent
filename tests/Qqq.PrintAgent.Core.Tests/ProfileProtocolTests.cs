@@ -9,32 +9,24 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
-/// <summary>The wire shape of operator metadata: heartbeat and printer inventory carry names, descriptions and locations in a way the server can distinguish "not set" from "cleared", without ever replacing the physical queue identity.</summary>
+/// <summary>The wire shape of operator metadata: a device profile and the printer inventory carry names, descriptions and locations in a way the server can distinguish "not set" from "cleared", without ever replacing the physical queue identity.</summary>
 public sealed class ProfileProtocolTests
 {
    /// <summary>
-   /// The heartbeat frame, in the shape the service sends it. With no profile it has no profile member at all. A profile
-   /// with an empty description sends that empty value, so the server clears it, while an unset location is omitted so
-   /// the server leaves it alone.
+   /// How a device profile is written with the options every frame and request is written with. An empty description is
+   /// written as the empty value, so the server clears it; an unset location is left out, so the server leaves it alone;
+   /// and a profile with nothing set is an object with no members. This is the rule the heartbeat relies on, tested on
+   /// the serializer: it does not read a frame the service built. The heartbeat the service sends is read in the Windows
+   /// suite (AgentRuntimeProfileTests).
    /// </summary>
    [Fact]
-   public async Task HeartbeatOmitsAnUnsetProfileAndTransmitsExplicitClears()
+   public void DeviceProfileKeepsAnExplicitClearAndOmitsWhatIsUnset()
    {
-      using var socket = new ScriptedWebSocket();
-      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
-      using var stop = new CancellationTokenSource();
-      Task run = channel.RunAsync(_ => { }, stop.Token);
-      await channel.SendAsync("HEARTBEAT", new { agentVersion = PrintApiClient.AgentVersion, profile = (DeviceProfile?)null });
-      JsonElement payload = (await socket.NextSentAsync()).GetProperty("payload");
-      Assert.Equal(PrintApiClient.AgentVersion, payload.GetProperty("agentVersion").GetString());
-      Assert.False(payload.TryGetProperty("profile", out _));
-      await channel.SendAsync("HEARTBEAT", new { agentVersion = PrintApiClient.AgentVersion, profile = new DeviceProfile("Packing station", "", null) });
-      JsonElement profile = (await socket.NextSentAsync()).GetProperty("payload").GetProperty("profile");
+      JsonElement profile = JsonSerializer.SerializeToElement(new DeviceProfile("Packing station", "", null), PrintApiClient.JsonOptions);
       Assert.Equal("Packing station", profile.GetProperty("name").GetString());
       Assert.Equal("", profile.GetProperty("description").GetString());
       Assert.False(profile.TryGetProperty("location", out _));
-      await stop.CancelAsync();
-      await run.WaitAsync(TimeSpan.FromSeconds(10));
+      Assert.Equal("{}", JsonSerializer.Serialize(new DeviceProfile(), PrintApiClient.JsonOptions));
    }
 
 
