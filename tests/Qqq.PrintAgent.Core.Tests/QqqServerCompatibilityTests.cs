@@ -18,21 +18,28 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>
 /// The compatibility check is what the connection wizard shows the operator: each way a server can be unusable must come
 /// back as its own typed problem, with the earlier checks recognisably passed, without a credential ever being sent, and
-/// without changing what <c>DiscoverAsync</c> has always thrown.
+/// without changing what <c>DiscoverAsync</c> has always thrown. "No credential is sent" can only be shown by a client
+/// that has one, so the tests that claim it run the check on a client that is signed in and has a device bound, and
+/// then prove the session and the binding are exactly as they were.
 /// </summary>
 public sealed class QqqServerCompatibilityTests
 {
+   private const int SignInRequests = 4;
    private static readonly Uri Redirect = new(ScriptedServer.Callback);
 
 
 
-   /// <summary>A table-based server with printing 2.x is compatible: no problems, no failed stage, a password sign-in on offer, and only the two public requests were made.</summary>
+   /// <summary>
+   /// A table-based server with printing 2.x is compatible: no problems, no failed stage, a password sign-in on offer.
+   /// The client is signed in with a device bound when it checks, and the check makes exactly the two public requests,
+   /// neither carrying the session cookie or the device proof, and leaves the session as it was.
+   /// </summary>
    [Fact]
    public async Task TableBasedServerIsCompatibleAndOffersPassword()
    {
       var info = new List<string>();
-      using var server = ScriptedServer.WithTable();
-      using var client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: new QqqSessionDiagnostics(info.Add));
+      using ScriptedServer server = BoundServer().Add(ScriptedServer.Discovery).Add(ScriptedServer.Table);
+      using QqqSessionClient client = await BoundClientAsync(server, new QqqSessionDiagnostics(info.Add));
       QqqServerCompatibility result = await client.CheckCompatibilityAsync();
       Assert.True(result.IsCompatible);
       Assert.Empty(result.Problems);
@@ -40,9 +47,8 @@ public sealed class QqqServerCompatibilityTests
       Assert.Null(result.Certificate);
       Assert.Equal(QqqSignInMethods.Password, result.SignInMethods);
       Assert.Equal("2.4.0", result.Discovery!.PrintingExtensionVersion);
-      Assert.Equal(new[] { "/qqq/v1/version", "/qqq/v1/metaData/authentication" }, server.Requests.Select(request => request.Uri.AbsolutePath), StringComparer.Ordinal);
-      Assert.All(server.Requests, request => Assert.True(request.IsPublic));
       Assert.Contains("Compatibility check passed: printing extension 2.4.0; sign-in by Password.", info, StringComparer.Ordinal);
+      await AssertCheckWasPublicAndLeftTheSessionAloneAsync(client, server, "/qqq/v1/version", "/qqq/v1/metaData/authentication");
    }
 
 
@@ -142,7 +148,12 @@ public sealed class QqqServerCompatibilityTests
 
 
 
-   /// <summary>An address that answers over HTTP but not with QQQ discovery (a web page, an error, a redirect, a demand for authorization, a JSON array, an oversized body) is "not a QQQ server" at the server stage, after exactly one public request.</summary>
+   /// <summary>
+   /// An address that answers over HTTP but not with QQQ discovery (a web page, an error, a redirect, a demand for
+   /// authorization, a JSON array, an oversized body) is "not a QQQ server" at the server stage, after exactly one
+   /// public request. The client holds a session and a bound device throughout: none of it is sent, and none of these
+   /// answers, not even a 401, takes the session away, because the request it answers carried no credential.
+   /// </summary>
    [Theory]
    [InlineData("page", "the discovery answer was not a valid QQQ document")]
    [InlineData("array", "the discovery answer was not a valid QQQ document")]
@@ -153,7 +164,7 @@ public sealed class QqqServerCompatibilityTests
    [InlineData("forbidden", "the server asks for authorization before answering the discovery request")]
    public async Task AnswerThatIsNotDiscoveryIsReportedAsNotAQqqServer(string fault, string detail)
    {
-      using var server = new ScriptedServer();
+      using ScriptedServer server = BoundServer();
       server.AddResponse(() => fault switch
       {
          "page" => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>welcome</html>", Encoding.UTF8, "text/html") },
@@ -164,14 +175,46 @@ public sealed class QqqServerCompatibilityTests
          "unauthorized" => ScriptedServer.Json("{}", HttpStatusCode.Unauthorized),
          _ => ScriptedServer.Json("{}", HttpStatusCode.Forbidden),
       });
-      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+      using QqqSessionClient client = await BoundClientAsync(server);
       QqqServerCompatibility result = await client.CheckCompatibilityAsync();
       QqqCompatibilityProblem problem = Assert.Single(result.Problems);
       Assert.Equal(QqqCompatibilityIssue.NotQqqServer, problem.Issue);
       Assert.StartsWith(detail, problem.Detail, StringComparison.Ordinal);
       Assert.Equal(QqqCompatibilityStage.Server, result.FailedStage);
       Assert.Null(result.Discovery);
-      Assert.True(Assert.Single(server.Requests).IsPublic);
+      await AssertCheckWasPublicAndLeftTheSessionAloneAsync(client, server, "/qqq/v1/version");
+   }
+
+
+
+   /// <summary>
+   /// A redirect is refused, not followed. The server here answers discovery with a redirect to another host and stands
+   /// ready to serve that host as well; it follows its own redirect, as the platform handler would, whenever the policy
+   /// the client handed the transport allows it. The client's policy does not, so the other host is never asked and the
+   /// check reports the redirect. Were the policy ever relaxed, or the client to follow the address itself, the other
+   /// host would be asked and this test would fail; the last lines prove the server really does follow when allowed.
+   /// </summary>
+   [Fact]
+   public async Task RedirectIsRefusedAndItsTargetIsNeverAsked()
+   {
+      using var server = new RedirectingServer();
+      var transport = new FakeTransport(server);
+      server.Policy = () => transport.HttpPolicy;
+      using var client = new QqqSessionClient(ScriptedServer.Origin, null, null, false, null, null, false, transport);
+      QqqServerCompatibility result = await client.CheckCompatibilityAsync();
+      QqqCompatibilityProblem problem = Assert.Single(result.Problems);
+      Assert.Equal(QqqCompatibilityIssue.NotQqqServer, problem.Issue);
+      Assert.Equal("the server refused or redirected the discovery request", problem.Detail);
+      Assert.Equal(new QqqTransportPolicy(FollowRedirects: false, UseCookieJar: false), transport.HttpPolicy);
+      Assert.Equal(new Uri(ScriptedServer.Origin, "/qqq/v1/version"), Assert.Single(server.Asked));
+      Assert.False(server.TargetAsked);
+
+      server.Policy = () => new QqqTransportPolicy(FollowRedirects: true, UseCookieJar: false);
+      using var following = new HttpMessageInvoker(server, disposeHandler: false);
+      using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(ScriptedServer.Origin, "/qqq/v1/version"));
+      using HttpResponseMessage followed = await following.SendAsync(request, CancellationToken.None);
+      Assert.Equal(HttpStatusCode.OK, followed.StatusCode);
+      Assert.True(server.TargetAsked);
    }
 
 
@@ -419,19 +462,18 @@ public sealed class QqqServerCompatibilityTests
 
 
 
-   /// <summary>An OAuth2 server whose native grant is valid and lists the host's callback offers the browser; without a callback to check, the grant alone decides.</summary>
+   /// <summary>An OAuth2 server whose native grant is valid and lists the host's callback offers the browser; without a callback to check, the grant alone decides. Both requests are public even though the client holds a session and a bound device, and both are left alone.</summary>
    [Theory]
    [InlineData(true)]
    [InlineData(false)]
    public async Task OAuthServerWithAUsableGrantOffersTheBrowser(bool checkCallback)
    {
-      using var server = ScriptedServer.WithOAuth();
-      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+      using ScriptedServer server = BoundServer().Add(ScriptedServer.Discovery).Add(ScriptedServer.OAuth);
+      using QqqSessionClient client = await BoundClientAsync(server);
       QqqServerCompatibility result = await client.CheckCompatibilityAsync(checkCallback ? Redirect : null);
       Assert.True(result.IsCompatible);
       Assert.Equal(QqqSignInMethods.Browser, result.SignInMethods);
-      Assert.Equal(2, server.Requests.Count);
-      Assert.All(server.Requests, request => Assert.True(request.IsPublic));
+      await AssertCheckWasPublicAndLeftTheSessionAloneAsync(client, server, "/qqq/v1/version", "/qqq/v1/metaData/authentication");
    }
 
 
@@ -439,7 +481,9 @@ public sealed class QqqServerCompatibilityTests
    /// <summary>
    /// A server that passes discovery but offers no sign-in this agent implements fails at the sign-in stage with the
    /// reason: an unknown authentication type, a grant that fails the sign-in rules, an API too old for the native grant,
-   /// a callback the server does not list or that is not a permitted form, or a sign-in description that cannot be read.
+   /// a callback the server does not list or that is not a permitted form, or a sign-in description that cannot be read
+   /// or that demands authorization. The client holds a session and a bound device: neither request carries any of it,
+   /// and whatever the server answers, the session is left as it was.
    /// </summary>
    [Theory]
    [InlineData("type", "authentication type 'TOKEN' is not supported; only TABLE_BASED and OAUTH2 are")]
@@ -452,6 +496,7 @@ public sealed class QqqServerCompatibilityTests
    [InlineData("loopback", "the server's native session grant does not list the callback http://127.0.0.1:49152/callback")]
    [InlineData("page", "the sign-in description answer was not a valid QQQ document")]
    [InlineData("refused", "the server refused or redirected the sign-in description request")]
+   [InlineData("unauthorized", "the server asks for authorization before answering the sign-in description request")]
    public async Task ServerWithoutAUsableSignInFailsAtTheSignInStage(string fault, string detail)
    {
       string discovery = fault switch
@@ -460,7 +505,7 @@ public sealed class QqqServerCompatibilityTests
          "feature" => ScriptedServer.Discovery.Replace("\"nativeSessionLogin\",", "", StringComparison.Ordinal),
          _ => ScriptedServer.Discovery,
       };
-      using var server = new ScriptedServer();
+      using ScriptedServer server = BoundServer();
       server.Add(discovery);
       server.AddResponse(() => fault switch
       {
@@ -470,6 +515,7 @@ public sealed class QqqServerCompatibilityTests
          "grant" => ScriptedServer.Json(ScriptedServer.OAuth.Replace("nativeSessionLogin", "nativeBearer", StringComparison.Ordinal)),
          "page" => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>sign in</html>", Encoding.UTF8, "text/html") },
          "refused" => ScriptedServer.Json("{}", HttpStatusCode.InternalServerError),
+         "unauthorized" => ScriptedServer.Json("{}", HttpStatusCode.Unauthorized),
          _ => ScriptedServer.Json(ScriptedServer.OAuth),
       });
       Uri? callback = fault switch
@@ -478,7 +524,7 @@ public sealed class QqqServerCompatibilityTests
          "loopback" => new Uri("http://127.0.0.1:49152/callback"),
          _ => Redirect,
       };
-      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+      using QqqSessionClient client = await BoundClientAsync(server);
       QqqServerCompatibility result = await client.CheckCompatibilityAsync(callback);
       QqqCompatibilityProblem problem = Assert.Single(result.Problems);
       Assert.Equal(QqqCompatibilityIssue.SignInUnavailable, problem.Issue);
@@ -487,7 +533,7 @@ public sealed class QqqServerCompatibilityTests
       Assert.Equal(QqqCompatibilityStage.SignIn, result.FailedStage);
       Assert.Equal(QqqSignInMethods.None, result.SignInMethods);
       Assert.NotNull(result.Discovery);
-      Assert.All(server.Requests, request => Assert.True(request.IsPublic));
+      await AssertCheckWasPublicAndLeftTheSessionAloneAsync(client, server, "/qqq/v1/version", "/qqq/v1/metaData/authentication");
    }
 
 
@@ -585,6 +631,92 @@ public sealed class QqqServerCompatibilityTests
       QqqSessionException exception = await Assert.ThrowsAsync<QqqSessionException>(() => refused.DiscoverAsync());
       Assert.Equal(QqqSessionException.FailureKind.ConfigurationRequired, exception.Failure);
       Assert.Equal("This server does not advertise the required QQQ printing and sign-in capabilities.", exception.Message);
+   }
+
+
+
+   /// <summary>A server whose first four replies sign a user in with a password and bind device-1; a test queues what the check should see after them.</summary>
+   private static ScriptedServer BoundServer() => ScriptedServer.SignedIn().Add(ScriptedServer.Identity);
+
+
+
+   /// <summary>A client that is signed in and has a device bound, so that a check which sent or disturbed any of that would be caught.</summary>
+   private static async Task<QqqSessionClient> BoundClientAsync(ScriptedServer server, QqqSessionDiagnostics? diagnostics = null)
+   {
+      var client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: diagnostics);
+      await client.SignInWithPasswordAsync("synthetic-user", "synthetic-password");
+      await client.BindDeviceAsync(new QqqDeviceCredential("device-1", "synthetic-proof"));
+      Assert.Equal(SignInRequests, server.Requests.Count);
+      Assert.Equal("device-1", server.Requests[^1].DeviceId);
+      return client;
+   }
+
+
+
+   /// <summary>
+   /// Requires that the check made exactly the given requests, none of them carrying the session cookie, the device
+   /// proof or any other credential, and that it left the client as it found it: still signed in with the same session,
+   /// and still bound, which a device request proves by going out with that cookie and that device's proof. Had the
+   /// check cleared or replaced the session, that request would be refused locally before it was sent.
+   /// </summary>
+   private static async Task AssertCheckWasPublicAndLeftTheSessionAloneAsync(QqqSessionClient client, ScriptedServer server, params string[] paths)
+   {
+      ScriptedRequest[] check = [.. server.Requests.Skip(SignInRequests)];
+      Assert.Equal(paths, check.Select(request => request.Uri.AbsolutePath), StringComparer.Ordinal);
+      Assert.All(check, request => Assert.True(request.IsPublic));
+      Assert.True(client.IsAuthenticated);
+      Assert.Equal("session", client.ExportCredential().SessionToken);
+      server.Add("""{"jobs":[]}""");
+      using HttpResponseMessage response = await client.SendPrintingAsync(HttpMethod.Get, "device/jobs/queued");
+      ScriptedRequest device = server.Requests[^1];
+      Assert.Equal("/qqq/v1/qbit/printing/device/jobs/queued", device.Uri.AbsolutePath);
+      Assert.Contains("sessionUUID=session", device.Cookie, StringComparison.Ordinal);
+      Assert.Equal("device-1", device.DeviceId);
+      Assert.Equal("synthetic-proof", device.DeviceToken);
+   }
+
+
+
+   /// <summary>
+   /// A hand-written server for the redirect test. It answers discovery on the session origin with a redirect to
+   /// another host and can serve that host too. Like the platform handler it stands in for, it follows its own redirect
+   /// when the transport policy allows that, and it records every address it was asked for, so a followed redirect
+   /// cannot go unnoticed.
+   /// </summary>
+   private sealed class RedirectingServer : HttpMessageHandler
+   {
+      private static readonly Uri Target = new("https://elsewhere.example.invalid/qqq/v1/version");
+
+
+
+      /// <summary>The policy the client handed the transport; read at each request, as a platform handler is configured by it.</summary>
+      internal Func<QqqTransportPolicy?>? Policy { get; set; }
+
+
+
+      /// <summary>Every address a request arrived for, in order.</summary>
+      internal List<Uri> Asked { get; } = [];
+
+
+
+      /// <summary>True once the redirect's target was asked, whether the client asked it or this server followed its own redirect.</summary>
+      internal bool TargetAsked { get; private set; }
+
+
+
+      /// <summary>Serves the target when it is asked for; otherwise answers with the redirect, following it first when the policy allows.</summary>
+      protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+      {
+         Asked.Add(request.RequestUri!);
+         if(request.RequestUri == Target || Policy?.Invoke()?.FollowRedirects == true)
+         {
+            TargetAsked = true;
+            return Task.FromResult(ScriptedServer.Json(ScriptedServer.Discovery));
+         }
+         var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
+         redirect.Headers.Location = Target;
+         return Task.FromResult(redirect);
+      }
    }
 
 

@@ -398,7 +398,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    {
       if(_discovery is not null)
       { return _discovery; }
-      QqqApiDiscovery discovery = await FetchDiscoveryAsync(cancellationToken).ConfigureAwait(false);
+      QqqApiDiscovery discovery = await FetchDiscoveryAsync(keepSession: false, cancellationToken).ConfigureAwait(false);
       discovery.Validate(report: _diagnostics.Info);
       _discovery = discovery;
       return discovery;
@@ -409,14 +409,15 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// <summary>
    /// Requests the discovery document and parses it without judging or caching it, so the throwing path
    /// (<see cref="DiscoverCoreAsync"/>) and the compatibility check, which reports the same shortfalls as values, read the
-   /// server in exactly the same way. Callers hold the client gate.
+   /// server in exactly the same way. The request carries no credential. The compatibility check asks for a held
+   /// session to be kept whatever the server answers; see <see cref="CheckAuthorization"/>. Callers hold the client gate.
    /// </summary>
-   private async Task<QqqApiDiscovery> FetchDiscoveryAsync(CancellationToken cancellationToken)
+   private async Task<QqqApiDiscovery> FetchDiscoveryAsync(bool keepSession, CancellationToken cancellationToken)
    {
       _diagnostics.Info($"Discovering QQQ at {Origin.Authority}: requesting /qqq/v1/version.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/version"), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken).ConfigureAwait(false);
-      RequireSuccess(response);
+      RequireSuccess(response, keepSession);
       QqqApiDiscovery discovery = Parse<QqqApiDiscovery>(response);
       _diagnostics.Info("Discovery received: " + discovery.Describe());
       _diagnostics.Debug(() => $"Discovery features: [{string.Join(", ", discovery.Features ?? [])}]; client channels: [{string.Join(", ", discovery.ClientChannels ?? [])}].");
@@ -434,7 +435,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       await DiscoverCoreAsync(cancellationToken).ConfigureAwait(false);
       if(_authentication is not null)
       { return _authentication; }
-      QqqAuthenticationMetadata metadata = await FetchAuthenticationAsync(cancellationToken).ConfigureAwait(false);
+      QqqAuthenticationMetadata metadata = await FetchAuthenticationAsync(keepSession: false, cancellationToken).ConfigureAwait(false);
       if(!string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal) && !string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
       {
          _diagnostics.Info($"Authentication type '{metadata.Type}' is not supported; only TABLE_BASED and OAUTH2 are.");
@@ -451,14 +452,15 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// <summary>
    /// Requests the authentication metadata and parses it without judging or caching it, for the same reason discovery is
    /// fetched separately: the sign-in path throws on an unsupported server, and the compatibility check reports it.
-   /// Callers hold the client gate and have already discovered the server.
+   /// The request carries no credential, and the compatibility check asks for a held session to be kept whatever the
+   /// server answers. Callers hold the client gate and have already discovered the server.
    /// </summary>
-   private async Task<QqqAuthenticationMetadata> FetchAuthenticationAsync(CancellationToken cancellationToken)
+   private async Task<QqqAuthenticationMetadata> FetchAuthenticationAsync(bool keepSession, CancellationToken cancellationToken)
    {
       _diagnostics.Info("Requesting authentication metadata from /qqq/v1/metaData/authentication.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/metaData/authentication"), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken).ConfigureAwait(false);
-      RequireSuccess(response);
+      RequireSuccess(response, keepSession);
       QqqAuthenticationMetadata metadata = Parse<QqqAuthenticationMetadata>(response);
       QqqAuthenticationMetadata.NativeGrant? grant = metadata.Values?.NativeSessionLogin;
       _diagnostics.Info($"Authentication metadata: type {(string.IsNullOrEmpty(metadata.Type) ? "(missing)" : metadata.Type)}, provider '{metadata.Name}', native browser sign-in {(grant is null ? "not offered" : "offered")}.");
@@ -786,14 +788,21 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
    /// <summary>
    /// Maps 401 to a cleared session and sign-in required, and 403 to permission denied. They are kept apart because a
-   /// withdrawn session can be repaired by signing in, whereas a denied permission cannot.
+   /// withdrawn session can be repaired by signing in, whereas a denied permission cannot. The compatibility check asks
+   /// for the session to be kept: its requests carry no credential, so a 401 to one of them says nothing about a session
+   /// the client holds, and a check the operator runs to look at a server must not sign the service out.
    /// </summary>
-   private void CheckAuthorization(HttpResponseMessage response)
+   private void CheckAuthorization(HttpResponseMessage response, bool keepSession = false)
    {
       if(response.StatusCode == HttpStatusCode.Unauthorized)
       {
-         _diagnostics.Info("The server answered 401 Unauthorized: the session is no longer accepted. Local session cleared; sign-in is required.");
-         ClearSession();
+         if(keepSession)
+         { _diagnostics.Info("The server answered 401 Unauthorized to a request that carried no credential; a held session is not affected."); }
+         else
+         {
+            _diagnostics.Info("The server answered 401 Unauthorized: the session is no longer accepted. Local session cleared; sign-in is required.");
+            ClearSession();
+         }
          throw AuthenticationRequired();
       }
       if(response.StatusCode == HttpStatusCode.Forbidden)
@@ -806,9 +815,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
    /// <summary>Applies the authorization mapping first, then treats any other non-success status as a refused request with a generic message.</summary>
-   private void RequireSuccess(HttpResponseMessage response)
+   private void RequireSuccess(HttpResponseMessage response, bool keepSession = false)
    {
-      CheckAuthorization(response);
+      CheckAuthorization(response, keepSession);
       if(!response.IsSuccessStatusCode)
       {
          _diagnostics.Info($"The server answered {(int)response.StatusCode} {response.ReasonPhrase}; the request did not succeed.");

@@ -8,7 +8,8 @@ namespace Qqq.PrintAgent.Core.Authentication;
 /// <summary>
 /// Compatibility part of the session client: the same public discovery and authentication requests every sign-in begins
 /// with, reported as a typed result instead of a thrown failure, so the connection wizard can tell the operator which
-/// step failed and why. Nothing here sends a credential.
+/// step failed and why. Nothing here sends a credential, and nothing here ends a session the client holds, whatever
+/// the server answers.
 /// </summary>
 public sealed partial class QqqSessionClient
 {
@@ -33,7 +34,7 @@ public sealed partial class QqqSessionClient
          Volatile.Write(ref _certificateRejection, null);
          QqqApiDiscovery discovery;
          try
-         { discovery = await FetchDiscoveryAsync(cancellationToken).ConfigureAwait(false); }
+         { discovery = await FetchDiscoveryAsync(keepSession: true, cancellationToken).ConfigureAwait(false); }
          catch(Exception exception) when(!cancellationToken.IsCancellationRequested
             && QqqServerCompatibility.FromFailure(exception, QqqCompatibilityIssue.NotQqqServer, "discovery", Volatile.Read(ref _certificateRejection)) is { } unreadable)
          {
@@ -62,7 +63,7 @@ public sealed partial class QqqSessionClient
    {
       QqqAuthenticationMetadata metadata;
       try
-      { metadata = await FetchAuthenticationAsync(cancellationToken).ConfigureAwait(false); }
+      { metadata = await FetchAuthenticationAsync(keepSession: true, cancellationToken).ConfigureAwait(false); }
       catch(Exception exception) when(!cancellationToken.IsCancellationRequested
          && QqqServerCompatibility.FromFailure(exception, QqqCompatibilityIssue.SignInUnavailable, "sign-in description", Volatile.Read(ref _certificateRejection)) is { } unreadable)
       { return (QqqSignInMethods.None, unreadable); }
