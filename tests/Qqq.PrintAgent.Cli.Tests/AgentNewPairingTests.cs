@@ -252,8 +252,8 @@ public sealed class AgentNewPairingTests
    /// <summary>
    /// Once the server has bound the new device, the live session no longer matches what this computer has stored or holds in
    /// memory. If the bound identity then turns out to belong to another user, the session cannot be exported, or the pairing
-   /// cannot be written, nothing has been saved: printing is blocked instead of running on the mismatch, the log says so, and an
-   /// ordinary sign-in binds the old device again and restores the old pairing.
+   /// cannot be written, nothing has been saved and nothing is left staged: printing is blocked instead of running on the
+   /// mismatch, the log says so, and an ordinary sign-in binds the old device again and restores the old pairing.
    /// </summary>
    [Theory]
    [InlineData("identity")]
@@ -282,6 +282,7 @@ public sealed class AgentNewPairingTests
       Assert.IsAssignableFrom(failingStep is "pairing-file" ? typeof(UnauthorizedAccessException) : typeof(IOException), thrown);
       Assert.Equal(original, File.ReadAllBytes(path));
       Assert.Equal(session, File.ReadAllBytes(authPath));
+      Assert.False(File.Exists(StagedSession(fixture)));
       AgentSnapshot failed = runtime.GetSnapshot();
       Assert.False(failed.Authentication!.Authorized);
       Assert.Contains("Sign in again", failed.Authentication.Message, StringComparison.Ordinal);
@@ -297,39 +298,56 @@ public sealed class AgentNewPairingTests
 
 
    /// <summary>
-   /// If the new pairing is saved and its session then cannot be written, the two files disagree and an ordinary sign-in is
-   /// refused. Printing is blocked, the status and the log name the recovery that works instead of a sign-in, and enrolling
-   /// again with a fresh code completes.
+   /// The pairing and its session are two files. If the new pairing is written and the session then cannot be moved into
+   /// place, the session waits beside it under a staged name and printing is blocked. The recovery the operator is told about
+   /// works both ways: an ordinary sign-in, or a restarted service, moves the staged session into place and finishes the switch.
    /// </summary>
-   [Fact]
-   public async Task FailureBetweenSavingThePairingAndItsSessionBlocksPrintingUntilEnrolledAgain()
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public async Task InterruptedSaveIsFinishedBySignInOrRestart(bool restart)
    {
       using SessionFixture fixture = new();
       fixture.SaveSession();
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       byte[] original = File.ReadAllBytes(path);
-      string blocker = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi.tmp");
-      using AgentRuntime runtime = fixture.Runtime();
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
-      Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
-      // SaveAuthentication writes this temporary name first; a directory in its place makes that write fail.
-      _ = Directory.CreateDirectory(blocker);
-      _ = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
-      Assert.NotEqual(original, File.ReadAllBytes(path));
-      AgentSnapshot failed = runtime.GetSnapshot();
-      Assert.False(failed.Authentication!.Authorized);
-      Assert.Contains("Enroll this computer again", failed.Authentication.Message, StringComparison.Ordinal);
-      Assert.DoesNotContain("Sign in again", failed.Authentication.Message, StringComparison.Ordinal);
-      Assert.DoesNotContain(failed.Logs, entry => entry.Message.Contains("Sign in again", StringComparison.Ordinal));
-      Assert.Contains(failed.Logs, entry => entry.Message.Contains("after the new pairing was saved but before its session was", StringComparison.Ordinal));
-      Directory.Delete(blocker);
-      _ = await Assert.ThrowsAsync<QqqSessionException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token));
-      Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
-      _ = await runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-second-code"), timeout.Token);
-      AgentSnapshot recovered = runtime.GetSnapshot();
-      Assert.True(recovered.Authentication!.Authorized);
-      Assert.Equal("replacement-device", recovered.DeviceId);
+      AgentRuntime runtime = fixture.Runtime();
+      try
+      {
+         _ = await runtime.PollControlsOnceAsync(timeout.Token);
+         Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
+         // An open handle that does not share deletion keeps the session file from being replaced, as a scanner or backup might.
+         using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+         {
+            Exception thrown = await Assert.ThrowsAnyAsync<Exception>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
+            Assert.True(thrown is IOException or UnauthorizedAccessException, thrown.GetType().FullName);
+         }
+         Assert.NotEqual(original, File.ReadAllBytes(path));
+         Assert.True(File.Exists(StagedSession(fixture)));
+         AgentSnapshot failed = runtime.GetSnapshot();
+         Assert.False(failed.Authentication!.Authorized);
+         Assert.Contains(failed.Logs, entry => entry.Message.Contains("after the new pairing and its session were saved", StringComparison.Ordinal));
+         if(restart)
+         {
+            runtime.Dispose();
+            runtime = fixture.Runtime();
+            _ = await runtime.PollControlsOnceAsync(timeout.Token);
+         }
+         else
+         {
+            _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token);
+         }
+         AgentSnapshot recovered = runtime.GetSnapshot();
+         Assert.True(recovered.Authentication!.Authorized);
+         Assert.Equal("replacement-device", recovered.DeviceId);
+         Assert.False(File.Exists(StagedSession(fixture)));
+      }
+      finally
+      {
+         runtime.Dispose();
+      }
    }
 
 
@@ -354,6 +372,7 @@ public sealed class AgentNewPairingTests
          AgentSnapshot failed = runtime.GetSnapshot();
          Assert.False(failed.Authentication!.Authorized);
          Assert.Contains(failed.Logs, entry => entry.Message.Contains("after the new pairing and its session were saved", StringComparison.Ordinal));
+         Assert.False(File.Exists(StagedSession(fixture)));
       }
       fixture.Session.ExportsBeforeFailure = null;
       using AgentRuntime restarted = fixture.Runtime();
@@ -362,6 +381,60 @@ public sealed class AgentNewPairingTests
       Assert.True(recovered.Authentication!.Authorized);
       Assert.Equal("replacement-device", recovered.DeviceId);
    }
+
+
+
+   /// <summary>
+   /// A staged session that does not belong to the stored pairing is what a crash leaves when the session was staged and the
+   /// pairing was never replaced. The next read discards it and returns the session that was already stored, unchanged.
+   /// </summary>
+   [Fact]
+   public void StagedSessionForAnotherDeviceIsDiscardedOnRead()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
+      byte[] stored = File.ReadAllBytes(authPath);
+      QqqSessionBinding other = fixture.Session.Binding with { DeviceId = "interrupted-device" };
+      using(AgentStore staging = new(fixture.Local.DirectoryPath))
+      {
+         staging.StagePairing(new AgentConfiguration("https://synthetic.invalid", "interrupted-device", "synthetic-interrupted"), new AgentAuthentication(other, fixture.Session.ExportCredential()));
+         staging.SaveConfiguration(new AgentConfiguration("https://synthetic.invalid", "device", "synthetic-token"));
+      }
+      Assert.True(File.Exists(StagedSession(fixture)));
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      AgentAuthentication? loaded = store.LoadAuthentication();
+      Assert.Equal("device", loaded!.Binding.DeviceId);
+      Assert.Equal(stored, File.ReadAllBytes(authPath));
+      Assert.False(File.Exists(StagedSession(fixture)));
+   }
+
+
+
+   /// <summary>
+   /// An unreadable staged session is discarded rather than trusted, and saving a session normally removes a staged one,
+   /// because what is saved is newer than what was staged.
+   /// </summary>
+   [Fact]
+   public void UnreadableOrSupersededStagedSessionIsRemoved()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      File.WriteAllBytes(StagedSession(fixture), [2, 4, 6]);
+      using(AgentStore store = new(fixture.Local.DirectoryPath))
+      {
+         Assert.Equal("device", store.LoadAuthentication()!.Binding.DeviceId);
+         Assert.False(File.Exists(StagedSession(fixture)));
+         File.WriteAllBytes(StagedSession(fixture), [2, 4, 6]);
+         store.SaveAuthentication(new AgentAuthentication(fixture.Session.Binding, fixture.Session.ExportCredential()));
+      }
+      Assert.False(File.Exists(StagedSession(fixture)));
+   }
+
+
+
+   /// <summary>Where the store keeps a session that belongs to a pairing change in progress.</summary>
+   private static string StagedSession(SessionFixture fixture) => Path.Combine(fixture.Local.DirectoryPath, "qqq-session.staged.dpapi");
 
 
 

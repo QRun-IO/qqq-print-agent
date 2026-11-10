@@ -24,11 +24,8 @@ public sealed partial class AgentRuntime
       /// <summary>The server bound the new device to the live session; the stored pairing and session still describe the old one.</summary>
       DeviceBound,
 
-      /// <summary>The new pairing is stored; the stored session still describes the old identity.</summary>
-      PairingSaved,
-
-      /// <summary>The new pairing and the matching session are both stored; the session is not active yet.</summary>
-      SessionSaved,
+      /// <summary>The new pairing is stored with its session staged beside it, which any later reader moves into place; the session is not active yet.</summary>
+      Saved,
 
       /// <summary>The new pairing and session are stored and the session is active.</summary>
       Activated,
@@ -68,16 +65,16 @@ public sealed partial class AgentRuntime
          RequireSameIdentity(expected, actual);
          ////////////////////////////////////////////////////////////////////
          // the stored pairing and session are replaced only after the     //
-         // server bound the device and the identity matched, so a failure //
-         // before this point leaves both files untouched                  //
+         // server bound the device and the identity matched, and as one   //
+         // staged step: a failure leaves either both files as they were,  //
+         // or the new pairing with a session any later reader completes   //
          ////////////////////////////////////////////////////////////////////
          WriteLog("INFO", "Step 4 of 4: saving the pairing to protected storage and activating the session for printing.");
          AgentAuthentication authentication = new(actual, session.ExportCredential());
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
-         store.SaveConfiguration(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds));
-         progress = EnrollmentProgress.PairingSaved;
-         store.SaveAuthentication(authentication);
-         progress = EnrollmentProgress.SessionSaved;
+         store.StagePairing(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds), authentication);
+         progress = EnrollmentProgress.Saved;
+         store.CompleteStagedPairing();
          ResetConnectionState();
          ActivateSession(session, actual, store);
          progress = EnrollmentProgress.Activated;
@@ -103,22 +100,19 @@ public sealed partial class AgentRuntime
    /// Stops the live session being used once the server has bound it to the new device while this computer has not finished
    /// switching to it, then says what the failed enrollment left behind and how to recover. Such a session no longer matches
    /// the stored pairing or the state the runtime holds, so printing waits for the operator instead of running on a mismatch
-   /// until the next renewal finds it. Blocking comes first, so a failure while logging cannot leave the session usable. When
-   /// only the pairing was saved, the stored session still names the old device and an ordinary sign-in would be refused, so
-   /// the status shown to the operator names enrolling again instead.
+   /// until the next renewal finds it. Blocking comes first, so a failure while logging cannot leave the session usable. In
+   /// both blocked states an ordinary sign-in recovers: before the save it binds the old device again, and after it the
+   /// store hands the sign-in the session that belongs to the new pairing.
    /// </summary>
    private void ReportEnrollmentFailure(EnrollmentProgress progress, Exception exception)
    {
-      if(progress is EnrollmentProgress.DeviceBound or EnrollmentProgress.SessionSaved)
+      if(progress is EnrollmentProgress.DeviceBound or EnrollmentProgress.Saved)
       { BlockAuthorization(); }
-      else if(progress is EnrollmentProgress.PairingSaved)
-      { BlockAuthorization("Enroll this computer again, or sign in choosing a new pairing; job history is preserved."); }
       WriteFailure(progress switch
       {
          EnrollmentProgress.NothingChanged => "Enrollment failed; the stored pairing and session are unchanged",
          EnrollmentProgress.DeviceBound => "Enrollment failed after the server bound the new device; the stored pairing and session are unchanged, and printing is blocked until you sign in again",
-         EnrollmentProgress.PairingSaved => "Enrollment failed after the new pairing was saved but before its session was; printing is blocked until you enroll again or start a new pairing",
-         EnrollmentProgress.SessionSaved => "Enrollment failed after the new pairing and its session were saved; printing is blocked until you sign in again or the service restarts, either of which finishes activating it",
+         EnrollmentProgress.Saved => "Enrollment failed after the new pairing and its session were saved; printing is blocked until you sign in again or the service restarts, either of which finishes activating it",
          _ => "Enrollment completed, but a later step failed",
       }, exception);
    }
