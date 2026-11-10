@@ -13,7 +13,9 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>
 /// A hand-written fake WebSocket for the realtime channel: the test plays the server by queueing the frames the channel
 /// will receive (whole messages, fragments, binary frames, a close) and reads back every frame the channel sent. Nothing
-/// touches the network, so each malformed shape can be delivered exactly.
+/// touches the network, so each malformed shape can be delivered exactly. Where the channel depends on what a socket
+/// does when it ends, the fake does what the platform socket does: aborting or disposing it faults a receive that is
+/// waiting, and nothing can be received or sent on it afterwards.
 /// </summary>
 internal sealed class ScriptedWebSocket : WebSocket
 {
@@ -103,11 +105,16 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
-   /// <inheritdoc/>
+   /// <summary>
+   /// Counts the abort and, as the platform socket does, moves an unfinished socket to the aborted state and ends a
+   /// receive that is waiting with a cancellation named "Aborted". A socket that was already closed stays closed.
+   /// </summary>
    public override void Abort()
    {
       Interlocked.Increment(ref _aborts);
-      _state = WebSocketState.Aborted;
+      if(_state is not (WebSocketState.Closed or WebSocketState.Aborted))
+      { _state = WebSocketState.Aborted; }
+      _incoming.Writer.TryComplete(new OperationCanceledException(nameof(WebSocketState.Aborted)));
    }
 
 
@@ -134,20 +141,30 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
-   /// <summary>Marks the socket disposed and closed.</summary>
+   /// <summary>
+   /// Marks the socket disposed and, unless it was aborted first, closed. A receive that is waiting ends as it does on
+   /// the platform socket when the connection goes away underneath it: closed before the close handshake finished.
+   /// </summary>
    public override void Dispose()
    {
       Volatile.Write(ref _disposed, true);
-      _state = WebSocketState.Closed;
+      if(_state != WebSocketState.Aborted)
+      { _state = WebSocketState.Closed; }
+      _incoming.Writer.TryComplete(new WebSocketException(WebSocketError.ConnectionClosedPrematurely));
    }
 
 
 
-   /// <summary>Hands the channel the next queued frame, waiting until the test queues one or the channel cancels.</summary>
+   /// <summary>
+   /// Hands the channel the next queued frame, waiting until the test queues one, the channel cancels, or the socket is
+   /// aborted or disposed. A socket that has ended hands out nothing, not even frames queued before it ended.
+   /// </summary>
    public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
    {
+      ThrowIfEnded();
       if(!await _incoming.Reader.WaitToReadAsync(cancellationToken))
       { throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely); }
+      ThrowIfEnded();
       Assert.True(_incoming.Reader.TryRead(out (byte[] Bytes, WebSocketMessageType Type, bool End) frame));
       (byte[] bytes, WebSocketMessageType type, bool end) = frame;
       Assert.True(bytes.Length <= buffer.Count, "A scripted frame must fit the channel's receive buffer; deliver a large message as fragments.");
@@ -157,13 +174,31 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
-   /// <summary>Runs the test's hook, then records the frame the channel sent.</summary>
+   /// <summary>
+   /// Runs the test's hook, then records the frame the channel sent. A socket that has ended, before the send or while
+   /// the hook held it, accepts nothing: the send fails as it does on the platform socket.
+   /// </summary>
    public override async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
    {
+      ThrowIfEnded();
       if(Sending is not null)
       { await Sending(cancellationToken); }
+      ThrowIfEnded();
       Assert.Equal(WebSocketMessageType.Text, messageType);
       Assert.True(endOfMessage);
       Assert.True(_sent.Writer.TryWrite(Encoding.UTF8.GetString(buffer)));
+   }
+
+
+
+   /// <summary>
+   /// Refuses an operation on a socket that is no longer open, the way the platform's client socket does: one that was
+   /// aborted or disposed reports that it is disposed, and one that has sent its close reports an invalid state.
+   /// </summary>
+   private void ThrowIfEnded()
+   {
+      ObjectDisposedException.ThrowIf(Disposed || Aborts > 0, this);
+      if(_state != WebSocketState.Open)
+      { throw new WebSocketException(WebSocketError.InvalidState, $"The WebSocket is in an invalid state ('{_state}') for this operation."); }
    }
 }
