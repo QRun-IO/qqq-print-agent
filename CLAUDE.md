@@ -12,7 +12,7 @@ Policy lives in [AGENTS.md](AGENTS.md) (repository rules: hosting split, authori
 
 ## Commands
 
-**Host note first.** On the maintainer's development PC, Windows Defender's heuristics quarantine the compiled `Qqq.PrintAgent.Core.Tests` assembly. Since 2026-11-10 the owner excludes the development folder from scanning, so `Core.Tests` and `build/Verify.ps1` run locally inside it. A checkout outside that folder is still quarantined: there, build `Qqq.PrintAgent.NativeCI.slnx` (the full solution minus `Core.Tests`) and take Core evidence from hosted CI. Changing Defender settings is the owner's decision; if a `Core.Tests` build is quarantined again, stop and ask rather than adding an exclusion or restoring the file.
+**Host note first.** On some machines Windows Defender's heuristics quarantine the compiled `Qqq.PrintAgent.Core.Tests` assembly. Where the owner has said `Core.Tests` may be built, `build/Verify.ps1` runs in full. Anywhere else, build `Qqq.PrintAgent.NativeCI.slnx` (the full solution minus `Core.Tests`) and take Core evidence from CI. How a machine's protection is configured is the owner's decision and is not recorded in this repository: if a `Core.Tests` build is quarantined, stop and ask rather than adding an exclusion or restoring the file.
 
 Quick local loop without `Core.Tests` (locked restore, Release x64 build with `-warnaserror`, Windows/CLI tests), always with `-p:Platform=x64` because the solution maps test projects to AnyCPU and a direct `dotnet test` without it picks stale output. Never pass `--no-build` to `dotnet test`: the solution build writes the test DLL to the AnyCPU folder, so an x64 `--no-build` run executes whatever old x64 DLL is lying around and reports a pass against stale code.
 
