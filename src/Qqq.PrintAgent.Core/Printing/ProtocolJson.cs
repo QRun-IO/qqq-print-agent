@@ -17,10 +17,21 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// </summary>
 internal static class ProtocolJson
 {
-   /// <summary>The nesting the JSON reader accepts by default. Claim and queued-job responses are bounded by it and nothing tighter, because a submitter's options may nest as deep as the reader allows.</summary>
+   /// <summary>
+   /// The nesting a claimed job may have, counted from the response that carries it: the depth the JSON reader accepts
+   /// by default, and nothing tighter, because a submitter's options may nest as deep as a reader allows.
+   /// </summary>
    internal const int ReaderDepth = 64;
 
+   /// <summary>
+   /// The nesting a claim or queued-job response is parsed to. It is far past <see cref="ReaderDepth"/> on purpose: a
+   /// job nested too deep to read must still be parsed far enough to learn which job it is, or it could not be
+   /// answered for and the server would offer it forever. The response is already limited to 2 MiB.
+   /// </summary>
+   internal const int ParseDepth = 512;
+
    private static readonly byte[] ByteOrderMark = [0xEF, 0xBB, 0xBF];
+   private static readonly JsonSerializerOptions DeepOptions = new(PrintApiClient.JsonOptions) { MaxDepth = ParseDepth };
 
 
 
@@ -116,11 +127,32 @@ internal static class ProtocolJson
 
 
 
-   /// <summary>Converts a JSON object into a contract type, reporting a member of the wrong JSON type as a protocol violation.</summary>
-   internal static T Read<T>(JsonElement value, string subject)
+   /// <summary>
+   /// True when the value nests containers more than the given number of levels deep, itself included: an empty object
+   /// is one level. The walk stops at the first branch that is too deep.
+   /// </summary>
+   internal static bool NestsDeeperThan(JsonElement value, int levels)
+   {
+      if(value.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
+      { return false; }
+      if(levels == 0)
+      { return true; }
+      return value.ValueKind == JsonValueKind.Object
+         ? value.EnumerateObject().Any(property => NestsDeeperThan(property.Value, levels - 1))
+         : value.EnumerateArray().Any(child => NestsDeeperThan(child, levels - 1));
+   }
+
+
+
+   /// <summary>
+   /// Converts a JSON object into a contract type, reporting a member of the wrong JSON type as a protocol violation.
+   /// The serializer reads to its default depth unless the caller asks for the whole parsed depth, which only a value
+   /// that is displayed and never acted on should: fields the type does not have are skipped, however deep they go.
+   /// </summary>
+   internal static T Read<T>(JsonElement value, string subject, bool toParseDepth = false)
    {
       try
-      { return value.Deserialize<T>(PrintApiClient.JsonOptions)!; }
+      { return value.Deserialize<T>(toParseDepth ? DeepOptions : PrintApiClient.JsonOptions)!; }
       catch(JsonException)
       { throw new PrintingProtocolException($"The {subject} does not have the expected fields."); }
    }

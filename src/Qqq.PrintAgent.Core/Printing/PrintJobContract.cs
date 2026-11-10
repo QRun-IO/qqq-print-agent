@@ -12,7 +12,9 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// with a missing member or an identifier that is unsafe to put in a route, a file name or a log line. Whether a
 /// well-formed job may print (format supported, size and copies within policy, media still current) stays with the
 /// worker, which reports those as FAILED; this is only about shape. Fields the agent does not read are ignored
-/// wherever they appear, as the contract requires, because the server relays a submitter's options unchanged.
+/// wherever they appear, as the contract requires, because the server relays a submitter's options unchanged. For
+/// the same reason a response is parsed much deeper than a job may nest: whoever submits a job chooses how deep its
+/// options go, and a job that could not even be identified could not be refused.
 /// </summary>
 internal static class PrintJobContract
 {
@@ -41,11 +43,13 @@ internal static class PrintJobContract
    /// Reads a claim response: null when the server has no job for this device, otherwise the validated job. A response
    /// that is not a JSON object, or a job that breaks the contract, throws. Whenever the job still names itself with one
    /// usable identifier the failure carries a stand-in for it, so the worker can answer for the job instead of being
-   /// offered it again forever; only a response that names no job the agent can answer for throws without one.
+   /// offered it again forever; only a response that names no job the agent can answer for throws without one. A job
+   /// nested deeper than <see cref="ProtocolJson.ReaderDepth"/> is such an identified failure; a response nested
+   /// deeper than <see cref="ProtocolJson.ParseDepth"/> is not JSON to the parser and names nothing.
    /// </summary>
    internal static PrintJob? ReadClaim(ReadOnlyMemory<byte> body)
    {
-      using JsonDocument document = ProtocolJson.ParseObject(ProtocolJson.WithoutByteOrderMark(body), "claim response", ProtocolJson.ReaderDepth);
+      using JsonDocument document = ProtocolJson.ParseObject(ProtocolJson.WithoutByteOrderMark(body), "claim response", ProtocolJson.ParseDepth);
       JsonElement[] offered = ProtocolJson.Members(document.RootElement, "job");
       if(offered.Length > 1)
       { throw new PrintingProtocolException("The claim response names more than one job."); }
@@ -60,6 +64,8 @@ internal static class PrintJobContract
       // them, so every refusal below can name the job it is about           //
       /////////////////////////////////////////////////////////////////////////
       PrintJob? named = StandIn(Text(element, "jobId"), Text(element, "printerId"), Text(element, "title"), Text(element, "format"), Text(element, "createdAt"));
+      if(ProtocolJson.NestsDeeperThan(element, ProtocolJson.ReaderDepth - 1))
+      { throw Violation("The claimed job is nested deeper than the agent reads.", named); }
       if(RepeatsReadMember(element))
       { throw Violation("The claimed job repeats a member the agent reads.", named); }
       PrintJob job;
@@ -78,12 +84,13 @@ internal static class PrintJobContract
    /// Reads the list of jobs the server is holding for this device. They are shown, never printed from here, so only
    /// what the display relies on is required of each: a usable job and printer identifier, each given once. Everything
    /// else that is missing becomes empty text, and a repeated display member is tolerated because nothing is decided
-   /// from it; the job is judged in full when it is claimed. A response without a list means none; more than the
-   /// contract's limit is refused.
+   /// from it; the job is judged in full when it is claimed. For the same reason an entry may nest as deep as the
+   /// response is parsed: a job that will be refused for its depth when it is claimed is still shown until then. A
+   /// response without a list means none; more than the contract's limit is refused.
    /// </summary>
    internal static IReadOnlyList<PrintJob> ReadQueued(ReadOnlyMemory<byte> body)
    {
-      using JsonDocument document = ProtocolJson.ParseObject(ProtocolJson.WithoutByteOrderMark(body), "queued jobs response", ProtocolJson.ReaderDepth);
+      using JsonDocument document = ProtocolJson.ParseObject(ProtocolJson.WithoutByteOrderMark(body), "queued jobs response", ProtocolJson.ParseDepth);
       JsonElement[] lists = ProtocolJson.Members(document.RootElement, "jobs");
       if(lists.Length > 1)
       { throw new PrintingProtocolException("The queued jobs response holds more than one list."); }
@@ -96,7 +103,7 @@ internal static class PrintJobContract
       {
          if(element.ValueKind != JsonValueKind.Object)
          { throw new PrintingProtocolException("A queued job is not a JSON object."); }
-         PrintJob job = ProtocolJson.Read<PrintJob>(element, "queued job");
+         PrintJob job = ProtocolJson.Read<PrintJob>(element, "queued job", toParseDepth: true);
          if(!PrintApiClient.ValidControlId(job.JobId) || !PrintApiClient.ValidControlId(job.PrinterId) || ProtocolJson.RepeatsMember(element, Identifiers))
          { throw new PrintingProtocolException("A queued job has no usable job or printer identifier."); }
          jobs.Add(Normalize(job) with { Title = job.Title ?? "", Format = job.Format ?? "", ContentSha256 = job.ContentSha256 ?? "", Options = job.Options ?? new PrintOptions() });

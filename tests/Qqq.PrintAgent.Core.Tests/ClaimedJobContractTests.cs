@@ -244,7 +244,13 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>A claim response that is not the expected JSON object at all (a web page, an array, a job that is not an object, nesting beyond what the JSON reader accepts, two job members) is the same protocol violation, with no job to report against.</summary>
+   /// <summary>
+   /// A claim response that is not the expected JSON object at all (a web page, an array, a job that is not an object,
+   /// two job members) is the same protocol violation, with no job to report against. The last row is the one case
+   /// left in which a job a submitter can cause is not answered for: a response nested past the 512 levels it is parsed
+   /// to is not JSON to the parser, so it names no job, the lane stops, and the server offers the job again until it
+   /// is cancelled there. Options that deep do not fit in the 2,000 characters the server allows a submitter.
+   /// </summary>
    [Theory]
    [InlineData("<html>sign in</html>", "The claim response is not valid JSON.")]
    [InlineData("", "The claim response is not valid JSON.")]
@@ -254,11 +260,11 @@ public sealed class ClaimedJobContractTests
    [InlineData("""{"job":[]}""", "The claimed job is not a JSON object.")]
    [InlineData("""{"job":null,"job":null}""", "The claim response names more than one job.")]
    [InlineData("""{"Job":null,"JOB":null}""", "The claim response names more than one job.")]
-   [InlineData("nested-65", "The claim response is not valid JSON.")]
+   [InlineData("nested-513", "The claim response is not valid JSON.")]
    public async Task MalformedClaimResponseIsAProtocolViolation(string body, string message)
    {
-      if(string.Equals(body, "nested-65", StringComparison.Ordinal))
-      { body = ClaimWithNestedOption(65); }
+      if(string.Equals(body, "nested-513", StringComparison.Ordinal))
+      { body = ClaimWithNestedOption(513); }
       using var server = new FakePrintServer();
       server.OfferRaw(body);
       using PrintApiClient api = Api(server);
@@ -273,7 +279,8 @@ public sealed class ClaimedJobContractTests
    /// The contract tells consumers to ignore fields they do not know, and the server relays a submitter's options
    /// unchanged, so a job is accepted whatever else it carries: unknown members beside the job, in the job and in its
    /// options, unknown names that repeat or differ only in case, and an unknown option nested as deep as the JSON
-   /// reader itself accepts (64 levels counted from the response). None of it reaches the job the worker sees.
+   /// reader itself accepts (64 levels counted from the response). None of it reaches the job the worker sees. One
+   /// level deeper the job is refused, in the test after this one.
    /// </summary>
    [Theory]
    [InlineData("""{"serverTime":"2026-01-01T00:00:00Z","job":JOB}""")]
@@ -289,6 +296,71 @@ public sealed class ClaimedJobContractTests
       server.OfferRaw(body);
       using PrintApiClient api = Api(server);
       Assert.Equal(new PrintJob("job-1", "printer1", "Synthetic", "ZPL", Hash, 3, new PrintOptions(), "2026-01-01T00:00:00Z", "CLAIMED"), await api.ClaimAsync(CancellationToken.None));
+   }
+
+
+
+   /// <summary>
+   /// A job nested one level deeper than the agent reads (65 levels counted from the response), or anywhere up to the
+   /// 512 levels the response is parsed to, is refused, and it is still identified: the response is parsed far enough
+   /// to learn which job it is, so the worker can answer for it. A submitter chooses how deep a job's options nest, so
+   /// without this one request could make the server offer a job the agent never answers.
+   /// </summary>
+   [Theory]
+   [InlineData(65)]
+   [InlineData(66)]
+   [InlineData(512)]
+   public async Task JobNestedDeeperThanTheAgentReadsIsRefusedAndStillIdentified(int depth)
+   {
+      using var server = new FakePrintServer();
+      server.OfferRaw(ClaimWithNestedOption(depth));
+      using PrintApiClient api = Api(server);
+      PrintingProtocolException violation = await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None));
+      Assert.Equal("The claimed job is nested deeper than the agent reads.", violation.Message);
+      PrintJob refused = Assert.IsType<PrintJob>(violation.RejectedJob);
+      Assert.Equal("job-1", refused.JobId);
+      Assert.Equal("printer1", refused.PrinterId);
+      Assert.Equal("Synthetic", refused.Title);
+      Assert.Equal(new PrintOptions(), refused.Options);
+   }
+
+
+
+   /// <summary>
+   /// What the worker does at each side of the depth it parses to. A job nested deeper than it reads is refused exactly
+   /// once (received, then FAILED with nothing submitted, never downloaded or printed) and the lane goes on to the job
+   /// behind it. Only a response nested past the 512 levels it is parsed to cannot be answered for: the violation
+   /// reaches the caller, nothing is recorded or reported, and the lane stops.
+   /// </summary>
+   [Fact]
+   public async Task OverDeepJobIsRefusedOnceAndOnlyAnUnparseableResponseStopsTheLane()
+   {
+      byte[] document = [1, 2, 3];
+      using var server = new FakePrintServer();
+      server.OfferRaw(ClaimWithNestedOption(65)).Offer(FakePrintServer.Job(document, "job-2"), document).OfferRaw(ClaimWithNestedOption(513).Replace("job-1", "job-3", StringComparison.Ordinal));
+      using PrintApiClient api = Api(server);
+      var journal = new RecordingJournal();
+      var printer = new FakePrinterBackend();
+      var worker = new PrintWorker(api, printer, journal, options: new PrintWorkerOptions { RecoverIncomplete = false, SynchronizeInventory = false });
+
+      Assert.True(await worker.RunOnceAsync());
+      Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal("The claimed job is nested deeper than the agent reads. No bytes were submitted.", journal.Last("job-1").Message);
+      Assert.Equal(new[] { ("job-1", "RECEIVED"), ("job-1", "FAILED") }, server.Events.Select(entry => (entry.JobId, entry.Event.Status)));
+      Assert.Equal(0, server.Downloads);
+      Assert.Equal(0, printer.Submissions);
+
+      Assert.True(await worker.RunOnceAsync());
+      Assert.Equal("SPOOLED", journal.GetState("job-2"));
+      Assert.Equal(1, printer.Submissions);
+
+      PrintingProtocolException unparseable = await Assert.ThrowsAsync<PrintingProtocolException>(() => worker.RunOnceAsync());
+      Assert.Equal("The claim response is not valid JSON.", unparseable.Message);
+      Assert.Null(unparseable.RejectedJob);
+      Assert.Null(journal.GetState("job-3"));
+      Assert.DoesNotContain(server.Events, entry => string.Equals(entry.JobId, "job-3", StringComparison.Ordinal));
+      Assert.Equal(3, server.Claims);
+      Assert.Equal(1, printer.Submissions);
    }
 
 
@@ -612,31 +684,33 @@ public sealed class ClaimedJobContractTests
 
    /// <summary>
    /// The accepting side of the queued-job list's two limits: exactly 200 jobs are all returned, and an entry whose
-   /// unknown option nests to exactly the 64 levels the JSON reader accepts, counted from the response, is read. One
-   /// more of either is refused in the theory below.
+   /// unknown option nests to exactly the 512 levels the response is parsed to is read. The list is only displayed, so
+   /// a job nested deeper than a claim may be (65 levels) is still shown until it is claimed and refused. One more of
+   /// either limit is refused in the theory below.
    /// </summary>
    [Fact]
    public async Task QueuedListAtItsLimitsIsAccepted()
    {
       using var server = new ScriptedServer();
       server.Add("{\"jobs\":[" + string.Join(",", Enumerable.Range(0, 200).Select(index => $$"""{"jobId":"queued-{{index}}","printerId":"printer1"}""")) + "]}")
-         .Add(QueuedWithNestedOption(64));
+         .Add(QueuedWithNestedOption(65)).Add(QueuedWithNestedOption(512));
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
       IReadOnlyList<PrintJob> full = await api.QueuedJobsAsync(CancellationToken.None);
       Assert.Equal(200, full.Count);
       Assert.Equal("queued-199", full[^1].JobId);
       Assert.Equal("queued-1", Assert.Single(await api.QueuedJobsAsync(CancellationToken.None)).JobId);
+      Assert.Equal("queued-1", Assert.Single(await api.QueuedJobsAsync(CancellationToken.None)).JobId);
    }
 
 
 
-   /// <summary>A queued-job list that breaks the contract (not JSON, nested past what the JSON reader accepts, two lists, not a list, too long, an entry that is not an object, has no usable identifiers or gives one twice, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
+   /// <summary>A queued-job list that breaks the contract (not JSON, nested past the 512 levels it is parsed to, two lists, not a list, too long, an entry that is not an object, has no usable identifiers or gives one twice, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
    [Theory]
    [InlineData("<html></html>", "The queued jobs response is not valid JSON.")]
    [InlineData("[]", "The queued jobs response is not a JSON object.")]
    [InlineData("""{"jobs":{}}""", "The queued jobs response does not hold a list of at most 200 jobs.")]
    [InlineData("too-many", "The queued jobs response does not hold a list of at most 200 jobs.")]
-   [InlineData("nested-65", "The queued jobs response is not valid JSON.")]
+   [InlineData("nested-513", "The queued jobs response is not valid JSON.")]
    [InlineData("""{"jobs":[null]}""", "A queued job is not a JSON object.")]
    [InlineData("""{"jobs":["queued-1"]}""", "A queued job is not a JSON object.")]
    [InlineData("""{"jobs":[{"printerId":"printer1"}]}""", "A queued job has no usable job or printer identifier.")]
@@ -649,8 +723,8 @@ public sealed class ClaimedJobContractTests
    {
       if(string.Equals(body, "too-many", StringComparison.Ordinal))
       { body = "{\"jobs\":[" + string.Join(",", Enumerable.Range(0, 201).Select(index => $$"""{"jobId":"queued-{{index}}","printerId":"printer1"}""")) + "]}"; }
-      if(string.Equals(body, "nested-65", StringComparison.Ordinal))
-      { body = QueuedWithNestedOption(65); }
+      if(string.Equals(body, "nested-513", StringComparison.Ordinal))
+      { body = QueuedWithNestedOption(513); }
       using var server = new ScriptedServer();
       server.Add(body).Add("{}", HttpStatusCode.InternalServerError);
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server);

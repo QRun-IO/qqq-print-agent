@@ -48,19 +48,26 @@ isolated child with a configurable deadline, retaining uncertain outcomes.
 
 A claimed job is checked against the contract before anything else handles it.
 Fields the client does not read are ignored wherever they appear, to the nesting
-depth the JSON reader accepts (64 levels), because the contract tells consumers
-to ignore unknown fields and the server relays a submitter's options unchanged.
+depth the JSON reader accepts (64 levels, counted from the claim response),
+because the contract tells consumers to ignore unknown fields and the server
+relays a submitter's options unchanged. The response itself is parsed to 512
+levels, so that a job nested too deep to read can still be identified.
 
 - **Malformed job.** A job that breaks the contract (a missing or unusable
-  member, or a member the client reads given twice, in any letter case) but
-  still names itself with one usable job identifier is refused, not skipped. The
-  worker records RECEIVED and then FAILED with the reason and "No bytes were
-  submitted", delivers both events, never downloads or submits the document, and
-  the lane goes on to the next job. A claim response that names no single job
-  (not JSON, no usable identifier, the identifier given twice) cannot be
-  answered for: the lane stops with an error, and the next wake-up claims
-  again. A malformed replay of a job the journal already knows, in any state,
-  changes nothing and is logged.
+  member, a member the client reads given twice in any letter case, or nesting
+  deeper than 64 levels) but still names itself with one usable job identifier
+  is refused, not skipped. The worker records RECEIVED and then FAILED with the
+  reason and "No bytes were submitted", delivers both events, never downloads
+  or submits the document, and the lane goes on to the next job. A malformed
+  replay of a job the journal already knows, in any state, changes nothing and
+  is logged.
+- **Claim that cannot be identified.** A claim response that names no single
+  job (not JSON, no usable identifier, the identifier given twice) cannot be
+  answered for: the lane stops with an error, the next wake-up claims again,
+  and the server offers the same job until it is cancelled there. The one such
+  response a submitter could in principle cause is a job nested deeper than the
+  512 levels the response is parsed to; options that deep do not fit in the
+  2,000 characters the server accepts.
 - **Claimed job that is already submitting.** A job the journal holds as
   SUBMITTING, or in a final state, is never processed a second time when the
   server offers it again. For SUBMITTING the worker logs the job and the reason.
