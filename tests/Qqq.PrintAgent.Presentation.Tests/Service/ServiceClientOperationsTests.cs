@@ -176,11 +176,11 @@ public sealed class ServiceClientOperationsTests
    /// Sign-in hands over only the credential and the pairing choice. The service confirms with "Signed in to" and this
    /// edition's server name, and the rest of its sentence becomes a value: printing is enabled, this computer still has to
    /// be enrolled, or some other condition. A reply for another server's name, or an error, is a rejection whose message
-   /// has no error marker. The sentences are the ones the service really sends.
+   /// has no error marker. The sentences are the ones the service really sends, taken from the service's own definition.
    /// </summary>
    [Theory]
-   [InlineData("QQQ", "Signed in to QQQ. Printing is enabled.", SignInReadiness.PrintingEnabled, null)]
-   [InlineData("Forge", "Signed in to Forge. Enroll this computer to enable printing.", SignInReadiness.EnrollmentNeeded, null)]
+   [InlineData("QQQ", "Signed in to QQQ." + SignInSentences.PrintingEnabled, SignInReadiness.PrintingEnabled, null)]
+   [InlineData("Forge", "Signed in to Forge." + SignInSentences.EnrollmentNeeded, SignInReadiness.EnrollmentNeeded, null)]
    [InlineData("QQQ", "Signed in to QQQ. QQQ authorization is required. Sign in again; pairing and history are preserved.", SignInReadiness.NotReady, null)]
    [InlineData("Forge", "Signed in to QQQ. Printing is enabled.", null, "Signed in to QQQ. Printing is enabled.")]
    [InlineData("QQQ", "Error: The session belongs to another user.", null, "The session belongs to another user.")]
@@ -202,6 +202,34 @@ public sealed class ServiceClientOperationsTests
       Assert.Equal(readiness, result.Payload?.Readiness);
       Assert.Equal(readiness is null ? null : reply, result.Payload?.Message);
       Assert.Equal(rejection ?? string.Empty, result.Message);
+   }
+
+
+
+   /// <summary>
+   /// The readiness of a sign-in is read from the sentences the service defines, and the service builds its answer from the
+   /// same definition: "Signed in to" and the server name, followed either by the printing sentence or by what its stored
+   /// status says after "Signed in.". Both ways of building the answer are read back as the right value here, and the wire
+   /// text itself is pinned, so rewording a sentence is a deliberate change to this test and not a silent loss of the
+   /// "enrollment still needed" state.
+   /// </summary>
+   [Fact]
+   public async Task SignInReadiness_IsReadFromTheSentencesTheServiceDefines()
+   {
+      ServiceClient client = Client();
+      QqqSessionCredential credential = new(new Uri("https://print.example.com"), "session-token");
+
+      _reply = "Signed in to QQQ." + SignInSentences.PrintingEnabled;
+      ServiceResult<SignInConfirmation> printing = await client.SignInAsync(credential, claimLegacyDevice: false, startNewPairing: false);
+      _reply = "Signed in to QQQ." + SignInSentences.SignedInEnrollmentNeeded[SignInSentences.SignedIn.Length..];
+      ServiceResult<SignInConfirmation> enrollment = await client.SignInAsync(credential, claimLegacyDevice: false, startNewPairing: false);
+
+      Assert.Equal(SignInReadiness.PrintingEnabled, printing.Payload?.Readiness);
+      Assert.Equal(SignInReadiness.EnrollmentNeeded, enrollment.Payload?.Readiness);
+      Assert.Equal("Signed in.", SignInSentences.SignedIn);
+      Assert.Equal(" Printing is enabled.", SignInSentences.PrintingEnabled);
+      Assert.Equal(" Enroll this computer to enable printing.", SignInSentences.EnrollmentNeeded);
+      Assert.Equal("Signed in. Enroll this computer to enable printing.", SignInSentences.SignedInEnrollmentNeeded);
    }
 
 
@@ -233,10 +261,13 @@ public sealed class ServiceClientOperationsTests
 
    /// <summary>
    /// A sign-out reply that opens like a JSON object is the document that carries the identity provider's token hint, so it
-   /// is never used as text. Without a message, or when it cannot be read, it is an unreadable reply: nothing of it reaches
-   /// the result or the log.
+   /// is never used as text. Without a message, when it cannot be read, or when its provider part is incomplete, it is an
+   /// unreadable reply and not an exception: nothing of it reaches the result or the log, and the log says that an answer
+   /// arrived and could not be read.
    /// </summary>
    [Theory]
+   [InlineData("""{"message":"Signed out.","providerLogout":{"endSessionUri":"https://id.example.com/logout?id_token_hint=secret-hint","redirectUri":null,"state":"state-1"}}""")]
+   [InlineData("""{"message":"Signed out.","providerLogout":{"endSessionUri":"https://id.example.com/logout?id_token_hint=secret-hint","redirectUri":"io.qrun.qqq-print-agent:/oauth/callback"}}""")]
    [InlineData("""{"providerLogout":{"endSessionUri":"https://id.example.com/logout?id_token_hint=secret-hint","redirectUri":"io.qrun.qqq-print-agent:/oauth/callback","state":"state-1"}}""")]
    [InlineData("""  {"message":"Signed out.","providerLogout":"https://id.example.com/logout?id_token_hint=secret-hint" """)]
    [InlineData("{}")]
@@ -253,6 +284,6 @@ public sealed class ServiceClientOperationsTests
       Assert.Null(result.Payload);
       Assert.Null(result.Reply);
       Assert.Equal("The service's reply could not be read.", result.Message);
-      Assert.DoesNotContain(log.Entries, entry => entry.Contains("secret-hint", StringComparison.Ordinal));
+      Assert.Equal("WARN Service request 'sign-out' was answered, but the answer could not be read (JsonException).", Assert.Single(log.Entries));
    }
 }

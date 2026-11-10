@@ -189,7 +189,7 @@ public sealed class SignInFlowPasswordTests
       { new OperationCanceledException("The reply did not arrive in time."), "request sent" },
       { new InvalidDataException("Local pipe message exceeds the permitted size."), "request sent" },
       { new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")), "nothing sent" },
-      { new UnauthorizedAccessException("The local endpoint is not the installed Windows print service."), "nothing sent" },
+      { new AgentPipeNotSentException(new UnauthorizedAccessException("The local endpoint is not the installed Windows print service.")), "nothing sent" },
    };
 
 

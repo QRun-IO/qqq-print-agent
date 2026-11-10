@@ -175,7 +175,7 @@ public sealed class SignInFlowEnrollmentTests
    {
       new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")),
       new AgentPipeNotSentException(new IOException("The pipe could not be opened.")),
-      new UnauthorizedAccessException("The local endpoint is not the installed Windows print service."),
+      new AgentPipeNotSentException(new UnauthorizedAccessException("The local endpoint is not the installed Windows print service.")),
    };
 
 

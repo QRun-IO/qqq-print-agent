@@ -56,7 +56,8 @@ public sealed class ServiceResult<T>
    /// <summary>
    /// True when the request left this process and no usable answer came back (a reply time limit, a pipe that closed
    /// mid-reply, an oversize or unreadable reply, or a wait the caller ended), so the service may have carried it out and
-   /// the operator must check before repeating it. False when the service answered and when nothing was sent at all.
+   /// the operator must check before repeating it. False when the service answered and when nothing was sent at all,
+   /// which includes a wait that had already ended before the request was made.
    /// </summary>
    public bool Unconfirmed { get; }
 
@@ -85,4 +86,9 @@ public sealed class ServiceResult<T>
 
    /// <summary>The caller ended the wait; the request may still be carried out.</summary>
    internal static ServiceResult<T> Abandoned() => new(ServiceOutcome.Canceled, default, string.Empty, null, ServiceFailure.None, unconfirmed: true);
+
+
+
+   /// <summary>The caller had ended the wait before the request was made, so nothing was sent and there is nothing to check.</summary>
+   internal static ServiceResult<T> NotStarted() => new(ServiceOutcome.Canceled, default, string.Empty, null, ServiceFailure.None, unconfirmed: false);
 }

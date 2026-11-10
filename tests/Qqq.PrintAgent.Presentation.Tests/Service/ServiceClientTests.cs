@@ -99,17 +99,18 @@ public sealed class ServiceClientTests
       Assert.Equal("The service's reply could not be read.", result.Message);
       Assert.Null(result.Reply);
       Assert.Null(result.Payload);
-      Assert.Equal("WARN Service request 'snapshot' did not complete (UnreadableReply, request sent): JsonException", Assert.Single(log.Entries));
+      Assert.Equal("WARN Service request 'snapshot' was answered, but the answer could not be read (JsonException).", Assert.Single(log.Entries));
    }
 
 
 
    /// <summary>
    /// Each failure the pipe client raises becomes an unavailable result with its cause and, separately, whether the request
-   /// had left. A failure the pipe client marked as "not sent" (the connect limit, a pipe that could not be opened, an
-   /// oversize request, an unverified service) is never unconfirmed; the same cause after the request left is. So a connect
-   /// time limit and a reply time limit share a cause and differ in what the operator must do. The failure's own message is
-   /// the reason, the first failure is a warning, and the full exception follows as debug detail.
+   /// had left. Only a failure the pipe client marked as "not sent" (the connect limit, a pipe that could not be opened, an
+   /// oversize request, an unverified service) is never unconfirmed; the same cause without that mark is, whatever its
+   /// type, because a refusal or a failed Windows call that arrives unmarked does not prove nothing was written. So a
+   /// connect time limit and a reply time limit share a cause and differ in what the operator must do. The failure's own
+   /// message is the reason, the first failure is a warning, and the full exception follows as debug detail.
    /// </summary>
    [Theory]
    [MemberData(nameof(PipeFailures))]
@@ -138,8 +139,9 @@ public sealed class ServiceClientTests
       { new IOException("Service connection closed before a complete response was received."), ServiceFailure.Disconnected, true, "Service connection closed before a complete response was received." },
       { new OperationCanceledException("The reply did not arrive in time."), ServiceFailure.TimedOut, true, "The reply did not arrive in time." },
       { new InvalidDataException("Local pipe message exceeds the permitted size."), ServiceFailure.InvalidData, true, "Local pipe message exceeds the permitted size." },
-      { new UnauthorizedAccessException("The local endpoint is not the installed Windows print service."), ServiceFailure.AccessDenied, false, "The local endpoint is not the installed Windows print service." },
-      { new Win32Exception(5, "Access is denied."), ServiceFailure.Native, false, "Access is denied." },
+      { new UnauthorizedAccessException("Access to the path is denied."), ServiceFailure.AccessDenied, true, "Access to the path is denied." },
+      { new Win32Exception(5, "Access is denied."), ServiceFailure.Native, true, "Access is denied." },
+      { new AgentPipeNotSentException(new Win32Exception(5, "Access is denied.")), ServiceFailure.Native, false, "Access is denied." },
       { new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")), ServiceFailure.TimedOut, false, "Nothing is listening on the pipe." },
       { new AgentPipeNotSentException(new IOException("The pipe could not be opened.")), ServiceFailure.Disconnected, false, "The pipe could not be opened." },
       { new AgentPipeNotSentException(new InvalidDataException("Local pipe message exceeds the permitted size.")), ServiceFailure.InvalidData, false, "Local pipe message exceeds the permitted size." },
@@ -188,7 +190,7 @@ public sealed class ServiceClientTests
       [
          () => Task.FromException<string>(new IOException("down")),
          () => Task.FromException<string>(new IOException("down")),
-         () => Task.FromException<string>(new UnauthorizedAccessException("refused")),
+         () => Task.FromException<string>(new AgentPipeNotSentException(new UnauthorizedAccessException("refused"))),
          () => Task.FromResult("Error: still starting"),
          () => Task.FromResult("ok"),
       ]);
@@ -203,10 +205,10 @@ public sealed class ServiceClientTests
       [
          "WARN Service request 'reconnect' did not complete (Disconnected, request sent): IOException: down",
          "DEBUG Service request 'reconnect' did not complete (Disconnected, request sent): IOException: down",
-         "WARN Service request 'reconnect' did not complete (AccessDenied, nothing sent): UnauthorizedAccessException: refused",
+         "WARN Service request 'reconnect' did not complete (AccessDenied, nothing sent): AgentPipeNotSentException: refused <- UnauthorizedAccessException: refused",
          "INFO Service request 'reconnect' is answering again.",
       ], log.Entries.Where(entry => !entry.Contains("failure detail", StringComparison.Ordinal)).ToList());
-      Assert.Equal(3, log.Entries.Count(entry => entry.StartsWith("DEBUG Service request 'reconnect' failure detail: System.", StringComparison.Ordinal)));
+      Assert.Equal(3, log.Entries.Count(entry => entry.StartsWith("DEBUG Service request 'reconnect' failure detail: ", StringComparison.Ordinal)));
    }
 
 
@@ -242,9 +244,46 @@ public sealed class ServiceClientTests
 
       next = () => Task.FromResult("ok");
       Assert.True((await client.SendAsync(new PipeRequest("retry-job"))).Succeeded);
-      next = () => Task.FromCanceled<string>(cancellation.Token);
-      Assert.Equal(ServiceOutcome.Canceled, (await client.SendAsync(new PipeRequest("retry-job"), cancellation.Token)).Outcome);
+      using CancellationTokenSource second = new();
+      next = () =>
+      {
+         second.Cancel();
+         return Task.FromCanceled<string>(second.Token);
+      };
+      Assert.Equal(ServiceOutcome.Canceled, (await client.SendAsync(new PipeRequest("retry-job"), second.Token)).Outcome);
       Assert.DoesNotContain(log.Entries, entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.Contains("answering again", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// A token that is already cancelled means the caller left before the request was made. Nothing is sent, so the service
+   /// cannot act on a request nobody is waiting for; the result says "canceled" and, unlike a wait that ended after the
+   /// send, not "unconfirmed", because there is nothing to check. The log has one debug line and no warning.
+   /// </summary>
+   [Fact]
+   public async Task TokenCancelledBeforeTheRequest_SendsNothingAndSaysSo()
+   {
+      RecordingLog log = new();
+      int sent = 0;
+      using CancellationTokenSource cancellation = new();
+      ServiceClient client = new(_ =>
+      {
+         sent++;
+         return Task.FromResult("Enrolled device 7.");
+      }, log, "QQQ");
+      await cancellation.CancelAsync();
+
+      ServiceResult<string> result = await client.EnrollAsync("https://print.example.com", "code-123", cancellation.Token);
+
+      Assert.Equal(0, sent);
+      Assert.Equal(ServiceOutcome.Canceled, result.Outcome);
+      Assert.Equal(ServiceFailure.None, result.Failure);
+      Assert.False(result.Unconfirmed);
+      Assert.False(result.Succeeded);
+      Assert.Equal(string.Empty, result.Message);
+      Assert.Null(result.Reply);
+      Assert.Equal("DEBUG Service request 'enroll' was not sent: its wait had ended before it started.", Assert.Single(log.Entries));
    }
 
 

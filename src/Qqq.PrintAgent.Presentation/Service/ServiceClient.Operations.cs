@@ -5,7 +5,6 @@
 
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
-using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Presentation.Service;
@@ -16,11 +15,6 @@ namespace Qqq.PrintAgent.Presentation.Service;
 /// </summary>
 public sealed partial class ServiceClient
 {
-   private const string PrintingEnabled = " Printing is enabled.";
-   private const string EnrollmentNeeded = " Enroll this computer to enable printing.";
-
-
-
    /// <summary>Reads the service's health, printers and connection state.</summary>
    public Task<ServiceResult<AgentSnapshot>> SnapshotAsync(CancellationToken cancellationToken = default)
       => SendAsync<AgentSnapshot>(new PipeRequest("snapshot"), cancellationToken);
@@ -108,11 +102,15 @@ public sealed partial class ServiceClient
 
 
 
-   /// <summary>Reads what the service said after its sign-in opening: printing is enabled, the computer still has to be enrolled, or some other condition.</summary>
+   /// <summary>
+   /// Reads what the service said after its sign-in opening: printing is enabled, the computer still has to be enrolled, or
+   /// some other condition. The two sentences are the service's own constants, so the service cannot reword one without
+   /// this reading following it.
+   /// </summary>
    private static SignInReadiness ReadReadiness(string remainder) => remainder switch
    {
-      PrintingEnabled => SignInReadiness.PrintingEnabled,
-      EnrollmentNeeded => SignInReadiness.EnrollmentNeeded,
+      SignInSentences.PrintingEnabled => SignInReadiness.PrintingEnabled,
+      SignInSentences.EnrollmentNeeded => SignInReadiness.EnrollmentNeeded,
       _ => SignInReadiness.NotReady,
    };
 
@@ -131,8 +129,8 @@ public sealed partial class ServiceClient
    /// <summary>
    /// Reads the sign-out reply. Text that does not open like a JSON object is the service's sentence and becomes the message.
    /// Anything that does open like one is read as the sign-out document and must carry a message: the document is the reply
-   /// that holds the identity provider's token hint, so it is never used as text, and a document that cannot be read or has
-   /// no message is unreadable rather than shown or logged.
+   /// that holds the identity provider's token hint, so it is never used as text, and a document that cannot be read, has
+   /// no message or has an incomplete provider part is unreadable rather than shown or logged.
    /// </summary>
    private static PipeSignOutResult ReadSignOut(string reply)
    {
@@ -140,7 +138,7 @@ public sealed partial class ServiceClient
       {
          return new PipeSignOutResult(reply, null);
       }
-      return JsonSerializer.Deserialize<PipeSignOutResult>(reply, PrintApiClient.JsonOptions) is { Message: not null } document
+      return Deserialize<PipeSignOutResult>(reply) is { Message: not null } document
          ? document : throw new JsonException("The sign-out document has no message.");
    }
 }

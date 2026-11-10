@@ -55,11 +55,17 @@ public sealed partial class ServiceClient
    /// Sends one request and turns whatever happens into a result. A pipe failure of a known kind becomes an unavailable
    /// result, an unreadable reply becomes an unavailable result of its own kind, and anything else (a programming error)
    /// is left to propagate. Cancelling the token ends the wait, not the request: that is the caller's decision rather than
-   /// a failure, so it is a result of its own, logged as debug detail and not counted against the service.
+   /// a failure, so it is a result of its own, logged as debug detail and not counted against the service. A token that is
+   /// already cancelled means the caller is gone before anything happened, so nothing is sent at all and the result says so.
    /// </summary>
    private async Task<ServiceResult<T>> ExchangeAsync<T>(PipeRequest request, Func<string, ServiceResult<T>> interpret, CancellationToken cancellationToken)
    {
       ArgumentNullException.ThrowIfNull(request);
+      if(cancellationToken.IsCancellationRequested)
+      {
+         _log.Debug($"Service request '{request.Operation}' was not sent: its wait had ended before it started.");
+         return ServiceResult<T>.NotStarted();
+      }
       Task<string>? pending = null;
       try
       {
@@ -89,16 +95,12 @@ public sealed partial class ServiceClient
 
    /// <summary>
    /// Names the cause of a pipe failure and whether the request had been sent, or <see cref="ServiceFailure.None"/> for an
-   /// exception this client must not swallow. A failure the pipe client wrapped as "not sent" is classified by what it
-   /// wraps. Without that wrapper, a refused or unverified pipe and a failed Windows call can only happen before the write,
-   /// and every other failure is assumed to have happened after it, which errs on the side of "check before repeating".
+   /// exception this client must not swallow. Only a failure the pipe client wrapped as "not sent" says nothing was sent,
+   /// and it is classified by what it wraps. Every other failure, whatever its type, is treated as possibly sent: the type
+   /// of an exception does not prove when it happened, and "check before repeating" is the safe answer to doubt.
    /// </summary>
-   private static (ServiceFailure Failure, bool Sent) Classify(Exception exception) => exception switch
-   {
-      AgentPipeNotSentException { InnerException: { } cause } => (Cause(cause), false),
-      UnauthorizedAccessException or Win32Exception => (Cause(exception), false),
-      _ => (Cause(exception), true),
-   };
+   private static (ServiceFailure Failure, bool Sent) Classify(Exception exception)
+      => exception is AgentPipeNotSentException { InnerException: { } cause } ? (Cause(cause), false) : (Cause(exception), true);
 
 
 
@@ -131,12 +133,15 @@ public sealed partial class ServiceClient
    /// Builds the unavailable result and logs what was swallowed. The first failure of an operation is a warning; the same
    /// failure repeating (the status polls run every few seconds while the service is down) is a debug line instead, so the
    /// log is not flooded unless debug logging was asked for. Every failure is followed by its full exception as debug
-   /// detail. An unreadable reply is described by its type only, because its text could quote part of the reply.
+   /// detail. An unreadable reply is logged as what it is, an answer that arrived and could not be read, and is described
+   /// by its type only, because its text could quote part of the reply.
    /// </summary>
    private ServiceResult<T> Failed<T>(string operation, (ServiceFailure Failure, bool Sent) kind, Exception exception)
    {
       bool unreadable = kind.Failure == ServiceFailure.UnreadableReply;
-      string entry = $"Service request '{operation}' did not complete ({kind.Failure}, {(kind.Sent ? "request sent" : "nothing sent")}): {(unreadable ? exception.GetType().Name : QqqSessionDiagnostics.Describe(exception))}";
+      string entry = unreadable
+         ? $"Service request '{operation}' was answered, but the answer could not be read ({exception.GetType().Name})."
+         : $"Service request '{operation}' did not complete ({kind.Failure}, {(kind.Sent ? "request sent" : "nothing sent")}): {QqqSessionDiagnostics.Describe(exception)}";
       if(_failing.TryGetValue(operation, out (ServiceFailure Failure, bool Sent) previous) && previous == kind)
       {
          _log.Debug(entry);
@@ -194,5 +199,24 @@ public sealed partial class ServiceClient
 
    /// <summary>Reads one JSON document with the options the service writes with; an empty document is unreadable rather than a null payload.</summary>
    private static T ReadJson<T>(string reply) where T : class
-      => JsonSerializer.Deserialize<T>(reply, PrintApiClient.JsonOptions) ?? throw new JsonException("The reply held no document.");
+      => Deserialize<T>(reply) ?? throw new JsonException("The reply held no document.");
+
+
+
+   /// <summary>
+   /// Turns reply text into a document. Some reply types check their own values when they are built and refuse a missing
+   /// one with an argument exception; from here that is one more way a reply can be unreadable, so it becomes the same
+   /// exception as malformed JSON instead of escaping this client as a programming error.
+   /// </summary>
+   private static T? Deserialize<T>(string reply) where T : class
+   {
+      try
+      {
+         return JsonSerializer.Deserialize<T>(reply, PrintApiClient.JsonOptions);
+      }
+      catch(ArgumentException exception)
+      {
+         throw new JsonException("The reply held a value its document does not accept.", exception);
+      }
+   }
 }

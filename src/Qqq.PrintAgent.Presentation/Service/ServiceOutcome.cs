@@ -17,6 +17,6 @@ public enum ServiceOutcome
    /// <summary>No usable answer arrived: the service could not be reached, timed out, was not trusted or sent something unreadable.</summary>
    Unavailable,
 
-   /// <summary>The caller's own cancellation token ended the wait. This is not a failure of the service, which may still carry the request out.</summary>
+   /// <summary>The caller's own cancellation token ended the wait. This is not a failure of the service, which may still carry the request out unless the wait had ended before anything was sent.</summary>
    Canceled,
 }
