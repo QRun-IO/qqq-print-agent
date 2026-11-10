@@ -27,7 +27,8 @@ public sealed class AgentPrinterCatalogTests
       Assert.Equal(PrinterServerState.Approved, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "printer", StringComparison.Ordinal)).ServerState);
       Assert.Equal(PrinterServerState.AwaitingApproval, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "other", StringComparison.Ordinal)).ServerState);
       Assert.Equal(fixture.Peer.Origin.Authority, snapshot.PrinterSync!.Server);
-      Assert.Contains(fixture.Logs, line => line.Contains("1 of 2 shared printer(s) approved", StringComparison.Ordinal) && line.Contains("awaiting approval on the server [Other synthetic]", StringComparison.Ordinal));
+      // The reading is stored before its summary is logged, so the line is waited for rather than expected at once.
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("1 of 2 shared printer(s) approved", StringComparison.Ordinal) && line.Contains("awaiting approval on the server [Other synthetic]", StringComparison.Ordinal)));
       Assert.Equal(0, fixture.ForbiddenPolls);
    }
 
@@ -62,6 +63,8 @@ public sealed class AgentPrinterCatalogTests
       AgentSnapshot snapshot = fixture.Runtime.GetSnapshot();
       Assert.All(snapshot.Printers, printer => Assert.Equal(PrinterServerState.NotReported, printer.ServerState));
       Assert.Contains(reason, snapshot.PrinterSync!.Detail, StringComparison.Ordinal);
+      // The reading is stored before its warning is logged, so the line is waited for rather than expected at once.
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("Printer approval is not reported by", StringComparison.Ordinal)));
       Assert.Single(fixture.Logs, line => line.Contains("Printer approval is not reported by", StringComparison.Ordinal));
       Assert.True(snapshot.Connected);
    }
