@@ -14,12 +14,13 @@ Policy lives in [AGENTS.md](AGENTS.md) (repository rules: hosting split, authori
 
 **Host note first.** On some machines Windows Defender's heuristics quarantine the compiled `Qqq.PrintAgent.Core.Tests` assembly. Where the owner has said `Core.Tests` may be built, `build/Verify.ps1` runs in full. Anywhere else, build `Qqq.PrintAgent.NativeCI.slnx` (the full solution minus `Core.Tests`) and take Core evidence from CI. How a machine's protection is configured is the owner's decision and is not recorded in this repository: if a `Core.Tests` build is quarantined, stop and ask rather than adding an exclusion or restoring the file.
 
-Quick local loop without `Core.Tests` (locked restore, Release x64 build with `-warnaserror`, Windows/CLI tests), always with `-p:Platform=x64` because the solution maps test projects to AnyCPU and a direct `dotnet test` without it picks stale output. Never pass `--no-build` to `dotnet test`: the solution build writes the test DLL to the AnyCPU folder, so an x64 `--no-build` run executes whatever old x64 DLL is lying around and reports a pass against stale code.
+Quick local loop without `Core.Tests` (locked restore, Release x64 build with `-warnaserror`, Windows/CLI and presentation tests), always with `-p:Platform=x64` because the solution maps test projects to AnyCPU and a direct `dotnet test` without it picks stale output. Never pass `--no-build` to `dotnet test`: the solution build writes the test DLL to the AnyCPU folder, so an x64 `--no-build` run executes whatever old x64 DLL is lying around and reports a pass against stale code.
 
 ```powershell
 dotnet restore Qqq.PrintAgent.NativeCI.slnx -p:Platform=x64 --locked-mode
 dotnet build Qqq.PrintAgent.NativeCI.slnx -c Release -p:Platform=x64 --no-restore -warnaserror
 dotnet test tests/Qqq.PrintAgent.Cli.Tests -c Release -p:Platform=x64 --no-restore
+dotnet test tests/Qqq.PrintAgent.Presentation.Tests -c Release -p:Platform=x64 --no-restore
 ```
 
 Single test (xunit):
@@ -35,7 +36,7 @@ Full verification (adds `Core.Tests`, the coverage gate and TRX output under `Te
 git -C ../qqq-print-protocol archive <pinned-sha> fixtures | tar -x -C <dir>; ./build/Verify.ps1 -ProtocolFixtures <dir>/fixtures
 ```
 
-The gate (`build/Assert-Coverage.ps1`) merges both suites' reports line by line and fails when an assembly is below its minimum in `build/minimum-coverage.json`. Minimums only move up, in the change that adds the tests; see `docs/adr/0003-version-2.md` for the release bar.
+The gate (`build/Assert-Coverage.ps1`) merges the three suites' reports line by line and fails when an assembly is below its minimum in `build/minimum-coverage.json`. Minimums only move up, in the change that adds the tests; see `docs/adr/0003-version-2.md` for the release bar.
 
 Packaging (unsigned self-contained x64 MSI; never installs or prints):
 
@@ -63,14 +64,15 @@ Pre-commit hooks (`pre-commit install --hook-type pre-commit --hook-type commit-
 
 ## Architecture
 
-Five projects, strict layering (Core → Windows → Service/UI/CLI). Business logic never lives above Core; OS calls never live in Core.
+Six projects, strict layering (Core → Windows → Presentation → UI, and Core → Windows → Service/CLI). Business logic never lives above Core; OS calls never live in Core; the companion's decisions live in Presentation, not in its views.
 
 | Project | Owns | Key entry points |
 | --- | --- | --- |
 | `Qqq.PrintAgent.Core` | QQQ session auth, HTTP/WSS clients, realtime settings/policy, document streaming, job state machine | `Authentication/QqqSessionClient*`, `Printing/PrintApiClient*`, `Printing/PrintWorker`, `Printing/PrintingRealtimeChannel` |
 | `Qqq.PrintAgent.Windows` | Spooler/PDF/ZPL backends, SQLite + DPAPI store, named-pipe IPC, the long-running runtime | `AgentRuntime.*.cs` (partial class split by concern), `AgentPipe*`, `AgentStore` |
 | `Qqq.PrintAgent.Service` | Windows Service host only | `PrintService.cs` |
-| `Qqq.PrintAgent` | WinUI/AppKit companion: tray, Printers/Jobs/Logs/Settings views, MSI update UX | `MainWindow.*.cs` (partial class split by concern) |
+| `Qqq.PrintAgent.Presentation` | The companion's logic without a window: the typed client for the service pipe, what each view shows and enables, Jobs paging and sorting state, the sign-in flow as a state machine. UI-free and held at 100% line coverage | `Service/ServiceClient*.cs`, `SignIn/SignInFlow*.cs`, `Shell/`, `Jobs/`, `Printers/`, `Settings/` |
+| `Qqq.PrintAgent` | WinUI/AppKit companion: tray, Printers/Jobs/Logs/Settings views, MSI update UX. Views call the presentation assembly and hold no decisions | `MainWindow.*.cs` (partial class split by concern) |
 | `Qqq.PrintAgent.Cli` | Service management over the pipe, nothing else; the same executable is also the MSI update helper and the browser sign-in callback forwarder | `CommandLine.cs` (`Program.cs` only binds the real console, pipe and helpers) |
 
 Large classes are deliberately split into partial files by concern (`AgentRuntime.Realtime.cs`, `AgentRuntime.Jobs.cs`, `MainWindow.Updates.cs`, ...). Add new behavior to the matching partial rather than growing `AgentRuntime.cs` / `MainWindow.xaml.cs`.
@@ -87,6 +89,7 @@ Large classes are deliberately split into partial files by concern (`AgentRuntim
 
 - `tests/Qqq.PrintAgent.Core.Tests`: protocol fixtures (`ProtocolFixtureTests`), loopback WebSocket peer, worker state machine, media contracts. New Core tests are written here (see the host note under Commands for where it builds).
 - `tests/Qqq.PrintAgent.Cli.Tests`: despite the name, this is mostly the Windows runtime suite (`AgentRuntime*`, `AgentRealtime*`, `AgentPipe*`, `AgentStore*`). Put Windows-layer tests here. The command-line tests are its `Cli*Tests.cs` files: they drive `CommandLine` through `CliFixture` (fakes for console, environment, pipe and helpers), and `CliProcessTests` starts the built executable.
+- `tests/Qqq.PrintAgent.Presentation.Tests`: the presentation assembly's suite, on hand-written fakes under `Fakes/` (`SignInFixture`, `FakeSession`, `FakeInbox`, `PumpContext`, `ManualTime`); no pipe, browser or network. Every line added to the assembly needs a test here, because its minimum is 100.
 - `tests/Qqq.PrintAgent.WorkerFixture`: child-process fixture used by runtime tests.
 
 ## Conventions worth knowing
