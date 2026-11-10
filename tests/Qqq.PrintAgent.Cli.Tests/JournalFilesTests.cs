@@ -15,13 +15,13 @@ public sealed class JournalFilesTests
 {
    /// <summary>
    /// One thread keeps releasing the files of one journal, as a finishing test does, while this thread opens and closes
-   /// stores on another journal several thousand times. Every open must succeed. When the release cleared every pool in the
+   /// stores on another journal 2,500 times. Every open must succeed. When the release cleared every pool in the
    /// process instead, an open here failed within a few thousand attempts with a disposed SQLite handle: the pool hands a
    /// connection out before marking whose it is, and a clear that runs in between takes it for abandoned and disposes it.
-   /// This is a stress loop, so it shows the fault with high likelihood, not with certainty: with the release clearing
-   /// every pool it failed in four runs of five. The releases are not paced by the opens, because paced releases never
-   /// fell into the gap; the loop is kept to a second or two, since a thread that releases without pause slows the stores
-   /// of the tests running beside it.
+   /// This is a stress loop, so it shows the fault with high likelihood, not with certainty. With the release clearing
+   /// every pool, 2,500 opens failed in five runs of six and 1,500 in two of six, so 2,500 is as short as the loop can be
+   /// and still show it; a thread that releases without pause slows the stores of the tests running beside it, which is
+   /// why it is no longer. The releases are not paced by the opens, because paced releases never fell into the gap.
    /// </summary>
    [Fact]
    public void ReleasingOneJournalsFiles_DoesNotDisturbStoresOpeningAnother()
@@ -40,7 +40,7 @@ public sealed class JournalFilesTests
       releasing.Start();
       try
       {
-         for(int attempt = 0; attempt < 5000; attempt++)
+         for(int attempt = 0; attempt < 2500; attempt++)
          {
             using AgentStore store = new(opened);
             Assert.Null(store.GetState("none"));
