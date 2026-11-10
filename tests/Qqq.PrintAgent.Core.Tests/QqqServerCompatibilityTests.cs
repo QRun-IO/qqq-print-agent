@@ -441,6 +441,35 @@ public sealed class QqqServerCompatibilityTests
 
 
 
+   /// <summary>
+   /// The printing extension version offered for display is null whenever there is nothing to show (no printing
+   /// extension, two of them, or one that states no version or an empty one), so an absent version can never be
+   /// mistaken for a value; the text that reports the absence words it itself. A version that is present is returned
+   /// in printable form.
+   /// </summary>
+   [Fact]
+   public async Task PrintingExtensionVersionIsNullWhenAbsentAndPrintableWhenPresent()
+   {
+      static QqqApiDiscovery Advertising(params QqqApiDiscovery.Extension[] extensions) => new() { Extensions = extensions };
+      var printing = new QqqApiDiscovery.Extension("printing", "2.4.0", "/qbit/printing");
+      Assert.Null(Advertising().PrintingExtensionVersion);
+      Assert.Null(Advertising(new QqqApiDiscovery.Extension("other", "2.4.0", "/qbit/other")).PrintingExtensionVersion);
+      Assert.Null(Advertising(printing, printing).PrintingExtensionVersion);
+      Assert.Null(Advertising(printing with { Version = null! }).PrintingExtensionVersion);
+      Assert.Null(Advertising(printing with { Version = "" }).PrintingExtensionVersion);
+      Assert.Equal("2.4.0", Advertising(printing).PrintingExtensionVersion);
+      Assert.Equal("2  4", Advertising(printing with { Version = "2\r\n4" }).PrintingExtensionVersion);
+
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery.Replace("\"version\":\"2.4.0\",", "", StringComparison.Ordinal));
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+      QqqServerCompatibility result = await client.CheckCompatibilityAsync();
+      Assert.Null(result.Discovery!.PrintingExtensionVersion);
+      Assert.Equal("printing extension version '(missing)' is not a plain 1.x or 2.x release", Assert.Single(result.Problems).Detail);
+   }
+
+
+
    /// <summary>A detail is cut one unit early when the limit falls inside a surrogate pair, so the cut never leaves half a character.</summary>
    [Fact]
    public void DetailCutNeverSplitsASurrogatePair()

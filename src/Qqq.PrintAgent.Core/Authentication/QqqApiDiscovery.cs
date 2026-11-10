@@ -165,10 +165,12 @@ public sealed class QqqApiDiscovery
 
 
    /// <summary>
-   /// The version of the single printing extension the server advertises, or null when there is none or more than one,
-   /// for display beside the compatibility result. Because it is shown, it is the printable form of what the server
-   /// sent (see <see cref="QqqCompatibilityProblem.Printable"/>): a version that passed validation is unchanged by
-   /// that, and anything else can neither break a line nor run long. It is derived, so it is never written to JSON.
+   /// The version of the single printing extension the server advertises, for display beside the compatibility
+   /// result, or null when there is nothing to show: no printing extension, more than one, or one that states no
+   /// version. Null always means absent; whoever composes text from it words that. Because a present value is shown,
+   /// it is the printable form of what the server sent (see <see cref="QqqCompatibilityProblem.Printable"/>): a
+   /// version that passed validation is unchanged by that, and anything else can neither break a line nor run long.
+   /// It is derived, so it is never written to JSON.
    /// </summary>
    [System.Text.Json.Serialization.JsonIgnore]
    public string? PrintingExtensionVersion
@@ -176,7 +178,7 @@ public sealed class QqqApiDiscovery
       get
       {
          Extension[] printing = [.. (Extensions ?? []).Where(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal))];
-         return printing.Length == 1 ? QqqCompatibilityProblem.Printable(printing[0].Version) : null;
+         return printing.Length == 1 && !string.IsNullOrEmpty(printing[0].Version) ? QqqCompatibilityProblem.Printable(printing[0].Version) : null;
       }
    }
 
