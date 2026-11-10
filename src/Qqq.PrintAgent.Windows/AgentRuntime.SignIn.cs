@@ -94,9 +94,8 @@ public sealed partial class AgentRuntime
    private string SignInReply()
    {
       string prefix = $"Signed in to {AppIdentity.ServerName}.";
-      const string signedIn = "Signed in.";
       return _authorizationReady ? prefix + SignInSentences.PrintingEnabled
-         : _authenticationMessage.StartsWith(signedIn, StringComparison.Ordinal) ? prefix + _authenticationMessage[signedIn.Length..]
+         : _authenticationMessage.StartsWith(SignInSentences.SignedIn, StringComparison.Ordinal) ? prefix + _authenticationMessage[SignInSentences.SignedIn.Length..]
          : prefix + " " + _authenticationMessage;
    }
 

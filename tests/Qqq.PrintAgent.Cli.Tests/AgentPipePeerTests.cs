@@ -72,6 +72,24 @@ public sealed class AgentPipePeerTests
 
 
 
+   /// <summary>
+   /// Doubt never softens the refusal. When the process that served the pipe cannot even be looked up (here its id is not
+   /// one a process can have), that is not the certain sign that it ended, so the answer stays "not the installed service"
+   /// and the operator is not told to simply try again.
+   /// </summary>
+   [Fact]
+   public void ProcessThatCannotBeLookedUpKeepsTheRefusal()
+   {
+      InvalidOperationException threw = new("The check could not be carried out.");
+
+      UnauthorizedAccessException refusal = AgentPipePeer.Refusal(uint.MaxValue, threw);
+
+      Assert.Equal(NotTheService, refusal.Message);
+      Assert.Same(threw, refusal.InnerException);
+   }
+
+
+
    /// <summary>A pipe that can no longer say which process serves it has lost its server, so the whole check ends as a stopped service with nothing sent.</summary>
    [Fact]
    public void PipeThatLostItsServerIsReportedAsAStoppedService()
