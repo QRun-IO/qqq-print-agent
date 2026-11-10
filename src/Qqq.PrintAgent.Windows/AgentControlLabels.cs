@@ -8,13 +8,8 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>Plain-language wording for the server's remote controls, kept in one place so the footer, status text and tests say the same thing.</summary>
 public static class AgentControlLabels
 {
-   /// <summary>Words the negotiated remote-control support as available, unavailable on an older server, or still being checked.</summary>
-   public static string Support(string value) => value switch
-   {
-      "SUPPORTED" => "available",
-      "LEGACY" => "unavailable on this server",
-      _ => "checking support",
-   };
+   /// <summary>Words the remote-control support as available once the server has sent its state, and as still being checked for anything else.</summary>
+   public static string Support(string value) => string.Equals(value, "SUPPORTED", StringComparison.Ordinal) ? "available" : "checking support";
 
 
 

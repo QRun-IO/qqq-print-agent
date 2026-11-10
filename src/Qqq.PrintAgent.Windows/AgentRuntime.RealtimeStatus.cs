@@ -18,7 +18,9 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Keeps the connection visibly alive while it is ready: a transport ping every interval, a heartbeat with the computer
    /// profile only when ordinary traffic is allowed (a paused or disconnected device pings but does not claim to be working),
-   /// session renewal when it is due, and a status refresh request so the footer stays current.
+   /// session renewal when it is due, the end of an update pause that ran out, and a status refresh request so the footer
+   /// stays current. The wait between rounds is
+   /// measured on the runtime's time provider, so a test can let an interval pass without waiting for it.
    /// </summary>
    private async Task RealtimeHeartbeatAsync(PrintingRealtimeChannel channel, CancellationToken token)
    {
@@ -32,11 +34,12 @@ public sealed partial class AgentRuntime
             {
                await channel.SendAsync("HEARTBEAT", new { agentVersion = PrintApiClient.AgentVersion, profile = store.GetDeviceProfile() }, token: token).ConfigureAwait(false);
             }
-            if(DateTimeOffset.UtcNow >= _nextSessionResume)
+            if(ObservationTime >= _nextSessionResume)
             { await EnsureAuthorizationAsync(token).ConfigureAwait(false); }
+            ResumeWhenUpdatePauseRanOut();
             RequestStatusSynchronization();
          }
-         await Task.Delay(TimeSpan.FromSeconds(_realtimeSettings.HeartbeatIntervalSeconds), token).ConfigureAwait(false);
+         await Task.Delay(TimeSpan.FromSeconds(_realtimeSettings.HeartbeatIntervalSeconds), Clock, token).ConfigureAwait(false);
       }
    }
 
@@ -59,7 +62,7 @@ public sealed partial class AgentRuntime
          AgentConfiguration? configuration = store.LoadConfiguration();
          if(configuration is null)
          { continue; }
-         using PrintApiClient api = CreateApi(configuration);
+         using PrintApiClient api = CreateApi();
          if(NormalTrafficAllowed)
          {
             ExposedPrinterBackend backend = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
@@ -76,7 +79,7 @@ public sealed partial class AgentRuntime
                lock(_stateLock)
                { _inventoryReady = true; }
                SignalPipeline();
-               WakePoll();
+               WakeClaims();
             }
             // A 2.4 server pushes approval in a PRINTERS frame after this inventory; an older server's operator catalog is read instead.
             if(!ApprovalNegotiated)
@@ -100,7 +103,7 @@ public sealed partial class AgentRuntime
       AgentConfiguration? configuration = store.LoadConfiguration();
       if(configuration is null)
       { return; }
-      using PrintApiClient api = CreateApi(configuration);
+      using PrintApiClient api = CreateApi();
       await _eventDeliveryGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
@@ -121,7 +124,8 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// Runs server commands one at a time in arrival order. Each waits until the connection is ready, executes under the control
-   /// gate with the server's clock offset applied to its expiry, and has its receipt delivered straight afterwards. The command's
+   /// gate with the server's clock offset applied to its expiry, and has its receipt delivered straight afterwards. The offset
+   /// and the present time are both read from the runtime's time provider, so the expiry is judged on one clock. The command's
    /// inbound-queue reservation is released as soon as it is taken off the queue.
    /// </summary>
    private async Task RealtimeCommandsAsync(ChannelReader<RealtimeEnvelope> commands, CancellationToken token)
@@ -148,8 +152,8 @@ public sealed partial class AgentRuntime
             AgentConfiguration? configuration = store.LoadConfiguration();
             if(configuration is null)
             { throw new InvalidOperationException("Device configuration is unavailable."); }
-            using PrintApiClient api = CreateApi(configuration);
-            await ApplyControlCommandAsync(store, api, command, DateTimeOffset.UtcNow + _serverTimeOffset, token).ConfigureAwait(false);
+            using PrintApiClient api = CreateApi();
+            await ApplyControlCommandAsync(store, api, command, ObservationTime + _serverTimeOffset, token).ConfigureAwait(false);
             await FlushControlReceiptsAsync(store, api, token).ConfigureAwait(false);
          }
          finally { _controlExecutionGate.Release(); }

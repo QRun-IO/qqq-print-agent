@@ -27,7 +27,7 @@ public sealed partial class AgentRuntime
       lock(_stateLock)
       {
          ApplicationTrafficSnapshot bytes = _traffic.GetSnapshot();
-         string protocol = _transportOrigin is null ? "NONE" : apiFactory is not null ? "HTTP" : _transportOrigin.Scheme is "https" ? "WSS" : "WS";
+         string protocol = _transportOrigin is null ? "NONE" : _transportOrigin.Scheme is "https" ? "WSS" : "WS";
          string state = _transportStopped || _transportOrigin is null ? "DISCONNECTED"
             : _authorizationBlocked || _transportNeedsSignIn ? "AUTHORIZATION_REQUIRED"
             : !_authorizationReady ? "DISCONNECTED"

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Collections.Concurrent;
+using System.IO.Pipes;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -13,12 +15,13 @@ using Qqq.PrintAgent.Windows;
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// Test harness for signed-in (QQQ session) behavior: a control fixture plus a scriptable fake session that records the
-/// printing requests it receives and can fail resume, deny device binding or stall a poll. No network or real sign-in is used.
+/// Test harness for signed-in (QQQ session) behavior: an enrolled local state plus a scriptable fake session that records the
+/// printing requests it receives and can fail resume, deny device binding or hold the realtime socket open. No network or real
+/// sign-in is used, and time moves only when a test advances the fixture's clock.
 /// </summary>
 internal sealed class SessionFixture : IDisposable
 {
-   internal ControlFixture Local { get; } = new();
+   internal EnrolledStateFixture Local { get; } = new();
    internal FakeSession Session { get; } = new();
    internal FakeSession? NextSession { get; set; }
    internal Func<Uri, IQqqSessionClient>? Factory { get; set; }
@@ -26,13 +29,95 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-   /// <summary>Builds a runtime whose session factory hands out the scripted sessions in priority order (custom factory, next session, default) and counts each creation.</summary>
-   internal AgentRuntime Runtime() => new(Local.DirectoryPath, _ => { }, Local.Printer, sessionFactory: origin =>
+   /// <summary>The clock every runtime of this fixture runs on. It moves only when advanced, so a renewal or a reconnect backoff happens when a test says so.</summary>
+   internal ManualTimeProvider Clock { get; } = new();
+
+
+
+   /// <summary>What the runtimes of this fixture logged, oldest first.</summary>
+   internal ConcurrentQueue<string> Logs { get; } = new();
+
+
+
+   /// <summary>The management pipe of the runtime built last.</summary>
+   internal string PipeName { get; private set; } = "";
+
+
+
+   /// <summary>
+   /// Builds a runtime on a private pipe and this fixture's clock whose session factory hands out the scripted sessions in
+   /// priority order (custom factory, next session, default) and counts each creation.
+   /// </summary>
+   internal AgentRuntime Runtime()
    {
-      Created++;
-      return Factory?.Invoke(origin) ?? NextSession ?? Session;
-   })
-   { SessionResumeInterval = TimeSpan.Zero };
+      string pipe = PipeName = "qqq-session-fixture-" + Guid.NewGuid().ToString("N");
+      return new(Local.DirectoryPath, Logs.Enqueue, Local.Printer, pipeName: pipe,
+         pipeFactory: () => new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
+         sessionFactory: origin =>
+         {
+            Created++;
+            return Factory?.Invoke(origin) ?? NextSession ?? Session;
+         }, timeProvider: Clock);
+   }
+
+
+
+   /// <summary>
+   /// Evaluates authorization at a moment when the session's renewal has come due, by letting the renewal interval pass on
+   /// the clock first. A first evaluation restores the saved session; every later one therefore renews it with the server
+   /// and checks the identity again, which is what makes a later evaluation a real check.
+   /// </summary>
+   internal Task<bool> EvaluateAsync(AgentRuntime runtime, CancellationToken token = default)
+   {
+      Clock.Advance(AgentRuntime.SessionResumeInterval);
+      return runtime.EnsureAuthorizationAsync(token);
+   }
+
+
+
+   /// <summary>
+   /// Runs the runtime's service loop until its connection loop has finished one whole pass and is waiting out its backoff,
+   /// then stops the loop. In that pass the service evaluated authorization and, had it been granted, asked the session for
+   /// the realtime socket. Waiting for the backoff, which is a timer on this fixture's clock, is what proves the pass is
+   /// over: a test that then finds no attempt knows none was made, not that none had been made yet.
+   /// </summary>
+   internal async Task RunOnePassAsync(AgentRuntime runtime)
+   {
+      using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+      Task running = runtime.RunAsync(guard.Token);
+      try
+      {
+         while(Clock.PendingTimers == 0)
+         {
+            if(running.IsCompleted)
+            { await running; }
+            await Task.Delay(10, guard.Token);
+         }
+      }
+      finally
+      {
+         await guard.CancelAsync();
+         try
+         { await running; }
+         catch(OperationCanceledException) { }
+      }
+   }
+
+
+
+   /// <summary>
+   /// Requires that a service which was not authorized sent nothing: no printing request went through any of the sessions,
+   /// none was asked for the realtime socket, and no connection was attempted and failed.
+   /// </summary>
+   internal void AssertSentNothing(params FakeSession[] sessions)
+   {
+      Assert.All(sessions, session =>
+      {
+         Assert.Empty(session.Paths);
+         Assert.Equal(0, session.RealtimeAttempts);
+      });
+      Assert.DoesNotContain(Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
+   }
 
 
 
@@ -45,15 +130,15 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-   /// <summary>Disposes the underlying control fixture, which removes the temporary state.</summary>
+   /// <summary>Disposes the underlying local state, which removes the temporary folder.</summary>
    public void Dispose() => Local.Dispose();
 
 
 
    /// <summary>
    /// In-memory stand-in for the signed-in QQQ session client. It accepts a restore, can be told to fail resume or deny binding,
-   /// answers the device enroll and control poll with canned responses, and refuses the browser and password sign-in calls this
-   /// fixture never needs.
+   /// answers device enrollment with a canned response, and refuses the browser and password sign-in calls this fixture never
+   /// needs.
    /// </summary>
    internal sealed class FakeSession : IQqqSessionClient
    {
@@ -62,6 +147,9 @@ internal sealed class SessionFixture : IDisposable
       internal QqqSessionBinding Binding { get; set; } = new(new Uri("https://synthetic.invalid/"), "principal", "tenant", "device");
       internal List<string> Paths { get; } = [];
       internal int Resumes;
+
+      /// <summary>How many times the service asked this session for the realtime socket.</summary>
+      internal int RealtimeAttempts;
       internal QqqSessionException.FailureKind? ResumeFailure { get; set; }
       internal bool ClaimedLegacy;
       internal bool DenyBinding;
@@ -77,20 +165,16 @@ internal sealed class SessionFixture : IDisposable
       private string? _deviceBeforeIssue;
       internal string? RevokedDeviceId;
       internal HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
-      internal bool DelayUnauthorizedPoll { get; set; }
       internal Func<CancellationToken, Task<System.Net.WebSockets.WebSocket>>? ConnectRealtime { get; set; }
 
 
 
-      /// <summary>Opens the realtime channel through the scripted connector; without one the realtime path is unsupported in that test.</summary>
+      /// <summary>Counts the attempt, then opens the realtime channel through the scripted connector; without one the realtime path is unsupported in that test.</summary>
       public Task<System.Net.WebSockets.WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
-         => ConnectRealtime?.Invoke(cancellationToken) ?? throw new NotSupportedException();
-
-
-
-      /// <summary>Completed when a control poll has reached the fake session, so a test can act while that poll is still in flight.</summary>
-      internal TaskCompletionSource PollEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-      internal TaskCompletionSource ReleasePoll { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+      {
+         Interlocked.Increment(ref RealtimeAttempts);
+         return ConnectRealtime?.Invoke(cancellationToken) ?? throw new NotSupportedException();
+      }
 
 
 
@@ -200,30 +284,22 @@ internal sealed class SessionFixture : IDisposable
 
 
       /// <summary>
-      /// Records the requested path. Device enrollment returns a replacement device and token (or the scripted error status). A
-      /// poll can be held open and then fail as an old-session denial, to test a session replaced mid-request; otherwise it
-      /// returns a normal connected control poll.
+      /// Records the requested path. Device enrollment returns a replacement device and token (or the scripted error status).
+      /// Nothing else is expected over HTTP from a runtime that has no realtime socket, so any other path gets an empty object
+      /// with the scripted status and the recorded path shows the test what was asked.
       /// </summary>
-      public async Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
+      public Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
       {
          Paths.Add(relativePath);
          if(string.Equals(relativePath, "devices/enroll", StringComparison.Ordinal))
          {
-            if(Status != HttpStatusCode.OK)
+            if(Status == HttpStatusCode.OK)
             {
-               return new HttpResponseMessage(Status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+               _issuedDeviceId = "replacement-device";
+               return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new EnrollmentResponse(1, "replacement-device", "replacement-token", 5), PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") });
             }
-            _issuedDeviceId = "replacement-device";
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new EnrollmentResponse(1, "replacement-device", "replacement-token", 5), PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") };
          }
-         if(DelayUnauthorizedPoll)
-         {
-            PollEntered.TrySetResult();
-            await ReleasePoll.Task.WaitAsync(cancellationToken);
-            throw new QqqSessionException(QqqSessionException.FailureKind.AuthenticationRequired, "Synthetic old-session denial.");
-         }
-         object body = new DeviceControlPoll(1, DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), 5, new DeviceDesiredState(1, false, "CONNECTED"), []);
-         return new HttpResponseMessage(Status) { Content = new StringContent(JsonSerializer.Serialize(body, PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") };
+         return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") });
       }
 
 

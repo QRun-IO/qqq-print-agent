@@ -80,7 +80,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
          }
          request = await StageAsync(release, progress, cancellationToken).ConfigureAwait(false);
          cancellationToken.ThrowIfCancellationRequested();
-         // The service finishes its current poll/submission before acknowledging this pause.
+         // The service finishes the jobs it has already claimed before it answers, or answers that it is not ready.
          paused = true;
          StatusChanged?.Invoke(this, new UpdateStatusEventArgs("Waiting for active printing to finish…"));
          string response = await AgentPipeClient.SendAsync(new PipeRequest("prepare-update")).ConfigureAwait(false);

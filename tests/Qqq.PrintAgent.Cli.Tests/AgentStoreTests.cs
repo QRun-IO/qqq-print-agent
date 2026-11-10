@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Collections.Concurrent;
+using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
@@ -37,14 +39,115 @@ public sealed class AgentStoreTests
             command.ExecuteNonQuery();
          }
          Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(() => new AgentStore(directory));
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+         JournalFiles.Release(directory);
          using FileStream exclusive = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
          Assert.True(exclusive.Length > 0);
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
+      }
+   }
+
+
+
+   /// <summary>
+   /// Many stores opened at once on one new journal all succeed and each can write its profile: schema creation and migration
+   /// are serialized for that journal, whichever store gets there first. Each store opens on a thread of its own, and a
+   /// barrier lets them go only when all sixteen are ready, so the opens really do overlap whatever the thread pool is doing.
+   /// The directory is addressed in three spellings (as given, in upper case, and with a trailing separator), because Windows
+   /// treats them as the same journal and so must the lock.
+   /// </summary>
+   [Fact]
+   public void ConcurrentOpensOfOneNewJournal_AllSucceedAndShareItsSchema()
+   {
+      string directory = Path.Combine(Path.GetTempPath(), "qqq-concurrent-open-" + Guid.NewGuid().ToString("N"));
+      string[] spellings = [directory, directory.ToUpperInvariant(), directory + Path.DirectorySeparatorChar];
+      // Each spelling is a connection string of its own, so each has a pool of its own to release before the folder can go.
+      int stores = 16;
+      try
+      {
+         using var together = new Barrier(stores);
+         var failures = new ConcurrentQueue<Exception>();
+         Thread[] opens = Enumerable.Range(0, stores).Select(index => new Thread(() =>
+         {
+            try
+            {
+               if(!together.SignalAndWait(TimeSpan.FromSeconds(30)))
+               { throw new TimeoutException("The stores did not all become ready to open."); }
+               using AgentStore store = new(spellings[index % spellings.Length]);
+               store.SavePrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), new PrinterProfile("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            }
+            catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException or TimeoutException or BarrierPostPhaseException)
+            { failures.Enqueue(exception); }
+         })).ToArray();
+         foreach(Thread open in opens)
+         { open.Start(); }
+         foreach(Thread open in opens)
+         { open.Join(); }
+         Assert.Empty(failures);
+         using AgentStore reopened = new(directory);
+         Assert.All(Enumerable.Range(0, stores), index => Assert.Equal("Queue " + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            reopened.GetPrinterProfile("printer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)).DisplayName));
+      }
+      finally
+      {
+         JournalFiles.Delete(directory, spellings);
+      }
+   }
+
+
+
+   /// <summary>
+   /// Stores on different folders do not wait for each other. This thread holds the schema lock of one journal, which every
+   /// store opening that journal must take, and meanwhile a store on a second folder is opened and used on another thread.
+   /// It must finish while the lock is still held. With one lock shared by all journals it cannot, and the test fails when
+   /// its wait of 30 seconds runs out; nothing else in the test depends on time. The lock is the same one for the first
+   /// folder written in upper case or with a trailing separator, and a different one for the second folder.
+   /// </summary>
+   [Fact]
+   public void StoresOnDifferentDirectories_DoNotWaitForEachOther()
+   {
+      string root = Path.Combine(Path.GetTempPath(), "qqq-separate-journals-" + Guid.NewGuid().ToString("N"));
+      string held = Path.Combine(root, "held");
+      string free = Path.Combine(root, "free");
+      try
+      {
+         using(AgentStore first = new(held))
+         { Assert.Null(first.GetState("none")); }
+         Exception? failure = null;
+         using var finished = new ManualResetEventSlim();
+         var opening = new Thread(() =>
+         {
+            try
+            {
+               using AgentStore other = new(free);
+               other.SavePrinterProfile("printer", new PrinterProfile("Free queue"));
+            }
+            catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException)
+            { failure = exception; }
+            finally { finished.Set(); }
+         });
+         Lock schemaLock = AgentStore.SchemaLockFor(held);
+         bool finishedWhileHeld;
+         lock(schemaLock)
+         {
+            opening.Start();
+            finishedWhileHeld = finished.Wait(TimeSpan.FromSeconds(30));
+         }
+         opening.Join();
+         Assert.True(finishedWhileHeld, "A store on another folder waited for this journal's schema lock.");
+         Assert.Null(failure);
+         // Compared as locks, not as objects: a lock passed as an object would lose its meaning to the compiler.
+         Assert.True(schemaLock == AgentStore.SchemaLockFor(held.ToUpperInvariant()));
+         Assert.True(schemaLock == AgentStore.SchemaLockFor(held + Path.DirectorySeparatorChar));
+         Assert.True(schemaLock != AgentStore.SchemaLockFor(free));
+         using AgentStore reopened = new(free);
+         Assert.Equal("Free queue", reopened.GetPrinterProfile("printer").DisplayName);
+      }
+      finally
+      {
+         JournalFiles.Delete(root);
       }
    }
 
@@ -72,8 +175,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -102,8 +204,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -146,8 +247,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -194,8 +294,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -239,8 +338,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -267,8 +365,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -290,8 +387,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -338,8 +434,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -382,8 +477,7 @@ public sealed class AgentStoreTests
       }
       finally
       {
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 

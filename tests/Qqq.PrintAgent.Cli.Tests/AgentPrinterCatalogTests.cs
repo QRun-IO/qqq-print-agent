@@ -27,7 +27,8 @@ public sealed class AgentPrinterCatalogTests
       Assert.Equal(PrinterServerState.Approved, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "printer", StringComparison.Ordinal)).ServerState);
       Assert.Equal(PrinterServerState.AwaitingApproval, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "other", StringComparison.Ordinal)).ServerState);
       Assert.Equal(fixture.Peer.Origin.Authority, snapshot.PrinterSync!.Server);
-      Assert.Contains(fixture.Logs, line => line.Contains("1 of 2 shared printer(s) approved", StringComparison.Ordinal) && line.Contains("awaiting approval on the server [Other synthetic]", StringComparison.Ordinal));
+      // The reading is stored before its summary is logged, so the line is waited for rather than expected at once.
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("1 of 2 shared printer(s) approved", StringComparison.Ordinal) && line.Contains("awaiting approval on the server [Other synthetic]", StringComparison.Ordinal)));
       Assert.Equal(0, fixture.ForbiddenPolls);
    }
 
@@ -62,22 +63,41 @@ public sealed class AgentPrinterCatalogTests
       AgentSnapshot snapshot = fixture.Runtime.GetSnapshot();
       Assert.All(snapshot.Printers, printer => Assert.Equal(PrinterServerState.NotReported, printer.ServerState));
       Assert.Contains(reason, snapshot.PrinterSync!.Detail, StringComparison.Ordinal);
+      // The reading is stored before its warning is logged, so the line is waited for rather than expected at once.
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("Printer approval is not reported by", StringComparison.Ordinal)));
       Assert.Single(fixture.Logs, line => line.Contains("Printer approval is not reported by", StringComparison.Ordinal));
       Assert.True(snapshot.Connected);
    }
 
 
 
-   /// <summary>A reading is kept for a minute: the heartbeat-driven synchronization passes do not read the catalog again straight away.</summary>
+   /// <summary>
+   /// A reading is kept for a minute, on a clock the test advances. Every heartbeat round asks for a synchronization pass. The
+   /// rounds that fall inside the minute do not read the catalog again; the round that completes the minute reads it, and it
+   /// is then the only further read. A runtime that read on every pass would have read once per round by then. A pass that
+   /// reads nothing leaves no trace to wait for, so a correct runtime can never fail here, and one that reads too often is
+   /// caught as soon as any of its earlier passes ran before the last round.
+   /// </summary>
    [Fact]
    public async Task Catalog_IsNotReadOnEverySynchronizationPass()
    {
-      await using RealtimeRuntimeFixture fixture = new();
+      var clock = new ManualTimeProvider();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
       await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
       int reads = fixture.CatalogRequests;
-      await Task.Delay(1500);
-      Assert.Equal(reads, fixture.CatalogRequests);
+      int rounds = (int)Math.Ceiling(AgentRuntime.CatalogRefreshInterval / TimeSpan.FromSeconds(fixture.Settings.HeartbeatIntervalSeconds));
+      Assert.True(rounds >= 3);
+      for(int round = 1; round < rounds; round++)
+      {
+         await fixture.HeartbeatAsync(clock);
+         Assert.Equal(reads, fixture.CatalogRequests);
+      }
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => fixture.CatalogRequests > reads);
+      Assert.Equal(reads + 1, fixture.CatalogRequests);
+      await fixture.HeartbeatAsync(clock);
+      Assert.Equal(reads + 1, fixture.CatalogRequests);
    }
 
 
@@ -122,6 +142,41 @@ public sealed class AgentPrinterCatalogTests
       await using RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
       Assert.Equal(0, fixture.CatalogRequests);
       Assert.Contains(fixture.Logs, line => line.Contains("PRINTERS frame has no printers list", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// The reason logged for a connection the reader ended is the frame it rejected, even while a send is waiting for an
+   /// acknowledgement. The server holds back the inventory acknowledgement and then sends the malformed frame, so the channel
+   /// fails that pending send at the same moment; the log must still name the frame, not the "closed before acknowledgement"
+   /// that only followed from it. The failure is logged before the service reconnects, so the test waits for that line.
+   /// </summary>
+   [Fact]
+   public async Task MalformedPrintersFrame_IsTheLoggedReasonEvenWhileASendAwaitsAcknowledgement()
+   {
+      await using RealtimeRuntimeFixture fixture = new(printingVersion: "2.4.0");
+      var inventoryPending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      fixture.BeforeAcknowledgement = async message =>
+      {
+         if(message.Type is "INVENTORY")
+         {
+            inventoryPending.TrySetResult();
+            await release.Task;
+         }
+      };
+      try
+      {
+         RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+         await fixture.WaitAsync(() => inventoryPending.Task.IsCompleted);
+         await first.SendAsync("PRINTERS", new { nothing = true });
+         await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("Realtime connection stopped", StringComparison.Ordinal)));
+         string stopped = fixture.Logs.First(line => line.Contains("Realtime connection stopped", StringComparison.Ordinal));
+         Assert.Contains("InvalidDataException: The PRINTERS frame has no printers list.", stopped, StringComparison.Ordinal);
+         Assert.DoesNotContain("before acknowledgement", stopped, StringComparison.Ordinal);
+      }
+      finally { release.TrySetResult(); }
    }
 
 

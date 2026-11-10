@@ -13,32 +13,33 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
-/// <summary>Hosts outbound printing and the local administrator management pipe.</summary>
+/// <summary>
+/// Hosts outbound printing and the local administrator management pipe. The service reaches QQQ in one way only: a signed-in
+/// session and the realtime channel opened through it. The printer backend, pipe, session client and clock can be replaced,
+/// which is how tests run this same path against a scripted server.
+/// </summary>
 public sealed partial class AgentRuntime(string directory, Action<string> log, IPrinterBackend? printerBackend = null,
-   Func<AgentConfiguration, PrintApiClient>? apiFactory = null, string pipeName = "QqqPrintAgent", Func<NamedPipeServerStream>? pipeFactory = null,
+   string pipeName = "QqqPrintAgent", Func<NamedPipeServerStream>? pipeFactory = null,
    Func<Uri, IQqqSessionClient>? sessionFactory = null, TimeProvider? timeProvider = null) : IDisposable
 {
    private readonly Lock _stateLock = new();
    private readonly IPrinterBackend _printers = printerBackend ?? new WindowsPrinters();
    private readonly Queue<AgentLogEntry> _logs = new();
-   private readonly SemaphoreSlim _pollRequested = new(0, 1);
+   private readonly SemaphoreSlim _claimsRequested = new(0, 1);
    private readonly SemaphoreSlim _connectionGate = new(1, 1);
    private readonly AgentActivityLog _activityLog = AgentActivityLog.Create(directory);
-   private DateTimeOffset? _lastSuccessfulPoll;
-   private string? _failure;
-   private int _pollIntervalSeconds = 5;
+   private DateTimeOffset? _lastServerContact;
    private IReadOnlyList<JobSnapshot> _queuedJobs = [];
    private long _queueGeneration;
-   private DateTimeOffset _nextHistoryMaintenance;
-   private bool _pollStarted;
-   private DateTimeOffset ObservationTime => timeProvider?.GetUtcNow() ?? DateTimeOffset.UtcNow;
+   private TimeProvider Clock => timeProvider ?? TimeProvider.System;
+   private DateTimeOffset ObservationTime => Clock.GetUtcNow();
 
 
 
    /// <summary>No persistent database handles are held by the runtime.</summary>
    public void Dispose()
    {
-      _pollRequested.Dispose();
+      _claimsRequested.Dispose();
       _connectionGate.Dispose();
       _controlExecutionGate.Dispose();
       _authenticationGate.Dispose();
@@ -58,142 +59,21 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
       WriteLog("INFO", "Print service started.");
-      if(apiFactory is null)
-      {
-         await RunRealtimeAsync(token).ConfigureAwait(false);
-         return;
-      }
-      // Explicit injected HTTP fixtures retain their deterministic test harness;
-      // production native sessions never enter the legacy polling path.
-      using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
-      Task control = ControlLoopAsync(lifetime.Token);
-      Task poll = PollAsync(lifetime.Token);
-      Task pipe = ServePipeAsync(lifetime.Token);
-      Task heartbeat = HeartbeatAsync(lifetime.Token);
-      await Task.WhenAny(poll, pipe, heartbeat, control).ConfigureAwait(false);
-      await lifetime.CancelAsync().ConfigureAwait(false);
-      await Task.WhenAll(poll, pipe, heartbeat, control).ConfigureAwait(false);
+      await RunRealtimeAsync(token).ConfigureAwait(false);
    }
 
 
 
    /// <summary>
-   /// Legacy claim loop used only with an injected HTTP API (fixtures); production sessions never enter it. It runs one
-   /// pass at a time under the connection gate so updates and enrollment are not starved, yields between jobs, records a
-   /// failure once instead of on every retry, and otherwise sleeps until the next interval or an explicit wake-up.
+   /// Builds the API client for one unit of work, bound to the live QQQ session and the current realtime channel. It fails
+   /// when no channel exists, so no HTTP-only path can claim work, and it fails with the channel-closed type, because the
+   /// caller only found the connection gone and that is never the reason the connection ended.
    /// </summary>
-   private async Task PollAsync(CancellationToken token)
+   private PrintApiClient CreateApi()
    {
-      lock(_stateLock)
-      {
-         _pollStarted = true;
-      }
-      while(!token.IsCancellationRequested)
-      {
-         bool processed = false;
-         try
-         {
-            await _connectionGate.WaitAsync(token).ConfigureAwait(false);
-            try
-            {
-               processed = await PollOnceAsync(token).ConfigureAwait(false);
-            }
-            finally { _connectionGate.Release(); }
-         }
-         catch(Exception exception) when(exception is not OperationCanceledException || !token.IsCancellationRequested)
-         {
-            bool changed;
-            lock(_stateLock)
-            {
-               changed = !string.Equals(_failure, exception.Message, StringComparison.Ordinal);
-               _failure = exception.Message;
-            }
-            if(changed)
-            { WriteLog("ERROR", exception.Message); }
-         }
-         if(processed)
-         {
-            // Release the connection gate and yield between jobs so update/enrollment
-            // commands and the independent heartbeat cannot starve behind a backlog.
-            await Task.Yield();
-         }
-         else
-         {
-            await _pollRequested.WaitAsync(TimeSpan.FromSeconds(_pollIntervalSeconds), token).ConfigureAwait(false);
-         }
-      }
-   }
-
-
-
-   /// <summary>
-   /// One legacy claim pass: skipped while an update pauses printing, authorization is missing or the server demands it.
-   /// It refreshes the queued-job preview only when traffic is allowed and discards the result if the queue generation
-   /// moved meanwhile, then lets the worker claim at most one job against the exposed printers and prunes history once a minute.
-   /// </summary>
-   private async Task<bool> PollOnceAsync(CancellationToken token)
-   {
-      if(UpdatePaused || (apiFactory is null && !_authorizationReady))
-      {
-         return false;
-      }
-      lock(_stateLock)
-      {
-         if(_controlState.AuthorizationRequired)
-         {
-            return false;
-         }
-      }
-      using AgentStore store = new(directory);
-      AgentConfiguration? configuration = store.LoadConfiguration();
-      if(configuration is null)
-      { return false; }
-      _pollIntervalSeconds = Math.Clamp(configuration.PollIntervalSeconds, 1, 20);
-      using PrintApiClient api = CreateApi(configuration);
-      long queueGeneration;
-      lock(_stateLock)
-      {
-         queueGeneration = _queueGeneration;
-      }
-      IReadOnlyList<PrintJob> queued = NormalTrafficAllowed ? await api.QueuedJobsAsync(token).ConfigureAwait(false) : [];
-      lock(_stateLock)
-      {
-         if(queueGeneration == _queueGeneration)
-         {
-            _queuedJobs = queued.Select(job => new JobSnapshot(job.JobId, "QUEUED", job.CreatedAt, "Waiting on the server; not yet received by this device.", null, job.PrinterId, _queuedJobs.FirstOrDefault(previous => string.Equals(previous.PrinterId, job.PrinterId, StringComparison.Ordinal))?.PrinterName, job.Title, job.Format, CreatedAt: JobSorting.NormalizeCreatedAt(job.CreatedAt))).ToArray();
-         }
-      }
-      ExposedPrinterBackend exposed = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
-      bool processed = await new PrintWorker(api, exposed, store, message => WriteLog("INFO", message), () => DispatchAllowed, () => NormalTrafficAllowed).RunOnceAsync(token).ConfigureAwait(false);
-      if(DateTimeOffset.UtcNow >= _nextHistoryMaintenance)
-      {
-         _ = store.PruneHistory();
-         _nextHistoryMaintenance = DateTimeOffset.UtcNow.AddMinutes(1);
-      }
-      bool recovered;
-      lock(_stateLock)
-      {
-         recovered = _failure is not null || _lastSuccessfulPoll is null;
-         _failure = null;
-      }
-      if(recovered)
-      { WriteLog("INFO", "Connected to the print server."); }
-      return processed;
-   }
-
-
-
-   /// <summary>
-   /// Builds the API client for one unit of work: the injected one in tests, otherwise a client bound to the live QQQ
-   /// session and the current realtime channel. It fails when no channel exists, so no HTTP-only path can claim work.
-   /// </summary>
-   private PrintApiClient CreateApi(AgentConfiguration configuration)
-   {
-      if(apiFactory is not null)
-      { return apiFactory(configuration); }
       PrintingRealtimeChannel realtime;
       lock(_stateLock)
-      { realtime = _realtime ?? throw new IOException("The realtime connection is unavailable."); }
+      { realtime = _realtime ?? throw new RealtimeChannelClosedException("The realtime connection is unavailable.", null); }
       return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException($"Sign in to {AppIdentity.ServerName} before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
    }
 
@@ -206,7 +86,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private PrintingRealtimeChannel CurrentRealtime()
    {
       lock(_stateLock)
-      { return _realtime ?? throw new IOException("Realtime connection unavailable; durable receipts are retained."); }
+      { return _realtime ?? throw new RealtimeChannelClosedException("Realtime connection unavailable; durable receipts are retained.", null); }
    }
 
 
@@ -215,14 +95,14 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// Wakes the claim loop. The single-slot semaphore coalesces repeated wake-ups into one pass, so a burst of job
    /// notifications cannot queue unbounded work; the status and queue-preview refreshes are requested alongside.
    /// </summary>
-   private void WakePoll()
+   private void WakeClaims()
    {
-      if(apiFactory is null)
-      { RequestStatusSynchronization(); RequestQueueRefresh(); }
+      RequestStatusSynchronization();
+      RequestQueueRefresh();
       lock(_stateLock)
       {
-         if(_pollRequested.CurrentCount == 0)
-         { _pollRequested.Release(); }
+         if(_claimsRequested.CurrentCount == 0)
+         { _claimsRequested.Release(); }
       }
    }
 
@@ -254,23 +134,23 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          }).ToArray();
          jobs = jobs.Concat(_queuedJobs.Where(queued => !jobs.Any(local => string.Equals(local.JobId, queued.JobId, StringComparison.Ordinal))))
             .Select(job => job.PrinterName is null ? job with { PrinterName = printers.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal))?.Name } : job).ToArray();
-         bool connected = configuration is not null && NormalTrafficAllowed && _failure is null && _heartbeatFailure is null && _lastSuccessfulPoll is not null
-            && ObservationTime - _lastSuccessfulPoll.Value < TimeSpan.FromSeconds(apiFactory is null ? _realtimeSettings.HeartbeatTimeoutSeconds : 30);
+         bool connected = configuration is not null && NormalTrafficAllowed && _heartbeatFailure is null && _lastServerContact is not null
+            && ObservationTime - _lastServerContact.Value < TimeSpan.FromSeconds(_realtimeSettings.HeartbeatTimeoutSeconds);
          bool printerIssue = !printers.Any(printer => printer.Exposed) || printers.Any(printer => printer.Exposed && !string.Equals(printer.Status, "READY", StringComparison.Ordinal));
          bool jobFailure = attentionCount > 0;
          string health = !connected || jobFailure ? "RED" : printerIssue ? "ORANGE" : "GREEN";
-         string status = configuration is null ? "Not enrolled" : _failure ?? _heartbeatFailure ?? (!connected ? "Waiting for server connection" : jobFailure ? $"Connected; {attentionCount} job(s) need review" : printerIssue ? "Connected; exposed printers need attention" : "Connected; exposed printers ready");
-         if(_updatePauseUntil > DateTimeOffset.UtcNow)
+         string status = configuration is null ? "Not enrolled" : _heartbeatFailure ?? (!connected ? "Waiting for server connection" : jobFailure ? $"Connected; {attentionCount} job(s) need review" : printerIssue ? "Connected; exposed printers need attention" : "Connected; exposed printers ready");
+         if(_updatePauseUntil > ObservationTime)
          {
             status = "Printing paused for application update. " + status;
          }
          (health, status) = ControlStatus(health, status, jobFailure);
-         if(apiFactory is null && !_authorizationReady)
+         if(!_authorizationReady)
          {
             health = "RED";
             status = _authenticationMessage;
          }
-         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastSuccessfulPoll?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot(), PrinterSync: printerSync);
+         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastServerContact?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot(), PrinterSync: printerSync);
       }
    }
 
@@ -434,7 +314,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             {
                store.SetExposure(request.PrinterId, request.Exposed.Value, _printers.Discover());
             }
-            WakePoll();
+            WakeClaims();
             WriteLog("INFO", request.Exposed.Value ? "A printer was shared with the server." : "A printer was hidden from the server.");
             return JsonSerializer.Serialize(GetSnapshot(), PrintApiClient.JsonOptions);
          case "enroll":
@@ -455,14 +335,6 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          default:
             throw new InvalidOperationException("Unknown command.");
       }
-   }
-
-
-
-   /// <summary>Compatibility entry point for enrollment; the native session path in <c>EnrollNativeAsync</c> does the work.</summary>
-   private async Task<string> EnrollAsync(PipeRequest request, CancellationToken token)
-   {
-      return await EnrollNativeAsync(request, token).ConfigureAwait(false);
    }
 }
 

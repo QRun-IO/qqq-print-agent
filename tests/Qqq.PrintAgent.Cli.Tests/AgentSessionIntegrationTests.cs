@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
@@ -15,23 +14,28 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// How the service uses the signed-in QQQ session: it resumes it, survives temporary failures, refuses a changed identity, and
 /// keeps the device pairing and job journal intact through sign-out. A fake session stands in for the server, so these tests
-/// check the service's decisions rather than the network.
+/// check the service's decisions rather than the network. Where a test needs authorization evaluated once it calls the entry
+/// point the reconnect loop and the heartbeat use. Where it claims the service sent nothing, it runs the service loop for a
+/// whole connection pass, because only the loop would send anything: the evaluation alone never does.
 /// </summary>
 public sealed class AgentSessionIntegrationTests
 {
-   /// <summary>A temporary resume failure (the transport was refused) surfaces as an error for that poll only; once the server is reachable again the same stored session works without asking the user to sign in again.</summary>
+   /// <summary>A temporary renewal failure (the transport was refused) surfaces as an error for that evaluation only and does not block authorization; once the server is reachable again the same stored session renews without asking the user to sign in again.</summary>
    [Fact]
    public async Task TransientResumeFailureDoesNotRequireNewSignIn()
    {
       using SessionFixture fixture = new();
       fixture.SaveSession();
       using AgentRuntime runtime = fixture.Runtime();
-      _ = await runtime.PollControlsOnceAsync(CancellationToken.None);
+      Assert.True(await runtime.EnsureAuthorizationAsync(CancellationToken.None));
       fixture.Session.ResumeFailure = QqqSessionException.FailureKind.TransportRefused;
-      await Assert.ThrowsAsync<QqqSessionException>(() => runtime.PollControlsOnceAsync(CancellationToken.None));
+      await Assert.ThrowsAsync<QqqSessionException>(() => fixture.EvaluateAsync(runtime));
+      Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
+      Assert.NotEqual("AUTHORIZATION_REQUIRED", runtime.GetTransportSnapshot().State, StringComparer.Ordinal);
       fixture.Session.ResumeFailure = null;
-      _ = await runtime.PollControlsOnceAsync(CancellationToken.None);
-      Assert.Equal(2, fixture.Session.Paths.Count);
+      Assert.True(await runtime.EnsureAuthorizationAsync(CancellationToken.None));
+      Assert.Equal(1, fixture.Created);
+      Assert.Equal(2, fixture.Session.Resumes);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
    }
 
@@ -46,10 +50,11 @@ public sealed class AgentSessionIntegrationTests
       fixture.Session.Binding = fixture.Session.Binding with { DeviceId = null };
       fixture.SaveSession();
       using AgentRuntime runtime = fixture.Runtime();
-      _ = await runtime.PollControlsOnceAsync(CancellationToken.None);
+      await fixture.RunOnePassAsync(runtime);
       Assert.True(runtime.GetSnapshot().Authentication!.SignedIn);
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
-      Assert.Empty(fixture.Session.Paths);
+      Assert.Equal(1, fixture.Created);
+      fixture.AssertSentNothing(fixture.Session);
    }
 
 
@@ -71,31 +76,6 @@ public sealed class AgentSessionIntegrationTests
 
 
 
-   /// <summary>
-   /// While a request on the old session is still waiting to be denied, the user signs in again. The new sign-in must not wait
-   /// for the old request, and the late denial must not sign the new session out; later polls use only the new session.
-   /// </summary>
-   [Fact]
-   public async Task DelayedOldSessionDenialCannotBlockNewSignIn()
-   {
-      using SessionFixture fixture = new();
-      fixture.SaveSession();
-      fixture.Session.DelayUnauthorizedPoll = true;
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
-      using AgentRuntime runtime = fixture.Runtime();
-      Task<int> oldPoll = runtime.PollControlsOnceAsync(timeout.Token);
-      await fixture.Session.PollEntered.Task.WaitAsync(timeout.Token);
-      fixture.NextSession = new SessionFixture.FakeSession();
-      _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.NextSession.ExportCredential()), timeout.Token);
-      fixture.Session.ReleasePoll.TrySetResult();
-      _ = await oldPoll;
-      Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
-      _ = await runtime.PollControlsOnceAsync(timeout.Token);
-      Assert.Single(fixture.NextSession.Paths);
-   }
-
-
-
    /// <summary>An installation paired with the older device-token method, with no saved sign-in, waits for the user to sign in: no session is created and nothing is sent. The existing pairing and the job journal are left exactly as they were.</summary>
    [Fact]
    public async Task InstalledLegacyPairingWaitsForSignInWithoutNetworkOrJournalLoss()
@@ -103,9 +83,10 @@ public sealed class AgentSessionIntegrationTests
       using SessionFixture fixture = new();
       fixture.Local.SeedSpooledJob();
       using AgentRuntime runtime = fixture.Runtime();
-      await runtime.PollControlsOnceAsync(CancellationToken.None);
+      await fixture.RunOnePassAsync(runtime);
       Assert.Equal(0, fixture.Created);
-      Assert.Empty(fixture.Session.Paths);
+      fixture.AssertSentNothing(fixture.Session);
+      Assert.Contains(fixture.Logs, line => line.StartsWith("No saved QQQ session", StringComparison.Ordinal));
       Assert.False(runtime.GetSnapshot().Connected);
       using AgentStore store = new(fixture.Local.DirectoryPath);
       Assert.Equal("device", store.LoadConfiguration()!.DeviceId);
@@ -115,26 +96,82 @@ public sealed class AgentSessionIntegrationTests
 
 
    /// <summary>
-   /// A saved session is restored once, polls over the session transport, and renews itself with a resume between polls. Neither
-   /// the session cookie nor the device token appears in the status snapshot, and the cookie is not readable in the protected file.
+   /// With a pairing but no usable sign-in, the running service waits; nothing a reconnect could retry exists. An operator who
+   /// asks to reconnect over the management pipe is told that a sign-in is required, and no connection is attempted.
    /// </summary>
    [Fact]
-   public async Task RestoredSessionUsesNativeTransportAndPeriodicallyResumes()
+   public async Task ReconnectWithoutAUsableSignInSaysASignInIsRequired()
+   {
+      using SessionFixture fixture = new();
+      using AgentRuntime runtime = fixture.Runtime();
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
+      Task running = runtime.RunAsync(stop.Token);
+      try
+      {
+         while(fixture.Clock.PendingTimers == 0)
+         { await Task.Delay(10, stop.Token); }
+         await using var pipe = new System.IO.Pipes.NamedPipeClientStream(".", fixture.PipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+         await pipe.ConnectAsync(stop.Token);
+         await AgentPipeFraming.WriteAsync(pipe, JsonSerializer.Serialize(new PipeRequest("reconnect"), PrintApiClient.JsonOptions), AgentPipeFraming.MaximumCommandCharacters, stop.Token);
+         string reply = await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, stop.Token);
+         Assert.StartsWith("Sign-in is required", reply, StringComparison.Ordinal);
+         Assert.DoesNotContain("Connection retry requested.", fixture.Logs, StringComparer.Ordinal);
+         fixture.AssertSentNothing(fixture.Session);
+      }
+      finally
+      {
+         await stop.CancelAsync();
+         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+      }
+   }
+
+
+
+   /// <summary>
+   /// A running service restores the saved session once and asks that session for the realtime socket, with no HTTP printing
+   /// request first. An authorization evaluation before the renewal interval has passed leaves the session alone; one made
+   /// after it, as the heartbeat makes, renews the same session instead of creating another. Neither the session cookie nor the device token appears in the status
+   /// snapshot, and the cookie is not readable in the protected file.
+   /// </summary>
+   [Fact]
+   public async Task RestoredSessionOpensTheRealtimeSocketAndRenewsItself()
    {
       using SessionFixture fixture = new();
       fixture.SaveSession();
+      var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      fixture.Session.ConnectRealtime = async token =>
+      {
+         opened.TrySetResult();
+         await Task.Delay(Timeout.InfiniteTimeSpan, token);
+         throw new OperationCanceledException(token);
+      };
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
       using AgentRuntime runtime = fixture.Runtime();
-      await runtime.PollControlsOnceAsync(CancellationToken.None);
-      await runtime.PollControlsOnceAsync(CancellationToken.None);
-      Assert.Equal(1, fixture.Created);
-      Assert.Equal(1, fixture.Session.Resumes);
-      Assert.Equal(new[] { "device/control/poll", "device/control/poll" }, fixture.Session.Paths, StringComparer.Ordinal);
-      Assert.True(runtime.GetSnapshot().Authentication!.SignedIn);
-      string snapshot = JsonSerializer.Serialize(runtime.GetSnapshot(), PrintApiClient.JsonOptions);
-      Assert.DoesNotContain("synthetic-qqq-cookie", snapshot, StringComparison.Ordinal);
-      Assert.DoesNotContain("synthetic-token", snapshot, StringComparison.Ordinal);
-      string protectedData = Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi")));
-      Assert.DoesNotContain("synthetic-qqq-cookie", protectedData, StringComparison.Ordinal);
+      Task running = runtime.RunAsync(stop.Token);
+      try
+      {
+         await opened.Task.WaitAsync(stop.Token);
+         Assert.Equal(1, fixture.Created);
+         Assert.Equal(0, fixture.Session.Resumes);
+         Assert.Equal(1, fixture.Session.RealtimeAttempts);
+         Assert.True(await runtime.EnsureAuthorizationAsync(stop.Token));
+         Assert.Equal(0, fixture.Session.Resumes);
+         Assert.True(await fixture.EvaluateAsync(runtime, stop.Token));
+         Assert.Equal(1, fixture.Created);
+         Assert.Equal(1, fixture.Session.Resumes);
+         Assert.Empty(fixture.Session.Paths);
+         Assert.True(runtime.GetSnapshot().Authentication!.SignedIn);
+         string snapshot = JsonSerializer.Serialize(runtime.GetSnapshot(), PrintApiClient.JsonOptions);
+         Assert.DoesNotContain("synthetic-qqq-cookie", snapshot, StringComparison.Ordinal);
+         Assert.DoesNotContain("synthetic-token", snapshot, StringComparison.Ordinal);
+         string protectedData = Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi")));
+         Assert.DoesNotContain("synthetic-qqq-cookie", protectedData, StringComparison.Ordinal);
+      }
+      finally
+      {
+         await stop.CancelAsync();
+         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+      }
    }
 
 
@@ -147,32 +184,20 @@ public sealed class AgentSessionIntegrationTests
       fixture.SaveSession();
       fixture.Session.Binding = fixture.Session.Binding with { PrincipalId = "different-user" };
       using AgentRuntime runtime = fixture.Runtime();
-      await runtime.PollControlsOnceAsync(CancellationToken.None);
-      Assert.Empty(fixture.Session.Paths);
+      await fixture.RunOnePassAsync(runtime);
+      Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
+      Assert.Equal(1, fixture.Created);
+      fixture.AssertSentNothing(fixture.Session);
       using AgentStore store = new(fixture.Local.DirectoryPath);
       Assert.Equal("principal", store.LoadAuthentication()!.Binding.PrincipalId);
    }
 
 
 
-   /// <summary>When the server uses the signed-in session (so it supports remote control), a 404 on the control poll is an error and must not be read as "legacy server, printing allowed", which would bypass pause and disconnect.</summary>
-   [Fact]
-   public async Task NativeAdvertisedControlsNeverFallBackOn404()
-   {
-      using SessionFixture fixture = new();
-      fixture.SaveSession();
-      fixture.Session.Status = HttpStatusCode.NotFound;
-      using AgentRuntime runtime = fixture.Runtime();
-      await Assert.ThrowsAsync<InvalidDataException>(() => runtime.PollControlsOnceAsync(CancellationToken.None));
-      Assert.NotEqual("LEGACY", runtime.GetSnapshot().Control!.Support, StringComparer.Ordinal);
-   }
-
-
-
    /// <summary>
    /// An explicit sign-in can claim an existing legacy device for the signed-in user, and the request text never reveals the
-   /// cookie. Signing out stops all printing requests but keeps the device pairing, the stored identity (without its credential)
-   /// and the job journal, so signing in again continues the same history.
+   /// cookie. Signing out leaves the service unauthorized and sends no printing requests, but keeps the device pairing, the
+   /// stored identity (without its credential) and the job journal, so signing in again continues the same history.
    /// </summary>
    [Fact]
    public async Task ExplicitSignInBindsLegacyAndSignOutRetainsDeviceAndJournal()
@@ -185,8 +210,9 @@ public sealed class AgentSessionIntegrationTests
       _ = await runtime.SignInAsync(request, CancellationToken.None);
       Assert.True(fixture.Session.ClaimedLegacy);
       _ = await runtime.SignOutAsync(CancellationToken.None);
-      await runtime.PollControlsOnceAsync(CancellationToken.None);
-      Assert.Empty(fixture.Session.Paths);
+      await fixture.RunOnePassAsync(runtime);
+      Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
+      fixture.AssertSentNothing(fixture.Session);
       using AgentStore store = new(fixture.Local.DirectoryPath);
       Assert.Null(store.LoadAuthentication()!.Credential);
       Assert.Equal("principal", store.LoadAuthentication()!.Binding.PrincipalId);

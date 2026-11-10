@@ -179,8 +179,7 @@ public sealed class AgentRuntimePipeResponseTests
          catch(OperationCanceledException) { }
          _runtime.Dispose();
          Stop.Dispose();
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(_directory, recursive: true);
+         JournalFiles.Delete(_directory);
       }
    }
 

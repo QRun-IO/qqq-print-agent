@@ -69,7 +69,7 @@ public sealed partial class AgentStore
 
 
 
-   /// <summary>Creates the profile table on first use under the shared schema lock, so concurrent stores cannot race creating it.</summary>
+   /// <summary>Creates the profile table on first use under this journal's schema lock, so concurrent stores of the same journal cannot race creating it.</summary>
    private void EnsureMetadataTable()
    {
       lock(SchemaLock)

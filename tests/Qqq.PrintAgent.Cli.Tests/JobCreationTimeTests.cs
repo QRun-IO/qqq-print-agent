@@ -36,8 +36,7 @@ public sealed class JobCreationTimeTests
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 
@@ -81,8 +80,7 @@ public sealed class JobCreationTimeTests
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 

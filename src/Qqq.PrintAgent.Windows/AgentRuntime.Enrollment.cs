@@ -57,7 +57,7 @@ public sealed partial class AgentRuntime
          using var api = PrintApiClient.ForSession(session);
          WriteLog("INFO", "Step 2 of 4: exchanging the enrollment code for a device credential.");
          EnrollmentResponse response = await api.EnrollAsync(new EnrollmentRequest(request.EnrollmentCode ?? "", Environment.MachineName, PrintApiClient.AgentVersion), token).ConfigureAwait(false);
-         WriteLog("INFO", $"Enrollment accepted: device {response.DeviceId}, poll interval {response.PollIntervalSeconds} s.");
+         WriteLog("INFO", $"Enrollment accepted: device {response.DeviceId}.");
          QqqSessionBinding expected = identity with { DeviceId = response.DeviceId };
          WriteLog("INFO", "Step 3 of 4: binding the new device to the session and confirming the identity.");
          QqqSessionBinding actual = await session.BindDeviceAsync(new QqqDeviceCredential(response.DeviceId, response.DeviceToken), cancellationToken: token).ConfigureAwait(false);
@@ -83,7 +83,7 @@ public sealed partial class AgentRuntime
             _queuedJobs = [];
          }
          WriteLog("INFO", $"Device enrolled with the {AppIdentity.ServerName} user session.");
-         WakePoll();
+         WakeClaims();
          return $"Enrolled device {response.DeviceId}";
       }
       catch(Exception exception) when(progress != EnrollmentProgress.NothingChanged || exception is not InvalidOperationException)

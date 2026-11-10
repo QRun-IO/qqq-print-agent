@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,9 +27,38 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
    private readonly SqliteConnection _database;
    private readonly string _directory;
-   private static readonly Lock SchemaLock = new();
+   private static readonly ConcurrentDictionary<string, Lock> SchemaLocks = new(StringComparer.OrdinalIgnoreCase);
    private string _connectionScope = "unenrolled";
    private bool _configurationRecoveryRequired;
+
+
+
+   /// <summary>
+   /// The lock that serializes schema creation and migration for the journal in a folder. Every store this process opens on
+   /// that folder shares it, so two of them cannot both add a column or a table. Stores on different folders do not wait for
+   /// each other: their journals are separate files, and a single lock for the whole process made every open queue behind
+   /// every other one. The lock is found by the folder's full path without a trailing separator, compared without regard to
+   /// letter case. That covers one path written relative or absolute, in another letter case, or with a trailing separator.
+   /// It does not cover other routes to the same folder: a short (8.3) name, a junction or a substituted drive letter each
+   /// get a lock of their own.
+   /// </summary>
+   internal static Lock SchemaLockFor(string directory)
+      => SchemaLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)), static _ => new Lock());
+
+
+
+   /// <summary>The schema lock of this store's journal.</summary>
+   private Lock SchemaLock => SchemaLockFor(_directory);
+
+
+
+   /// <summary>
+   /// The connection string every store uses for the journal in a folder. SQLite keeps one pool of idle connections per
+   /// connection string, so this text also names the journal's pool; a test that must delete a journal releases that pool by
+   /// it, and no other.
+   /// </summary>
+   internal static string JournalConnectionString(string directory)
+      => new SqliteConnectionStringBuilder { DataSource = Path.Combine(Path.GetFullPath(directory), "journal.db") }.ToString();
 
 
 
@@ -42,7 +72,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       _directory = Path.GetFullPath(directory);
       Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(_directory);
       Directory.CreateDirectory(_directory);
-      _database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "journal.db") }.ToString());
+      _database = new SqliteConnection(JournalConnectionString(_directory));
       try
       {
          _database.Open();
@@ -58,7 +88,7 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
 
    /// <summary>
-   /// Creates or migrates the schema under a process-wide lock: events, exposure, per-job summaries, and the added
+   /// Creates or migrates the schema under this journal's schema lock: events, exposure, per-job summaries, and the added
    /// timestamp and scope columns, with legacy rows assigned to the current scope. Job summaries are rebuilt from the latest
    /// event only the first time that table appears. The migration runs in a transaction so a failure leaves the old schema usable.
    /// </summary>

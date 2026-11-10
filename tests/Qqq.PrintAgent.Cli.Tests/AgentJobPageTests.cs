@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
@@ -40,8 +39,7 @@ public sealed class AgentJobPageTests
       }
       finally
       {
-         SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
+         JournalFiles.Delete(directory);
       }
    }
 }

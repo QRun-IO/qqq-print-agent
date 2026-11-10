@@ -89,8 +89,8 @@ public sealed partial class AgentRuntime
    /// Keeps one authenticated socket alive for the current connection generation. Each failure marks realtime and
    /// control not ready and records a reason the operator can read; when the server says sign-in or permission is gone
    /// it blocks further attempts, because reconnecting cannot repair that. A generation change (sign-out, re-pairing)
-   /// abandons the attempt without touching newer state. Between attempts it waits the backoff delay, cut short by an
-   /// explicit reconnect request.
+   /// abandons the attempt without touching newer state. Between attempts it waits the backoff delay on the runtime's
+   /// clock, cut short by an explicit reconnect request.
    /// </summary>
    private async Task RealtimeReconnectAsync(CancellationToken token)
    {
@@ -134,8 +134,24 @@ public sealed partial class AgentRuntime
          {
             WriteLog("DEBUG", $"Next realtime connection attempt ({_reconnectAttempts}) in {delay.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s, or sooner on an explicit reconnect request.");
          }
-         await _reconnectRequested.WaitAsync(delay, token).ConfigureAwait(false);
+         await WaitBeforeReconnectAsync(delay, token).ConfigureAwait(false);
       }
+   }
+
+
+
+   /// <summary>
+   /// Waits out the backoff before the next connection attempt, or less when a reconnect is requested. The delay is
+   /// measured on the runtime's clock. The wait on the request is cancelled when the delay ends, so a request that arrives
+   /// later is kept for the wait after the next attempt instead of being consumed by one that already gave up.
+   /// </summary>
+   private async Task WaitBeforeReconnectAsync(TimeSpan delay, CancellationToken token)
+   {
+      using var elapsed = new CancellationTokenSource(delay, Clock);
+      using var either = CancellationTokenSource.CreateLinkedTokenSource(token, elapsed.Token);
+      try
+      { await _reconnectRequested.WaitAsync(either.Token).ConfigureAwait(false); }
+      catch(OperationCanceledException) when(!token.IsCancellationRequested) { }
    }
 
 
@@ -197,15 +213,7 @@ public sealed partial class AgentRuntime
       Task handshakeWatch = AwaitRealtimeHandshakeAsync(handshake.Token, lifetime.Token);
       try
       {
-         WriteLog("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
-         await channel.SendAsync("HELLO", new
-         {
-            agentVersion = PrintApiClient.AgentVersion,
-            capabilities,
-            lastAppliedRevision = _controlState.DesiredState.Revision,
-            lastSettingsRevision = settings.Revision,
-            limits = RealtimeSettings.ClientLimits,
-         }, token: lifetime.Token).ConfigureAwait(false);
+         await SendHelloAsync(channel, capabilities, settings, lifetime.Token).ConfigureAwait(false);
          await Task.WhenAny(reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
       }
       finally
@@ -218,8 +226,52 @@ public sealed partial class AgentRuntime
          }
          SignalPipeline();
          await lifetime.CancelAsync().ConfigureAwait(false);
-         await Task.WhenAll(reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
+         await CompleteConnectionAsync(other => WriteLog("DEBUG", "Realtime connection also failed with: " + QqqSessionDiagnostics.Describe(other)),
+            reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
       }
+   }
+
+
+
+   /// <summary>Sends HELLO, the first message on a socket: the agent version, this socket's capabilities, the revisions already applied and the ceilings this client can honor.</summary>
+   private async Task SendHelloAsync(PrintingRealtimeChannel channel, string[] capabilities, RealtimeSettings settings, CancellationToken token)
+   {
+      WriteLog("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
+      await channel.SendAsync("HELLO", new
+      {
+         agentVersion = PrintApiClient.AgentVersion,
+         capabilities,
+         lastAppliedRevision = _controlState.DesiredState.Revision,
+         lastSettingsRevision = settings.Revision,
+         limits = RealtimeSettings.ClientLimits,
+      }, token: token).ConfigureAwait(false);
+   }
+
+
+
+   /// <summary>
+   /// Waits for every task of a finished connection and rethrows one failure as the reason it ended; the others go to
+   /// <paramref name="alsoFailed"/>. Which task completes first is a matter of scheduling, so the reason is chosen by what
+   /// each failure is. A worker that failed with anything other than <see cref="RealtimeChannelClosedException"/> has a
+   /// reason of its own (a refusal, a timeout, a session the server ended, a full output queue) and comes first, also when
+   /// the server closed the socket straight afterwards and the reader failed with that. A worker's
+   /// <see cref="RealtimeChannelClosedException"/> only says the connection was gone when it tried to use it; then the
+   /// reader's failure (a frame it rejected, a socket the server closed) is the reason, and the worker's failure, which
+   /// carries that as its cause when it was waiting for an acknowledgement, is detail.
+   /// </summary>
+   internal static async Task CompleteConnectionAsync(Action<Exception> alsoFailed, Task reader, params Task[] workers)
+   {
+      var all = Task.WhenAll([reader, .. workers]);
+      await all.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+      Exception? readerFailure = reader.Exception?.InnerException;
+      Exception[] failures = all.Exception is null ? [] : [.. all.Exception.InnerExceptions];
+      Exception? reason = failures.FirstOrDefault(failure => !ReferenceEquals(failure, readerFailure) && failure is not RealtimeChannelClosedException)
+         ?? readerFailure ?? (failures.Length > 0 ? failures[0] : null);
+      foreach(Exception other in failures.Where(failure => !ReferenceEquals(failure, reason)))
+      { alsoFailed(other); }
+      if(reason is not null)
+      { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(reason); }
+      await all.ConfigureAwait(false);
    }
 
 
@@ -253,8 +305,6 @@ public sealed partial class AgentRuntime
          _realtimeReady = true;
          _transportConnectedBefore = true;
          _controlReady = true;
-         _controlFailure = null;
-         _failure = null;
          _reconnectAttempts = 0;
          return becameReady;
       }
@@ -339,14 +389,14 @@ public sealed partial class AgentRuntime
    private void ReceiveRealtime(RealtimeEnvelope envelope, ChannelWriter<RealtimeStateUpdate> updates, ChannelWriter<RealtimeEnvelope> commands)
    {
       lock(_stateLock)
-      { _lastSuccessfulPoll = ObservationTime; _heartbeatFailure = null; }
+      { _lastServerContact = ObservationTime; _heartbeatFailure = null; }
       WriteLog("DEBUG", $"Realtime frame received: {envelope.Type}.");
       if(envelope.Type is "WELCOME" or "PONG")
       {
          string? serverTime = envelope.Payload.GetProperty("serverTime").GetString();
          if(!DateTimeOffset.TryParse(serverTime, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset server))
          { throw new InvalidDataException("Invalid realtime server time."); }
-         _serverTimeOffset = server - DateTimeOffset.UtcNow;
+         _serverTimeOffset = server - ObservationTime;
       }
       switch(envelope.Type)
       {
@@ -366,7 +416,7 @@ public sealed partial class AgentRuntime
             { throw new IOException("Realtime command queue is full."); }
             break;
          case "JOB_AVAILABLE":
-            WakePoll();
+            WakeClaims();
             RequestQueueRefresh();
             break;
          case "PRINTERS":
@@ -439,9 +489,7 @@ public sealed partial class AgentRuntime
             using var store = new AgentStore(directory);
             if(envelope.Type is "WELCOME" or "SETTINGS")
             { ApplyRealtimeSettings(envelope, store, channel); }
-            lock(_stateLock)
-            { saved = _controlState; }
-            store.SaveControlState(saved);
+            saved = PersistControlState(store);
          }
          finally { _connectionGate.Release(); }
          await channel.SendAsync("STATE_APPLIED", new { lastAppliedRevision = saved.DesiredState.Revision, lastSettingsRevision = _realtimeSettings.Revision }, acknowledged: true, token: token).ConfigureAwait(false);
@@ -454,7 +502,7 @@ public sealed partial class AgentRuntime
          RequestStatusSynchronization();
          RequestQueueRefresh();
          if(envelope.Type is "WELCOME" or "DESIRED_STATE")
-         { WakePoll(); }
+         { WakeClaims(); }
       }
    }
 }

@@ -40,16 +40,18 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    /// <summary>
    /// Runs the reader and writer until either ends, then shuts the channel down in a fixed order: mark it closed, stop the
    /// outgoing queue, cancel both loops, abort the socket, and fail every send still waiting for an acknowledgement so its
-   /// caller replays the durable record instead of waiting forever.
+   /// caller replays the durable record instead of waiting forever. When the reader or writer ended with a failure, each of
+   /// those failed sends carries it as its cause, so whoever reports the send also reports why the channel closed.
    /// </summary>
    public async Task RunAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
       using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
       Task reader = ReadAsync(received, lifetime.Token);
       Task writer = WriteAsync(lifetime.Token);
+      Task ended = reader;
       try
       {
-         await Task.WhenAny(reader, writer).ConfigureAwait(false);
+         ended = await Task.WhenAny(reader, writer).ConfigureAwait(false);
       }
       finally
       {
@@ -57,9 +59,10 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
          _outgoing.Writer.TryComplete();
          await lifetime.CancelAsync().ConfigureAwait(false);
          socket.Abort();
+         Exception? cause = ended.Exception?.InnerException;
          foreach(TaskCompletionSource pending in _pending.Values)
          {
-            pending.TrySetException(new IOException("Realtime connection closed before acknowledgement; durable receipts will be replayed."));
+            pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
          }
          await Task.WhenAll(reader, writer).ConfigureAwait(false);
       }
@@ -76,7 +79,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    {
       token.ThrowIfCancellationRequested();
       if(Volatile.Read(ref _closed) != 0)
-      { throw new IOException("Realtime connection is closed."); }
+      { throw new RealtimeChannelClosedException("Realtime connection is closed.", null); }
       string id = messageId ?? Guid.NewGuid().ToString("N");
       byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { type, messageId = id, payload }, PrintApiClient.JsonOptions);
       if(bytes.Length > _limits.MaxFrameBytes)

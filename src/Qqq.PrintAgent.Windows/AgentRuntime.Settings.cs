@@ -10,7 +10,7 @@ namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
 /// Settings commands of the runtime: log options and device and printer profiles. They live in one place so every change is followed by
-/// a poll wake-up and a fresh snapshot, and the caller sees the state that was actually stored.
+/// a wake-up of the claim loop and a fresh snapshot, and the caller sees the state that was actually stored.
 /// </summary>
 public sealed partial class AgentRuntime
 {
@@ -72,7 +72,7 @@ public sealed partial class AgentRuntime
          default:
             throw new InvalidOperationException("Unknown settings command.");
       }
-      WakePoll();
+      WakeClaims();
       return JsonSerializer.Serialize(GetSnapshot(), PrintApiClient.JsonOptions);
    }
 }

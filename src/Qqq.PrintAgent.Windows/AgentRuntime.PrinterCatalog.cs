@@ -18,7 +18,7 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public sealed partial class AgentRuntime
 {
-   /// <summary>How long a catalog reading stays current before the synchronization loop reads it again.</summary>
+   /// <summary>How long a catalog reading stays current before the synchronization loop reads it again, measured on the runtime's time provider.</summary>
    internal static readonly TimeSpan CatalogRefreshInterval = TimeSpan.FromSeconds(60);
 
    private HashSet<string>? _catalogApproved;
@@ -97,7 +97,7 @@ public sealed partial class AgentRuntime
    {
       lock(_stateLock)
       {
-         if(!force && _catalogCheckedAt is DateTimeOffset checkedAt && DateTimeOffset.UtcNow - checkedAt < CatalogRefreshInterval)
+         if(!force && _catalogCheckedAt is DateTimeOffset checkedAt && ObservationTime - checkedAt < CatalogRefreshInterval)
          { return; }
       }
       string server = new Uri(configuration.ServerUrl).Authority;
@@ -141,7 +141,7 @@ public sealed partial class AgentRuntime
             || (approved is not null && (_catalogApproved is null || !_catalogApproved.SetEquals(approved)));
          _catalogApproved = approved;
          _catalogSync = sync;
-         _catalogCheckedAt = DateTimeOffset.UtcNow;
+         _catalogCheckedAt = ObservationTime;
       }
       if(!changed)
       { return; }

@@ -73,7 +73,7 @@ public sealed partial class AgentRuntime
       {
          throw new InvalidOperationException("Server actions are unavailable while disconnected by the administrator or awaiting authorization/control negotiation. Local history is preserved.");
       }
-      AgentConfiguration configuration = store.LoadConfiguration() ?? throw new InvalidOperationException("Connect this device in Settings first.");
+      _ = store.LoadConfiguration() ?? throw new InvalidOperationException("Connect this device in Settings first.");
       if(string.Equals(request.Operation, "test-print", StringComparison.Ordinal))
       {
          PrinterInfo printer = _printers.Discover().SingleOrDefault(p => string.Equals(p.PrinterId, request.PrinterId, StringComparison.Ordinal))
@@ -83,7 +83,7 @@ public sealed partial class AgentRuntime
             throw new InvalidOperationException("Share the printer and select a supported format first. The server must also approve the printer.");
          }
       }
-      using PrintApiClient api = CreateApi(configuration);
+      using PrintApiClient api = CreateApi();
       string? testProfile = string.Equals(request.Operation, "test-print", StringComparison.Ordinal) ? request.TestProfile : null;
       string queuedJob = await api.OperatorActionAsync(request.Operation, request.JobId, request.PrinterId, request.Format, request.ConfirmDuplicateRisk, testProfile, token).ConfigureAwait(false);
       if(string.Equals(request.Operation, "cancel-job", StringComparison.Ordinal))
@@ -95,7 +95,7 @@ public sealed partial class AgentRuntime
          }
       }
       WriteLog("INFO", "Server accepted operator action " + request.Operation + ".");
-      WakePoll();
+      WakeClaims();
       return string.IsNullOrEmpty(queuedJob) ? "The server accepted the cancellation before dispatch." : "Queued on the server. The new job will appear here when this device receives it.";
    }
 

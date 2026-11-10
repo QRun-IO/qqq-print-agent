@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
@@ -79,13 +78,6 @@ public sealed class MetadataTests : IDisposable
 
 
 
-   /// <summary>Releases SQLite's pooled connections and deletes the temporary store directory.</summary>
-   public void Dispose()
-   {
-      SqliteConnection.ClearAllPools();
-      if(Directory.Exists(_directory))
-      {
-         Directory.Delete(_directory, recursive: true);
-      }
-   }
+   /// <summary>Releases this journal's pooled connections and deletes the temporary store directory, if a test created it.</summary>
+   public void Dispose() => JournalFiles.Delete(_directory);
 }
