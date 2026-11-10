@@ -11,15 +11,21 @@ using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
-/// <summary>One continuously active reader and one bounded writer. Callbacks must only dispatch work, never await it.</summary>
-public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings limits, ApplicationTrafficMeter? traffic = null) : IDisposable
+/// <summary>
+/// One continuously active reader and one bounded writer. Callbacks must only dispatch work, never await it. The
+/// acknowledgement wait is counted on the supplied clock (the system clock by default), so a test reaches the timeout
+/// by moving a clock.
+/// </summary>
+public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings limits, ApplicationTrafficMeter? traffic = null, TimeProvider? timeProvider = null) : IDisposable
 {
+   private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
    private readonly Channel<byte[]> _outgoing = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
    private RealtimeSettings _limits = limits;
    private readonly ConcurrentDictionary<string, TaskCompletionSource> _pending = new(StringComparer.Ordinal);
    private long _queuedBytes;
    private int _queuedFrames;
    private int _closed;
+   private int _disposed;
 
 
 
@@ -42,30 +48,47 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    /// outgoing queue, cancel both loops, abort the socket, and fail every send still waiting for an acknowledgement so its
    /// caller replays the durable record instead of waiting forever. When the reader or writer ended with a failure, each of
    /// those failed sends carries it as its cause, so whoever reports the send also reports why the channel closed.
+   /// <para>
+   /// How the method ends says why the channel ended. It returns normally when the channel was ended on purpose: the
+   /// caller cancelled the token it passed in, or the channel was disposed while it ran. It throws when the channel ended
+   /// by itself, with what the reader failed with (a frame it rejected, a socket the server closed, a callback that
+   /// threw) or, when the reader did not fail, what the writer failed with. A callback that gives up by throwing a
+   /// cancellation while the caller's token is not cancelled ends the method as that cancellation, because it was not
+   /// the caller who asked to stop.
+   /// </para>
    /// </summary>
    public async Task RunAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
       using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
       Task reader = ReadAsync(received, lifetime.Token);
       Task writer = WriteAsync(lifetime.Token);
-      Task ended = reader;
-      try
+      Task ended = await Task.WhenAny(reader, writer).ConfigureAwait(false);
+
+      ////////////////////////////////////////////////////////////////////////
+      // read before the teardown below, so a channel that failed first and //
+      // was disposed a moment later still reports its failure              //
+      ////////////////////////////////////////////////////////////////////////
+      bool disposed = Volatile.Read(ref _disposed) != 0;
+      Interlocked.Exchange(ref _closed, 1);
+      _outgoing.Writer.TryComplete();
+      await lifetime.CancelAsync().ConfigureAwait(false);
+      socket.Abort();
+      Exception? cause = ended.Exception?.InnerException;
+      foreach(TaskCompletionSource pending in _pending.Values)
       {
-         ended = await Task.WhenAny(reader, writer).ConfigureAwait(false);
+         pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
       }
-      finally
-      {
-         Interlocked.Exchange(ref _closed, 1);
-         _outgoing.Writer.TryComplete();
-         await lifetime.CancelAsync().ConfigureAwait(false);
-         socket.Abort();
-         Exception? cause = ended.Exception?.InnerException;
-         foreach(TaskCompletionSource pending in _pending.Values)
-         {
-            pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
-         }
-         await Task.WhenAll(reader, writer).ConfigureAwait(false);
-      }
+      var both = Task.WhenAll(reader, writer);
+      await both.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+      /////////////////////////////////////////////////////////////////////////
+      // ended on purpose: disposed (whatever the loops met on a socket that //
+      // was disposed under them is the dispose itself), or cancelled by the //
+      // caller with neither loop having failed. anything else is rethrown:  //
+      // a failure, the reader's first, or a cancellation nobody asked for   //
+      /////////////////////////////////////////////////////////////////////////
+      if(!disposed && !(both.IsCanceled && token.IsCancellationRequested))
+      { await both.ConfigureAwait(false); }
    }
 
 
@@ -94,7 +117,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
          Queue(bytes);
          if(completion is not null)
          {
-            await completion.Task.WaitAsync(TimeSpan.FromMilliseconds(_limits.AckTimeoutMillis), token).ConfigureAwait(false);
+            await completion.Task.WaitAsync(TimeSpan.FromMilliseconds(_limits.AckTimeoutMillis), _time, token).ConfigureAwait(false);
          }
       }
       finally
@@ -109,6 +132,9 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    /// <summary>
    /// Adds a frame to the bounded outgoing queue, counting bytes and frames against the negotiated limits. Exceeding a limit
    /// aborts the socket and throws, which forces a reconnect, because dropping a frame silently would lose a durable event.
+   /// A frame is also refused when the channel closed after the send was let in, while the frame was being serialized:
+   /// the queue no longer takes anything then, and the send is told the channel is closed, which is what happened,
+   /// instead of that the queue is full, which would be reported as the reason the connection dropped.
    /// </summary>
    private void Queue(byte[] bytes)
    {
@@ -118,6 +144,8 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       {
          Interlocked.Add(ref _queuedBytes, -bytes.Length);
          Interlocked.Decrement(ref _queuedFrames);
+         if(Volatile.Read(ref _closed) != 0)
+         { throw new RealtimeChannelClosedException("Realtime connection is closed.", null); }
          socket.Abort();
          throw new IOException("Realtime output queue is full; reconnect is required.");
       }
@@ -143,103 +171,89 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
 
    /// <summary>
    /// The single reader. It assembles text messages from fragments within the negotiated size, rejects any other message
-   /// type, parses each message with a depth limit and no duplicate fields, checks the envelope, and hands it to the
-   /// callback. A close frame or any protocol violation ends the loop, which closes the connection and triggers a reconnect.
+   /// type, has each complete message parsed and checked as an envelope, and routes it. A close frame ends the loop as a
+   /// lost connection; anything the server gets wrong ends it as a <see cref="PrintingProtocolException"/>. Either way the
+   /// connection closes and the runtime reconnects.
    /// </summary>
    private async Task ReadAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
       byte[] buffer = new byte[8192];
       using var message = new MemoryStream();
-      while(!token.IsCancellationRequested)
+      while(true)
       {
+         token.ThrowIfCancellationRequested();
          ValueWebSocketReceiveResult result = await socket.ReceiveAsync(buffer.AsMemory(), token).ConfigureAwait(false);
          traffic?.RecordDownload(result.Count);
          if(result.MessageType == WebSocketMessageType.Close)
          { throw new IOException("Server closed the realtime connection."); }
          if(result.MessageType != WebSocketMessageType.Text || message.Length + result.Count > _limits.MaxFrameBytes)
          {
-            throw new InvalidDataException("Realtime message type or size is invalid.");
+            throw new PrintingProtocolException("The realtime message is not text or exceeds the negotiated frame size.");
          }
          message.Write(buffer, 0, result.Count);
          if(!result.EndOfMessage)
          { continue; }
-         using var document = JsonDocument.Parse(message.GetBuffer().AsMemory(0, checked((int)message.Length)), new JsonDocumentOptions { MaxDepth = 24 });
-         RejectDuplicateFields(document.RootElement);
-         RealtimeEnvelope envelope = document.RootElement.Deserialize<RealtimeEnvelope>(PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Missing realtime envelope.");
-         if(string.IsNullOrEmpty(envelope.Type) || string.IsNullOrEmpty(envelope.MessageId) || envelope.MessageId.Length > 200)
-         {
-            throw new InvalidDataException("Invalid realtime envelope.");
-         }
-         DispatchFrame(envelope with { WireLength = checked((int)message.Length) }, received);
+         DispatchFrame(RealtimeEnvelope.Parse(message.GetBuffer().AsMemory(0, checked((int)message.Length))), received);
          message.SetLength(0);
       }
    }
 
 
 
-   /// <summary>Rejects any object that repeats a field name, ignoring case, anywhere in the message; two parsers could otherwise read different values from the same text.</summary>
-   private static void RejectDuplicateFields(JsonElement value)
-   {
-      if(value.ValueKind == JsonValueKind.Object)
-      {
-         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-         foreach(JsonProperty property in value.EnumerateObject())
-         {
-            if(!names.Add(property.Name))
-            { throw new InvalidDataException("Duplicate realtime JSON field."); }
-            RejectDuplicateFields(property.Value);
-         }
-      }
-      else if(value.ValueKind == JsonValueKind.Array)
-      {
-         foreach(JsonElement child in value.EnumerateArray())
-         { RejectDuplicateFields(child); }
-      }
-   }
-
-
-
    /// <summary>
-   /// Routes one validated frame. An ACK completes the send waiting on that message. An ERROR for a message still awaiting
-   /// acknowledgement fails that send with an HTTP-like status the callers already handle; errors that mean authorization
-   /// is gone are also passed on so the runtime can stop. Everything else goes to the callback with its payload cloned,
-   /// because the parsed document is freed as soon as the reader moves on.
+   /// Routes one validated frame. An ACK must name the message it acknowledges and completes the send waiting on it; an
+   /// ACK for a message no longer waiting is ignored. An ERROR must carry a code; for a message still awaiting
+   /// acknowledgement it fails that send with an HTTP-like status the callers already handle, and errors that mean
+   /// authorization is gone are also passed on so the runtime can stop. Everything else goes to the callback.
    /// </summary>
    private void DispatchFrame(RealtimeEnvelope envelope, Action<RealtimeEnvelope> received)
    {
       if(string.Equals(envelope.Type, "ACK", StringComparison.Ordinal))
       {
-         string? id = envelope.Payload.GetProperty("acknowledgedMessageId").GetString();
-         if(id is not null && _pending.TryGetValue(id, out TaskCompletionSource? completion))
+         string acknowledged = ProtocolJson.RequiredText(envelope.Payload, "acknowledgedMessageId", 200, "realtime ACK frame");
+         if(_pending.TryGetValue(acknowledged, out TaskCompletionSource? completion))
          { completion.TrySetResult(); }
          return;
       }
-      if(string.Equals(envelope.Type, "ERROR", StringComparison.Ordinal) && _pending.TryGetValue(envelope.MessageId, out TaskCompletionSource? failed))
+      if(string.Equals(envelope.Type, "ERROR", StringComparison.Ordinal))
       {
-         string? code = envelope.Payload.GetProperty("code").GetString();
-         System.Net.HttpStatusCode status = code switch
+         string code = ProtocolJson.RequiredText(envelope.Payload, "code", 128, "realtime ERROR frame");
+         if(_pending.TryGetValue(envelope.MessageId, out TaskCompletionSource? failed))
          {
-            "NOT_FOUND" => System.Net.HttpStatusCode.NotFound,
-            "EXPIRED" => System.Net.HttpStatusCode.Gone,
-            "CONFLICT" => System.Net.HttpStatusCode.Conflict,
-            _ => System.Net.HttpStatusCode.BadRequest,
-         };
-         failed.TrySetException(new HttpRequestException("Realtime operation was rejected: " + code, null, status));
-         if(code is not ("AUTHORIZATION_REQUIRED" or "AUTHENTICATION_REQUIRED"))
-         { return; }
+            failed.TrySetException(new HttpRequestException("Realtime operation was rejected: " + code, null, RejectionStatus(code)));
+            if(code is not ("AUTHORIZATION_REQUIRED" or "AUTHENTICATION_REQUIRED"))
+            { return; }
+         }
       }
-      received(envelope with { Payload = envelope.Payload.Clone() });
+      received(envelope);
    }
 
 
 
-   /// <summary>Marks the channel closed, stops the queue, fails any send still waiting so its caller replays the durable record, and disposes the socket.</summary>
+   /// <summary>Maps the server's rejection code to the HTTP status the same refusal would have had over HTTP, which is what the callers of an acknowledged send already handle.</summary>
+   private static System.Net.HttpStatusCode RejectionStatus(string code) => code switch
+   {
+      "NOT_FOUND" => System.Net.HttpStatusCode.NotFound,
+      "EXPIRED" => System.Net.HttpStatusCode.Gone,
+      "CONFLICT" => System.Net.HttpStatusCode.Conflict,
+      _ => System.Net.HttpStatusCode.BadRequest,
+   };
+
+
+
+   /// <summary>
+   /// Marks the channel disposed and closed, stops the queue, fails any send still waiting so its caller replays the
+   /// durable record, and disposes the socket. A run that is still going ends normally: disposing is its owner ending
+   /// it on purpose. The waiting sends are told the channel is closed, the same failure a send gets when the channel
+   /// closes for any other reason.
+   /// </summary>
    public void Dispose()
    {
+      Interlocked.Exchange(ref _disposed, 1);
       Interlocked.Exchange(ref _closed, 1);
       _outgoing.Writer.TryComplete();
       foreach(TaskCompletionSource pending in _pending.Values)
-      { pending.TrySetException(new IOException("Realtime connection was disposed.")); }
+      { pending.TrySetException(new RealtimeChannelClosedException("Realtime connection was disposed.", null)); }
       socket.Dispose();
    }
 }

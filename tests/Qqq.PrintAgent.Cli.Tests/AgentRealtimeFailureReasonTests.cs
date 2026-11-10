@@ -148,4 +148,43 @@ public sealed class AgentRealtimeFailureReasonTests
       _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completion);
       Assert.Empty(detail);
    }
+
+
+
+   /// <summary>
+   /// The channel's run returns when its caller cancels it, so in an orderly teardown the reader is not cancelled: it
+   /// completes. The workers are cancelled by the same token, so the connection still reports cancellation, not a
+   /// normal end and not a failure.
+   /// </summary>
+   [Fact]
+   public async Task CancellationIsReportedWhenTheReaderCompletedAndTheWorkersWereCancelled()
+   {
+      var reader = new TaskCompletionSource();
+      var worker = new TaskCompletionSource();
+      var watchdog = new TaskCompletionSource();
+      List<Exception> detail = [];
+      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task, watchdog.Task);
+      reader.SetResult();
+      worker.SetCanceled();
+      watchdog.SetCanceled();
+      _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completion);
+      Assert.Empty(detail);
+   }
+
+
+
+   /// <summary>A reader that completed in the teardown does not hide what ended the connection: a worker's failure is still the reason.</summary>
+   [Fact]
+   public async Task WorkerFailureIsTheReasonWhenTheReaderCompleted()
+   {
+      var reader = new TaskCompletionSource();
+      var worker = new TaskCompletionSource();
+      List<Exception> detail = [];
+      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      var failure = new TimeoutException("Synthetic acknowledgement timeout.");
+      worker.SetException(failure);
+      reader.SetResult();
+      Assert.Same(failure, await Assert.ThrowsAsync<TimeoutException>(() => completion));
+      Assert.Empty(detail);
+   }
 }

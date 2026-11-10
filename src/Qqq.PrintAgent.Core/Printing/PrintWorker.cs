@@ -5,25 +5,42 @@
 
 namespace Qqq.PrintAgent.Core.Printing;
 
-/// <summary>Serial happy-path worker. A locally ambiguous submission is never automatically printed again.</summary>
+/// <summary>
+/// Serial happy-path worker. A locally ambiguous submission is never automatically printed again. A worker whose
+/// options name a staging directory hands staged files to its backend, so it is refused at construction, with an
+/// <see cref="ArgumentException"/> naming the backend parameter, unless that backend declares that it takes files.
+/// </summary>
 public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null,
    Func<bool>? canDispatch = null, Func<bool>? canSynchronize = null, PrintWorkerOptions? options = null)
 {
+   /// <summary>
+   /// The backend as one that takes staged files; null for a worker that stages nothing and submits from memory. The
+   /// check made here, when the worker is built, is that the backend handed to the worker declares the file interface;
+   /// a backend that does not is a composition error raised to whoever composed it. It proves nothing about a backend
+   /// that declares the interface and forwards to another: a wrapper around a backend without file support passes
+   /// this check and still fails when a staged file is handed to it.
+   /// </summary>
+   private readonly IFilePrinterBackend? _filePrinters = options?.StagingDirectory is null ? null
+      : printers as IFilePrinterBackend ?? throw new ArgumentException("A worker that stages documents to files needs a printer backend that takes files.", nameof(printers));
+
+
+
    /// <summary>
    /// One pass of the claim loop. It first reports work a previous run left half-done and drains the durable event
    /// outbox, because the server never re-claims those jobs and an unreported outcome would stay invisible. Only when
    /// nothing is pending, dispatch is allowed and the connection is synchronized does it discover printers and claim at
    /// most one job. Returns true when a job was spooled, or, when recovery is switched off (realtime lanes, where the
    /// runtime recovers once and each lane only drains), whenever a claimed job was processed whatever its outcome so
-   /// the lane keeps draining; false when idle, paused, blocked, or the claimed job was already final.
+   /// the lane keeps draining; false when idle, paused, blocked, or the claimed job was one the journal already holds as
+   /// final or as submitting, which ends a lane's pass because the server would only offer that job again.
    /// </summary>
    public async Task<bool> RunOnceAsync(CancellationToken token = default)
    {
       // A recovered job must be reported even when the server never claims it again.
       foreach((string jobId, string previousState) in options?.RecoverIncomplete == false ? [] : journal.Incomplete())
       {
-         Record(jobId, previousState is "SUBMITTING" ? "OUTCOME_UNKNOWN" : "FAILED",
-            previousState is "SUBMITTING" ? "Agent restarted during submission; inspect the printer before reprinting." : "Agent stopped before submitting this job; submit a new job if printing is still needed.");
+         Record(jobId, previousState is PrintJobState.Submitting ? PrintJobState.OutcomeUnknown : PrintJobState.Failed,
+            previousState is PrintJobState.Submitting ? "Agent restarted during submission; inspect the printer before reprinting." : "Agent stopped before submitting this job; submit a new job if printing is still needed.");
       }
       await FlushAsync(token).ConfigureAwait(false);
       if(canSynchronize?.Invoke() == false)
@@ -37,9 +54,9 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          // Drain a bounded outbox batch before claiming more work after an outage.
          return false;
       }
-      long inventoryStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+      long inventoryStarted = Time.GetTimestamp();
       IReadOnlyList<PrinterInfo> inventory = printers.Discover();
-      TimeSpan inventoryElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(inventoryStarted);
+      TimeSpan inventoryElapsed = Time.GetElapsedTime(inventoryStarted);
       if(canSynchronize?.Invoke() == false)
       {
          return false;
@@ -50,15 +67,16 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       {
          return false;
       }
-      long claimStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-      PrintJob? job = await ClaimAndRegisterAsync(inventory, token).ConfigureAwait(false);
-      TimeSpan claimElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(claimStarted);
-      if(job is null)
+      long claimStarted = Time.GetTimestamp();
+      Claim claim = await ClaimAndRegisterAsync(inventory, token).ConfigureAwait(false);
+      TimeSpan claimElapsed = Time.GetElapsedTime(claimStarted);
+      if(claim.Job is null)
       {
-         return false;
+         // A refused job was reported as FAILED, so a lane keeps draining exactly as it does after any other failed job.
+         return claim.Refused && options?.RecoverIncomplete == false;
       }
       try
-      { return await ProcessJobAsync(job, inventory, new JobAttempt(inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
+      { return await ProcessJobAsync(claim.Job, inventory, new JobAttempt(Time, inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
       finally { options?.ActiveJobChanged?.Invoke(null); }
    }
 
@@ -68,38 +86,53 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// Claims one job under the shared claim gate and registers it locally before anything else can happen to it. The
    /// server keeps replaying CLAIMED until RECEIVED commits, so admission is serialized through that acknowledgement; if
    /// it is interrupted the job is recorded FAILED with no bytes submitted. A job the journal already holds in a final
-   /// state is dropped here so a replayed claim can never print twice.
+   /// state, or as submitting, is dropped here so a replayed claim can never print twice; the pass then ends, because
+   /// the server would only offer that job again. A claimed job that breaks the contract but names itself is refused
+   /// and reported instead of returned.
    /// </summary>
-   private async Task<PrintJob?> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
+   private async Task<Claim> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
       if(options?.ClaimGate is not null)
       { await options.ClaimGate.WaitAsync(token).ConfigureAwait(false); }
       try
       {
          if(canDispatch?.Invoke() == false || options?.CanClaim?.Invoke() == false)
-         { return null; }
-         PrintJob? job = await api.ClaimAsync(token).ConfigureAwait(false);
-         if(job is not null)
+         { return default; }
+         PrintJob? job;
+         try
+         { job = await api.ClaimAsync(token).ConfigureAwait(false); }
+         catch(PrintingProtocolException violation) when(violation.RejectedJob is not null)
+         { return new Claim(null, await RefuseAsync(violation.RejectedJob, violation.Message, inventory, token).ConfigureAwait(false)); }
+         if(job is null)
+         { return default; }
+         Track(job, inventory);
+         if(journal.GetState(job.JobId) is { } state && (PrintJobState.IsFinal(state) || string.Equals(state, PrintJobState.Submitting, StringComparison.Ordinal)))
          {
-            PrinterInfo? printer = inventory.FirstOrDefault(item => string.Equals(item.PrinterId, job.PrinterId, StringComparison.Ordinal));
-            journal.TrackJob(job, string.IsNullOrWhiteSpace(printer?.DisplayName) ? printer?.Name : printer.DisplayName);
-            if(journal.GetState(job.JobId) is "SPOOLED" or "SPOOLER_COMPLETED" or "FAILED" or "OUTCOME_UNKNOWN")
-            { return null; }
-            options?.ActiveJobChanged?.Invoke(job);
-            try
-            {
-               Record(job, "RECEIVED");
-               // The server replays CLAIMED until RECEIVED commits. Serialize admission through its ACK.
-               await FlushAsync(token).ConfigureAwait(false);
-            }
-            catch
-            {
-               Record(job, "FAILED", "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
-               options?.ActiveJobChanged?.Invoke(null);
-               throw;
-            }
+            ////////////////////////////////////////////////////////////////////////
+            // a job recorded as submitting was handed to a printer once already  //
+            // and has not concluded: another lane is submitting it now, or a run //
+            // stopped part-way and recovery will report it as OUTCOME_UNKNOWN.   //
+            // claiming it again must never print it a second time, and it must   //
+            // not pass silently, because the server should not be offering it    //
+            ////////////////////////////////////////////////////////////////////////
+            if(!PrintJobState.IsFinal(state))
+            { log?.Invoke($"{job.JobId}: offered again while recorded as {state}, so its submission has started and not concluded; it is not submitted a second time and this pass claims nothing more."); }
+            return default;
          }
-         return job;
+         options?.ActiveJobChanged?.Invoke(job);
+         try
+         {
+            Record(job, PrintJobState.Received);
+            // The server replays CLAIMED until RECEIVED commits. Serialize admission through its ACK.
+            await FlushAsync(token).ConfigureAwait(false);
+         }
+         catch
+         {
+            Record(job, PrintJobState.Failed, "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
+            options?.ActiveJobChanged?.Invoke(null);
+            throw;
+         }
+         return new Claim(job, false);
       }
       finally { options?.ClaimGate?.Release(); }
    }
@@ -107,19 +140,57 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
    /// <summary>
+   /// Reports a claimed job the API client refused because it broke the contract. The server offers a claimed job again
+   /// until the agent answers for it, so leaving it unanswered would block every job behind it; the job is therefore
+   /// recorded as received and then FAILED, with the reason and the fact that nothing was submitted, and both events are
+   /// delivered. A job the journal already knows, in any state, is left exactly as it is: it was answered for once, its
+   /// outcome is recorded or another lane is working on it right now, and a FAILED written over RECEIVED or SUBMITTING
+   /// would claim that nothing was submitted while a submission may be under way. The replay is only logged. Returns
+   /// true when the refusal was reported.
+   /// </summary>
+   private async Task<bool> RefuseAsync(PrintJob rejected, string reason, IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
+   {
+      if(journal.GetState(rejected.JobId) is { } known)
+      {
+         log?.Invoke($"{rejected.JobId}: offered again in a form that breaks the contract while already recorded as {known}; nothing was recorded or reported for it. {reason}");
+         return false;
+      }
+      Track(rejected, inventory);
+      Record(rejected, PrintJobState.Received);
+      Record(rejected, PrintJobState.Failed, reason + " No bytes were submitted.");
+      await FlushAsync(token).ConfigureAwait(false);
+      return true;
+   }
+
+
+
+   /// <summary>Stores the job's display facts in the journal, naming its printer by the operator's friendly name when one is set and by the queue name otherwise.</summary>
+   private void Track(PrintJob job, IReadOnlyList<PrinterInfo> inventory)
+   {
+      PrinterInfo? printer = inventory.FirstOrDefault(item => string.Equals(item.PrinterId, job.PrinterId, StringComparison.Ordinal));
+      journal.TrackJob(job, string.IsNullOrWhiteSpace(printer?.DisplayName) ? printer?.Name : printer.DisplayName);
+   }
+
+
+
+   /// <summary>The result of one claim: the job to process, or none, and whether a malformed job was refused and reported instead.</summary>
+   private readonly record struct Claim(PrintJob? Job, bool Refused);
+
+
+
+   /// <summary>
    /// Runs one claimed job and reports its outcome. The submission steps live in <see cref="SubmitJobAsync"/> so their
    /// disposal scope stays inside this method's try block, which keeps every failure, including one raised while
-   /// releasing a reservation, recorded through the same FAILED or OUTCOME_UNKNOWN decision. One timing line per job is
-   /// logged afterwards so a slow print can be attributed to a phase from the service's own log without any extra
-   /// request, payload or printer access.
+   /// releasing a reservation, inside the same decision: FAILED when Windows was never asked, OUTCOME_UNKNOWN when
+   /// submission had begun, and nothing at all when the job is already recorded as SPOOLED, because a release that
+   /// fails after Windows accepted the document says nothing about the print and must not be written over it. One
+   /// timing line per job is logged afterwards so a slow print can be attributed to a phase from the service's own log
+   /// without any extra request, payload or printer access.
    /// </summary>
    private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, JobAttempt attempt, CancellationToken token)
    {
-      PrinterInfo? assignedPrinter = inventory.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal));
-      journal.TrackJob(job, string.IsNullOrWhiteSpace(assignedPrinter?.DisplayName) ? assignedPrinter?.Name : assignedPrinter.DisplayName);
-
-      string? state = journal.GetState(job.JobId);
-      if(state is "SPOOLED" or "SPOOLER_COMPLETED" or "FAILED" or "OUTCOME_UNKNOWN")
+      Track(job, inventory);
+      if(PrintJobState.IsFinal(journal.GetState(job.JobId)))
       {
          return false;
       }
@@ -129,7 +200,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       { await SubmitJobAsync(job, attempt, token).ConfigureAwait(false); }
       catch(Exception exception)
       {
-         Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? "OUTCOME_UNKNOWN" : "FAILED", exception.Message);
+         if(attempt.Spooled)
+         { log?.Invoke($"{job.JobId}: spooled, and stays recorded as spooled; releasing what the job held failed afterwards: {exception.Message}"); }
+         else
+         { Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? PrintJobState.OutcomeUnknown : PrintJobState.Failed, exception.Message); }
       }
       log?.Invoke(attempt.TimingMessage(job.JobId));
       if(!token.IsCancellationRequested)
@@ -143,6 +217,9 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// Downloads, revalidates and submits one job. The reservation, staged file and submission lease are declared here and
    /// released when this method returns, after SPOOLED is recorded, exactly as when the same steps ran inline. The
    /// attempt records how far the job got so the caller can tell a refusal before any bytes from an uncertain submission.
+   /// Between recording SUBMITTING and calling Windows nothing has been sent, so the two things that can stop the job
+   /// there (delivery of the receipt not being confirmed, and cancellation) say in their own words that no bytes were
+   /// submitted.
    /// </summary>
    private async Task SubmitJobAsync(PrintJob job, JobAttempt attempt, CancellationToken token)
    {
@@ -159,19 +236,34 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
       await using IAsyncDisposable? submission = options?.AcquireSubmissionAsync is null ? null : await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
       RequireSubmitAllowed("Dispatch is paused before native submission.");
-      Record(job, "SUBMITTING");
-      await FlushAsync(token).ConfigureAwait(false);
+      Record(job, PrintJobState.Submitting);
+      try
+      { await FlushAsync(token).ConfigureAwait(false); }
+      catch(Exception exception)
+      {
+         ///////////////////////////////////////////////////////////////////////////
+         // SUBMITTING is on record but Windows has not been asked, so this is a  //
+         // plain refusal. the flush sends every pending event, so it may have    //
+         // failed on another job's event, on a lost acknowledgement or on the    //
+         // journal; all that is known is that delivery of this receipt was not   //
+         // confirmed. the failure's own message ("connection reset") would leave //
+         // an operator who reads SUBMITTING then FAILED unsure whether anything  //
+         // printed, so the refusal states that nothing was                       //
+         ///////////////////////////////////////////////////////////////////////////
+         throw new IOException("Delivery of the submitting receipt could not be confirmed, so the document was not sent to the printer; no bytes were submitted.", exception);
+      }
       attempt.Gate = attempt.Lap();
       RequireSubmitAllowed("Dispatch stopped before native submission; no bytes were submitted.");
       RealtimeSettings submissionSettings = EffectiveSettings;
       if(job.Options.Copies > submissionSettings.MaxCopies || job.ContentLength > submissionSettings.MaximumDocumentBytes(job.Format))
       { throw new InvalidDataException("Document or copies exceed the current submission policy."); }
-      token.ThrowIfCancellationRequested();
+      if(token.IsCancellationRequested)
+      { throw new OperationCanceledException("Stopped before native submission; no bytes were submitted.", token); }
       attempt.Submitting = true;
       attempt.Restart();
       string spoolId = await SubmitNativeAsync(job, file, content, submissionSettings, token).ConfigureAwait(false);
       attempt.Submit = attempt.Lap();
-      Record(job, "SPOOLED", spoolerJobId: spoolId);
+      Record(job, PrintJobState.Spooled, spoolerJobId: spoolId);
       attempt.Spooled = true;
    }
 
@@ -207,14 +299,16 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
    /// <summary>
-   /// Hands the verified staged file, or the in-memory content for a backend without file support, to the native printer
-   /// and returns its spooler receipt. This is the only step after which an outcome is uncertain.
+   /// Hands the verified staged file to the file backend, or the in-memory content to a worker that stages nothing, and
+   /// returns its spooler receipt. This is the only step after which an outcome is uncertain. A staged file exists only
+   /// for a worker built with a staging directory, and such a worker was required, when it was built, to have a backend
+   /// that declares the file interface, so the staged file always has somewhere to go from here.
    /// </summary>
    private Task<string> SubmitNativeAsync(PrintJob job, DownloadedDocument? file, byte[]? content, RealtimeSettings submissionSettings, CancellationToken token)
    {
-      return file is not null && printers is IFilePrinterBackend files
-         ? files.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
-         : printers.PrintAsync(job, content ?? throw new InvalidOperationException("File printing is required."), token);
+      return file is not null
+         ? _filePrinters!.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
+         : printers.PrintAsync(job, content!, token);
    }
 
 
@@ -224,6 +318,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// policy change reaches a job that is already past its first check; defaults apply when no settings were supplied.
    /// </summary>
    private RealtimeSettings EffectiveSettings => options?.CurrentSettings?.Invoke() ?? options?.Settings ?? new();
+
+
+
+   /// <summary>The clock the phase timings are measured on: the one supplied in the options, otherwise the system clock.</summary>
+   private TimeProvider Time => options?.TimeProvider ?? TimeProvider.System;
 
 
 
@@ -271,12 +370,12 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
    /// <summary>
    /// Progress and phase timing of one claimed job. Progress tells the caller whether native submission began, which
-   /// decides between a known refusal and an uncertain outcome; the durations come from the monotonic clock and feed the
-   /// single timing line, so they carry no document content.
+   /// decides between a known refusal and an uncertain outcome; the durations come from the worker's monotonic clock and
+   /// feed the single timing line, so they carry no document content.
    /// </summary>
-   private sealed class JobAttempt(TimeSpan inventory, TimeSpan claim)
+   private sealed class JobAttempt(TimeProvider time, TimeSpan inventory, TimeSpan claim)
    {
-      private long _mark = System.Diagnostics.Stopwatch.GetTimestamp();
+      private long _mark = time.GetTimestamp();
 
       public bool Submitting { get; set; }
 
@@ -295,7 +394,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       /// <summary>Starts the next phase now, discarding the time since the previous mark.</summary>
       public void Restart()
       {
-         _mark = System.Diagnostics.Stopwatch.GetTimestamp();
+         _mark = time.GetTimestamp();
       }
 
 
@@ -303,8 +402,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       /// <summary>Returns the time since the previous mark and starts the next phase at the same instant, so phases never overlap or leave a gap.</summary>
       public TimeSpan Lap()
       {
-         long now = System.Diagnostics.Stopwatch.GetTimestamp();
-         TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(_mark, now);
+         long now = time.GetTimestamp();
+         TimeSpan elapsed = time.GetElapsedTime(_mark, now);
          _mark = now;
          return elapsed;
       }

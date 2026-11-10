@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+Core hardening for 2.0. No change to pairing, history or the wire protocol.
+
+- A job the server sends in a form the agent cannot use no longer blocks a device. The agent identifies the job
+  and refuses it: history shows RECEIVED and then FAILED with a fixed reason ending "No bytes were submitted",
+  nothing is downloaded or printed, and the next job is taken. This covers a missing or unusable member, a member
+  given twice in any letter case, and options nested deeper than 64 levels. Only a claim that names no job at all
+  still stops the device's queue until that job is cancelled on the server.
+- Extra fields in a job, including any a submitter adds to its options, are ignored. A job title may be 1,024
+  characters of any script, and a byte-order mark in front of a server response is accepted.
+- A job is never printed twice because the server offered it again. One that is still being submitted is left to
+  finish, and the log says so. A job stopped after its SUBMITTING receipt and before Windows was asked is FAILED
+  with a reason that says no bytes were submitted; a job Windows has accepted stays SPOOLED even if releasing its
+  staging space or printer turn fails afterwards.
+- A realtime message that breaks the contract ends the connection with a reason naming what was wrong, and the
+  agent reconnects.
+- Core can now check a server before sign-in and report each problem by kind (unreachable, certificate refused
+  with the certificate, not a QQQ server, printing extension missing or too old, no usable sign-in). The check
+  sends no credential, follows no redirect and never signs the service out.
+- Text that comes from a server, an identity provider, a browser callback or a certificate is shown and logged
+  only in printable, bounded form, so a server cannot forge a log line or flood the log. A long value is cut and
+  ends in "...", and a long list is counted.
+
 Sign-out now ends the identity provider's browser session as well as the QQQ session, and every browser
 sign-in sends `max_age=0` beside `prompt=login`, so the next sign-in always asks for credentials (the provider
 must stay invisible to users). The companion's Sign out asks the service to log out with the application's

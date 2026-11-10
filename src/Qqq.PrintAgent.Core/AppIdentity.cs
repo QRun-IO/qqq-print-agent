@@ -56,7 +56,7 @@ public static class AppIdentity
    public static Edition? Edition { get; } = Edition.LoadInstalled();
 
    /// <summary>The identity this build ships with: the edition's presentation over <see cref="BaseInfo"/>, before machine branding.</summary>
-   public static AppInfo DefaultInfo { get; } = Edition?.Apply(BaseInfo) ?? BaseInfo;
+   public static AppInfo DefaultInfo { get; } = Compose(Edition, new RuntimeBranding());
 
    /// <summary>What user-facing text calls the server: the edition's name for it, or QQQ in the generic build.</summary>
    public static string ServerName => Edition?.ServerName ?? Core.Edition.DefaultServerName;
@@ -65,21 +65,32 @@ public static class AppIdentity
    public static string UpdateAssetPrefix => Edition?.AssetPrefix ?? Core.Edition.DefaultAssetPrefix;
 
    /// <summary>The edition's logo shipped beside the executable, when the edition supplies one and no machine branding logo overrides it.</summary>
-   public static string? EditionLogoPath
-   {
-      get
-      {
-         if(Edition is null)
-         {
-            return null;
-         }
-         string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Brand", "logo.png");
-         return File.Exists(path) ? path : null;
-      }
-   }
+   public static string? EditionLogoPath => EditionLogoIn(Edition, AppContext.BaseDirectory);
 
    public static RuntimeBranding Branding { get; } = RuntimeBranding.LoadMachine(includeInstallerLabels: Edition is null);
-   public static AppInfo Info { get; } = Branding.Apply(DefaultInfo);
+   public static AppInfo Info { get; } = Compose(Edition, Branding);
+
+
+
+   /// <summary>
+   /// Builds the identity an edition and a machine's branding produce together: the edition's presentation over the
+   /// generic identity, then the machine's branding over that. The static members above apply it to what this build and
+   /// this machine hold; a test applies it to an edition and branding of its own, with no machine state involved.
+   /// </summary>
+   internal static AppInfo Compose(Edition? edition, RuntimeBranding branding) => branding.Apply(edition?.Apply(BaseInfo) ?? BaseInfo);
+
+
+
+   /// <summary>The logo an edition ships under the given application folder, or null for the generic build or an edition without one.</summary>
+   internal static string? EditionLogoIn(Edition? edition, string baseDirectory)
+   {
+      if(edition is null)
+      {
+         return null;
+      }
+      string path = Path.Combine(baseDirectory, "Assets", "Brand", "logo.png");
+      return File.Exists(path) ? path : null;
+   }
 
    /// <summary>Where the app keeps its per-user data; honors the data-folder override variable.</summary>
    public static AppPaths Paths { get; } = new(Info);

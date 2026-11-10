@@ -6,6 +6,10 @@
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>The server's enrollment result: protocol version, the new device identity and its secret token, and the poll interval. The token is shown once, so it must be stored immediately and never logged.</summary>
-public sealed record EnrollmentResponse(int ProtocolVersion, string DeviceId, string DeviceToken, int PollIntervalSeconds);
+public sealed record EnrollmentResponse(int ProtocolVersion, string DeviceId, string DeviceToken, int PollIntervalSeconds)
+{
+   /// <summary>Returns a fixed redacted label, so logging or displaying the response can never reveal the device token.</summary>
+   public override string ToString() => "Enrollment response (redacted)";
+}
 
 

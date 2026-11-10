@@ -6,6 +6,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
@@ -17,7 +18,9 @@ namespace Qqq.PrintAgent.Core.Printing;
 public sealed partial class PrintApiClient : IDisposable
 {
    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+   private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(20);
    private readonly HttpClient _http;
+   private readonly TimeProvider _time;
 
 
 
@@ -29,15 +32,18 @@ public sealed partial class PrintApiClient : IDisposable
    /// <summary>
    /// Creates a client for one server. The address must be HTTPS, or HTTP only on loopback for local development. Responses
    /// are limited to 2 MiB and requests to 60 seconds, and a bearer token is attached only when one is supplied (the legacy
-   /// diagnostic path); native sessions authenticate through the session client instead.
+   /// diagnostic path); native sessions authenticate through the session client instead. The control, download and
+   /// throttling limits are counted on the supplied clock, the system clock by default. The 60 second request limit is
+   /// not: it is <c>HttpClient.Timeout</c>, which the platform enforces on the system clock whatever clock is supplied.
    /// </summary>
-   public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null)
+   public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null)
    {
       Uri uri = new(serverUrl.TrimEnd('/') + "/printing/v1/");
       if(!string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && !(string.Equals(uri.Scheme, "http", StringComparison.Ordinal) && uri.IsLoopback))
       {
          throw new ArgumentException("Use HTTPS, or HTTP on loopback for local development.", nameof(serverUrl));
       }
+      _time = timeProvider ?? TimeProvider.System;
       _http = handler is null ? new HttpClient() : new HttpClient(handler);
       _http.BaseAddress = uri;
       _http.Timeout = TimeSpan.FromSeconds(60);
@@ -100,12 +106,18 @@ public sealed partial class PrintApiClient : IDisposable
 
 
 
-   /// <summary>Asks the server for the next job for this device, or null when none is waiting. The server replays a claimed job until its RECEIVED event commits, so the caller must record it.</summary>
+   /// <summary>
+   /// Asks the server for the next job for this device, or null when none is waiting. The server replays a claimed job
+   /// until its RECEIVED event commits, so the caller must record it. The job is checked against the contract before it
+   /// is returned: one that breaks it throws <see cref="PrintingProtocolException"/>, carrying a stand-in when the job
+   /// named itself, so nothing later ever handles a job with a missing member or an unsafe identifier. Fields the agent
+   /// does not read are ignored, and a byte-order mark in front of the body is accepted.
+   /// </summary>
    public async Task<PrintJob?> ClaimAsync(CancellationToken token)
    {
       using HttpResponseMessage response = await _http.PostAsJsonAsync("device/jobs/claim", new { }, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
-      return (await response.Content.ReadFromJsonAsync<JobClaim>(token).ConfigureAwait(false))?.Job;
+      return PrintJobContract.ReadClaim(await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false));
    }
 
 
@@ -122,8 +134,7 @@ public sealed partial class PrintApiClient : IDisposable
          throw new InvalidDataException("Document exceeds the 20 MiB limit or is empty.");
       }
 
-      using var downloadTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-      downloadTimeout.CancelAfter(_http.Timeout);
+      using var downloadTimeout = new Deadline(_time, _http.Timeout, token);
       token = downloadTimeout.Token;
       using HttpResponseMessage response = await _http.GetAsync($"device/jobs/{Uri.EscapeDataString(job.JobId)}/content", HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
@@ -173,15 +184,20 @@ public sealed partial class PrintApiClient : IDisposable
 
 
 
-   /// <summary>Lists jobs the server is holding for this device but this computer has not received. A server without the endpoint (404) is treated as having none, so an older server only loses the preview.</summary>
+   /// <summary>
+   /// Lists jobs the server is holding for this device but this computer has not received. A server without the endpoint
+   /// (404) is treated as having none, so an older server only loses the preview. Each entry must name its job and
+   /// printer once, with usable identifiers; a list that breaks the contract throws
+   /// <see cref="PrintingProtocolException"/>. Fields the agent does not read are ignored, and a byte-order mark in
+   /// front of the body is accepted.
+   /// </summary>
    public async Task<IReadOnlyList<PrintJob>> QueuedJobsAsync(CancellationToken token)
    {
       using HttpResponseMessage response = await _http.GetAsync("device/jobs/queued", token).ConfigureAwait(false);
       if(response.StatusCode == System.Net.HttpStatusCode.NotFound)
       { return []; }
       response.EnsureSuccessStatusCode();
-      using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
-      return result.RootElement.TryGetProperty("jobs", out JsonElement jobs) ? jobs.Deserialize<PrintJob[]>(JsonOptions) ?? [] : [];
+      return PrintJobContract.ReadQueued(await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false));
    }
 
 

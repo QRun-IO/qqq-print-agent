@@ -16,8 +16,8 @@ public sealed partial class PrintApiClient
 
 
 
-   /// <summary>The channel to send on: the provider's current one when a provider was given (so a reconnect is picked up), otherwise the attached one; with neither it throws, never silently falling back to HTTP.</summary>
-   private PrintingRealtimeChannel RealtimeChannel => _realtimeProvider?.Invoke() ?? _realtime ?? throw new IOException("Realtime connection unavailable.");
+   /// <summary>The channel to send on: the provider's current one when a provider was given (so a reconnect is picked up), otherwise the attached one; with neither it throws that the channel is closed, the failure every other "the connection is gone" raises, never silently falling back to HTTP.</summary>
+   private PrintingRealtimeChannel RealtimeChannel => _realtimeProvider?.Invoke() ?? _realtime ?? throw new RealtimeChannelClosedException("Realtime connection unavailable.", null);
 
 
 

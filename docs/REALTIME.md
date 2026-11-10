@@ -44,6 +44,57 @@ Download/print concurrency and aggregate staging/bandwidth are bounded; jobs
 for one printer retain their submission order. Native printing runs in an
 isolated child with a configurable deadline, retaining uncertain outcomes.
 
+## Claimed jobs the worker does not print
+
+A claimed job is checked against the contract before anything else handles it.
+Fields the client does not read are ignored wherever they appear, to the nesting
+depth the JSON reader accepts (64 levels, counted from the claim response),
+because the contract tells consumers to ignore unknown fields and the server
+relays a submitter's options unchanged. The response itself is parsed to 1,024
+levels, so that a job nested too deep to read can still be identified.
+
+- **Malformed job.** A job that breaks the contract (a missing or unusable
+  member, a member the client reads given twice in any letter case, or nesting
+  deeper than 64 levels) but still names itself with one usable job identifier
+  is refused, not skipped. The worker records RECEIVED and then FAILED with the
+  reason and "No bytes were submitted", delivers both events, never downloads
+  or submits the document, and the lane goes on to the next job. A malformed
+  replay of a job the journal already knows, in any state, changes nothing and
+  is logged.
+- **Claim that cannot be identified.** A claim response that names no single
+  job (not JSON, no usable identifier, the identifier given twice) cannot be
+  answered for: the lane stops with an error, the next wake-up claims again,
+  and the server offers the same job until it is cancelled there. The one such
+  response a submitter could in principle cause is a job nested deeper than the
+  1,024 levels the response is parsed to. That depth is derived from the
+  server's cap of 2,000 characters on a job's options: the cheapest nesting,
+  an array in an array, costs two characters a level, so about 1,000 levels fit,
+  plus the response, the job and the options. No options the server accepts
+  today can nest deeper, so this case cannot be produced through it as it
+  stands; that rests on the server's cap, and the depth must rise if the cap
+  does.
+- **Claimed job that is already submitting.** A job the journal holds as
+  SUBMITTING, or in a final state, is never processed a second time when the
+  server offers it again. For SUBMITTING the worker logs the job and the reason.
+  The lane then ends its pass and the wave is marked drained, because the server
+  would only offer the same job again; the next committed notification or
+  released capacity starts a new wave. The outcome is reported by the lane that
+  is submitting the job or, after a restart, by recovery as OUTCOME_UNKNOWN.
+- **Between SUBMITTING and Windows.** If delivery of the SUBMITTING receipt
+  cannot be confirmed, or the worker is stopped after it was acknowledged and
+  before the native call, Windows is never asked. The job is FAILED and its
+  reason says that no bytes were submitted.
+- **After spool acceptance.** Once a job is recorded as SPOOLED it stays
+  SPOOLED. A failure while releasing its staging reservation or printer turn
+  afterwards is logged and is not written over the record.
+- **File requirement.** A worker configured with a staging directory hands
+  staged files to its printer backend. Building such a worker with a backend
+  that does not declare file support fails at construction with an argument
+  error naming the backend. The check sees only the backend the worker is
+  given: the Windows runtime's wrappers always declare file support and forward
+  to the backend inside them, so a wrapped backend without it passes the check
+  and the job fails when the staged file is handed over.
+
 ## Administrator settings
 
 In QQQ, authorized administrators use **Printing connection and limits** for

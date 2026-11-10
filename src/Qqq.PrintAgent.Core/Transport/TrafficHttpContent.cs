@@ -38,7 +38,10 @@ internal sealed class TrafficHttpContent : HttpContent
 
 
 
-   /// <summary>Older serialization entry point, routed to the cancellable one so counting lives in a single place.</summary>
+   /// <summary>
+   /// The serialization entry point every content must implement. The platform calls the cancellable overload below, so this
+   /// one only serves a caller that has no token; it is routed there so counting lives in a single place.
+   /// </summary>
    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
       => SerializeToStreamAsync(stream, context, CancellationToken.None);
 
@@ -53,12 +56,11 @@ internal sealed class TrafficHttpContent : HttpContent
 
 
 
-   /// <summary>Older read-stream entry point, routed to the cancellable one.</summary>
-   protected override Task<Stream> CreateContentReadStreamAsync() => CreateContentReadStreamAsync(CancellationToken.None);
-
-
-
-   /// <summary>Gives the reader a stream that counts bytes as they are read, so a streamed download is metered as it arrives rather than when it ends.</summary>
+   /// <summary>
+   /// Gives the reader a stream that counts bytes as they are read, so a streamed download is metered as it arrives rather
+   /// than when it ends. Only the cancellable overload is overridden: the platform calls it for every read, and the older
+   /// one is reached only through the base implementation this replaces.
+   /// </summary>
    protected override async Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken)
       => new TrafficStream(await _inner.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), _record, countReads: true);
 

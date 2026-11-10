@@ -7,6 +7,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
@@ -21,17 +22,24 @@ public sealed partial class PrintApiClient
 
 
 
-   /// <summary>Applies the same validation to a single command that arrived over the realtime channel as an HTTP poll response would get, so both transports accept exactly the same commands.</summary>
+   /// <summary>
+   /// Applies the same rule to a single command that arrived over the realtime channel as an HTTP poll response would
+   /// get, so both transports accept exactly the same commands. Only the failure differs: a realtime command that fails
+   /// the rule is a <see cref="PrintingProtocolException"/>, like any other malformed frame, while a polled batch that
+   /// fails it is an <see cref="InvalidDataException"/>, as the compatibility poll has always reported it.
+   /// </summary>
    public static void ValidateRealtimeCommand(DeviceControlCommand command)
-      => ValidateControlPoll(new DeviceControlPoll(1, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture), 5, new DeviceDesiredState(0, false, "CONNECTED"), [command]));
+   {
+      if(!ValidControlCommand(command))
+      { throw new PrintingProtocolException("The realtime command frame carries an invalid device control command."); }
+   }
 
 
 
    /// <summary>A 404 means legacy only before this connection has negotiated control support.</summary>
    public async Task<DeviceControlPoll?> ControlPollAsync(long revision, CancellationToken token)
    {
-      using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-      timeout.CancelAfter(TimeSpan.FromSeconds(20));
+      using var timeout = new Deadline(_time, ControlLimit, token);
       using HttpResponseMessage response = await _http.PostAsJsonAsync("device/control/poll", new
       {
          controlVersion = 1,
@@ -64,6 +72,7 @@ public sealed partial class PrintApiClient
    /// Checks a control response in full: version 1, a poll interval of 1 to 300 seconds, a valid desired state and server time, at
    /// most 20 commands, and for each command a safe unique identifier, a bounded action, a lifetime of at most 15 minutes, and a
    /// job identifier when the action cancels a spool job. Anything else is rejected as an invalid response, not partly applied.
+   /// The rejection is an <see cref="InvalidDataException"/>; this path is outside what <see cref="PrintingProtocolException"/> covers.
    /// </summary>
    private static void ValidateControlPoll(DeviceControlPoll poll)
    {
@@ -76,12 +85,7 @@ public sealed partial class PrintApiClient
       var identifiers = new HashSet<string>(StringComparer.Ordinal);
       foreach(DeviceControlCommand command in poll.Commands)
       {
-         if(command is null || !ValidControlId(command.CommandId) || !ValidControlId(command.RequestId) || !identifiers.Add(command.CommandId)
-            || string.IsNullOrEmpty(command.Action) || command.Action.Length > 64
-            || !DateTimeOffset.TryParse(command.CreatedAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset created)
-            || !DateTimeOffset.TryParse(command.ExpiresAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset expires)
-            || expires <= created || expires - created > TimeSpan.FromMinutes(15)
-            || (string.Equals(command.Action, "CANCEL_SPOOL", StringComparison.Ordinal) && !ValidControlId(command.JobId)))
+         if(!ValidControlCommand(command) || !identifiers.Add(command.CommandId))
          {
             throw new InvalidDataException("Invalid device control command.");
          }
@@ -90,8 +94,23 @@ public sealed partial class PrintApiClient
 
 
 
+   /// <summary>
+   /// True for a command that is safe to act on: present, with safe command and request identifiers, a bounded action, a
+   /// creation and expiry time that parse, a lifetime of at most 15 minutes, and a job identifier when the action cancels
+   /// a spool job. The same rule serves a polled batch and a single realtime command, so both transports agree.
+   /// </summary>
+   private static bool ValidControlCommand(DeviceControlCommand? command)
+      => command is not null && ValidControlId(command.CommandId) && ValidControlId(command.RequestId)
+         && !string.IsNullOrEmpty(command.Action) && command.Action.Length <= 64
+         && DateTimeOffset.TryParse(command.CreatedAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset created)
+         && DateTimeOffset.TryParse(command.ExpiresAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset expires)
+         && expires > created && expires - created <= TimeSpan.FromMinutes(15)
+         && (!string.Equals(command.Action, "CANCEL_SPOOL", StringComparison.Ordinal) || ValidControlId(command.JobId));
+
+
+
    /// <summary>True for a non-empty identifier of at most 200 characters made only of letters, digits and the characters - _ . :, so it cannot carry path or markup characters into later use.</summary>
-   private static bool ValidControlId(string? value) => !string.IsNullOrEmpty(value) && value.Length <= 200 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':');
+   internal static bool ValidControlId([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value) => !string.IsNullOrEmpty(value) && value.Length <= 200 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':');
 
 
 
@@ -107,8 +126,7 @@ public sealed partial class PrintApiClient
          await RealtimeChannel.SendAsync("COMMAND_RECEIPT", new { commandId, receipt }, "receipt-" + receipt.ReceiptId, acknowledged: true, token: token).ConfigureAwait(false);
          return;
       }
-      using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-      timeout.CancelAfter(TimeSpan.FromSeconds(20));
+      using var timeout = new Deadline(_time, ControlLimit, token);
       using HttpResponseMessage response = await _http.PostAsJsonAsync($"device/control/commands/{Uri.EscapeDataString(commandId)}/receipt", receipt, JsonOptions, timeout.Token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
       using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));

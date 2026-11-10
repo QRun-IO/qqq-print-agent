@@ -66,12 +66,17 @@ public sealed class QqqApiDiscovery
 
 
 
-   /// <summary>A one-line, credential-free summary for the log: API version and every advertised extension with its version and path.</summary>
+   /// <summary>
+   /// A one-line, credential-free summary for the log: API version and the advertised extensions with their versions and
+   /// paths. Everything in it is what the server sent, so each value is shown in printable, bounded form and a long list
+   /// is counted instead of spelled out; a hostile document cannot break the log line or make it long.
+   /// </summary>
    public string Describe()
    {
       string extensions = Extensions is null || Extensions.Count == 0 ? "no extensions"
-         : string.Join(", ", Extensions.Where(extension => extension is not null).Select(extension => $"{extension.Name} {extension.Version} at {extension.PathPrefix}"));
-      return $"QQQ API {(string.IsNullOrEmpty(ApiVersion) ? "(missing)" : ApiVersion)}, {Features?.Count ?? 0} feature(s), client channels [{string.Join(", ", ClientChannels ?? [])}], {extensions}.";
+         : QqqCompatibilityProblem.BoundedList(Extensions.Where(extension => extension is not null)
+            .Select(extension => $"{QqqCompatibilityProblem.Printable(extension.Name)} {QqqCompatibilityProblem.Printable(extension.Version)} at {QqqCompatibilityProblem.Printable(extension.PathPrefix)}"));
+      return $"QQQ API {QqqCompatibilityProblem.Printable(ApiVersion)}, {Features?.Count ?? 0} feature(s), client channels [{QqqCompatibilityProblem.PrintableList(ClientChannels)}], {extensions}.";
    }
 
 
@@ -84,10 +89,10 @@ public sealed class QqqApiDiscovery
    /// </summary>
    internal void Validate(bool nativeSession = false, Action<string>? report = null)
    {
-      List<string> problems = Problems(nativeSession);
+      List<QqqCompatibilityProblem> problems = Problems(nativeSession);
       if(problems.Count != 0)
       {
-         report?.Invoke("Discovery rejected: " + string.Join("; ", problems) + ".");
+         report?.Invoke("Discovery rejected: " + string.Join("; ", problems.Select(problem => problem.Detail)) + ".");
          throw Configuration();
       }
    }
@@ -95,40 +100,91 @@ public sealed class QqqApiDiscovery
 
 
    /// <summary>
-   /// Lists every way the discovery document falls short of what this agent needs, in plain words, so the log can say which
-   /// server-side requirement is missing. The thrown failure stays generic; only the local log sees this detail.
+   /// Lists every way the discovery document falls short of what this agent needs, each with its kind and a plain
+   /// explanation, so the log and the connection wizard can both say which server-side requirement is missing. Sign-in
+   /// accepts a 1.x printing extension as before; asking for realtime also reports one as too old, because only 2.x can
+   /// deliver a job.
    /// </summary>
-   private List<string> Problems(bool nativeSession)
+   internal List<QqqCompatibilityProblem> Problems(bool nativeSession, bool realtime = false)
    {
-      var problems = new List<string>();
-      string[] required = ["version", "metaData", "processes", "processCancel", "extensions", "widgets"];
+      var problems = new List<QqqCompatibilityProblem>();
       uint minimumMinor = nativeSession ? 9u : 8u;
       if(!SupportedVersion(ApiVersion, minimumMinor))
-      { problems.Add($"API version '{ApiVersion}' is not a plain 1.{minimumMinor}+ release{(nativeSession ? " (1.9 is needed for native browser sign-in)" : "")}"); }
-      if(Features is null)
-      { problems.Add("no features list"); }
-      else
       {
-         string[] missing = [.. required.Where(feature => !Features.Contains(feature, StringComparer.Ordinal))];
-         if(missing.Length != 0)
-         { problems.Add("missing feature(s) " + string.Join(", ", missing)); }
-         if(nativeSession && !Features.Contains("nativeSessionLogin", StringComparer.Ordinal))
-         { problems.Add("the nativeSessionLogin feature is not advertised, so browser sign-in cannot be used"); }
+         problems.Add(new(QqqCompatibilityIssue.ApiVersionUnsupported,
+            $"API version '{QqqCompatibilityProblem.Printable(ApiVersion)}' is not a plain 1.{minimumMinor}+ release{(nativeSession ? " (1.9 is needed for native browser sign-in)" : "")}"));
       }
+      AddFeatureProblems(problems, nativeSession);
       if(ClientChannels is null || !ClientChannels.Contains("api", StringComparer.Ordinal))
-      { problems.Add("the 'api' client channel is not offered"); }
-      int printingCount = Extensions?.Count(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal)) ?? 0;
-      if(printingCount != 1)
-      { problems.Add(printingCount == 0 ? "no printing extension is advertised (is the printing QBit installed and enabled?)" : $"{printingCount} printing extensions are advertised, expected exactly one"); }
-      else
-      {
-         Extension printing = Extensions!.Single(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal));
-         if(!(SupportedVersion(printing.Version, 0) || SupportedVersion(printing.Version, 0, "2")))
-         { problems.Add($"printing extension version '{printing.Version}' is not a plain 1.x or 2.x release"); }
-         if(!string.Equals(printing.PathPrefix, "/qbit/printing", StringComparison.Ordinal))
-         { problems.Add($"printing extension path '{printing.PathPrefix}' is not /qbit/printing"); }
-      }
+      { problems.Add(new(QqqCompatibilityIssue.ClientChannelMissing, "the 'api' client channel is not offered")); }
+      AddPrintingProblems(problems, realtime);
       return problems;
+   }
+
+
+
+   /// <summary>Adds a problem for a missing features list, for each core feature the agent calls that is absent, and, when browser sign-in is wanted, for the missing native sign-in feature.</summary>
+   private void AddFeatureProblems(List<QqqCompatibilityProblem> problems, bool nativeSession)
+   {
+      if(Features is null)
+      {
+         problems.Add(new(QqqCompatibilityIssue.ApiFeatureMissing, "no features list"));
+         return;
+      }
+      string[] required = ["version", "metaData", "processes", "processCancel", "extensions", "widgets"];
+      string[] missing = [.. required.Where(feature => !Features.Contains(feature, StringComparer.Ordinal))];
+      if(missing.Length != 0)
+      { problems.Add(new(QqqCompatibilityIssue.ApiFeatureMissing, "missing feature(s) " + string.Join(", ", missing))); }
+      if(nativeSession && !Features.Contains("nativeSessionLogin", StringComparer.Ordinal))
+      { problems.Add(new(QqqCompatibilityIssue.SignInUnavailable, "the nativeSessionLogin feature is not advertised, so browser sign-in cannot be used")); }
+   }
+
+
+
+   /// <summary>
+   /// Adds the printing extension problems: none advertised, more than one, a version that is not a plain 1.x or 2.x
+   /// release, a non-standard path, and, when realtime is required, a 1.x extension that can never deliver a job.
+   /// </summary>
+   private void AddPrintingProblems(List<QqqCompatibilityProblem> problems, bool realtime)
+   {
+      Extension[] printing = [.. (Extensions ?? []).Where(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal))];
+      if(printing.Length == 0)
+      {
+         problems.Add(new(QqqCompatibilityIssue.PrintingExtensionMissing, "no printing extension is advertised (is the printing QBit installed and enabled?)"));
+         return;
+      }
+      if(printing.Length != 1)
+      {
+         problems.Add(new(QqqCompatibilityIssue.PrintingExtensionUnsupported, $"{printing.Length} printing extensions are advertised, expected exactly one"));
+         return;
+      }
+      string version = QqqCompatibilityProblem.Printable(printing[0].Version);
+      if(!(SupportedVersion(printing[0].Version, 0) || SupportedVersion(printing[0].Version, 0, "2")))
+      { problems.Add(new(QqqCompatibilityIssue.PrintingExtensionUnsupported, $"printing extension version '{version}' is not a plain 1.x or 2.x release")); }
+      else if(realtime && SupportedVersion(printing[0].Version, 0))
+      { problems.Add(new(QqqCompatibilityIssue.PrintingExtensionTooOld, $"printing extension {version} cannot deliver jobs to this agent; upgrade the server to printing extension 2.x")); }
+      if(!string.Equals(printing[0].PathPrefix, "/qbit/printing", StringComparison.Ordinal))
+      { problems.Add(new(QqqCompatibilityIssue.PrintingExtensionUnsupported, $"printing extension path '{QqqCompatibilityProblem.Printable(printing[0].PathPrefix)}' is not /qbit/printing")); }
+   }
+
+
+
+   /// <summary>
+   /// The version of the single printing extension the server advertises, for display beside the compatibility
+   /// result, or null when there is nothing to show: no printing extension, more than one, or one that states no
+   /// version. Null always means absent; whoever composes text from it words that. Because a present value is shown,
+   /// it is the printable form of what the server sent (see <see cref="QqqCompatibilityProblem.Printable"/>): a
+   /// version that passed validation is unchanged by that, and anything else can neither break a line nor run long.
+   /// It is derived, so it is never written to JSON.
+   /// </summary>
+   [System.Text.Json.Serialization.JsonIgnore]
+   public string? PrintingExtensionVersion
+   {
+      get
+      {
+         Extension[] printing = [.. (Extensions ?? []).Where(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal))];
+         return printing.Length == 1 && !string.IsNullOrEmpty(printing[0].Version) ? QqqCompatibilityProblem.Printable(printing[0].Version) : null;
+      }
    }
 
 
