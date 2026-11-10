@@ -1,6 +1,6 @@
 # ADR-0002: Initial prerelease quality and packaging gates
 
-Status: accepted for the owner-authorized happy-path prerelease. Date: 2026-10-29.
+Status: accepted for the owner-authorized happy-path prerelease. Date: 2026-10-29. The coverage waiver below is superseded by [ADR-0003](0003-version-2.md) (2026-11-10), which gates coverage per assembly; the MSI validation exceptions remain in force.
 
 The original template mandates 100% core/CLI coverage and automated desktop acceptance. The new connector includes native printing and a privileged service; those requirements are not yet established. The owner requested a working happy path, public setup and CI that actually verifies this release rather than claiming an unattained gate.
 

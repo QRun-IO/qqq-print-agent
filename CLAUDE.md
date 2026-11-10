@@ -12,9 +12,9 @@ Policy lives in [AGENTS.md](AGENTS.md) (repository rules: hosting split, authori
 
 ## Commands
 
-**Host restriction first.** `Qqq.PrintAgent.Core.Tests` is hosted-CI-only. On this development PC, Windows Defender quarantines the Core test assembly, so that project must not be built or run locally (see `docs/SESSION-STATE.md`; do not add exclusions or restore quarantine to work around it). Local work uses `Qqq.PrintAgent.NativeCI.slnx`, which is the full solution minus `Core.Tests`. Core test evidence comes from the hosted Windows CI run on the pushed commit.
+**Host note first.** On the maintainer's development PC, Windows Defender's heuristics quarantine the compiled `Qqq.PrintAgent.Core.Tests` assembly. Since 2026-11-10 the owner excludes the development folder from scanning, so `Core.Tests` and `build/Verify.ps1` run locally inside it. A checkout outside that folder is still quarantined: there, build `Qqq.PrintAgent.NativeCI.slnx` (the full solution minus `Core.Tests`) and take Core evidence from hosted CI. Changing Defender settings is the owner's decision; if a `Core.Tests` build is quarantined again, stop and ask rather than adding an exclusion or restoring the file.
 
-Local default (locked restore, Release x64 build with `-warnaserror`, Windows/CLI tests), always with `-p:Platform=x64` because the solution maps test projects to AnyCPU and a direct `dotnet test` without it picks stale output. Never pass `--no-build` to `dotnet test`: the solution build writes the test DLL to the AnyCPU folder, so an x64 `--no-build` run executes whatever old x64 DLL is lying around and reports a pass against stale code.
+Quick local loop without `Core.Tests` (locked restore, Release x64 build with `-warnaserror`, Windows/CLI tests), always with `-p:Platform=x64` because the solution maps test projects to AnyCPU and a direct `dotnet test` without it picks stale output. Never pass `--no-build` to `dotnet test`: the solution build writes the test DLL to the AnyCPU folder, so an x64 `--no-build` run executes whatever old x64 DLL is lying around and reports a pass against stale code.
 
 ```powershell
 dotnet restore Qqq.PrintAgent.NativeCI.slnx -p:Platform=x64 --locked-mode
@@ -28,11 +28,14 @@ Single test (xunit):
 dotnet test tests/Qqq.PrintAgent.Cli.Tests -p:Platform=x64 --filter "FullyQualifiedName~AgentPipeSecurityTests"
 ```
 
-Full verification, **only on a permitted host or hosted CI** (adds Core.Tests, coverage and TRX output under `TestResults/verify-<guid>`; requires the sibling protocol checkout):
+Full verification (adds `Core.Tests`, the coverage gate and TRX output under `TestResults/verify-<guid>`). It needs the protocol fixtures at the commit pinned in `.github/workflows/ci.yml`: either the sibling checkout at that commit, or an export of it passed with `-ProtocolFixtures`:
 
 ```powershell
 ./build/Verify.ps1
+git -C ../qqq-print-protocol archive <pinned-sha> fixtures | tar -x -C <dir>; ./build/Verify.ps1 -ProtocolFixtures <dir>/fixtures
 ```
+
+The gate (`build/Assert-Coverage.ps1`) merges both suites' reports line by line and fails when an assembly is below its minimum in `build/minimum-coverage.json`. Minimums only move up, in the change that adds the tests; see `docs/adr/0003-version-2.md` for the release bar.
 
 Packaging (unsigned self-contained x64 MSI; never installs or prints):
 
@@ -82,7 +85,7 @@ Large classes are deliberately split into partial files by concern (`AgentRuntim
 
 ## Test layout
 
-- `tests/Qqq.PrintAgent.Core.Tests`: protocol fixtures (`ProtocolFixtureTests`), loopback WebSocket peer, worker state machine, media contracts. Hosted CI only on this PC (see Commands); new Core tests are written here and validated by the CI run.
+- `tests/Qqq.PrintAgent.Core.Tests`: protocol fixtures (`ProtocolFixtureTests`), loopback WebSocket peer, worker state machine, media contracts. New Core tests are written here (see the host note under Commands for where it builds).
 - `tests/Qqq.PrintAgent.Cli.Tests`: despite the name, this is the Windows runtime suite (`AgentRuntime*`, `AgentRealtime*`, `AgentPipe*`, `AgentStore*`). Put Windows-layer tests here.
 - `tests/Qqq.PrintAgent.WorkerFixture`: child-process fixture used by runtime tests.
 
@@ -91,5 +94,6 @@ Large classes are deliberately split into partial files by concern (`AgentRuntim
 - `.editorconfig`: 3-space indentation, Allman braces, everywhere (C#, PowerShell, scripts). Analyzers run in build; zero warnings is enforced by `TreatWarningsAsErrors`.
 - Every owned source file starts with the `Copyright (c) 2026 James Maes` / `SPDX-License-Identifier: MIT` header; `check-source-headers.py` fails otherwise. `tools/virtual-agent` keeps its QRun.IO attribution.
 - Package versions are central (`Directory.Packages.props`); after changing them, regenerate each affected `packages.lock.json` (`dotnet restore --force-evaluate`).
-- Coverage is reported, not gated, per `docs/adr/0002-prerelease-quality-and-packaging.md`.
+- Coverage is gated per assembly (`docs/adr/0003-version-2.md`): never lower a minimum in `build/minimum-coverage.json`, and raise it with the tests that earn it.
+- 2.0 work lands as pull requests against `release/2.0`; `main` stays 1.2.x until the release.
 - `docs/SESSION-STATE.md` records the current release/verification state; consult it before claiming anything is verified.
