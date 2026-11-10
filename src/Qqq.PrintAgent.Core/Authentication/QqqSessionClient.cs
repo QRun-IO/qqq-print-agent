@@ -319,12 +319,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
             RequireSuccess(response);
             _diagnostics.Info($"Server accepted the legacy claim for device {credential.DeviceId}.");
          }
+         // The identity check refuses, and clears the session, when the server names any device but this one, so an identity that comes back is bound to it.
          QqqSessionBinding identity = await IdentityCoreAsync(credential, cancellationToken).ConfigureAwait(false);
-         if(!string.Equals(identity.DeviceId, credential.DeviceId, StringComparison.Ordinal))
-         {
-            _diagnostics.Info($"Device binding refused: the server reports device {identity.DeviceId ?? "(none)"} for this session, not {credential.DeviceId}.");
-            throw InvalidResponse();
-         }
          _device = credential;
          _binding = identity;
          _generation++;
@@ -535,7 +531,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// successful document download, hands back the live stream. The default 20 second limit is skipped only when the caller
    /// bounds the request itself.
    /// </summary>
-   private async Task<HttpResponseMessage> SendCoreAsync(Uri uri, HttpMethod method, HttpContent? content, int maximumBytes, string? cookie,
+   internal async Task<HttpResponseMessage> SendCoreAsync(Uri uri, HttpMethod method, HttpContent? content, int maximumBytes, string? cookie,
       QqqDeviceCredential? device, string? basic, CancellationToken cancellationToken, bool providerDiscovery = false, bool streamContent = false, bool boundedByCaller = false)
    {
       if(!providerDiscovery && !SameOrigin(uri, Origin))
@@ -825,19 +821,18 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// <summary>
    /// Builds a URL under the printing route from a caller-supplied relative path, rejecting absolute, backslash, fragment,
    /// percent-encoded, dot-segment and empty-segment paths so a caller cannot reach another route or origin by crafting the path.
+   /// The address that results is checked as well, in the same refusal: it must still be on this origin and under the
+   /// printing route, whatever the text looked like.
    /// </summary>
    private Uri PrintingUri(string path)
    {
-      if(string.IsNullOrEmpty(path) || path.StartsWith('/') || path.Contains('\\', StringComparison.Ordinal)
-         || path.Contains('#', StringComparison.Ordinal) || path.Split('?', 2)[0].Contains('%', StringComparison.Ordinal)
-         || path.Split('?', 2)[0].Split('/').Any(part => part is "." or ".." or ""))
-      {
-         throw new ArgumentException("Use a relative native printing route.", nameof(path));
-      }
-      var uri = new Uri(Origin, PrintingPath + path);
-      if(!SameOrigin(uri, Origin) || !uri.AbsolutePath.StartsWith(PrintingPath, StringComparison.Ordinal))
-      { throw new ArgumentException("Invalid printing route.", nameof(path)); }
-      return uri;
+      bool relative = !string.IsNullOrEmpty(path) && !path.StartsWith('/') && !path.Contains('\\', StringComparison.Ordinal)
+         && !path.Contains('#', StringComparison.Ordinal) && !path.Split('?', 2)[0].Contains('%', StringComparison.Ordinal)
+         && !path.Split('?', 2)[0].Split('/').Any(part => part is "." or ".." or "");
+      Uri? uri = relative ? new Uri(Origin, PrintingPath + path) : null;
+      return uri is not null && SameOrigin(uri, Origin) && uri.AbsolutePath.StartsWith(PrintingPath, StringComparison.Ordinal)
+         ? uri
+         : throw new ArgumentException("Use a relative native printing route.", nameof(path));
    }
 
 
