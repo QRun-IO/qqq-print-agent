@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+The development-only certificate exception now covers two origins at most (2.0, narrows behavior).
+
+- "Allow untrusted server certificate" used to make a session accept an untrusted certificate from every host it
+  contacted. It now accepts one only from the server's own origin and, during sign-in in the companion, from the
+  origin of the sign-in provider that server names. A certificate Windows does not trust from any other host is
+  refused, and the log names the certificate and the origins the exception covers.
+- A development setup whose sign-in provider has an untrusted certificate on a different origin from the server still
+  signs in: the companion reads the server's sign-in description under the exception for the server, then continues
+  with an exception that also names the provider, and logs both origins. In the service the exception names the
+  server only, so signing out of such a setup ends the QQQ session and signs out locally, but the provider's
+  sign-out page cannot be prepared and the sign-out reports that failure. Installing the provider's root certificate
+  in the Local Machine trusted root store avoids this. A later change records the provider's origin with the server.
+- A server check now reports the origin of the sign-in provider the server names whenever its sign-in description
+  could be read, so both addresses can be shown before an exception is saved.
+- Servers with trusted certificates, and setups without the exception, are not affected.
+
 Two cases the print worker now settles with a known outcome (2.0).
 
 - A printer that stops being shared while jobs wait behind a print no longer leaves those jobs with an unknown
