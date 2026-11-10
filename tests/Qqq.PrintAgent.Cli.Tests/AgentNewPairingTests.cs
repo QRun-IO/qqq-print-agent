@@ -646,8 +646,9 @@ public sealed class AgentNewPairingTests
 
    /// <summary>
    /// A session saved after a pairing change was staged is newer than the staged one, even when it does not belong to the
-   /// stored pairing (a sign-in for a new pairing, say) and the staged file could not be removed at the time. The staged
-   /// session must not replace it later.
+   /// stored pairing (a sign-in for a new pairing, say) and the staged file could not be removed at the time. The save
+   /// stamps itself later than the staged file, here although the staged file carries a time in the future as it would
+   /// after the clock stepped back, and the staged session does not replace it later.
    /// </summary>
    [Fact]
    public void SessionSavedAfterStagingIsNotReplacedByTheStagedOne()
@@ -656,18 +657,41 @@ public sealed class AgentNewPairingTests
       fixture.SaveSession();
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       Stage(fixture, "replacement-device", "https://synthetic.invalid/");
+      File.SetLastWriteTimeUtc(StagedSession(fixture), DateTime.UtcNow.AddHours(1));
       using(FileStream held = new(StagedSession(fixture), FileMode.Open, FileAccess.Read, FileShare.Read))
       {
          using AgentStore saving = new(fixture.Local.DirectoryPath);
          saving.SaveAuthentication(new AgentAuthentication(fixture.Session.Binding with { DeviceId = null }, fixture.Session.ExportCredential()));
       }
       Assert.True(File.Exists(StagedSession(fixture)));
-      File.SetLastWriteTimeUtc(authPath, File.GetLastWriteTimeUtc(StagedSession(fixture)).AddSeconds(1));
+      Assert.True(File.GetLastWriteTimeUtc(authPath) > File.GetLastWriteTimeUtc(StagedSession(fixture)));
       byte[] saved = File.ReadAllBytes(authPath);
       using AgentStore store = new(fixture.Local.DirectoryPath);
       Assert.Null(store.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.Discarded, store.StagedPairing);
       Assert.Equal(saved, File.ReadAllBytes(authPath));
+      Assert.False(File.Exists(StagedSession(fixture)));
+   }
+
+
+
+   /// <summary>
+   /// Staging never stamps the staged session earlier than the stored session it is about to replace, so a clock that
+   /// stepped back between the two writes cannot make the new pairing's session look like a leftover: it is still moved
+   /// into place. The stored session here carries a time in the future, as it would after such a step.
+   /// </summary>
+   [Fact]
+   public void StagedSessionIsNotOlderThanTheSessionItReplaces()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
+      File.SetLastWriteTimeUtc(authPath, DateTime.UtcNow.AddHours(1));
+      Stage(fixture, "replacement-device", "https://synthetic.invalid/");
+      Assert.Equal(File.GetLastWriteTimeUtc(authPath), File.GetLastWriteTimeUtc(StagedSession(fixture)));
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      Assert.Equal("replacement-device", store.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(StagedPairingOutcome.Completed, store.StagedPairing);
       Assert.False(File.Exists(StagedSession(fixture)));
    }
 
