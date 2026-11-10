@@ -65,6 +65,16 @@ internal sealed class SessionFixture : IDisposable
       internal QqqSessionException.FailureKind? ResumeFailure { get; set; }
       internal bool ClaimedLegacy;
       internal bool DenyBinding;
+
+      /// <summary>When set, binding a device fails as a lost connection before the server has bound anything.</summary>
+      internal bool FailBindingTransport;
+      /// <summary>When set, a successful bind reports a different principal, as if the device had been bound for another user.</summary>
+      internal bool BindAsAnotherPrincipal;
+
+      /// <summary>How many more credential exports succeed before one fails as a lost connection; null never fails.</summary>
+      internal int? ExportsBeforeFailure;
+      private string? _issuedDeviceId;
+      private string? _deviceBeforeIssue;
       internal string? RevokedDeviceId;
       internal HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
       internal bool DelayUnauthorizedPoll { get; set; }
@@ -89,8 +99,19 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-      /// <summary>Returns a fixed synthetic cookie credential for this origin.</summary>
-      public QqqSessionCredential ExportCredential() => new(Origin, "synthetic-qqq-cookie");
+      /// <summary>Returns a fixed synthetic cookie credential for this origin, or fails as a lost connection once the scripted number of exports is used up.</summary>
+      public QqqSessionCredential ExportCredential()
+      {
+         if(ExportsBeforeFailure is { } remaining)
+         {
+            if(remaining == 0)
+            {
+               throw new IOException("Synthetic failure while exporting the session.");
+            }
+            ExportsBeforeFailure = remaining - 1;
+         }
+         return new(Origin, "synthetic-qqq-cookie");
+      }
 
 
 
@@ -145,16 +166,35 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-      /// <summary>Refuses with permission-denied when binding is denied or the device was revoked; otherwise checks the device id matches and records whether a legacy device was claimed.</summary>
+      /// <summary>
+      /// Fails as a lost connection when scripted to, and refuses with permission-denied when binding is denied or the device was
+      /// revoked. Otherwise it behaves as the server does: the session takes on a device only when that device is bound, so binding
+      /// the device an enrollment issued switches to it, and binding the device held before switches back. Any other device must
+      /// already be the one the session holds. It records whether a legacy device was claimed and returns the binding (as another
+      /// principal when scripted to).
+      /// </summary>
       public Task<QqqSessionBinding> BindDeviceAsync(QqqDeviceCredential credential, bool claimLegacyDevice = false, CancellationToken cancellationToken = default)
       {
+         if(FailBindingTransport)
+         {
+            throw new IOException("Synthetic connection loss while binding the device.");
+         }
          if(DenyBinding || string.Equals(RevokedDeviceId, credential.DeviceId, StringComparison.Ordinal))
          {
             throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "Synthetic binding denied.");
          }
+         if(string.Equals(credential.DeviceId, _issuedDeviceId, StringComparison.Ordinal) && !string.Equals(Binding.DeviceId, _issuedDeviceId, StringComparison.Ordinal))
+         {
+            _deviceBeforeIssue = Binding.DeviceId;
+            Binding = Binding with { DeviceId = _issuedDeviceId };
+         }
+         else if(_deviceBeforeIssue is not null && string.Equals(credential.DeviceId, _deviceBeforeIssue, StringComparison.Ordinal))
+         {
+            Binding = Binding with { DeviceId = _deviceBeforeIssue };
+         }
          Assert.Equal(Binding.DeviceId, credential.DeviceId);
          ClaimedLegacy = claimLegacyDevice;
-         return Task.FromResult(Binding);
+         return Task.FromResult(BindAsAnotherPrincipal ? Binding with { PrincipalId = "someone-else" } : Binding);
       }
 
 
@@ -173,7 +213,7 @@ internal sealed class SessionFixture : IDisposable
             {
                return new HttpResponseMessage(Status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
             }
-            Binding = Binding with { DeviceId = "replacement-device" };
+            _issuedDeviceId = "replacement-device";
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new EnrollmentResponse(1, "replacement-device", "replacement-token", 5), PrintApiClient.JsonOptions), Encoding.UTF8, "application/json") };
          }
          if(DelayUnauthorizedPoll)

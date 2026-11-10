@@ -11,12 +11,26 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// Saved QQQ session part of the store. The session identity and credential are kept in one DPAPI-protected file; an
-/// unreadable file is quarantined (moved aside, never deleted) so a user can sign in again without losing evidence.
+/// Saved QQQ session part of the store. The session identity and credential are kept in one DPAPI-protected file. While a
+/// pairing change is in progress, the session that belongs to the new pairing waits beside it under a staged name until
+/// it is moved into place. An unreadable session file, stored or staged, is moved aside under a recovery name and never
+/// deleted, so a user can sign in again without losing evidence.
 /// </summary>
 public sealed partial class AgentStore
 {
+   private const string SessionFile = "qqq-session.dpapi";
+   private const string StagedSessionFile = "qqq-session.staged.dpapi";
    private bool _authenticationRecoveryRequired;
+
+
+
+   /// <summary>What the last read of the session did about a staged pairing change, for the caller to log.</summary>
+   internal StagedPairingOutcome StagedPairing { get; private set; }
+
+
+
+   /// <summary>Why the staged session could not be moved into place when the outcome is <see cref="StagedPairingOutcome.Deferred"/>; otherwise null.</summary>
+   internal Exception? StagedPairingFailure { get; private set; }
 
 
 
@@ -41,7 +55,7 @@ public sealed partial class AgentStore
    {
       if(_authenticationRecoveryRequired)
       {
-         File.Move(Path.Combine(_directory, "qqq-session.dpapi"), Path.Combine(_directory, "qqq-session.recovery-" + Guid.NewGuid().ToString("N") + ".dpapi"));
+         File.Move(Path.Combine(_directory, SessionFile), Path.Combine(_directory, "qqq-session.recovery-" + Guid.NewGuid().ToString("N") + ".dpapi"));
          _authenticationRecoveryRequired = false;
          return true;
       }
@@ -51,12 +65,18 @@ public sealed partial class AgentStore
 
 
    /// <summary>
-   /// Reads and decrypts the saved session, or returns null when none exists. The file is size-bounded, decrypted for the
-   /// current service account, parsed and validated, and the decrypted bytes are zeroed afterwards. A damaged or invalid file throws.
+   /// Returns the saved session to act on, or null when there is none. A pairing change that was staged and not finished
+   /// is dealt with first: a staged session that belongs to the stored pairing is the one returned, whether or not it
+   /// could be moved into place yet, so a caller never acts on a session left over from the previous pairing. Files are
+   /// size-bounded, decrypted for the current service account, parsed and validated. A damaged stored file throws.
    /// </summary>
-   public AgentAuthentication? LoadAuthentication()
+   public AgentAuthentication? LoadAuthentication() => ResolveStagedPairing() ?? ReadAuthentication(Path.Combine(_directory, SessionFile));
+
+
+
+   /// <summary>Reads, decrypts, parses and validates one protected session file, or returns null when it does not exist.</summary>
+   private static AgentAuthentication? ReadAuthentication(string path)
    {
-      string path = Path.Combine(_directory, "qqq-session.dpapi");
       if(!File.Exists(path))
       {
          return null;
@@ -104,19 +124,204 @@ public sealed partial class AgentStore
 
    /// <summary>
    /// Saves the session protected for the service account, writing a temporary file and moving it into place so a crash cannot
-   /// leave a half-written secret. An unreadable earlier file is quarantined first, and the plaintext buffer is zeroed on every path.
+   /// leave a half-written secret. An unreadable earlier file is quarantined first. A staged session from an unfinished pairing
+   /// change is removed, because what is saved here is newer than it. When it cannot be removed, the saved file is stamped
+   /// later than the staged one, so the order the two were written in does not depend on the clock having moved forward.
    /// </summary>
    public void SaveAuthentication(AgentAuthentication authentication)
+   {
+      string path = Path.Combine(_directory, SessionFile);
+      string staged = Path.Combine(_directory, StagedSessionFile);
+      WriteProtected(path + ".tmp", authentication);
+      _ = QuarantineUnreadableAuthentication();
+      File.Move(path + ".tmp", path, overwrite: true);
+      if(!DeleteQuietly(staged) && File.GetLastWriteTimeUtc(path) <= File.GetLastWriteTimeUtc(staged))
+      {
+         File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(staged).AddTicks(1));
+      }
+   }
+
+
+
+   /// <summary>
+   /// Starts replacing the pairing and its session as one step. The session is written first, flushed to disk, under a
+   /// staged name, and the pairing is replaced second. From then on the change is decided: every reader of the session
+   /// uses the staged one and moves it into place, because it names the stored pairing's server and device. If the pairing
+   /// cannot be written the staged session is removed and nothing has changed; a staged session left by a crash before the
+   /// pairing was replaced names a different device and is discarded by the next reader. The staged file is never stamped
+   /// earlier than the stored session it is about to replace, whatever the clock did in between.
+   /// </summary>
+   internal void StagePairing(AgentConfiguration configuration, AgentAuthentication authentication)
+   {
+      string staged = Path.Combine(_directory, StagedSessionFile);
+      string path = Path.Combine(_directory, SessionFile);
+      WriteProtected(staged + ".tmp", authentication);
+      File.Move(staged + ".tmp", staged, overwrite: true);
+      if(File.Exists(path) && File.GetLastWriteTimeUtc(path) > File.GetLastWriteTimeUtc(staged))
+      {
+         File.SetLastWriteTimeUtc(staged, File.GetLastWriteTimeUtc(path));
+      }
+      try
+      {
+         SaveConfiguration(configuration);
+      }
+      catch
+      {
+         _ = DeleteQuietly(staged);
+         throw;
+      }
+   }
+
+
+
+   /// <summary>Deals with a staged pairing change now, as every read of the session does, and reports what was done.</summary>
+   internal StagedPairingOutcome CompleteStagedPairing()
+   {
+      _ = ResolveStagedPairing();
+      return StagedPairing;
+   }
+
+
+
+   /// <summary>
+   /// Decides what a staged session is and acts on it. One that belongs to the stored pairing, while the stored session
+   /// does not and is older, is the session of a pairing change in progress: it is moved into place when that is possible,
+   /// an unreadable earlier session being moved aside first, and returned either way. One that names another server or
+   /// device, or that the stored session has superseded, is a leftover and is deleted. One that cannot be read is moved aside.
+   /// </summary>
+   private AgentAuthentication? ResolveStagedPairing()
+   {
+      StagedPairing = StagedPairingOutcome.None;
+      StagedPairingFailure = null;
+      string staged = Path.Combine(_directory, StagedSessionFile);
+      _ = DeleteQuietly(staged + ".tmp");
+      AgentAuthentication? session = File.Exists(staged) ? ReadStagedOrSetAside(staged) : null;
+      if(session is null)
+      {
+         return null;
+      }
+      string path = Path.Combine(_directory, SessionFile);
+      AgentConfiguration? pairing = LoadPairingOrNull();
+      AgentAuthentication? stored = ReadStoredOrFlag(path);
+      if(!BelongsToPairing(session, pairing) || (stored is not null && (BelongsToPairing(stored, pairing) || File.GetLastWriteTimeUtc(path) > File.GetLastWriteTimeUtc(staged))))
+      {
+         ////////////////////////////////////////////////////////////////////////
+         // a leftover: it is for another pairing, or the stored session is    //
+         // already this pairing's, or was saved after it and so is newer. One //
+         // that cannot be deleted now must not fail the read, and is reported //
+         // as discarded only once it is gone                                  //
+         ////////////////////////////////////////////////////////////////////////
+         StagedPairing = DeleteQuietly(staged) ? StagedPairingOutcome.Discarded : StagedPairingOutcome.None;
+         return null;
+      }
+      try
+      {
+         bool quarantined = QuarantineUnreadableAuthentication();
+         File.Move(staged, path, overwrite: true);
+         StagedPairing = quarantined ? StagedPairingOutcome.CompletedAfterQuarantine : StagedPairingOutcome.Completed;
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         // Something holds one of the two files open. The staged session is still the right one to act on, and the next reader moves it.
+         StagedPairing = StagedPairingOutcome.Deferred;
+         StagedPairingFailure = exception;
+      }
+      return session;
+   }
+
+
+
+   /// <summary>Reads the staged session; one that cannot be decrypted or parsed is moved aside under a recovery name, because after the pairing was replaced it may be the only copy.</summary>
+   private AgentAuthentication? ReadStagedOrSetAside(string staged)
+   {
+      try
+      {
+         return ReadAuthentication(staged);
+      }
+      catch(Exception exception) when(exception is CryptographicException or JsonException or InvalidDataException or ArgumentException)
+      {
+         try
+         {
+            File.Move(staged, Path.Combine(_directory, "qqq-session.recovery-" + Guid.NewGuid().ToString("N") + ".dpapi"));
+            StagedPairing = StagedPairingOutcome.SetAside;
+         }
+         catch(Exception moveFailure) when(moveFailure is IOException or UnauthorizedAccessException)
+         {
+            // It stays where it is and the next reader sets it aside; the stored session is still the answer to this read.
+         }
+         return null;
+      }
+   }
+
+
+
+   /// <summary>Reads the stored session for comparison; an unreadable one is flagged for quarantine and treated as absent.</summary>
+   private AgentAuthentication? ReadStoredOrFlag(string path)
+   {
+      try
+      {
+         return ReadAuthentication(path);
+      }
+      catch(Exception exception) when(exception is CryptographicException or JsonException or InvalidDataException or ArgumentException)
+      {
+         _authenticationRecoveryRequired = true;
+         return null;
+      }
+   }
+
+
+
+   /// <summary>Reads the stored pairing, treating one that cannot be read as absent: a pairing change only ever leaves a readable pairing behind.</summary>
+   private AgentConfiguration? LoadPairingOrNull()
+   {
+      try
+      {
+         return LoadConfiguration();
+      }
+      catch(Exception exception) when(exception is CryptographicException or JsonException or ArgumentException or UriFormatException)
+      {
+         return null;
+      }
+   }
+
+
+
+   /// <summary>True when a session names the same server and device as the pairing.</summary>
+   private static bool BelongsToPairing(AgentAuthentication session, AgentConfiguration? pairing)
+      => pairing is not null
+         && string.Equals(session.Binding.DeviceId, pairing.DeviceId, StringComparison.Ordinal)
+         && Uri.TryCreate(pairing.ServerUrl, UriKind.Absolute, out Uri? server)
+         && string.Equals(server.GetLeftPart(UriPartial.Authority), session.Binding.Origin.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
+
+
+
+   /// <summary>Writes one session to a file protected for the service account and flushes it to disk, zeroing the plaintext buffer on every path.</summary>
+   private static void WriteProtected(string path, AgentAuthentication authentication)
    {
       byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(authentication, PrintApiClient.JsonOptions);
       try
       {
-         byte[] encrypted = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
-         string path = Path.Combine(_directory, "qqq-session.dpapi");
-         File.WriteAllBytes(path + ".tmp", encrypted);
-         QuarantineUnreadableAuthentication();
-         File.Move(path + ".tmp", path, overwrite: true);
+         using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
+         stream.Write(ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+         stream.Flush(flushToDisk: true);
       }
       finally { CryptographicOperations.ZeroMemory(bytes); }
+   }
+
+
+
+   /// <summary>Deletes a leftover file without failing the operation that noticed it, and says whether the file is gone.</summary>
+   private static bool DeleteQuietly(string path)
+   {
+      try
+      {
+         File.Delete(path);
+         return true;
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         // A staged session is examined again by the next reader, which discards it by the same rules, and a temporary file is overwritten by the next write.
+         return false;
+      }
    }
 }
