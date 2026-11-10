@@ -61,6 +61,20 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
 
+   /// <summary>
+   /// When true the server behaves as a real one does when the agent reports an older desired-state revision as applied than
+   /// the newest one it was sent: it sends that desired state again. When false it stays silent, which shows what a lost
+   /// frame costs when nothing repairs it.
+   /// </summary>
+   internal bool ResendUnappliedState { get; set; }
+
+
+
+   /// <summary>Runs on the runtime's command thread just before it saves a command's result; a test blocks here to hold that save open.</summary>
+   internal Action? ControlResultSaving { get; set; }
+
+
+
    /// <summary>Captures the actual HELLO payload so compatibility tests observe the wire rather than duplicating capability selection.</summary>
    internal string[] LastHelloCapabilities { get; private set; } = [];
 
@@ -123,7 +137,8 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
       _running = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
       Runtime = new AgentRuntime(DirectoryPath, Logs.Enqueue, Printer, pipeName: PipeName,
          pipeFactory: () => new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
-         sessionFactory: origin => new QqqSessionClient(origin, new Handler(this), allowLoopbackHttp: true), timeProvider: _timeProvider);
+         sessionFactory: origin => new QqqSessionClient(origin, new Handler(this), allowLoopbackHttp: true), timeProvider: _timeProvider)
+      { ControlResultSaving = () => ControlResultSaving?.Invoke() };
       Running = Runtime.RunAsync(_running.Token);
    }
 

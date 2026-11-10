@@ -453,9 +453,7 @@ public sealed partial class AgentRuntime
             using var store = new AgentStore(directory);
             if(envelope.Type is "WELCOME" or "SETTINGS")
             { ApplyRealtimeSettings(envelope, store, channel); }
-            lock(_stateLock)
-            { saved = _controlState; }
-            store.SaveControlState(saved);
+            saved = PersistControlState(store);
          }
          finally { _connectionGate.Release(); }
          await channel.SendAsync("STATE_APPLIED", new { lastAppliedRevision = saved.DesiredState.Revision, lastSettingsRevision = _realtimeSettings.Revision }, acknowledged: true, token: token).ConfigureAwait(false);

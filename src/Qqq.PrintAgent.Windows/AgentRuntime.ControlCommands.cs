@@ -19,7 +19,7 @@ public sealed partial class AgentRuntime
    /// Applies one command. An expired command is answered as expired, and a refresh is skipped while traffic is not allowed. The
    /// execution intent is committed first; if a receipt already exists it is simply redelivered, and a command whose intent was
    /// recorded without a receipt is reported as outcome unknown instead of being run again. The receipt message is redacted and
-   /// bounded, and the last command is recorded in the control state.
+   /// bounded, and the last command is recorded beside whatever desired state is then in force.
    /// </summary>
    private async Task ApplyControlCommandAsync(AgentStore store, PrintApiClient api, DeviceControlCommand command, DateTimeOffset serverTime, CancellationToken token)
    {
@@ -43,10 +43,7 @@ public sealed partial class AgentRuntime
       message = AgentActivityLog.Redact(message);
       DeviceControlReceipt receipt = new(Guid.NewGuid().ToString("N"), outcome, Now(), message.Length <= 1024 ? message : message[..1024]);
       store.SaveControlReceipt(command.CommandId, receipt);
-      AgentControlState state;
-      lock(_stateLock)
-      { state = _controlState with { LastCommand = command.Action, LastOutcome = outcome, LastCommandAt = receipt.CompletedAt }; }
-      SetControlState(store, state);
+      RecordCommandResult(store, command.Action, outcome, receipt.CompletedAt);
    }
 
 

@@ -18,8 +18,18 @@ namespace Qqq.PrintAgent.Windows;
 public sealed partial class AgentRuntime
 {
    private readonly SemaphoreSlim _controlExecutionGate = new(1, 1);
+   private readonly Lock _controlPersistence = new();
    private AgentControlState _controlState = AgentControlState.Initial;
    private bool _controlReady;
+
+
+
+   /// <summary>
+   /// Called by the command path just before it saves a command's result, while it holds the control-state persistence lock.
+   /// The service leaves it unset. A test sets it to deliver a server frame at exactly that moment, which no socket or store
+   /// double can do: every write the command makes before this one takes the same journal lock.
+   /// </summary>
+   internal Action? ControlResultSaving { get; init; }
 
 
 
@@ -59,25 +69,44 @@ public sealed partial class AgentRuntime
 
 
    /// <summary>
-   /// Saves a new control state, then publishes it. The disk write comes first so a crash cannot leave a looser state on
-   /// restart. The claim loop is woken when the desired state changed, and the pipeline is signalled so waiting lanes
-   /// re-evaluate whether they may proceed.
+   /// Saves the control state now in force and returns what was saved. Two workers save it, the one that applies the
+   /// server's state frames and the one that records command results, and the reader changes it in memory at any moment.
+   /// Both savers take the same lock and save the value they read inside it, so the journal always ends up holding the
+   /// newest state and never an older one written late.
    /// </summary>
-   private void SetControlState(AgentStore store, AgentControlState value)
+   private AgentControlState PersistControlState(AgentStore store)
    {
-      store.SaveControlState(value);
-      bool wake;
-      lock(_stateLock)
+      lock(_controlPersistence)
       {
-         wake = value.DesiredState != _controlState.DesiredState;
-         _controlState = value;
-         _controlReady = true;
+         AgentControlState current;
+         lock(_stateLock)
+         { current = _controlState; }
+         store.SaveControlState(current);
+         return current;
       }
-      if(wake)
+   }
+
+
+
+   /// <summary>
+   /// Records the last executed command beside the desired state. Only the three last-command fields are changed, in the
+   /// state as it is at that moment. A copy taken earlier must never be written back whole: a desired state the reader
+   /// applied in between would be replaced by the older one, in memory and on disk. Readiness and the claim loop are not
+   /// touched, because a command result changes neither.
+   /// </summary>
+   private void RecordCommandResult(AgentStore store, string action, string outcome, string completedAt)
+   {
+      lock(_controlPersistence)
       {
-         WakePoll();
+         AgentControlState merged;
+         lock(_stateLock)
+         {
+            merged = _controlState with { LastCommand = action, LastOutcome = outcome, LastCommandAt = completedAt };
+            _controlState = merged;
+         }
+         ControlResultSaving?.Invoke();
+         store.SaveControlState(merged);
       }
-      SignalPipeline();
    }
 
 

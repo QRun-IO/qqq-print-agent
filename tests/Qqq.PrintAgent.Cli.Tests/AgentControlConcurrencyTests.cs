@@ -4,6 +4,7 @@
  */
 
 using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
@@ -46,6 +47,72 @@ public sealed class AgentControlConcurrencyTests
       await fixture.WaitAsync(() => fixture.State("job") is "SPOOLED");
       Assert.Equal(1, fixture.Printer.Prints);
       Assert.Equal(0, fixture.ForbiddenPolls);
+   }
+
+
+
+   /// <summary>
+   /// A new desired state arrives while the command worker is saving a command's result. The save is held open, the frame is
+   /// delivered and applied in memory, and only then is the save let through. Neither may be lost. The desired state in force
+   /// afterwards is the new one, in memory and on disk, and it is the only revision the agent reports as applied: reporting the
+   /// old one would let a paused device print until the server noticed, and reporting the new one while holding the old would
+   /// leave the connection silent. The command's result is kept beside it. The server either repeats an unapplied state, as a
+   /// real one does, or stays silent; the outcome must not depend on being repaired.
+   /// </summary>
+   [Theory]
+   [InlineData(false, false)]
+   [InlineData(false, true)]
+   [InlineData(true, false)]
+   [InlineData(true, true)]
+   public async Task StateFrameArrivingWhileACommandResultIsSavedLosesNeither(bool resumeArrives, bool serverResends)
+   {
+      using var saving = new ManualResetEventSlim();
+      using var release = new ManualResetEventSlim();
+      await using RealtimeRuntimeFixture fixture = new();
+      fixture.ResendUnappliedState = serverResends;
+      fixture.ControlResultSaving = () =>
+      {
+         saving.Set();
+         release.Wait();
+      };
+      try
+      {
+         DeviceDesiredState arriving = new(2, !resumeArrives, "CONNECTED");
+         RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, resumeArrives, "CONNECTED"));
+         await connection.SendAsync("COMMAND", RealtimeRuntimeFixture.Command("REFRESH_INVENTORY"));
+         await fixture.WaitAsync(() => saving.IsSet);
+         int reportedBefore = fixture.Count("STATE_APPLIED");
+         await connection.SendAsync("DESIRED_STATE", arriving);
+         await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Control!.DesiredState == arriving);
+         release.Set();
+         await fixture.WaitAsync(() => fixture.Count("STATE_APPLIED") > reportedBefore && fixture.Runtime.GetTransportSnapshot().State is "CONNECTED"
+            && fixture.Messages.Any(message => message.Type is "COMMAND_RECEIPT"));
+         Assert.All(fixture.Messages.Where(message => message.Type is "STATE_APPLIED").Skip(reportedBefore), message => Assert.Equal(2, message.Payload.GetProperty("lastAppliedRevision").GetInt64()));
+         AgentControlState live = fixture.Runtime.GetSnapshot().Control!;
+         Assert.Equal(arriving, live.DesiredState);
+         Assert.Equal("REFRESH_INVENTORY", live.LastCommand);
+         Assert.Equal("INVENTORY_REFRESHED", live.LastOutcome);
+         using(AgentStore store = new(fixture.DirectoryPath))
+         {
+            AgentControlState saved = store.LoadControlState();
+            Assert.Equal(arriving, saved.DesiredState);
+            Assert.Equal("REFRESH_INVENTORY", saved.LastCommand);
+         }
+         fixture.AddJob("after");
+         await connection.SendAsync("JOB_AVAILABLE", new { });
+         if(resumeArrives)
+         {
+            await fixture.WaitAsync(() => fixture.State("after") is "SPOOLED");
+         }
+         else
+         {
+            await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Jobs.Any(job => job.JobId is "after" && job.Status is "QUEUED"));
+            Assert.Null(fixture.State("after"));
+            Assert.Equal(0, fixture.Printer.Prints);
+         }
+         Assert.Equal(0, fixture.ForbiddenPolls);
+      }
+      finally { release.Set(); }
    }
 
 

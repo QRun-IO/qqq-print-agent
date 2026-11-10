@@ -22,6 +22,7 @@ internal sealed partial class RealtimeRuntimeFixture
    {
       private readonly SemaphoreSlim _send = new(1, 1);
       private Task _pump = Task.CompletedTask;
+      private DeviceDesiredState? _newestDesired;
       internal Task Completion => _pump;
 
 
@@ -46,9 +47,11 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
-      /// <summary>Sends one server message, serialized so concurrent senders cannot interleave frames.</summary>
+      /// <summary>Sends one server message, serialized so concurrent senders cannot interleave frames, and remembers the newest desired state sent so it can be sent again if the agent does not apply it.</summary>
       internal async Task SendAsync(string type, object payload)
       {
+         if(payload is DeviceDesiredState desired && type is "DESIRED_STATE")
+         { _newestDesired = desired; }
          await _send.WaitAsync(token);
          try
          { await LoopbackWebSocketPeer.SendAsync(socket, type, payload, token); }
@@ -102,6 +105,9 @@ internal sealed partial class RealtimeRuntimeFixture
             if(fixture.RefuseWith?.Invoke(message) is string code)
             { await SendErrorAsync(message.MessageId, code); continue; }
             await SendAsync("ACK", new { acknowledgedMessageId = message.MessageId });
+            if(message.Type is "STATE_APPLIED" && fixture.ResendUnappliedState && _newestDesired is DeviceDesiredState unapplied
+               && message.Payload.GetProperty("lastAppliedRevision").GetInt64() < unapplied.Revision)
+            { await SendAsync("DESIRED_STATE", unapplied); }
          }
       }
 
