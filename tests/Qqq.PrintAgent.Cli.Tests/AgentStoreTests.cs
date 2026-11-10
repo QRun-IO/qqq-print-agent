@@ -99,64 +99,56 @@ public sealed class AgentStoreTests
 
 
    /// <summary>
-   /// Stores on different directories do not wait for each other. Another connection holds a write transaction on one
-   /// journal, so a store opening that journal stays busy inside its schema lock. A store on a second directory is then
-   /// opened and used, which must not have to wait: had it waited, it could only have got through after the first open gave
-   /// up, and that open would have failed. Once the transaction is released the first open completes without error.
+   /// Stores on different folders do not wait for each other. This thread holds the schema lock of one journal, which every
+   /// store opening that journal must take, and meanwhile a store on a second folder is opened and used on another thread.
+   /// It must finish while the lock is still held. With one lock shared by all journals it cannot, and the test fails when
+   /// its wait of 30 seconds runs out; nothing else in the test depends on time. The lock is the same one for the first
+   /// folder written in upper case or with a trailing separator, and a different one for the second folder.
    /// </summary>
    [Fact]
    public void StoresOnDifferentDirectories_DoNotWaitForEachOther()
    {
       string root = Path.Combine(Path.GetTempPath(), "qqq-separate-journals-" + Guid.NewGuid().ToString("N"));
-      string busy = Path.Combine(root, "busy");
-      Directory.CreateDirectory(busy);
+      string held = Path.Combine(root, "held");
+      string free = Path.Combine(root, "free");
       try
       {
-         // Loads the SQLite provider and the store's types, so the thread below can wait in one place only: its busy journal.
-         using(AgentStore warm = new(Path.Combine(root, "warm")))
-         { Assert.Null(warm.GetState("none")); }
-         using var holder = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(busy, "journal.db"), Pooling = false }.ToString());
-         holder.Open();
-         Execute(holder, "BEGIN IMMEDIATE");
+         using(AgentStore first = new(held))
+         { Assert.Null(first.GetState("none")); }
          Exception? failure = null;
+         using var finished = new ManualResetEventSlim();
          var opening = new Thread(() =>
          {
             try
             {
-               using AgentStore store = new(busy);
+               using AgentStore other = new(free);
+               other.SavePrinterProfile("printer", new PrinterProfile("Free queue"));
             }
             catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException)
             { failure = exception; }
+            finally { finished.Set(); }
          });
-         opening.Start();
-         // The open retries a busy journal by sleeping between attempts, and it does so inside the journal's schema lock.
-         Assert.True(SpinWait.SpinUntil(() => opening.ThreadState.HasFlag(ThreadState.WaitSleepJoin), TimeSpan.FromSeconds(30)));
-         using(AgentStore other = new(Path.Combine(root, "free")))
+         Lock schemaLock = AgentStore.SchemaLockFor(held);
+         bool finishedWhileHeld;
+         lock(schemaLock)
          {
-            other.SavePrinterProfile("printer", new PrinterProfile("Free queue"));
-            Assert.Equal("Free queue", other.GetPrinterProfile("printer").DisplayName);
+            opening.Start();
+            finishedWhileHeld = finished.Wait(TimeSpan.FromSeconds(30));
          }
-         Assert.True(opening.IsAlive);
-         Execute(holder, "ROLLBACK");
-         Assert.True(opening.Join(TimeSpan.FromSeconds(60)));
+         opening.Join();
+         Assert.True(finishedWhileHeld, "A store on another folder waited for this journal's schema lock.");
          Assert.Null(failure);
+         // Compared as locks, not as objects: a lock passed as an object would lose its meaning to the compiler.
+         Assert.True(schemaLock == AgentStore.SchemaLockFor(held.ToUpperInvariant()));
+         Assert.True(schemaLock == AgentStore.SchemaLockFor(held + Path.DirectorySeparatorChar));
+         Assert.True(schemaLock != AgentStore.SchemaLockFor(free));
+         using AgentStore reopened = new(free);
+         Assert.Equal("Free queue", reopened.GetPrinterProfile("printer").DisplayName);
       }
       finally
       {
          JournalFiles.Delete(root);
       }
-   }
-
-
-
-   /// <summary>Runs one statement on a raw connection to a journal.</summary>
-   private static void Execute(SqliteConnection connection, string statement)
-   {
-      using SqliteCommand command = connection.CreateCommand();
-#pragma warning disable CA2100 // The statement is a constant written in this file.
-      command.CommandText = statement;
-#pragma warning restore CA2100
-      command.ExecuteNonQuery();
    }
 
 
