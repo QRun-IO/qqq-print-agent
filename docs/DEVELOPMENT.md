@@ -12,7 +12,7 @@ and reconnect rules. The service never falls back from WSS to job/control pollin
 | Qqq.PrintAgent.Windows | Native spooler/PDF adapter, SQLite/DPAPI store and local management runtime |
 | Qqq.PrintAgent.Service | .NET Windows Service host |
 | Qqq.PrintAgent | AppKit/WinUI setup, details and tray companion |
-| Qqq.PrintAgent.Cli | Authenticated service management and explicit isolated legacy diagnostics |
+| Qqq.PrintAgent.Cli | Management of the installed service over its pipe; also the MSI update helper and browser sign-in callback forwarder |
 
 The service owns the credential, journal and print operations. The UI is optional at runtime and sees only credential-free snapshots. Service IPC uses the `QqqPrintAgent` named pipe and accepts administrator clients. `snapshot` returns connection health, all locally discovered printers with exposure state, the latest 50 jobs and the latest 100 in-memory log entries. `set-exposure` persists a selected queue and returns a fresh snapshot. Legacy `status`, `printers` and `enroll` operations remain available.
 
@@ -51,9 +51,9 @@ $agent = '.\src\Qqq.PrintAgent.Cli\bin\x64\Debug\net10.0-windows10.0.19041.0\qqq
 & $agent run
 ```
 
-`run` requests a connection refresh through the authenticated service; it does not start a second foreground worker. Device setup and explicit printer exposure use that same service. Submit a physical test only when authorized, after approving the selected exposed queue in QQQ.
+`run` requests a connection refresh through the authenticated service; the command line never claims or prints a job itself. Device setup and explicit printer exposure use that same service. Submit a physical test only when authorized, after approving the selected exposed queue in QQQ.
 
-Direct bearer diagnostics require explicit `--legacy-compat` and a separate private `--data-dir`; they cannot use `--service` and are never an automatic fallback. The exclusive `worker.lock` prevents simultaneous workers on one journal. Do not point a development worker at installed state.
+The command line has no state and no server transport of its own: every command is one request to the service. The `--legacy-compat` bearer diagnostics and their `--data-dir`, `--once` and `--service` options were removed in 2.0. The service holds an exclusive `worker.lock` in its data directory, so a second service host cannot run against the same journal; do not point a development service at installed state. `CommandLine` takes the console, the environment, the pipe and the helper entry points as injected functions, so its tests need none of them.
 
 ## Virtual file printer (macOS/Linux)
 

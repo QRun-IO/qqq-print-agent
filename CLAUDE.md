@@ -71,7 +71,7 @@ Five projects, strict layering (Core → Windows → Service/UI/CLI). Business l
 | `Qqq.PrintAgent.Windows` | Spooler/PDF/ZPL backends, SQLite + DPAPI store, named-pipe IPC, the long-running runtime | `AgentRuntime.*.cs` (partial class split by concern), `AgentPipe*`, `AgentStore` |
 | `Qqq.PrintAgent.Service` | Windows Service host only | `PrintService.cs` |
 | `Qqq.PrintAgent` | WinUI/AppKit companion: tray, Printers/Jobs/Logs/Settings views, MSI update UX | `MainWindow.*.cs` (partial class split by concern) |
-| `Qqq.PrintAgent.Cli` | Authenticated service management over the pipe; isolated legacy diagnostics | `Program.cs` |
+| `Qqq.PrintAgent.Cli` | Service management over the pipe, nothing else; the same executable is also the MSI update helper and the browser sign-in callback forwarder | `CommandLine.cs` (`Program.cs` only binds the real console, pipe and helpers) |
 
 Large classes are deliberately split into partial files by concern (`AgentRuntime.Realtime.cs`, `AgentRuntime.Jobs.cs`, `MainWindow.Updates.cs`, ...). Add new behavior to the matching partial rather than growing `AgentRuntime.cs` / `MainWindow.xaml.cs`.
 
@@ -86,7 +86,7 @@ Large classes are deliberately split into partial files by concern (`AgentRuntim
 ## Test layout
 
 - `tests/Qqq.PrintAgent.Core.Tests`: protocol fixtures (`ProtocolFixtureTests`), loopback WebSocket peer, worker state machine, media contracts. New Core tests are written here (see the host note under Commands for where it builds).
-- `tests/Qqq.PrintAgent.Cli.Tests`: despite the name, this is the Windows runtime suite (`AgentRuntime*`, `AgentRealtime*`, `AgentPipe*`, `AgentStore*`). Put Windows-layer tests here.
+- `tests/Qqq.PrintAgent.Cli.Tests`: despite the name, this is mostly the Windows runtime suite (`AgentRuntime*`, `AgentRealtime*`, `AgentPipe*`, `AgentStore*`). Put Windows-layer tests here. The command-line tests are its `Cli*Tests.cs` files: they drive `CommandLine` through `CliFixture` (fakes for console, environment, pipe and helpers), and `CliProcessTests` starts the built executable.
 - `tests/Qqq.PrintAgent.WorkerFixture`: child-process fixture used by runtime tests.
 
 ## Conventions worth knowing

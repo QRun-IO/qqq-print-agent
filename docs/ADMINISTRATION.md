@@ -24,9 +24,34 @@ Get-Service QqqPrintAgent, Spooler
 & 'C:\Program Files\QQQ Print Agent\Cli\qqq-print-agent.exe' service-status
 ```
 
-Use the actual install path if it differs. Normal CLI commands and the companion use the authenticated installed service. Its printer list reflects the service identity; explicit isolated legacy diagnostics may see different queues under their invoking account.
+Use the actual install path if it differs. CLI commands and the companion use the authenticated installed service, so the printer list reflects the service identity, not the account that runs the command.
 
 Use the built-in AppKit activity log for shared service and companion events, with source labels and severity filtering. Windows Event Viewer can also help diagnose service-host startup failures. Record relevant timestamps, job IDs and error text without customer document contents.
+
+## Command line
+
+`qqq-print-agent.exe` manages the installed service and nothing else. Each command is one request over the administrator-only pipe, so run it from an elevated prompt with the service running. Sign in through the companion first: enrollment and the connection commands act on the service's QQQ session.
+
+| Command | What the service does |
+| --- | --- |
+| `printers` | Lists the printers it can see, as JSON |
+| `enroll --server URL` | Pairs this computer with a QQQ server using a one-time enrollment code |
+| `expose --printer ID --exposed true\|false` | Shares a printer with QQQ, or stops sharing it |
+| `run` | Refreshes its connection to QQQ |
+| `sign-out` | Ends its QQQ session (the identity provider's browser session is ended only by Sign out in the companion) |
+| `service-status` | Reports its connection status |
+| `snapshot` | Reports its state as JSON: connection, printers, recent jobs and logs |
+| `help`, `--help`, `-h`, or no arguments; `--help` or `-h` after a command | Nothing; the usage is printed |
+
+The enrollment code is read from the `QQQ_PRINT_ENROLLMENT_CODE` environment variable. When the variable is not set it is read from standard input, in one of two ways. When input is redirected, one line is read with no prompt, so a script can pipe the code in: standard output holds only the service's reply and, on success, standard error stays empty (when a script redirects or captures standard error, with `2>&1`, a file, the ISE or remoting, Windows PowerShell turns each line a native program writes there into an error). When input is a Windows console, the prompt `Enrollment code: ` is written to standard error and the code is typed without being shown (Backspace corrects, Enter ends). White space around the code is dropped, and so is a leading byte-order mark, which Windows PowerShell 5.1 puts in front of piped text when the console code page is UTF-8. The code is never accepted as an argument and never printed.
+
+Two limits of that rule. "Not shown" holds at a Windows console. A terminal that gives native programs a pipe instead of a console (the default Git Bash window, for example) counts as redirected input: there is no prompt, the tool cannot stop the terminal echoing what is typed, and the line may stay on the screen; use the variable there. And an unattended caller that has a console nobody can type at (a scheduled task, for example) must set the variable or redirect input, or the command waits at the prompt for a key that never comes.
+
+The exit code is 0 on success and 1 otherwise: wrong arguments, a service that cannot be reached or is not the installed one, a timeout, or a reply from the service that begins with `Error:`. Standard output carries what the service replied, including an `Error:` reply (the exit code, not the stream, tells a script it failed), and usage that was asked for. Standard error carries the command line's own failures (the service unreachable, a timeout, no enrollment code), the enrollment prompt when the code is typed at a console, and the reason and usage for a refused command line; a command that succeeds without that prompt writes nothing to it.
+
+A command accepts exactly the options shown, each once, in any order, each with a value that is not blank and does not begin with `--`. `--exposed` takes the word `true` or `false` in any letter case. Anything else is refused before the service is contacted and before a code is asked for, with one line saying what is wrong (`--server is required.`, `--printer needs a value.`, `'run' takes no arguments.` and so on) followed by the usage. The refusal names only the tool's own commands and options and never repeats what was typed, because a mistyped command line can contain an enrollment code.
+
+Version 2.0 removed `--legacy-compat` and the options that existed for it (`--data-dir`, `--once`, `--service`); a command line that uses one is refused with a sentence saying so. The executable is also no longer a printer worker (`--printer-worker`): the service starts its own executable for that. If that mode was ever used on a machine, its separate per-user state is still in `%LOCALAPPDATA%\QqqPrintAgent` (`connection.dpapi`, `journal.db`, `worker.lock`). Nothing reads it any more; delete it once the device it enrolled has been revoked in QQQ. Leave `auth-callback.log` in that folder: the browser sign-in helper still writes it.
 
 ## Credentials and network
 
