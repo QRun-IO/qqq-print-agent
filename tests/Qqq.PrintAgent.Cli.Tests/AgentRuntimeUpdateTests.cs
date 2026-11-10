@@ -184,6 +184,84 @@ public sealed class AgentRuntimeUpdateTests
 
 
    /// <summary>
+   /// The limit runs out while the server has still not answered a claim that was sent before the pause, and no job is in
+   /// progress. The reply and the log say that a claim was still in progress, not that no jobs were. When the server then
+   /// answers the claim with a job, that job is printed although the pause is still in force.
+   /// </summary>
+   [Fact]
+   public async Task UpdatePreparationSaysAClaimWasStillInProgressWhenItsLimitRunsOut()
+   {
+      var clock = new ManualTimeProvider();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
+      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await fixture.WaitAsync(() => fixture.LastClaimWasEmpty);
+      int claims = fixture.Claims;
+      fixture.ClaimHold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      fixture.AddJob("claimed");
+      await connection.SendAsync("JOB_AVAILABLE", new { });
+      await fixture.WaitAsync(() => fixture.Claims > claims);
+      Task<string> preparation = fixture.PipeAsync(new PipeRequest("prepare-update"));
+      await fixture.WaitAsync(() => clock.HasTimerDueIn(AgentRuntime.UpdatePreparationLimit));
+      clock.Advance(AgentRuntime.UpdatePreparationLimit);
+      string reply = await preparation;
+      Assert.StartsWith("Not ready for update: a claim was still in progress after 25 seconds.", reply, StringComparison.Ordinal);
+      Assert.DoesNotContain("job(s)", reply, StringComparison.Ordinal);
+      Assert.Contains(fixture.Logs, line => line.StartsWith("Update preparation stopped waiting after 25 s: a claim was still in progress", StringComparison.Ordinal));
+      Assert.StartsWith(Paused, fixture.Runtime.GetSnapshot().Status, StringComparison.Ordinal);
+      fixture.ClaimHold.SetResult();
+      await fixture.WaitAsync(() => fixture.State("claimed") is "SPOOLED");
+      Assert.StartsWith(Paused, fixture.Runtime.GetSnapshot().Status, StringComparison.Ordinal);
+      Assert.Equal("Printing resumed.", await fixture.PipeAsync(new PipeRequest("resume-after-update")));
+      Assert.Equal(0, fixture.ForbiddenPolls);
+   }
+
+
+
+   /// <summary>
+   /// The server sends a new desired state, or new settings, while update preparation is waiting for a job whose document is
+   /// still downloading. The frame is saved and acknowledged during the wait, so the runtime becomes ready again; the job can
+   /// then pass the submission gate, is printed and reported, and the reply is "Ready for update." Were the frame left
+   /// unapplied until preparation ended, the job could not be submitted and preparation would wait for work it was itself
+   /// holding up.
+   /// </summary>
+   [Theory]
+   [InlineData("DESIRED_STATE")]
+   [InlineData("SETTINGS")]
+   public async Task ServerStateArrivingDuringUpdatePreparationIsAppliedAndTheClaimedJobFinishes(string frame)
+   {
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
+      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-during");
+      using var document = new GatedDocument(bytes);
+      fixture.AddJob("during", () => document, length: bytes.Length);
+      await connection.SendAsync("JOB_AVAILABLE", new { });
+      await fixture.WaitAsync(document.Entered.Task);
+      try
+      {
+         Task<string> preparation = fixture.PipeAsync(new PipeRequest("prepare-update"));
+         await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Status.StartsWith(Paused, StringComparison.Ordinal));
+         int applied = fixture.Count("STATE_APPLIED");
+         if(frame is "SETTINGS")
+         { await connection.SendAsync("SETTINGS", fixture.Settings with { Revision = 2 }); }
+         else
+         { await connection.SendAsync("DESIRED_STATE", new DeviceDesiredState(2, false, "CONNECTED")); }
+         // Saved and acknowledged while preparation is still waiting for the download.
+         await fixture.WaitAsync(() => fixture.Count("STATE_APPLIED") > applied && fixture.Runtime.GetSnapshot().Connected);
+         Assert.False(preparation.IsCompleted);
+         Assert.Equal("RECEIVED", fixture.State("during"));
+         document.Release.TrySetResult();
+         Assert.Equal("Ready for update.", await preparation);
+         Assert.Equal("SPOOLED", fixture.State("during"));
+         Assert.Contains(fixture.Messages, message => IsEvent(message, "during", "SPOOLED"));
+         Assert.Equal("Printing resumed.", await fixture.PipeAsync(new PipeRequest("resume-after-update")));
+         Assert.Equal(0, fixture.ForbiddenPolls);
+      }
+      finally { document.Release.TrySetResult(); }
+   }
+
+
+
+   /// <summary>
    /// An updater that never comes back cannot leave printing off. A job announced during the pause is not claimed while the
    /// pause lasts, across a heartbeat interval. When the pause's ten minutes have passed on the manual clock, with no resume,
    /// the next heartbeat round notices, the status no longer says paused, and the waiting job is claimed and printed.

@@ -17,8 +17,12 @@ public sealed partial class AgentRuntime
    /// <summary>How long a pause lasts when the updater never resumes printing.</summary>
    internal static readonly TimeSpan UpdatePauseDuration = TimeSpan.FromMinutes(10);
 
+
+
    /// <summary>How long update preparation waits for claimed work before it answers that the service is not ready. It is shorter than the pipe's 30-second command limit, so the answer still reaches the updater.</summary>
    internal static readonly TimeSpan UpdatePreparationLimit = TimeSpan.FromSeconds(25);
+
+
 
    private DateTimeOffset _updatePauseUntil;
 
@@ -41,8 +45,11 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Starts the pause and answers "Ready for update." only when nothing claimed before it is still in progress, so the
    /// installer never replaces files under a job that is downloading, waiting for its printer or being submitted. Such a job is
-   /// not stopped by the pause: it finishes and is reported. When that takes longer than the preparation limit the answer says
-   /// how many jobs were still in progress, the pause stays, and the jobs carry on.
+   /// not stopped by the pause: it finishes and is reported. The pause is set under the connection gate, which orders it against
+   /// a sign-in or a state change in progress, and the gate is released before the wait: a desired state or settings the
+   /// server sends meanwhile must still be saved and acknowledged, or the runtime would stay not ready and the very jobs
+   /// being waited for could not be submitted. When the wait takes longer than the preparation limit the answer says what was
+   /// still in progress, the pause stays, and that work carries on.
    /// </summary>
    private async Task<string> PrepareUpdateAsync(CancellationToken token)
    {
@@ -53,41 +60,62 @@ public sealed partial class AgentRuntime
          {
             _updatePauseUntil = ObservationTime + UpdatePauseDuration;
          }
-         using var limit = new CancellationTokenSource(UpdatePreparationLimit, Clock);
-         using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token, limit.Token);
-         try
-         {
-            await WaitForClaimedWorkAsync(bounded.Token).ConfigureAwait(false);
-         }
-         catch(OperationCanceledException) when(limit.IsCancellationRequested && !token.IsCancellationRequested)
-         {
-            int remaining;
-            lock(_stateLock)
-            { remaining = _jobTickets.Count; }
-            string seconds = UpdatePreparationLimit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
-            WriteLog("WARN", $"Update preparation stopped waiting after {seconds} s: {remaining} job(s) claimed before the pause were still in progress. They continue; new claims stay paused until the updater resumes printing or the pause runs out.");
-            return $"Not ready for update: {remaining} job(s) were still in progress after {seconds} seconds. They will finish; try the update again afterwards.";
-         }
-         WriteLog("INFO", "Printing paused for an application update after active submission finished.");
-         return "Ready for update.";
       }
       finally
       {
          _connectionGate.Release();
       }
+      using var limit = new CancellationTokenSource(UpdatePreparationLimit, Clock);
+      using var bounded = CancellationTokenSource.CreateLinkedTokenSource(token, limit.Token);
+      bool claimAnswered = false;
+      try
+      {
+         // A claim already on its way to the server holds the claim gate until its job is registered, so passing the
+         // gate once means every such claim has been answered and its job, if any, has a ticket.
+         await _claimGate.WaitAsync(bounded.Token).ConfigureAwait(false);
+         _claimGate.Release();
+         claimAnswered = true;
+         await WaitForClaimedWorkAsync(bounded.Token).ConfigureAwait(false);
+      }
+      catch(OperationCanceledException) when(limit.IsCancellationRequested && !token.IsCancellationRequested)
+      {
+         if(PreparationLimitReached(claimAnswered) is string notReady)
+         { return notReady; }
+      }
+      WriteLog("INFO", "Printing paused for an application update after active submission finished.");
+      return "Ready for update.";
    }
 
 
 
    /// <summary>
-   /// Waits until no job claimed before the pause remains. A claim that was already on its way to the server holds the claim
-   /// gate until its job is registered, so passing that gate once means every such claim has a ticket; after that the wait is
-   /// for the last ticket to be released, on the pipeline signal rather than a timer.
+   /// Says what was still in progress when the preparation limit ran out: jobs claimed before the pause, a claim the server
+   /// had not answered yet, or both. It logs that and returns the reply for the updater. It returns null when the claim was
+   /// answered and the last job finished at the same moment the limit ran out, because the service is then ready after all.
    /// </summary>
+   private string? PreparationLimitReached(bool claimAnswered)
+   {
+      int remaining;
+      lock(_stateLock)
+      { remaining = _jobTickets.Count; }
+      if(claimAnswered && remaining == 0)
+      { return null; }
+      string seconds = UpdatePreparationLimit.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
+      (string what, string outcome) = (claimAnswered, remaining) switch
+      {
+         (true, _) => ($"{remaining} job(s) were", "They will finish;"),
+         (false, 0) => ("a claim was", "A job it returns will be printed;"),
+         _ => ($"a claim and {remaining} job(s) were", "The jobs will finish, and a job the claim returns will be printed;"),
+      };
+      WriteLog("WARN", $"Update preparation stopped waiting after {seconds} s: {what} still in progress from before the pause. {outcome} new claims stay paused until the updater resumes printing or the pause runs out.");
+      return $"Not ready for update: {what} still in progress after {seconds} seconds. {outcome} try the update again afterwards.";
+   }
+
+
+
+   /// <summary>Waits until no job claimed before the pause remains: for the last ticket to be released, on the pipeline signal rather than a timer.</summary>
    private async Task WaitForClaimedWorkAsync(CancellationToken token)
    {
-      await _claimGate.WaitAsync(token).ConfigureAwait(false);
-      _claimGate.Release();
       while(true)
       {
          Task changed;
