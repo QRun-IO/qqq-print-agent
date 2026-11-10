@@ -200,4 +200,47 @@ public sealed class RealtimeChannelEndingTests
       await channel.SendAsync("HEARTBEAT", new { });
       Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() => run.WaitAsync(Patience)));
    }
+
+
+
+   /// <summary>
+   /// A send can be let in while the channel is open and find it closed by the time its frame is serialized. The queue
+   /// takes nothing then, and the send is told what happened, that the channel is closed, not that the queue is full:
+   /// the service reports a full queue as the reason a connection dropped. The socket is not aborted on the send's
+   /// account. A queue that really is full is still reported as full, and aborts the socket.
+   /// </summary>
+   [Fact]
+   public async Task SendOvertakenByTheChannelClosingIsToldItClosedNotThatTheQueueIsFull()
+   {
+      using var socket = new ScriptedWebSocket();
+      var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings(MaxQueuedFrames: 1));
+      await channel.SendAsync("HEARTBEAT", new { });
+      IOException full = await Assert.ThrowsAsync<IOException>(() => channel.SendAsync("HEARTBEAT", new { }));
+      Assert.Equal("Realtime output queue is full; reconnect is required.", full.Message);
+      Assert.Equal(1, socket.Aborts);
+
+      using var second = new ScriptedWebSocket();
+      var overtaken = new PrintingRealtimeChannel(second, new RealtimeSettings());
+      RealtimeChannelClosedException closed = await Assert.ThrowsAsync<RealtimeChannelClosedException>(() => overtaken.SendAsync("HEARTBEAT", new ClosingPayload(overtaken.Dispose)));
+      Assert.Equal("Realtime connection is closed.", closed.Message);
+      Assert.Null(closed.InnerException);
+      Assert.Equal(0, second.Aborts);
+      channel.Dispose();
+   }
+
+
+
+   /// <summary>A payload that closes the channel while it is being serialized, which is after the send passed the closed check and before its frame is queued.</summary>
+   private sealed class ClosingPayload(Action close)
+   {
+      /// <summary>Closes the channel the first time the serializer reads it.</summary>
+      public string Text
+      {
+         get
+         {
+            close();
+            return "serialized after the channel closed";
+         }
+      }
+   }
 }

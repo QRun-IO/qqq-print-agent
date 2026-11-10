@@ -144,6 +144,8 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       {
          Interlocked.Add(ref _queuedBytes, -bytes.Length);
          Interlocked.Decrement(ref _queuedFrames);
+         if(Volatile.Read(ref _closed) != 0)
+         { throw new RealtimeChannelClosedException("Realtime connection is closed.", null); }
          socket.Abort();
          throw new IOException("Realtime output queue is full; reconnect is required.");
       }
