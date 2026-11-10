@@ -50,6 +50,18 @@ internal sealed class ManualTimeProvider : TimeProvider
 
 
    /// <summary>
+   /// True when a wait armed at the present instant will end after exactly the given time. It names one wait among several:
+   /// a loop that has just started waiting for its interval, as opposed to a longer deadline or a wait armed earlier.
+   /// </summary>
+   internal bool HasTimerDueIn(TimeSpan delay)
+   {
+      lock(_lock)
+      { return _timers.Any(timer => timer.Due == _now + delay); }
+   }
+
+
+
+   /// <summary>
    /// Moves the clock forward and fires every wait that has come due. The callbacks run after the lock is released, because a
    /// callback may create or dispose a timer on this same clock.
    /// </summary>

@@ -175,7 +175,7 @@ public sealed partial class AgentRuntime
          StagingDirectory = staging,
          Settings = _realtimeSettings,
          CurrentSettings = () => _realtimeSettings,
-         CanSubmit = () => NormalTrafficAllowed && !UpdatePaused && !_transitioning,
+         CanSubmit = () => NormalTrafficAllowed && !_transitioning,
          RecoverIncomplete = false,
          SynchronizeInventory = false,
          EventGate = _eventDeliveryGate,
@@ -310,8 +310,9 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// Admits one job to native printing. It waits for the previous job on the same printer to complete, then for traffic
-   /// to be allowed, no update or transition, a free print slot and no other job printing on that queue. The lease frees
-   /// the slot and queue and records the job as no longer submitting.
+   /// to be allowed, no transition, a free print slot and no other job printing on that queue. An update pause does not hold
+   /// a job here: it stops new claims, and a job that was already claimed is finished so the update does not lose it. The
+   /// lease frees the slot and queue and records the job as no longer submitting.
    /// </summary>
    private async Task<IAsyncDisposable> AcquireSubmissionAsync(PrintJob job, CancellationToken token)
    {
@@ -324,7 +325,7 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
-            if(NormalTrafficAllowed && !UpdatePaused && !_transitioning && _activePrints < _realtimeSettings.MaxConcurrentPrints && _printingQueues.Add(job.PrinterId))
+            if(NormalTrafficAllowed && !_transitioning && _activePrints < _realtimeSettings.MaxConcurrentPrints && _printingQueues.Add(job.PrinterId))
             {
                _activePrints++;
                _submittingJobs.Add(job.JobId);

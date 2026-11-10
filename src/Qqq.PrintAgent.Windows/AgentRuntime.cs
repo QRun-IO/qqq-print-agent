@@ -31,7 +31,8 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private DateTimeOffset? _lastSuccessfulPoll;
    private IReadOnlyList<JobSnapshot> _queuedJobs = [];
    private long _queueGeneration;
-   private DateTimeOffset ObservationTime => timeProvider?.GetUtcNow() ?? DateTimeOffset.UtcNow;
+   private TimeProvider Clock => timeProvider ?? TimeProvider.System;
+   private DateTimeOffset ObservationTime => Clock.GetUtcNow();
 
 
 
@@ -138,7 +139,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          bool jobFailure = attentionCount > 0;
          string health = !connected || jobFailure ? "RED" : printerIssue ? "ORANGE" : "GREEN";
          string status = configuration is null ? "Not enrolled" : _heartbeatFailure ?? (!connected ? "Waiting for server connection" : jobFailure ? $"Connected; {attentionCount} job(s) need review" : printerIssue ? "Connected; exposed printers need attention" : "Connected; exposed printers ready");
-         if(_updatePauseUntil > DateTimeOffset.UtcNow)
+         if(_updatePauseUntil > ObservationTime)
          {
             status = "Printing paused for application update. " + status;
          }
