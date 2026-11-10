@@ -5,7 +5,9 @@
 Version 2.0 (several servers at once, a connection wizard, enforced quality gates) is decided in [ADR-0003](adr/0003-version-2.md) and built from pull requests against `release/2.0`. Nothing here is released, installed or printed.
 
 - Baseline, measured locally on `a695996` with the full `build/Verify.ps1`: 197 Core and 377 Windows tests pass; merged line coverage is Core 87.19% (1,674 of 1,920), Windows 69.04% (2,623 of 3,799), CLI 38.26% (44 of 115). The WinUI companion is not measured.
-- The coverage gate now runs in `build/Verify.ps1` with minimums of 86 / 68 / 38 in `build/minimum-coverage.json`. The release bar is 100 / 90 for Core / Windows, so the gate currently proves "no worse", not "covered".
+- A second run of the same commit measured Windows at 68.91% (2,618 of 3,799): five lines in timing-dependent waits are not reached on every run.
+- The coverage gate now runs in `build/Verify.ps1` with minimums of 86 / 68 / 37 (Core / Windows / CLI) in `build/minimum-coverage.json`: the measured value rounded down, less one point for that variance. The release bar is 100 / 90 / 100, so the gate currently proves "within a point of the baseline", not "covered".
+- Not yet done: the standards exception records (90% Windows; Gitea equivalents) are unfiled, changed-line coverage is unmeasured, and Gitea runs no checks for this repository until its CI workflow lands (owned by the Gitea CI work, not this branch).
 - `Core.Tests` builds locally on the maintainer's PC since the owner excluded the development folder from Defender scanning on 2026-11-10; see the host note in `CLAUDE.md`. Earlier entries below that call Core.Tests hosted-only describe the state before that date.
 - Stages: (1) foundations and gates, (2) runtime decomposition while still single-server, (3) multi-server service and versioned pipe, (4) view models, server tree and wizard, (5) release hardening and an independent re-audit.
 

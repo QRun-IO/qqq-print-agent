@@ -20,11 +20,11 @@ A baseline audit on 2026-11-10 measured merged line coverage of 87% for Core, 69
 
 **The management pipe gets a versioned contract.** Requests name the server they address, replies are typed instead of matched by text prefix, and a client or service that does not understand the other's version says so.
 
-**Coverage is gated.** `build/Verify.ps1` fails when an assembly falls below its minimum in `build/minimum-coverage.json`. The minimums start at the measured baseline and only move up, in the change that adds the tests. The release bar is 100% for Core and the view-model assembly and 90% for the Windows layer, where the remainder is native printing, installer and service-control code behind thin adapters marked `[ExcludeFromCodeCoverage]` with a written reason. The 90% figure deviates from K22-TEST-10 and is recorded in the standards exception register.
+**Coverage is gated.** `build/Verify.ps1` fails when an assembly falls below its minimum in `build/minimum-coverage.json`. Each minimum is the measured percentage rounded down to a whole number, less one point: a few lines in timing-dependent waits are reached on some runs and not others (five lines of the Windows layer moved between two runs of the same commit), and a minimum set at the measured value would fail at random. Minimums only move up, by the same rule, in the change that adds the tests. The release bar is 100% for Core, the view-model assembly and the CLI, and 90% for the Windows layer, where the remainder is native printing, installer and service-control code behind thin adapters marked `[ExcludeFromCodeCoverage]` with a written reason. The 90% figure deviates from K22-TEST-10; an exception record for it is to be proposed to the standards register and is not yet filed. K22-TEST-10 also asks for 80% coverage of changed lines; nothing measures that yet, and it is open work for this release.
 
 **Test doubles are hand-written fakes at boundaries.** No mocking library is added. The polling path that only tests reach is removed once its tests run against the realtime path.
 
-**Delivery.** Work lands as small pull requests on `release/2.0`; `main` stays 1.2.x until release. Gitea is the primary host, so the repository standard is met with Gitea's equivalents and one exception record that maps the GitHub-only requirements.
+**Delivery.** Work lands as small pull requests on `release/2.0`; `main` stays 1.2.x until release. Gitea is the primary host, so the repository standard is to be met with Gitea's equivalents; an exception record mapping the GitHub-only requirements is to be proposed and is not yet filed.
 
 ## Consequences
 
