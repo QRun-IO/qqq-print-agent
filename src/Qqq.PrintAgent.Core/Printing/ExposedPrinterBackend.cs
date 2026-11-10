@@ -17,12 +17,17 @@ public sealed class ExposedPrinterBackend(IPrinterBackend inner, Func<IReadOnlyS
 
 
 
-   /// <summary>Prints a staged file only if the job's printer is still shared on this computer, rechecked at submission time because the operator may have unshared it since the job was claimed.</summary>
+   /// <summary>
+   /// Prints a staged file only if the job's printer is still shared on this computer, rechecked at submission time
+   /// because the operator may have unshared it since the job was claimed. The refusal is made before the backend
+   /// behind the filter is called and has its own type, <see cref="PrinterNotExposedException"/>, so the caller knows
+   /// that nothing was submitted.
+   /// </summary>
    public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
    {
       if(!exposedIds().Contains(job.PrinterId))
       {
-         throw new InvalidOperationException("The printer is not exposed to QQQ on this computer.");
+         throw new PrinterNotExposedException("The printer is not exposed to QQQ on this computer; no bytes were submitted.");
       }
       return inner.PrintFileAsync(job, path, submissionTimeout, cancellationToken);
    }

@@ -125,6 +125,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       EventGate = eventGate,
       ClaimGate = claimGate,
       ThrottleDownloadAsync = (_, _) => Task.CompletedTask,
+      IsInHand = _ => false,
       CanClaim = () => true,
       ReserveDocumentAsync = (_, _) => throw new InvalidOperationException("Scale tests must not print."),
       AcquireSubmissionAsync = (_, _) => throw new InvalidOperationException("Scale tests must not print."),

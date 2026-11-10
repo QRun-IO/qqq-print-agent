@@ -41,7 +41,7 @@ public sealed class PrintingSupportTests
 
 
 
-   /// <summary>A job is submitted only while its printer is still shared: the check is made again at submission, the staged file and its submission limit reach the inner backend unchanged, and a refusal never reaches it.</summary>
+   /// <summary>A job is submitted only while its printer is still shared: the check is made again at submission, the staged file and its submission limit reach the inner backend unchanged, and a refusal never reaches it. The refusal has its own type and says that nothing was submitted, because it is made before the inner backend is called.</summary>
    [Fact]
    public async Task ExposureFilterRechecksSharingAtSubmission()
    {
@@ -57,8 +57,8 @@ public sealed class PrintingSupportTests
       Assert.Equal(TimeSpan.FromSeconds(30), limit);
 
       shared.Clear();
-      InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(() => backend.PrintFileAsync(Job, temp.File("staged.document"), TimeSpan.FromSeconds(30), CancellationToken.None));
-      Assert.Equal("The printer is not exposed to QQQ on this computer.", refused.Message);
+      PrinterNotExposedException refused = await Assert.ThrowsAsync<PrinterNotExposedException>(() => backend.PrintFileAsync(Job, temp.File("staged.document"), TimeSpan.FromSeconds(30), CancellationToken.None));
+      Assert.Equal("The printer is not exposed to QQQ on this computer; no bytes were submitted.", refused.Message);
       Assert.Equal(1, inner.Submissions);
    }
 
