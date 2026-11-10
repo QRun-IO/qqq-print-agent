@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Presentation.Shell;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;

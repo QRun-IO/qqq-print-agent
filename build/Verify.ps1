@@ -28,7 +28,7 @@ try
    if($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed.' }
    & dotnet build Qqq.PrintAgent.slnx --configuration Release '-p:Platform=x64' "-p:PrintingProtocolFixtures=$ProtocolFixtures" --no-restore -warnaserror
    if($LASTEXITCODE -ne 0) { throw 'Solution build failed.' }
-   foreach($project in @('tests/Qqq.PrintAgent.Core.Tests', 'tests/Qqq.PrintAgent.Cli.Tests'))
+   foreach($project in @('tests/Qqq.PrintAgent.Core.Tests', 'tests/Qqq.PrintAgent.Cli.Tests', 'tests/Qqq.PrintAgent.Presentation.Tests'))
    {
       # Solution mappings use AnyCPU for these projects; direct x64 test invocations
       # must build their own matching output instead of selecting a stale x64 DLL.

@@ -12,7 +12,8 @@
        justification at its declaration.
      - Qqq.PrintAgent.WorkerFixture: the child-process fixture the runtime tests launch. It
        is test support, not shipped code.
-     The WinUI project is not measured: its views need a live compositor. FlaUI acceptance
+     The WinUI project is not measured: its views need a live compositor. What those views
+     decide and say lives in Qqq.PrintAgent.Presentation, which is measured. FlaUI acceptance
      is run separately and must not be inferred from a successful unit-test run.
      Each suite writes its own report; the gate merges them line by line and never averages. -->
 <RunSettings>

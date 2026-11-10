@@ -1,0 +1,29 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
+<Project Sdk="Microsoft.NET.Sdk">
+
+   <!-- The companion's presentation logic without a window: the typed service client, the texts,
+        enablement rules, paging and sorting state, and the sign-in state machine. It may use the
+        Windows layer's snapshot and pipe types, and must never reference WinUI, the Windows App SDK,
+        H.NotifyIcon or AppKit.WinUI, so every line can be reached by a unit test. Line coverage is
+        gated at 100% in build/minimum-coverage.json (docs/adr/0003-version-2.md). -->
+   <PropertyGroup>
+      <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+   </PropertyGroup>
+
+   <ItemGroup>
+      <PackageReference Include="CommunityToolkit.Mvvm" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <ProjectReference Include="..\Qqq.PrintAgent.Windows\Qqq.PrintAgent.Windows.csproj" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <InternalsVisibleTo Include="Qqq.PrintAgent.Presentation.Tests" />
+   </ItemGroup>
+
+</Project>

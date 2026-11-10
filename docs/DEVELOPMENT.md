@@ -11,7 +11,8 @@ and reconnect rules. The service never falls back from WSS to job/control pollin
 | Qqq.PrintAgent.Core | QQQ authentication, HTTP/WSS clients, policy, streaming and submission state machine |
 | Qqq.PrintAgent.Windows | Native spooler/PDF adapter, SQLite/DPAPI store and local management runtime |
 | Qqq.PrintAgent.Service | .NET Windows Service host |
-| Qqq.PrintAgent | AppKit/WinUI setup, details and tray companion |
+| Qqq.PrintAgent.Presentation | The companion's presentation logic without a window: typed service client, texts, enablement rules, paging and sorting state, sign-in state machine |
+| Qqq.PrintAgent | AppKit/WinUI setup, details and tray companion; views call the presentation assembly |
 | Qqq.PrintAgent.Cli | Management of the installed service over its pipe; also the MSI update helper and browser sign-in callback forwarder |
 
 The service owns the credential, journal and print operations. The UI is optional at runtime and sees only credential-free snapshots. Service IPC uses the `QqqPrintAgent` named pipe and accepts administrator clients. `snapshot` returns connection health, all locally discovered printers with exposure state, the latest 50 jobs and the latest 100 in-memory log entries. `set-exposure` persists a selected queue and returns a fresh snapshot. Legacy `status`, `printers` and `enroll` operations remain available.
@@ -26,7 +27,7 @@ Check out this repository and the protocol repository as siblings, then pin the 
 ./build/Verify.ps1
 ```
 
-This performs locked restore, Release solution build, core tests and Windows/CLI tests, with coverage/TRX output under TestResults, and then fails if an assembly's merged line coverage is below its minimum in `build/minimum-coverage.json`. UI tests compile in the solution but are not automatically run by hosted CI. Use an elevated interactive desktop and `K22_UITEST_EXE` for those tests.
+This performs locked restore, Release solution build, core tests, Windows/CLI tests and presentation tests, with coverage/TRX output under TestResults, and then fails if an assembly's merged line coverage is below its minimum in `build/minimum-coverage.json`. UI tests compile in the solution but are not automatically run by hosted CI. Use an elevated interactive desktop and `K22_UITEST_EXE` for those tests.
 
 ## Testing the service runtime
 
