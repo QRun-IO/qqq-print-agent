@@ -18,7 +18,7 @@ public sealed partial class AgentRuntime
    /// How many lanes one wake-up starts. It equals the largest download concurrency the client advertises, so a wave can use
    /// every slot the server may grant; lanes beyond the granted slots wait for one, or stop once the queue is drained.
    /// </summary>
-   internal const int DrainLanes = 16;
+   private const int DrainLanes = 16;
 
    private TaskCompletionSource _pipelineChanged = NewSignal();
    private readonly Dictionary<string, CancellationTokenSource> _activeTransfers = new(StringComparer.Ordinal);

@@ -26,6 +26,7 @@ public sealed partial class AgentRuntime
    private string? _lastAuthorizationNote;
 
 
+
    /// <summary>How long a restored or renewed session is used before it is renewed with the server and its identity checked again.</summary>
    internal static readonly TimeSpan SessionResumeInterval = TimeSpan.FromMinutes(5);
 
