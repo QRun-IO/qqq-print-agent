@@ -5,10 +5,24 @@
 
 namespace Qqq.PrintAgent.Core.Printing;
 
-/// <summary>Serial happy-path worker. A locally ambiguous submission is never automatically printed again.</summary>
+/// <summary>
+/// Serial happy-path worker. A locally ambiguous submission is never automatically printed again. A worker whose
+/// options name a staging directory hands staged files to its backend, so it is refused at construction, with an
+/// <see cref="ArgumentException"/> naming the backend parameter, unless that backend takes files.
+/// </summary>
 public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null,
    Func<bool>? canDispatch = null, Func<bool>? canSynchronize = null, PrintWorkerOptions? options = null)
 {
+   /// <summary>
+   /// The backend as one that takes staged files; null for a worker that stages nothing and submits from memory. Whether
+   /// the backend can take files is settled here, when the worker is built, so it is a composition error raised to
+   /// whoever composed it and never a job that fails part-way.
+   /// </summary>
+   private readonly IFilePrinterBackend? _filePrinters = options?.StagingDirectory is null ? null
+      : printers as IFilePrinterBackend ?? throw new ArgumentException("A worker that stages documents to files needs a printer backend that takes files.", nameof(printers));
+
+
+
    /// <summary>
    /// One pass of the claim loop. It first reports work a previous run left half-done and drains the durable event
    /// outbox, because the server never re-claims those jobs and an unreported outcome would stay invisible. Only when
@@ -208,8 +222,6 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       using DownloadedDocument? file = options?.StagingDirectory is null ? null : await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, token, options.ThrottleDownloadAsync).ConfigureAwait(false);
       byte[]? content = file is null ? await api.DownloadAsync(job, token).ConfigureAwait(false) : null;
       attempt.Download = attempt.Lap();
-      if(file is not null && printers is not IFilePrinterBackend)
-      { throw new InvalidOperationException("File printing is required."); }
       RequireCurrentPrinter(job);
       attempt.Revalidate = attempt.Lap();
 
@@ -263,14 +275,15 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
    /// <summary>
-   /// Hands the verified staged file to a backend that takes files, or the in-memory content to one that does not, and
-   /// returns its spooler receipt. This is the only step after which an outcome is uncertain, so whether the backend can
-   /// take the staged file was settled before the job was recorded as submitting.
+   /// Hands the verified staged file to the file backend, or the in-memory content to a worker that stages nothing, and
+   /// returns its spooler receipt. This is the only step after which an outcome is uncertain. A staged file exists only
+   /// for a worker built with a staging directory, and such a worker was required to have a file backend when it was
+   /// built, so there is nothing left to decide here.
    /// </summary>
    private Task<string> SubmitNativeAsync(PrintJob job, DownloadedDocument? file, byte[]? content, RealtimeSettings submissionSettings, CancellationToken token)
    {
       return file is not null
-         ? ((IFilePrinterBackend)printers).PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
+         ? _filePrinters!.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
          : printers.PrintAsync(job, content!, token);
    }
 

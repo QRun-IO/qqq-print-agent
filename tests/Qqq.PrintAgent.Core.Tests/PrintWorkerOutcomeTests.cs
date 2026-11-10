@@ -237,21 +237,27 @@ public sealed class PrintWorkerOutcomeTests
 
 
 
-   /// <summary>A staged document cannot be given to a backend that only takes in-memory content. That is settled before the job is recorded as submitting, so it is a FAILED the operator can retry, not an uncertain outcome.</summary>
+   /// <summary>
+   /// A worker told to stage documents to files hands staged files to its backend, so one composed with a backend that
+   /// only takes in-memory content is refused when it is built, naming the backend parameter, before it can claim
+   /// anything. The same backend is fine for a worker that stages nothing, and a file backend is fine for either.
+   /// </summary>
    [Fact]
-   public async Task StagedJobWithABackendThatCannotTakeFilesFailsBeforeSubmitting()
+   public void WorkerThatStagesFilesIsRefusedAtConstructionUnlessItsBackendTakesFiles()
    {
       using var staging = new TempDirectory();
       using var server = new FakePrintServer();
-      server.Offer(FakePrintServer.Job(Document, format: "PDF"), Document);
       using PrintApiClient api = Api(server);
       var journal = new RecordingJournal();
-      var printer = new FakePrinterBackend();
-      Assert.False(await new PrintWorker(api, printer, journal, options: new PrintWorkerOptions { StagingDirectory = staging.Path }).RunOnceAsync());
-      Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
-      Assert.Equal("File printing is required.", journal.Last("job-1").Message);
-      Assert.Equal(0, printer.Submissions);
-      Assert.Empty(Directory.EnumerateFileSystemEntries(staging.Path));
+      var staged = new PrintWorkerOptions { StagingDirectory = staging.Path };
+      ArgumentException refused = Assert.Throws<ArgumentException>(() => new PrintWorker(api, new FakePrinterBackend(), journal, options: staged));
+      Assert.Equal("printers", refused.ParamName);
+      Assert.StartsWith("A worker that stages documents to files needs a printer backend that takes files.", refused.Message, StringComparison.Ordinal);
+      Assert.NotNull(new PrintWorker(api, new FakeFilePrinterBackend(), journal, options: staged));
+      Assert.NotNull(new PrintWorker(api, new FakePrinterBackend(), journal, options: new PrintWorkerOptions()));
+      Assert.NotNull(new PrintWorker(api, new FakePrinterBackend(), journal));
+      Assert.NotNull(new PrintWorker(api, new FakeFilePrinterBackend(), journal));
+      Assert.Equal(0, server.Claims);
    }
 
 
