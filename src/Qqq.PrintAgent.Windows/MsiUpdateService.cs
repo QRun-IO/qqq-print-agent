@@ -86,7 +86,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
          string response = await AgentPipeClient.SendAsync(new PipeRequest("prepare-update")).ConfigureAwait(false);
          if(!string.Equals(response, "Ready for update.", StringComparison.Ordinal))
          {
-            throw new InvalidOperationException("The service could not prepare for an update. Let active printing finish and try again. " + response);
+            throw new InvalidOperationException(PreparationNotCompleted(response));
          }
          cancellationToken.ThrowIfCancellationRequested();
          MsiUpdateInstaller.StartHelper(request);
@@ -197,6 +197,20 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
          // The service also expires an abandoned update pause automatically.
       }
    }
+
+
+
+   /// <summary>
+   /// Words an update preparation the service did not complete. "Not ready for update: ..." is the service saying that work
+   /// it claimed before the pause is still running; its sentence already says what is running and what to do, so it is
+   /// shown as it is, after one sentence saying that nothing was installed. Any other answer is an error, or something this
+   /// build does not know, and is shown as that: it is not an invitation to wait for printing that may have nothing to do
+   /// with it.
+   /// </summary>
+   internal static string PreparationNotCompleted(string response)
+      => response.StartsWith("Not ready for update:", StringComparison.Ordinal)
+         ? "The update was not started, and the current version remains installed. " + response
+         : "The service could not prepare for an update, and the current version remains installed. The service answered: " + response;
 
 
 
