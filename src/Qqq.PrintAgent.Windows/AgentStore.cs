@@ -65,7 +65,8 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    /// <summary>
    /// Opens (creating if needed) the journal under the protected state directory and brings its schema up to date. With
    /// recovery enabled, an unreadable saved connection no longer blocks opening: the store switches to an isolated scope so
-   /// old evidence is kept but never attached to a replacement identity. On any failure the connection is closed.
+   /// old evidence is kept but never attached to a replacement identity. On any failure the connection is closed. The
+   /// connection is opened under the journal's schema lock, which keeps two stores from being handed one database connection.
    /// </summary>
    public AgentStore(string directory, bool recoverUnreadableConfiguration = false)
    {
@@ -75,7 +76,23 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       _database = new SqliteConnection(JournalConnectionString(_directory));
       try
       {
-         _database.Open();
+         /////////////////////////////////////////////////////////////////////
+         // Open must stay inside this lock. Microsoft.Data.Sqlite 10.0.0   //
+         // takes a pooled connection and only afterwards, outside the      //
+         // pool's own lock, records which SqliteConnection owns it. When   //
+         // another thread opens the same journal in that gap and finds     //
+         // the pool empty, the pool takes the first connection for         //
+         // abandoned and hands it to the second thread as well. Both       //
+         // stores then share one native handle: one store's transaction    //
+         // can swallow or roll back the other's writes. Every open of one  //
+         // journal goes through this constructor, and the lock is at       //
+         // least as wide as the pool, so with Open inside it no opener     //
+         // can be in that gap while another asks the pool.                 //
+         /////////////////////////////////////////////////////////////////////
+         lock(SchemaLock)
+         {
+            _database.Open();
+         }
          InitializeDatabase(recoverUnreadableConfiguration);
       }
       catch
