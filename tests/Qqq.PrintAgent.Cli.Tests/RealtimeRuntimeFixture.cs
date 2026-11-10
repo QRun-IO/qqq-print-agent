@@ -367,16 +367,18 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
    /// <summary>
-   /// Lets exactly one heartbeat interval pass on a manual clock. It waits until the heartbeat loop has just started waiting
-   /// for its interval, advances the clock by the interval, and waits until the loop has started waiting again, by which time
-   /// that round's frames have been handed to the socket. Other waits on the clock (the update preparation limit) have other
-   /// lengths, so they are not mistaken for the heartbeat's.
+   /// Lets the heartbeat loop's current interval run out on a manual clock, so exactly one heartbeat round happens. It waits
+   /// until the loop is waiting for its interval, advances the clock by what remains of that wait, and waits until the loop
+   /// has started waiting again, by which time that round's frames have been handed to the socket. What remains is the whole
+   /// interval unless the test has moved the clock itself since the loop began to wait, which is allowed. The loop's wait is
+   /// told from other waits on the clock (the update preparation limit, the reconnect backoff) by its length.
    /// </summary>
    internal async Task HeartbeatAsync(ManualTimeProvider clock)
    {
       var interval = TimeSpan.FromSeconds(Settings.HeartbeatIntervalSeconds);
-      await WaitAsync(() => clock.HasTimerDueIn(interval), "heartbeat loop waiting");
-      clock.Advance(interval);
+      TimeSpan? remaining = null;
+      await WaitAsync(() => (remaining = clock.RemainingOfWaitArmedFor(interval)) is not null, "heartbeat loop waiting");
+      clock.Advance(remaining!.Value);
       await WaitAsync(() => clock.HasTimerDueIn(interval), "heartbeat loop waiting again");
    }
 

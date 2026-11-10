@@ -62,6 +62,22 @@ internal sealed class ManualTimeProvider : TimeProvider
 
 
    /// <summary>
+   /// How long remains of a pending wait that was armed for exactly the given time, or null when there is none. Unlike
+   /// <see cref="HasTimerDueIn"/> it finds the wait whenever it was armed, so it still names a loop's interval after a
+   /// test has moved the clock by less than that interval.
+   /// </summary>
+   internal TimeSpan? RemainingOfWaitArmedFor(TimeSpan delay)
+   {
+      lock(_lock)
+      {
+         ManualTimer? timer = _timers.Where(candidate => candidate.Due is not null && candidate.ArmedFor == delay).MinBy(candidate => candidate.Due);
+         return timer is null ? null : timer.Due - _now;
+      }
+   }
+
+
+
+   /// <summary>
    /// Moves the clock forward and fires every wait that has come due. The callbacks run after the lock is released, because a
    /// callback may create or dispose a timer on this same clock.
    /// </summary>
@@ -106,6 +122,11 @@ internal sealed class ManualTimeProvider : TimeProvider
 
 
 
+      /// <summary>The time the timer was last armed for, which tells waits of different lengths apart whenever they were armed.</summary>
+      internal TimeSpan? ArmedFor { get; private set; }
+
+
+
       /// <summary>Runs the callback the creator supplied.</summary>
       internal void Fire() => callback(state);
 
@@ -117,6 +138,7 @@ internal sealed class ManualTimeProvider : TimeProvider
          lock(owner._lock)
          {
             Due = dueTime == Timeout.InfiniteTimeSpan ? null : owner._now + dueTime;
+            ArmedFor = dueTime == Timeout.InfiniteTimeSpan ? null : dueTime;
             Period = period == Timeout.InfiniteTimeSpan || period <= TimeSpan.Zero ? null : period;
          }
          return true;

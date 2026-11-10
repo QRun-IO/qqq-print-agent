@@ -40,4 +40,28 @@ public sealed class AgentRuntimeHeartbeatTests
       Assert.False(fixture.Running.IsCompleted);
       Assert.Equal(0, fixture.ForbiddenPolls);
    }
+
+
+
+   /// <summary>
+   /// A test may move the clock by less than a heartbeat interval, for something else it is timing, and then ask for a
+   /// heartbeat round. The helper lets the rest of the interval pass, not a whole one: exactly one more round happens, and
+   /// the clock ends one interval after the previous round.
+   /// </summary>
+   [Fact]
+   public async Task HeartbeatRoundCanBeAskedForAfterTheClockMovedPartOfAnInterval()
+   {
+      var clock = new ManualTimeProvider();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
+      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => fixture.Count("HEARTBEAT") == 1);
+      DateTimeOffset afterFirst = clock.GetUtcNow();
+      int pings = fixture.Count("PING");
+      clock.Advance(TimeSpan.FromSeconds(7));
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => fixture.Count("HEARTBEAT") == 2);
+      Assert.Equal(pings + 1, fixture.Count("PING"));
+      Assert.Equal(afterFirst + TimeSpan.FromSeconds(fixture.Settings.HeartbeatIntervalSeconds), clock.GetUtcNow());
+   }
 }

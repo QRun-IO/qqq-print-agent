@@ -4,6 +4,7 @@
  */
 
 using System.Text;
+using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
@@ -257,6 +258,95 @@ public sealed class AgentRuntimeUpdateTests
          Assert.Equal(0, fixture.ForbiddenPolls);
       }
       finally { document.Release.TrySetResult(); }
+   }
+
+
+
+   /// <summary>
+   /// Printing is resumed by another command while preparation is still waiting for a job whose document is downloading.
+   /// The pause is then no longer in force, so when the job has finished the reply is not "Ready for update.": it says that
+   /// preparation was interrupted and must be repeated, and the log says the same. The management pipe of this fixture
+   /// serves one command at a time, so both operations are called on the runtime directly, as a pipe that serves several
+   /// will call them.
+   /// </summary>
+   [Fact]
+   public async Task UpdatePreparationInterruptedByAResumeDoesNotAnswerReady()
+   {
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
+      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-resumed");
+      using var document = new GatedDocument(bytes);
+      fixture.AddJob("resumed", () => document, length: bytes.Length);
+      await connection.SendAsync("JOB_AVAILABLE", new { });
+      await fixture.WaitAsync(document.Entered.Task);
+      try
+      {
+         Task<string> preparation = fixture.Runtime.PrepareUpdateAsync(CancellationToken.None);
+         await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Status.StartsWith(Paused, StringComparison.Ordinal));
+         Assert.Equal("Printing resumed.", fixture.Runtime.ResumeAfterUpdate());
+         Assert.False(preparation.IsCompleted);
+         document.Release.TrySetResult();
+         await fixture.WaitAsync(preparation);
+         string reply = await preparation;
+         Assert.StartsWith("Update preparation was interrupted: printing was resumed", reply, StringComparison.Ordinal);
+         Assert.EndsWith("Try the update again.", reply, StringComparison.Ordinal);
+         Assert.Contains(fixture.Logs, line => line.StartsWith("Update preparation was interrupted", StringComparison.Ordinal));
+         Assert.DoesNotContain(Quiesced, fixture.Logs, StringComparer.Ordinal);
+         Assert.Equal("SPOOLED", fixture.State("resumed"));
+         Assert.Equal(0, fixture.ForbiddenPolls);
+      }
+      finally { document.Release.TrySetResult(); }
+   }
+
+
+
+   /// <summary>
+   /// A sign-in begins while preparation is waiting for a job whose document is downloading. The sign-in is a connection
+   /// change: it cancels the job, which ends preparation's wait, and it is still under way (its first request to the server
+   /// is held open) when preparation decides its answer. The pause is in force, but the connection is being changed, so the
+   /// reply is not "Ready for update.": it says that preparation was interrupted and must be repeated.
+   /// </summary>
+   [Fact]
+   public async Task UpdatePreparationInterruptedByASignInDoesNotAnswerReady()
+   {
+      using var signInReachedTheServer = new ManualResetEventSlim();
+      using var letSignInContinue = new ManualResetEventSlim();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
+      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-sign-in");
+      using var document = new GatedDocument(bytes);
+      fixture.AddJob("cancelled", () => document, length: bytes.Length);
+      await connection.SendAsync("JOB_AVAILABLE", new { });
+      await fixture.WaitAsync(document.Entered.Task);
+      try
+      {
+         Task<string> preparation = fixture.Runtime.PrepareUpdateAsync(CancellationToken.None);
+         await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Status.StartsWith(Paused, StringComparison.Ordinal));
+         fixture.HttpFault = request =>
+         {
+            if(string.Equals(request.RequestUri!.AbsolutePath, "/qqq/v1/manageSession", StringComparison.Ordinal))
+            {
+               signInReachedTheServer.Set();
+               letSignInContinue.Wait();
+            }
+            return null;
+         };
+         Task<string> signIn = Task.Run(() => fixture.Runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: new QqqSessionCredential(fixture.Peer.Origin, "synthetic-session")), CancellationToken.None));
+         await fixture.WaitAsync(() => signInReachedTheServer.IsSet);
+         await fixture.WaitAsync(preparation);
+         string reply = await preparation;
+         Assert.StartsWith("Update preparation was interrupted: a sign-in, sign-out or enrollment began", reply, StringComparison.Ordinal);
+         Assert.DoesNotContain(Quiesced, fixture.Logs, StringComparer.Ordinal);
+         Assert.StartsWith(Paused, fixture.Runtime.GetSnapshot().Status, StringComparison.Ordinal);
+         letSignInContinue.Set();
+         await fixture.WaitAsync(signIn);
+         Assert.Equal(0, fixture.Printer.Submissions);
+      }
+      finally
+      {
+         letSignInContinue.Set();
+         document.Release.TrySetResult();
+      }
    }
 
 
