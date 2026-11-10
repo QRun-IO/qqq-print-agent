@@ -4,14 +4,14 @@ QQQ Print Agent is developed in the [QRun-IO organization on Gitea](https://git.
 
 ## Set up
 
-Use Windows x64, Git and the .NET 10 SDK selected by `global.json`. Check out `qqq-print-agent` and `qqq-print-protocol` into sibling directories. Check out the protocol commit pinned in `.github/workflows/ci.yml` (`42c0d249f81395f00408ec0f92638dcbbf5deb03`, [Gitea PR 2](https://git.kof22.com/QRun-IO/qqq-print-protocol/pulls/2)); its JSON fixtures are linked into the contract tests.
+Use Windows x64, Git and the .NET 10 SDK selected by `global.json`. Check out `qqq-print-agent` and `qqq-print-protocol` into sibling directories. Check out the protocol commit pinned in `.github/workflows/ci.yml` (the `ref` of its "Checkout pinned protocol fixtures" step); its JSON fixtures are linked into the contract tests. To leave an existing protocol checkout where it is, export that commit's `fixtures` folder elsewhere and pass it with `./build/Verify.ps1 -ProtocolFixtures <dir>`.
 
 ```powershell
 ./build/Verify.ps1
 ./build/Build-Installer.ps1 -ProductVersion 1.0.1 -ReleaseVersion 1.0.1
 ```
 
-Verification uses locked NuGet restore, a warnings-as-errors solution build, core tests, Windows/CLI tests and a coverage report. Packaging creates a self-contained x64 MSI. Neither command installs the service or prints a document.
+Verification uses locked NuGet restore, a warnings-as-errors solution build, core tests, Windows/CLI tests and a coverage gate. Packaging creates a self-contained x64 MSI. Neither command installs the service or prints a document.
 
 ## Changes and review
 
@@ -26,7 +26,7 @@ Publish ordinary branches and pull requests to the [primary Gitea repository](ht
 - Do not include secrets, document contents, customer labels or local journals in issues, fixtures or commits.
 - Disclose substantial AI assistance in the PR and include a model-naming Co-Authored-By trailer when appropriate.
 
-For the initial prerelease, coverage is reported rather than forced to the template's unattained 100% target. This is an explicit temporary exception documented in [ADR-0002](docs/adr/0002-prerelease-quality-and-packaging.md), not a claim of full coverage. Elevated desktop tests are separate from hosted CI because they need an interactive administrator session.
+Line coverage is gated per assembly ([ADR-0003](docs/adr/0003-version-2.md)). `build/Verify.ps1` merges the suites' reports and fails when an assembly is below its minimum in `build/minimum-coverage.json`. The minimums are a floor that only moves up: when a change adds tests, raise the entry in the same change to the measured percentage rounded down, less one point (a few timing-dependent lines differ between runs); never lower one to make a change pass. The release bar is 100% for Core and the CLI and 90% for the Windows layer, so a green gate today means "within a point of the recorded baseline", not "fully covered". Code a test cannot reach (native calls, process hooks) goes in a thin adapter marked `[ExcludeFromCodeCoverage(Justification = "...")]`, with the decisions around it kept in covered code. Elevated desktop tests are separate from hosted CI because they need an interactive administrator session.
 
 ## UI and hardware tests
 

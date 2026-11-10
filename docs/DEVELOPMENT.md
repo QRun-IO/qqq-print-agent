@@ -26,7 +26,7 @@ Check out this repository and the protocol repository as siblings, then pin the 
 ./build/Verify.ps1
 ```
 
-This performs locked restore, Release solution build, core tests and Windows/CLI tests, with coverage/TRX output under TestResults. UI tests compile in the solution but are not automatically run by hosted CI. Use an elevated interactive desktop and `K22_UITEST_EXE` for those tests.
+This performs locked restore, Release solution build, core tests and Windows/CLI tests, with coverage/TRX output under TestResults, and then fails if an assembly's merged line coverage is below its minimum in `build/minimum-coverage.json`. UI tests compile in the solution but are not automatically run by hosted CI. Use an elevated interactive desktop and `K22_UITEST_EXE` for those tests.
 
 ## Local server and CLI
 
