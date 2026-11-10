@@ -54,8 +54,11 @@ public sealed partial class QqqSessionClient
          }
          return await ProviderLogoutFromAsync(response, grant!, postLogoutRedirectUri, cancellationToken).ConfigureAwait(false);
       }
-      catch(Exception exception) when(ReportFailure("Provider sign-out", exception))
-      { throw; }
+      catch(Exception exception)
+      {
+         ReportFailure("Provider sign-out", exception);
+         throw;
+      }
       finally
       {
          ClearSession();

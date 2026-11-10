@@ -22,6 +22,10 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    private const int PrintingLimit = 22 * 1024 * 1024;
    private static readonly TimeSpan RequestLimit = TimeSpan.FromSeconds(20);
    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = false };
+
+   /// <summary>Redirects are never followed and the platform keeps no cookie jar: a redirect could carry credentials elsewhere, and the session cookie is attached by hand.</summary>
+   private static readonly QqqTransportPolicy TransportPolicy = new(FollowRedirects: false, UseCookieJar: false);
+   private readonly IQqqTransport _transport;
    private readonly HttpClient _http;
    private readonly TimeProvider _timeProvider;
    private readonly ApplicationTrafficMeter? _traffic;
@@ -46,8 +50,22 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// </summary>
    public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null,
       QqqSessionDiagnostics? diagnostics = null, bool allowUntrustedCertificate = false)
+      : this(origin, handler, timeProvider, allowLoopbackHttp, traffic, diagnostics, allowUntrustedCertificate, QqqPlatformTransport.Instance)
+   {
+   }
+
+
+
+   /// <summary>
+   /// The same client over a given transport. Production uses the platform transport; a test supplies a fake one to see
+   /// the policy, the certificate decisions and the socket upgrade request this client produces, and to play each outcome
+   /// of an upgrade back to it.
+   /// </summary>
+   internal QqqSessionClient(Uri origin, HttpMessageHandler? handler, TimeProvider? timeProvider, bool allowLoopbackHttp, ApplicationTrafficMeter? traffic,
+      QqqSessionDiagnostics? diagnostics, bool allowUntrustedCertificate, IQqqTransport transport)
    {
       ArgumentNullException.ThrowIfNull(origin);
+      _transport = transport;
       _diagnostics = diagnostics ?? QqqSessionDiagnostics.None;
       AllowsUntrustedCertificate = allowUntrustedCertificate;
       if(!origin.IsAbsoluteUri || origin.UserInfo.Length != 0 || origin.Query.Length != 0 || origin.Fragment.Length != 0
@@ -60,20 +78,10 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       Origin = new Uri(origin.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute);
       _timeProvider = timeProvider ?? TimeProvider.System;
       _traffic = traffic;
-      // MA0039: the callback keeps the platform's verdict (it accepts only SslPolicyErrors.None) unless the administrator
-      // explicitly allowed untrusted certificates for a development server; it exists so a rejection is logged with its
-      // reason instead of failing silently, and so the opt-in is visible in the log on every connection.
-#pragma warning disable MA0039
-      _http = new HttpClient(handler ?? new HttpClientHandler
-      {
-         AllowAutoRedirect = false,
-         UseCookies = false,
-         ServerCertificateCustomValidationCallback = (request, certificate, chain, errors) => EvaluateCertificate(request.RequestUri?.Authority ?? Origin.Authority, certificate, errors),
-      })
+      _http = new HttpClient(handler ?? transport.CreateHttpHandler(TransportPolicy, ValidateHttpCertificate))
       {
          Timeout = Timeout.InfiniteTimeSpan,
       };
-#pragma warning restore MA0039
       _diagnostics.Info($"Session client created for {Origin.Scheme}://{Origin.Authority} (plain HTTP {(string.Equals(Origin.Scheme, "http", StringComparison.Ordinal) ? "allowed for loopback" : "not allowed")}; untrusted server certificates {(allowUntrustedCertificate ? "ALLOWED" : "refused")}).");
       if(allowUntrustedCertificate)
       { _diagnostics.Info($"WARNING: certificate validation is relaxed for {Origin.Authority}. Any certificate, including a forged one, will be accepted. Use this only for development servers."); }
@@ -181,8 +189,11 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          AdoptManagedSession(response);
          _diagnostics.Info("Password sign-in accepted; a server-managed session is now held.");
       }
-      catch(Exception exception) when(ReportFailure("Password sign-in", exception))
-      { throw; }
+      catch(Exception exception)
+      {
+         ReportFailure("Password sign-in", exception);
+         throw;
+      }
       finally { _gate.Release(); }
    }
 
@@ -231,8 +242,11 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _diagnostics.Info("Renewing the session with the server.");
          await ResumeCoreAsync(cancellationToken).ConfigureAwait(false);
       }
-      catch(Exception exception) when(ReportFailure("Session renewal", exception))
-      { throw; }
+      catch(Exception exception)
+      {
+         ReportFailure("Session renewal", exception);
+         throw;
+      }
       finally { _gate.Release(); }
    }
 
@@ -255,8 +269,11 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          else
          { _diagnostics.Info("Sign-out requested with no held session; clearing local state only."); }
       }
-      catch(Exception exception) when(ReportFailure("Sign-out", exception))
-      { throw; }
+      catch(Exception exception)
+      {
+         ReportFailure("Sign-out", exception);
+         throw;
+      }
       finally
       {
          ClearSession();
@@ -314,8 +331,11 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _diagnostics.Info($"Device {credential.DeviceId} bound to principal {identity.PrincipalId} in tenant {identity.TenantId}.");
          return identity;
       }
-      catch(Exception exception) when(ReportFailure("Device binding", exception))
-      { throw; }
+      catch(Exception exception)
+      {
+         ReportFailure("Device binding", exception);
+         throw;
+      }
       finally { _gate.Release(); }
    }
 
@@ -917,17 +937,16 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
    /// <summary>
-   /// Records why an operation failed (type and message only) and returns false, so it can sit in an exception filter and
-   /// leave the exception, its stack and the catch order untouched. Cancellation requested by the caller is noted, not reported as a failure.
+   /// Records why an operation failed (type and message only). The caller rethrows the exception unchanged, so the log gains
+   /// a line and nothing else about the failure differs. A cancellation is noted, not reported as a failure.
    /// </summary>
-   private bool ReportFailure(string operation, Exception exception)
+   private void ReportFailure(string operation, Exception exception)
    {
       _diagnostics.Info(exception is OperationCanceledException
          ? operation + " was cancelled."
          : exception is QqqSessionException session
             ? $"{operation} failed ({session.Failure}): {session.Message}"
             : $"{operation} failed: {QqqSessionDiagnostics.Describe(exception)}");
-      return false;
    }
 
 

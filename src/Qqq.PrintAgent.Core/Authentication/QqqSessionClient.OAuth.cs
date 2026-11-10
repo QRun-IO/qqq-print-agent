@@ -64,8 +64,11 @@ public sealed partial class QqqSessionClient
          _diagnostics.Info($"Browser sign-in attempt started: the authorization page is {QqqSessionDiagnostics.Describe(builder.Uri)} (query not logged); waiting for the callback, which expires after five minutes.");
          return _browserLogin;
       }
-      catch(Exception exception) when(ReportFailure("Browser sign-in start", exception))
-      { throw; }
+      catch(Exception exception)
+      {
+         ReportFailure("Browser sign-in start", exception);
+         throw;
+      }
       finally { _gate.Release(); }
    }
 
@@ -141,46 +144,7 @@ public sealed partial class QqqSessionClient
       {
          QqqBrowserLogin? pending = _browserLogin;
          _browserLogin = null;
-         TimeSpan age = _timeProvider.GetElapsedTime(attempt.StartedAt);
-         _diagnostics.Info($"Browser callback received at {QqqSessionDiagnostics.Describe(callback)} after {age.TotalSeconds:0} s.");
-         if(!ReferenceEquals(pending, attempt))
-         {
-            _diagnostics.Info("Browser callback refused: it does not belong to the pending sign-in attempt (a new attempt was started, or the attempt was already used).");
-            throw InvalidResponse();
-         }
-         if(age < TimeSpan.Zero || age > TimeSpan.FromMinutes(5))
-         {
-            _diagnostics.Info("Browser callback refused: the attempt is older than five minutes. Start the browser sign-in again.");
-            throw InvalidResponse();
-         }
-         if(!callback.IsAbsoluteUri || callback.Fragment.Length != 0 || callback.UserInfo.Length != 0
-            || !string.Equals(callback.GetLeftPart(UriPartial.Path), attempt.RedirectUri.AbsoluteUri, StringComparison.Ordinal))
-         {
-            _diagnostics.Info($"Browser callback refused: its address does not match the registered callback {attempt.RedirectUri.AbsoluteUri} exactly, or it carries a fragment or user information.");
-            throw InvalidResponse();
-         }
-         Dictionary<string, string> values = CallbackValues(callback);
-         _diagnostics.Debug(() => $"Browser callback parameters: [{string.Join(", ", values.Keys)}] (values not logged).");
-         if(values.TryGetValue("error", out string? providerError))
-         {
-            _diagnostics.Info($"Browser sign-in refused by the identity provider: error '{providerError}'{(values.TryGetValue("error_description", out string? description) ? " (" + description + ")" : "")}.");
-            throw InvalidResponse();
-         }
-         if(!values.TryGetValue("state", out string? state) || !string.Equals(state, attempt.State, StringComparison.Ordinal))
-         {
-            _diagnostics.Info("Browser callback refused: the state parameter is missing or does not match this attempt.");
-            throw InvalidResponse();
-         }
-         if(!values.TryGetValue("code", out string? code) || string.IsNullOrWhiteSpace(code) || code.Length > 4096)
-         {
-            _diagnostics.Info("Browser callback refused: no usable authorization code was returned.");
-            throw InvalidResponse();
-         }
-         if(values.TryGetValue("iss", out string? issuer) && !string.Equals(issuer, attempt.Issuer, StringComparison.Ordinal))
-         {
-            _diagnostics.Info($"Browser callback refused: the issuer '{issuer}' differs from the expected '{attempt.Issuer}'.");
-            throw InvalidResponse();
-         }
+         string code = AcceptCallback(pending, attempt, callback);
          _diagnostics.Info("Browser callback validated; exchanging the authorization code with QQQ for a server-managed session.");
          using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, "/qqq/v1/manageSession"), HttpMethod.Post,
             JsonBody(NativeCodeExchange(attempt, code)),
@@ -189,9 +153,65 @@ public sealed partial class QqqSessionClient
          AdoptManagedSession(response);
          _diagnostics.Info("Browser sign-in accepted; a server-managed session is now held.");
       }
-      catch(Exception exception) when(ReportFailure("Browser sign-in completion", exception))
-      { throw; }
+      catch(Exception exception)
+      {
+         ReportFailure("Browser sign-in completion", exception);
+         throw;
+      }
       finally { _gate.Release(); }
+   }
+
+
+
+   /// <summary>
+   /// Checks a browser callback against the attempt it claims to finish and returns its authorization code. The callback must
+   /// belong to the pending attempt, arrive within five minutes, be exactly the registered redirect with no fragment or user
+   /// information, carry no provider error, the attempt's own state, a usable code and, when it names one, the expected issuer.
+   /// Each refusal is logged with its reason and reported as the same generic invalid response.
+   /// </summary>
+   private string AcceptCallback(QqqBrowserLogin? pending, QqqBrowserLogin attempt, Uri callback)
+   {
+      TimeSpan age = _timeProvider.GetElapsedTime(attempt.StartedAt);
+      _diagnostics.Info($"Browser callback received at {QqqSessionDiagnostics.Describe(callback)} after {age.TotalSeconds:0} s.");
+      if(!ReferenceEquals(pending, attempt))
+      {
+         _diagnostics.Info("Browser callback refused: it does not belong to the pending sign-in attempt (a new attempt was started, or the attempt was already used).");
+         throw InvalidResponse();
+      }
+      if(age < TimeSpan.Zero || age > TimeSpan.FromMinutes(5))
+      {
+         _diagnostics.Info("Browser callback refused: the attempt is older than five minutes. Start the browser sign-in again.");
+         throw InvalidResponse();
+      }
+      if(!callback.IsAbsoluteUri || callback.Fragment.Length != 0 || callback.UserInfo.Length != 0
+         || !string.Equals(callback.GetLeftPart(UriPartial.Path), attempt.RedirectUri.AbsoluteUri, StringComparison.Ordinal))
+      {
+         _diagnostics.Info($"Browser callback refused: its address does not match the registered callback {attempt.RedirectUri.AbsoluteUri} exactly, or it carries a fragment or user information.");
+         throw InvalidResponse();
+      }
+      Dictionary<string, string> values = CallbackValues(callback);
+      _diagnostics.Debug(() => $"Browser callback parameters: [{string.Join(", ", values.Keys)}] (values not logged).");
+      if(values.TryGetValue("error", out string? providerError))
+      {
+         _diagnostics.Info($"Browser sign-in refused by the identity provider: error '{providerError}'{(values.TryGetValue("error_description", out string? description) ? " (" + description + ")" : "")}.");
+         throw InvalidResponse();
+      }
+      if(!values.TryGetValue("state", out string? state) || !string.Equals(state, attempt.State, StringComparison.Ordinal))
+      {
+         _diagnostics.Info("Browser callback refused: the state parameter is missing or does not match this attempt.");
+         throw InvalidResponse();
+      }
+      if(!values.TryGetValue("code", out string? code) || string.IsNullOrWhiteSpace(code) || code.Length > 4096)
+      {
+         _diagnostics.Info("Browser callback refused: no usable authorization code was returned.");
+         throw InvalidResponse();
+      }
+      if(values.TryGetValue("iss", out string? issuer) && !string.Equals(issuer, attempt.Issuer, StringComparison.Ordinal))
+      {
+         _diagnostics.Info($"Browser callback refused: the issuer '{issuer}' differs from the expected '{attempt.Issuer}'.");
+         throw InvalidResponse();
+      }
+      return code;
    }
 
 
