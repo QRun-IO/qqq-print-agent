@@ -24,9 +24,30 @@ Get-Service QqqPrintAgent, Spooler
 & 'C:\Program Files\QQQ Print Agent\Cli\qqq-print-agent.exe' service-status
 ```
 
-Use the actual install path if it differs. Normal CLI commands and the companion use the authenticated installed service. Its printer list reflects the service identity; explicit isolated legacy diagnostics may see different queues under their invoking account.
+Use the actual install path if it differs. CLI commands and the companion use the authenticated installed service, so the printer list reflects the service identity, not the account that runs the command.
 
 Use the built-in AppKit activity log for shared service and companion events, with source labels and severity filtering. Windows Event Viewer can also help diagnose service-host startup failures. Record relevant timestamps, job IDs and error text without customer document contents.
+
+## Command line
+
+`qqq-print-agent.exe` manages the installed service and nothing else. Each command is one request over the administrator-only pipe, so run it from an elevated prompt with the service running. Sign in through the companion first: enrollment and the connection commands act on the service's QQQ session.
+
+| Command | What the service does |
+| --- | --- |
+| `printers` | Lists the printers it can see, as JSON |
+| `enroll --server URL` | Pairs this computer with a QQQ server using a one-time enrollment code |
+| `expose --printer ID --exposed true\|false` | Shares a printer with QQQ, or stops sharing it |
+| `run` | Refreshes its connection to QQQ |
+| `sign-out` | Ends its QQQ session (the identity provider's browser session is ended only by Sign out in the companion) |
+| `service-status` | Reports its connection status |
+| `snapshot` | Reports its state as JSON: connection, printers, recent jobs and logs |
+| `help`, `--help`, `-h`, or no arguments | Nothing; the usage is printed |
+
+The enrollment code is read from the `QQQ_PRINT_ENROLLMENT_CODE` environment variable, or typed at a prompt when the variable is not set. It is never accepted as an argument and never printed.
+
+The exit code is 0 on success and 1 otherwise: wrong arguments, a service that cannot be reached or is not the installed one, a timeout, or a reply from the service that begins with `Error:`. Replies and requested usage go to standard output; failures, and the usage shown for a refused command line, go to standard error. A command accepts exactly the options shown, each once; anything else is refused before the service is contacted, and the refusal does not repeat what was typed.
+
+Version 2.0 removed `--legacy-compat` and the options that existed for it (`--data-dir`, `--once`, `--service`). If that mode was ever used on a machine, its separate per-user state is still in `%LOCALAPPDATA%\QqqPrintAgent` (`connection.dpapi`, `journal.db`, `worker.lock`). Nothing reads it any more; delete it once the device it enrolled has been revoked in QQQ. Leave `auth-callback.log` in that folder: the browser sign-in helper still writes it.
 
 ## Credentials and network
 

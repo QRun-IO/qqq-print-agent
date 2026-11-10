@@ -13,6 +13,18 @@ capability gets the ordinary logout, and the log says the provider session was n
 `sign-out` cannot open the companion's callback inbox, so it still ends only the QQQ session and says so.
 No change to pairing, history or the printing protocol.
 
+Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the installed service over its pipe. The
+`--legacy-compat` mode is removed with everything that existed for it: the separate per-user data directory
+(`--data-dir`), the command line's worker lock, the run-once claim pass (`run --once`), the isolated enroll and
+expose paths, and the `--service` flag. It was the last code that sent a device token outside a QQQ session.
+`--help`, `-h`, `help` and no arguments print the usage on standard output and exit 0 (`--help` and `-h` used to
+exit 1); an unknown command prints it on standard error and exits 1. Arguments are checked strictly: a command
+accepts exactly its own options, each once, and anything else is refused without contacting the service and
+without repeating what was typed. `service-status` and `snapshot` now exit 1 when the service replies with an
+error, as the other commands already did. State left in `%LOCALAPPDATA%\QqqPrintAgent` by the removed mode is no
+longer read; see [Administrator operations](docs/ADMINISTRATION.md#command-line). The executable's internal roles
+(printer worker, MSI update helper, browser sign-in callback) are unchanged.
+
 ## 1.2.1
 
 Release-pipeline fix only; same source as 1.2.0 otherwise. The stable release workflow's per-edition

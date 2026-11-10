@@ -18,7 +18,7 @@ Run the MSI as an administrator. Windows Installer deploys one coherent applicat
 
 - The `QqqPrintAgent` automatic Windows service, running as LocalSystem and depending on the Windows Spooler.
 - The native **QQQ Print Agent** setup/status app and Start-menu entry.
-- The `qqq-print-agent.exe` diagnostic CLI.
+- The `qqq-print-agent.exe` command-line tool, which manages the service.
 - A restricted `%ProgramData%\QqqPrintAgent` directory for enrollment and the job journal.
 
 There is no inbound firewall rule or local HTTP server. The client requires outbound WSS upgrades and HTTPS to the QQQ server; update checks/downloads use HTTPS to GitHub release services. Use the matching qbit-printing 1.0.0 server with native printing API 2.3. There is no job/control polling fallback. The UI requests administrator elevation because its management pipe permits only SYSTEM and local administrators.
@@ -49,7 +49,7 @@ Full uninstall removes only tasks whose name, current-user SID, interactive prin
 
 ## Isolated native printer operations
 
-Discovery, submission and cancellation run in a short-lived child of the service or explicit diagnostic CLI. Control requests use anonymous standard-input/output pipes. Realtime documents stream to protected owned staging files; their content is not placed in command arguments or logs. Discovery and cancellation have bounded helper deadlines. Realtime printing uses the server's `nativeSubmissionTimeoutMillis`, default 120 seconds, rather than a fixed submission deadline. A timed-out child is terminated, with bounded cleanup, and also watches its parent. The child still runs with service privileges; isolation limits a blocked driver, not its authority.
+Discovery, submission and cancellation run in a short-lived child of the service. Control requests use anonymous standard-input/output pipes. Realtime documents stream to protected owned staging files; their content is not placed in command arguments or logs. Discovery and cancellation have bounded helper deadlines. Realtime printing uses the server's `nativeSubmissionTimeoutMillis`, default 120 seconds, rather than a fixed submission deadline. A timed-out child is terminated, with bounded cleanup, and also watches its parent. The child still runs with service privileges; isolation limits a blocked driver, not its authority.
 
 This bounds a blocked printer driver without stopping cloud connectivity permanently. It cannot retract bytes already accepted by a printer: timeout, crash or cancellation after submission begins is an uncertain outcome and requires inspection before reprinting. Existing spooler receipt cancellation verifies the exact QQQ document identity before requesting cancellation; it does not prove that no paper or label has already emerged. Synthetic subprocess tests use a fake backend and never access a printer.
 
@@ -65,7 +65,7 @@ Use qbit-printing 1.0.0 on QQQ 4.1.0-RC.21 or a compatible newer server; the rel
 
 For an existing unbound installation, choose **Associate the existing pairing with my account**; preserve its device record and history. For a new installation, complete sign-in and enter a single-use enrollment code created in QQQ. Enrollment runs in the service, protecting its device proof and QQQ session under the service identity. The desktop does not retain the password or device token. **Set up a new pairing** is an explicit replacement flow, not routine upgrade migration.
 
-Normal CLI setup, printer exposure and connection commands use the authenticated installed service. Sign in through the companion first; `run` requests a connection refresh. Explicit `--legacy-compat` diagnostics require a separate `--data-dir` and cannot use `--service`. Do not copy a user-protected DPAPI credential into ProgramData: credentials are bound to the account that created them. The service owns unattended discovery and printing.
+CLI setup, printer exposure and connection commands are requests to the authenticated installed service; see [Administrator operations](ADMINISTRATION.md#command-line). Sign in through the companion first; `run` requests a connection refresh. The command line keeps no credentials or data of its own. Do not copy a user-protected DPAPI credential into ProgramData: credentials are bound to the account that created them. The service owns unattended discovery and printing.
 
 ## Updates
 

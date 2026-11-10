@@ -2,7 +2,7 @@
 
 | Symptom | Check |
 | --- | --- |
-| Companion cannot connect to service | Confirm the MSI is installed, `QqqPrintAgent` is running, and the companion is elevated. A development CLI worker does not host the installed service pipe. |
+| Companion cannot connect to service | Confirm the MSI is installed, `QqqPrintAgent` is running, and the companion is elevated. The command-line tool is only a client of that pipe; it does not host it. |
 | Sign-in or discovery fails | Open **View logs**: every step (discovery, authentication metadata, native grant validation, provider discovery, browser callback, session verification by the service, device binding, identity check) is logged with the reason it stopped, and the dialog shows the same reason. Turn on **Debug logging** in Log settings for request routes, status codes, timings and realtime frames. |
 | Sign-in works in the companion but "Service authorization not completed" | The service verifies the session itself as LocalSystem. A self-signed or private-authority certificate (for example a local Caddy root) that your user account trusts is not in the machine store, so the service's TLS check fails; the log shows `TLS certificate for host rejected: RemoteCertificateChainErrors`. Install the issuing root in **Local Machine → Trusted Root Certification Authorities**, or enter the server address and enable **Allow untrusted server certificate for this server** in Connection settings for a development server (the exception is bound to that one server). |
 | Enrollment fails | Complete standard QQQ sign-in, then check the server URL, fresh/unconsumed code, device/facility configuration and server logs. Remote endpoints require HTTPS. The log records each enrollment step and the server's answer. |
@@ -17,7 +17,7 @@
 | PDF clipped or wrong size | Select actual size versus fit deliberately. Match the machine default, advertised media profile or explicit per-job PDF dimensions to the loaded stock; see [Printer media](PRINTER-MEDIA.md). |
 | Zebra prints text or blank labels | Confirm ZPL-capable hardware/driver, DPI, stock dimensions and actual printer mode. Inspect the specific document; previously confirmed output does not qualify every format/driver combination. |
 | Protected configuration cannot be opened | It belongs to another Windows identity, or the service account changed. Re-enroll through the service after resolving old jobs; do not copy a user-enrolled DPAPI file. |
-| Another worker owns the directory | Stop the duplicate CLI worker. Only one worker may own a given journal/data directory. |
+| Another worker owns the directory | A second copy of the service host (for example a development build started by hand) holds `worker.lock`. Stop it. Only one service may own a given journal/data directory. |
 | MSI publisher warning | Stable 1.0.1 is signed. Verify the exact official release checksum and Authenticode signature as described in [Installation](INSTALLATION.md). Earlier prereleases may be unsigned. |
 
 ## ZPL prints but PDF does not
