@@ -29,8 +29,9 @@ internal sealed class AgentBrandingShortcuts(IShortcutShell shell, IPathSecurity
    /// <summary>
    /// Creates or renames the all-users Start menu shortcut to the customer's brand name. It requires an administrator,
    /// verifies the install and shortcut folders (no reparse points, trusted owner, no untrusted write access), and refuses to
-   /// replace a shortcut it does not own. The previous brand's shortcut is removed only after the new one is written, and the
-   /// chosen file name is recorded so a later run or uninstall can find exactly what this installer made.
+   /// replace a shortcut it does not own. Everything that can make the run fail is checked before anything is written, the
+   /// previous brand's shortcut included. The new shortcut is then written and its file name recorded at once, so a later
+   /// run or an uninstall can always find what this run made; only then is the previous brand's shortcut removed.
    /// </summary>
    internal void ApplyInstalledBranding()
    {
@@ -53,12 +54,51 @@ internal sealed class AgentBrandingShortcuts(IShortcutShell shell, IPathSecurity
       {
          throw new InvalidOperationException("A different shortcut already uses the requested brand name.");
       }
+      string? replaced = PreviousShortcutToRemove(previous, filename);
       WriteShortcut(destination, branding.IconPath);
-      if(previous is not null && !string.Equals(previous, filename, StringComparison.OrdinalIgnoreCase))
-      {
-         RemoveOwnedShortcut(AgentBrandingInstaller.ShortcutPath(ShortcutDirectory, previous));
-      }
       record.WriteLastShortcutName(filename);
+      if(replaced is not null)
+      {
+         File.Delete(replaced);
+      }
+   }
+
+
+
+   /// <summary>
+   /// Decides, before the new shortcut is written, what becomes of the shortcut the last run recorded. It is removed only
+   /// when it is a different file from the new one and is still ours. When the recorded name is not a shortcut file name in
+   /// the shortcut folder, or the file under it has become someone else's, nothing is removed and a note is written:
+   /// a file that is not ours under the old name is no reason to refuse this brand its shortcut, and the installer runs
+   /// this step as a required action, so refusing would fail every later install and upgrade. A shortcut that cannot be
+   /// read at all still stops the run, before anything has changed.
+   /// </summary>
+   private string? PreviousShortcutToRemove(string? previous, string filename)
+   {
+      if(previous is null || string.Equals(previous, filename, StringComparison.OrdinalIgnoreCase))
+      {
+         return null;
+      }
+      string path;
+      try
+      {
+         path = AgentBrandingInstaller.ShortcutPath(ShortcutDirectory, previous);
+      }
+      catch(InvalidDataException)
+      {
+         places.Note("The recorded name of the previous shortcut is not a shortcut file name in the shortcut folder. Nothing was removed, and the new shortcut is recorded in its place.");
+         return null;
+      }
+      if(!File.Exists(path))
+      {
+         return null;
+      }
+      if(!IsOwnedShortcut(path))
+      {
+         places.Note($"The previous shortcut \"{previous}\" no longer belongs to this application. It was left unchanged, and the new shortcut is recorded in its place.");
+         return null;
+      }
+      return path;
    }
 
 

@@ -61,6 +61,7 @@ public sealed class AgentBrandingShortcutsTests
       Assert.Equal(link, new FakeShortcutShell().Read(shortcut));
       Assert.Equal(new[] { true }, setup.Record.Reads);
       Assert.Equal(new[] { "Acme Print Connector.lnk" }, setup.Record.Writes, StringComparer.Ordinal);
+      Assert.Empty(setup.Notes);
    }
 
 
@@ -184,28 +185,79 @@ public sealed class AgentBrandingShortcutsTests
 
 
    /// <summary>
-   /// The previous brand's shortcut is removed only while it is still ours. If it has since been changed into someone
-   /// else's, it is left untouched and the run fails; a recorded name that is not a plain file name in the shortcut folder
-   /// is refused as well. As the code stands the new shortcut has been written by then and the record still names the old
-   /// one, which this test records as the present behavior.
+   /// The previous brand's shortcut is removed only while it is still ours. When the file under the recorded name has
+   /// become someone else's, or the recorded name is not a plain shortcut file name in the shortcut folder, the run still
+   /// succeeds: the new shortcut is written and recorded, nothing else is touched, and one note says what was left alone.
+   /// A second run then finds its own shortcut recorded and is clean: no note, no failure, the same record.
    /// </summary>
    [Theory]
-   [InlineData("Old Brand.lnk", "The tracked shortcut no longer belongs to this application; it was left unchanged.")]
-   [InlineData("..\\Old Brand.lnk", "Invalid owned shortcut filename.")]
-   public void PreviousShortcutThatIsNoLongerOursIsLeftAndReported(string recorded, string message)
+   [InlineData("Old Brand.lnk", "The previous shortcut \"Old Brand.lnk\" no longer belongs to this application. It was left unchanged, and the new shortcut is recorded in its place.")]
+   [InlineData("..\\Old Brand.lnk", "The recorded name of the previous shortcut is not a shortcut file name in the shortcut folder. Nothing was removed, and the new shortcut is recorded in its place.")]
+   public void PreviousShortcutThatIsNoLongerOursIsLeftAloneAndTheNewOneIsRecorded(string recorded, string note)
    {
       using var setup = new Setup();
-      Directory.CreateDirectory(setup.Rules.ShortcutDirectory);
-      string previous = setup.PlantShortcut("Old Brand.lnk", new ShortcutLink(Path.Combine(setup.Root, "other.exe"), "", Ours));
+      string foreign = setup.PlantShortcut("Old Brand.lnk", new ShortcutLink(Path.Combine(setup.Root, "other.exe"), "", Ours));
       string outside = Path.Combine(setup.Programs, "Old Brand.lnk");
       FakeShortcutShell.Plant(outside, new ShortcutLink(setup.Installed, "", Ours));
+      string foreignBefore = File.ReadAllText(foreign);
       setup.Record.Name = recorded;
-      Exception refused = Assert.ThrowsAny<Exception>(setup.Rules.ApplyInstalledBranding);
-      Assert.Equal(message, refused.Message);
-      Assert.True(File.Exists(previous));
+      setup.Rules.ApplyInstalledBranding();
+      string shortcut = Path.Combine(setup.Rules.ShortcutDirectory, "Acme Print Connector.lnk");
+      Assert.Equal(new ShortcutLink(setup.Installed, "", Ours), new FakeShortcutShell().Read(shortcut) with { WorkingDirectory = "", IconLocation = "" });
+      Assert.Equal("Acme Print Connector.lnk", setup.Record.Name);
+      Assert.Equal(foreignBefore, File.ReadAllText(foreign));
       Assert.True(File.Exists(outside));
+      Assert.Equal(new[] { note }, setup.Notes, StringComparer.Ordinal);
+      setup.Rules.ApplyInstalledBranding();
+      _ = Assert.Single(setup.Notes);
+      Assert.Equal("Acme Print Connector.lnk", setup.Record.Name);
+      Assert.Equal(new[] { "Acme Print Connector.lnk", "Acme Print Connector.lnk" }, setup.Record.Writes, StringComparer.Ordinal);
+      Assert.Equal(foreignBefore, File.ReadAllText(foreign));
+      Assert.Equal(2, Directory.GetFiles(setup.Rules.ShortcutDirectory).Length);
+   }
+
+
+
+   /// <summary>
+   /// A run that has to fail fails before it has changed anything. Here the previous brand's shortcut cannot be read, so
+   /// whether it is ours cannot be known: no new shortcut is written, nothing is removed and the record still names the old one.
+   /// </summary>
+   [Fact]
+   public void PreviousShortcutThatCannotBeReadStopsTheRunBeforeAnythingChanges()
+   {
+      using var setup = new Setup();
+      string previous = setup.PlantShortcut("Old Brand.lnk", new ShortcutLink(setup.Installed, "", Ours));
+      setup.Record.Name = "Old Brand.lnk";
+      setup.Shell.ReadFailure = new InvalidOperationException("Windows could not open the shortcut.");
+      Assert.Equal("Windows could not open the shortcut.", Assert.Throws<InvalidOperationException>(setup.Rules.ApplyInstalledBranding).Message);
+      Assert.Equal(new[] { previous }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Empty(setup.Shell.Written);
+      Assert.Empty(setup.Record.Writes);
+      Assert.Equal("Old Brand.lnk", setup.Record.Name);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
+   /// <summary>
+   /// The new shortcut is recorded as soon as it is written, before the previous one is removed. When removing the previous
+   /// shortcut then fails (here another program holds the file open), the run fails, but the record already names the new
+   /// shortcut, so an uninstall or a later run can still find what this run made.
+   /// </summary>
+   [Fact]
+   public void NewShortcutIsRecordedEvenWhenThePreviousOneCannotBeRemoved()
+   {
+      using var setup = new Setup();
+      string previous = setup.PlantShortcut("Old Brand.lnk", new ShortcutLink(setup.Installed, "", Ours));
+      setup.Record.Name = "Old Brand.lnk";
+      using(new FileStream(previous, FileMode.Open, FileAccess.Read, FileShare.Read))
+      {
+         Exception failed = Assert.ThrowsAny<Exception>(setup.Rules.ApplyInstalledBranding);
+         Assert.True(failed is IOException or UnauthorizedAccessException);
+      }
+      Assert.Equal("Acme Print Connector.lnk", setup.Record.Name);
       Assert.True(File.Exists(Path.Combine(setup.Rules.ShortcutDirectory, "Acme Print Connector.lnk")));
-      Assert.Equal(recorded, setup.Record.Name);
+      Assert.True(File.Exists(previous));
    }
 
 
@@ -400,6 +452,11 @@ public sealed class AgentBrandingShortcutsTests
 
 
 
+      /// <summary>The notes the rules wrote, in order, in place of the machine activity log.</summary>
+      internal List<string> Notes { get; } = [];
+
+
+
       /// <summary>For each time the branding was loaded, whether the installer's labels were asked for.</summary>
       internal List<bool> LoadedWithInstallerLabels { get; } = [];
 
@@ -438,7 +495,7 @@ public sealed class AgentBrandingShortcutsTests
          {
             LoadedWithInstallerLabels.Add(includeInstallerLabels);
             return Branding;
-         }));
+         }, Notes.Add));
       }
 
 

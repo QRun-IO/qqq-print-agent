@@ -22,7 +22,13 @@ public static class AgentBrandingInstaller
 {
    private static readonly AgentBrandingShortcuts Installed = new(new WindowsShortcutShell(), new WindowsPathSecurity(), new RegistryShortcutRecord(),
       new BrandingPlaces(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent", "App", "Qqq.PrintAgent.exe"),
-         Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), AgentStore.DefaultDirectory, MachineStateDirectory.EnsureForPath, RuntimeBranding.LoadMachine));
+         Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), AgentStore.DefaultDirectory, MachineStateDirectory.EnsureForPath, RuntimeBranding.LoadMachine, LogInstallerNote));
+
+
+
+   /// <summary>Writes a note from a branding run to the machine activity log, marked as coming from the installer.</summary>
+   [ExcludeFromCodeCoverage(Justification = "Writes to the machine activity log under ProgramData, which a test must not write and which needs administrator rights. It only passes the text on; when a note is written and what it says is decided in AgentBrandingShortcuts, which is tested with a list in place of the log.")]
+   private static void LogInstallerNote(string note) => AgentActivityLog.Create(AgentStore.DefaultDirectory).Warning("[Installer] " + note);
 
 
 
