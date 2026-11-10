@@ -13,6 +13,18 @@ capability gets the ordinary logout, and the log says the provider session was n
 `sign-out` cannot open the companion's callback inbox, so it still ends only the QQQ session and says so.
 No change to pairing, history or the printing protocol.
 
+Servers that run as several nodes. A load balancer in front of such a server names the node it chose in a
+cookie; the client attached only the session cookie, so its realtime socket could open on one node while its
+claims and downloads went to another, and a server whose claim gate needs the socket on the same node
+(QQQ Printing 1.1.x) answered 409. The client now keeps the Application Load Balancer's cookies (names
+beginning `AWSALB`) from any answer of the server, the WebSocket upgrade answer included, and sends them on
+every later request and on the upgrade, so everything reaches the node that holds the socket. When that node
+stops, the load balancer rewrites the cookie on the next answer and the client follows it. The cookies are
+held in memory only, never saved with the session, limited to eight bounded values scoped to the server's
+host and root path, and sent nowhere but the server. Cookies under other names no longer decide whether a
+session answer is valid, because a load balancer adds its own to every answer. Nothing changes against a
+single-node server. No change to pairing, history or the printing protocol.
+
 ## 1.2.1
 
 Release-pipeline fix only; same source as 1.2.0 otherwise. The stable release workflow's per-edition

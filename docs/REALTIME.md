@@ -23,6 +23,36 @@ apply. No credentials are placed in URLs or messages. WSS and HTTPS share the
 configured origin; redirects cannot select another document host. Plain WS/HTTP
 is restricted to explicit loopback development.
 
+### A server that runs as several nodes
+
+A QQQ server may run as several nodes behind a load balancer with cookie
+stickiness. Sessions are rows in its database, so any node accepts the session;
+what differs per node is which one holds this device's socket. The client keeps
+the load balancer's own cookies (Application Load Balancer names, beginning
+`AWSALB`) from every answer of the configured origin, including the answer to
+the WebSocket upgrade, and sends them on every later request and on the next
+upgrade. Discovery runs immediately before each upgrade, so the socket opens on
+the node the HTTP requests already reach, and claims and downloads then go to
+the node that holds the socket. The cookies are held in memory only, are never
+saved with the session, and are bounded (eight values of at most 4096
+characters, scoped to the origin's host and root path).
+
+When that node stops:
+
+| What the client sees | What it does | Needs a person |
+|---|---|---|
+| The socket closes or stops answering heartbeats | Marks realtime not ready, cancels the claim wave, and reconnects after the configured backoff (1 to 30 seconds by default). The load balancer routes the reconnect to a healthy node and rewrites its cookie; the client follows it. After the new socket's welcome and applied state the server announces outstanding work again and claims resume; a claimed job replays, a job already recorded locally is not submitted twice | No |
+| 502, 503 or 504 (or any 5xx, or 409) on a claim, download or event | The request fails; the session is kept. The lane logs `Print lane stopped` and ends; the job stays on the server and is claimed on the next job notification. A job caught between claim and submission is recorded FAILED locally, with no bytes submitted | No (the FAILED job needs an operator retry) |
+| A dropped connection with no answer | The same as a 5xx: a transport failure, session kept | No |
+| 5xx on the WebSocket upgrade | A failed connection attempt; retried after backoff | No |
+| 401 on any request, or 401/403 on the WebSocket upgrade | The server withdrew authorization. The session is cleared (401) and reconnecting stops until someone signs in | Yes |
+
+A server at QQQ Printing 1.1.x refuses a claim (409) unless the socket is on
+the node that received it; the cookie keeps the two together except while a
+node is being drained (the load balancer already sends new requests elsewhere
+while the socket is still open). A server with the several-node support in
+QQQ Printing after 1.1.2 accepts the claim on any node.
+
 The service owns separate connection, receive, send, synchronization, command
 and job workers. Settings, desired state, commands, inventory, job events and
 receipts use small bounded WebSocket messages. A job notification wakes a finite
