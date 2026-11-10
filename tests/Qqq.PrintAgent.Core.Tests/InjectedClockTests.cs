@@ -11,10 +11,13 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>
-/// Every limit Core enforces is counted on an injected clock. These tests move that clock by hand and check that each
-/// limit fires at exactly its configured time and not a millisecond earlier: the acknowledgement wait, the session
-/// client's request limit, the control limits, the three download limits, the bandwidth pacing and the worker's phase
-/// timings. None of them waits for real time to pass.
+/// The limits Core enforces itself are counted on an injected clock: the acknowledgement wait, the session client's
+/// request limit, the control limits, the three download limits, the bandwidth pacing and the worker's phase timings.
+/// The one limit that is not is <c>HttpClient.Timeout</c> on the API client's HTTP client, which the platform counts
+/// on the system clock; it is not tested here. These tests move the injected clock by hand and check that each limit
+/// fires at exactly its configured time and not a millisecond earlier. "Not earlier" is read off the clock itself:
+/// one millisecond before the limit, the limit's timer must still be armed and due in exactly that millisecond, which
+/// it would not be had it already fired. None of the tests waits for real time to pass.
 /// </summary>
 public sealed class InjectedClockTests
 {
@@ -40,7 +43,7 @@ public sealed class InjectedClockTests
       Assert.Equal("event-1", (await socket.NextSentAsync()).GetProperty("messageId").GetString());
       await time.WhenDueInAsync(TimeSpan.FromSeconds(15));
       time.Advance(TimeSpan.FromSeconds(15) - Tick);
-      Assert.False(send.IsCompleted);
+      Assert.Contains(Tick, time.DueIn);
       time.Advance(Tick);
       await Assert.ThrowsAsync<TimeoutException>(() => send);
 
@@ -67,7 +70,7 @@ public sealed class InjectedClockTests
       Task<QqqApiDiscovery> discovery = client.DiscoverAsync();
       await arrived.Task.WaitAsync(Patience);
       time.Advance(TimeSpan.FromSeconds(20) - Tick);
-      Assert.False(discovery.IsCompleted);
+      Assert.Contains(Tick, time.DueIn);
       time.Advance(Tick);
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => discovery);
       Assert.Contains("HTTP GET https://printing.example.invalid/qqq/v1/version timed out after 20000 ms with no response headers.", info, StringComparer.Ordinal);
@@ -91,6 +94,7 @@ public sealed class InjectedClockTests
       using var caller = new CancellationTokenSource();
       Task<HttpResponseMessage> request = client.SendPrintingAsync(HttpMethod.Get, "admin/devices", cancellationToken: caller.Token);
       await arrived.Task.WaitAsync(Patience);
+      Assert.Empty(time.DueIn);
       time.Advance(TimeSpan.FromMinutes(10));
       Assert.False(request.IsCompleted);
       await caller.CancelAsync();
@@ -116,7 +120,7 @@ public sealed class InjectedClockTests
          : api.ControlReceiptAsync("command-1", new DeviceControlReceipt("receipt-1", "COMPLETED", "2026-01-01T00:00:00Z"), CancellationToken.None);
       await arrived.Task.WaitAsync(Patience);
       time.Advance(TimeSpan.FromSeconds(20) - Tick);
-      Assert.False(request.IsCompleted);
+      Assert.Contains(Tick, time.DueIn);
       time.Advance(Tick);
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
    }
@@ -136,7 +140,7 @@ public sealed class InjectedClockTests
       Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), CancellationToken.None);
       await arrived.Task.WaitAsync(Patience);
       time.Advance(TimeSpan.FromSeconds(2) - Tick);
-      Assert.False(download.IsCompleted);
+      Assert.Contains(Tick, time.DueIn);
       time.Advance(Tick);
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
       Assert.Empty(Directory.EnumerateFileSystemEntries(staging.Path));
@@ -160,7 +164,7 @@ public sealed class InjectedClockTests
       body.Feed([1, 2, 3, 4]);
       await body.NextReadAsync();
       time.Advance(TimeSpan.FromSeconds(3) - Tick);
-      Assert.False(download.IsCompleted);
+      Assert.Contains(Tick, time.DueIn);
       time.Advance(Tick);
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
       Assert.Empty(Directory.EnumerateFileSystemEntries(staging.Path));
@@ -187,7 +191,7 @@ public sealed class InjectedClockTests
       }
       await body.NextReadAsync();
       time.Advance(TimeSpan.FromSeconds(1) - Tick);
-      Assert.False(download.IsCompleted);
+      Assert.Contains(Tick, time.DueIn);
       time.Advance(Tick);
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
       Assert.Equal(TimeSpan.FromSeconds(7), time.Elapsed);
@@ -243,7 +247,7 @@ public sealed class InjectedClockTests
       Task<byte[]> download = api.DownloadAsync(Job(new byte[8]), CancellationToken.None);
       await body.NextReadAsync();
       time.Advance(TimeSpan.FromSeconds(60) - Tick);
-      Assert.False(download.IsCompleted);
+      Assert.Contains(Tick, time.DueIn);
       time.Advance(Tick);
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
    }
