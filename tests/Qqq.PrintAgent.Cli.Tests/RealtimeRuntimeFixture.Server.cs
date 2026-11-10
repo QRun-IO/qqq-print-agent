@@ -26,8 +26,20 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
-   /// <summary>Counts requests to a polling or control route, which the realtime path must never make; each is also refused.</summary>
+   /// <summary>
+   /// Counts what the realtime path must never do: a request to a polling or control route, and a claim made while the
+   /// agent has no connection whose applied state the server acknowledged. Each is also refused, so it cannot pass unnoticed.
+   /// </summary>
    internal int ForbiddenPolls;
+
+
+
+   /// <summary>
+   /// True from the moment the server acknowledges the agent's report of the applied state until the agent's next HELLO
+   /// or a restart of the runtime. A claim outside that span is a violation. A drop of the socket by the server does not
+   /// end the span, because a claim the agent had already sent when the socket died is not its fault.
+   /// </summary>
+   private volatile bool _claimsAllowed;
 
 
 
@@ -113,9 +125,17 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
-      /// <summary>Counts the claim, waits while claims are held, then hands out the queue head under a lock so a job is claimed once until its RECEIVED event arrives.</summary>
+      /// <summary>
+      /// Refuses and counts a claim made without an acknowledged connection. Otherwise counts the claim, waits while claims are
+      /// held, then hands out the queue head under a lock so a job is claimed once until its RECEIVED event arrives.
+      /// </summary>
       private async Task<HttpResponseMessage> ClaimAsync(CancellationToken cancellationToken)
       {
+         if(!fixture._claimsAllowed)
+         {
+            Interlocked.Increment(ref fixture.ForbiddenPolls);
+            throw new InvalidOperationException("Claim without a realtime connection whose applied state was acknowledged.");
+         }
          Interlocked.Increment(ref fixture.Claims);
          fixture.ClaimArrived.TrySetResult();
          if(fixture.ClaimHold is TaskCompletionSource hold)

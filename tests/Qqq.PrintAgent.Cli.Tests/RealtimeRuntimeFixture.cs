@@ -193,6 +193,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    [MemberNotNull(nameof(Runtime), nameof(Running), nameof(_running))]
    private void Start()
    {
+      _claimsAllowed = false;
       _running = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
       Runtime = new AgentRuntime(DirectoryPath, Logs.Enqueue, Printer, pipeName: PipeName,
          pipeFactory: () => new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
@@ -272,7 +273,10 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
          try
          {
             socket = await Peer.AcceptAsync(wait.Token);
-            return (socket, await LoopbackWebSocketPeer.ReceiveAsync(socket, wait.Token));
+            RealtimeEnvelope hello = await LoopbackWebSocketPeer.ReceiveAsync(socket, wait.Token);
+            // From this HELLO until the agent's report of the applied state is acknowledged, no claim is legitimate.
+            _claimsAllowed = false;
+            return (socket, hello);
          }
          catch(OperationCanceledException exception) when(wait.IsCancellationRequested)
          { throw new InvalidOperationException(Diagnostic("WebSocket handshake"), exception); }

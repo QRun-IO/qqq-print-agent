@@ -110,6 +110,9 @@ internal sealed partial class RealtimeRuntimeFixture
                await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "refused", token);
                return;
             }
+            // Set before the acknowledgement leaves: the agent may claim as soon as it reads it.
+            if(message.Type is "STATE_APPLIED")
+            { fixture._claimsAllowed = true; }
             await SendAsync("ACK", new { acknowledgedMessageId = message.MessageId });
             if(message.Type is "STATE_APPLIED" && fixture.ResendUnappliedState && _newestDesired is DeviceDesiredState unapplied
                && message.Payload.GetProperty("lastAppliedRevision").GetInt64() < unapplied.Revision)
