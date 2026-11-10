@@ -9,6 +9,8 @@ using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Core.Tests;
@@ -255,6 +257,165 @@ public sealed class QqqServerCompatibilityTests
       Assert.InRange(problem.Detail.Length, 1, 160);
       Assert.Contains("...'", problem.Detail, StringComparison.Ordinal);
    }
+
+
+
+   /// <summary>
+   /// What "printable" means, value by value. Line breaks of every kind (including U+2028 and U+2029), the characters
+   /// that reorder or hide text (bidirectional embeddings, overrides, isolates and marks, zero-width characters, tag
+   /// characters), private-use and unassigned code points all become spaces; ordinary text, including characters
+   /// outside the basic plane, is kept; a surrogate without its partner becomes the replacement character; and the cut
+   /// comes after 80 UTF-16 units without ever splitting a surrogate pair.
+   /// </summary>
+   [Fact]
+   public void PrintableReplacesEverythingThatCouldBreakOrReorderALineAndNeverSplitsAPair()
+   {
+      (string? Value, string Shown)[] cases =
+      [
+         (null, "(missing)"),
+         ("", "(missing)"),
+         ("2.4.0", "2.4.0"),
+         ("/qbit/printing caf\u00E9 \u5370\u5237 \U0001F5A8", "/qbit/printing caf\u00E9 \u5370\u5237 \U0001F5A8"),
+         ("a\r\nb\tc\0d\u0085e", "a  b c d e"),
+         ("a\u2028b\u2029c", "a b c"),
+         ("a\u202Ab\u202Bc\u202Cd\u202De\u202Ef", "a b c d e f"),
+         ("a\u2066b\u2067c\u2068d\u2069e", "a b c d e"),
+         ("a\u200Eb\u200Fc\u061Cd", "a b c d"),
+         ("a\u200Bb\u200Cc\u200Dd\uFEFFe\u00ADf", "a b c d e f"),
+         ("a\U000E0001b\U000E007Fc", "a b c"),
+         ("a\uE000b\U000F0000c\u0378d", "a b c d"),
+         ("a\uD83Db\uDDA8c", "a\uFFFDb\uFFFDc"),
+         (new string('x', 80), new string('x', 80)),
+         (new string('x', 81), new string('x', 80) + "..."),
+         (new string('x', 79) + "\U0001F5A8", new string('x', 79) + "..."),
+         (new string('x', 78) + "\U0001F5A8", new string('x', 78) + "\U0001F5A8"),
+         (new string('x', 78) + "\U0001F5A8y", new string('x', 78) + "\U0001F5A8..."),
+      ];
+      foreach((string? value, string shown) in cases)
+      { Assert.Equal(shown, QqqCompatibilityProblem.Printable(value)); }
+   }
+
+
+
+   /// <summary>A 64 KiB value full of line breaks comes out as one short line: 80 units and the mark of the cut, with nothing in it that could start a new line or change direction.</summary>
+   [Fact]
+   public void PrintableBoundsAVeryLongHostileValue()
+   {
+      string hostile = string.Concat(Enumerable.Repeat("9\r\nINFO forged line\u2028\u202E", 65_536 / 21 + 1));
+      Assert.True(hostile.Length >= 65_536);
+      string shown = QqqCompatibilityProblem.Printable(hostile);
+      Assert.Equal(83, shown.Length);
+      Assert.StartsWith("9  INFO forged line  9  INFO forged line  ", shown, StringComparison.Ordinal);
+      Assert.EndsWith("...", shown, StringComparison.Ordinal);
+      Assert.All(shown, character => Assert.True(IsPlain(character)));
+   }
+
+
+
+   /// <summary>
+   /// Every value the sign-in description supplies reaches a problem's detail only in printable form, because the wizard
+   /// shows that detail before anyone has signed in. Each row makes one value hostile (line breaks, a line separator, a
+   /// right-to-left override) and expects the sentence about it to carry the cleaned value and nothing else.
+   /// </summary>
+   [Theory]
+   [InlineData("type", "authentication type 'x  y z w' is not supported; only TABLE_BASED and OAUTH2 are")]
+   [InlineData("scopes", "scopes 'x  y z w' do not include openid")]
+   [InlineData("flow", "grant flow is 'x  y z w', expected AUTHORIZATION_CODE_PKCE_SESSION")]
+   [InlineData("codeChallengeMethod", "code challenge method is 'x  y z w', expected S256")]
+   [InlineData("prompt", "prompt is 'x  y z w', expected login")]
+   [InlineData("nonceValidation", "nonce validation policy 'x  y z w' is not one this client supports (expected REQUIRED, OPTIONAL or absent)")]
+   [InlineData("issuer", "issuer 'x  y z w' is not a plain HTTPS address")]
+   [InlineData("discoveryUrl", "discovery address 'x  y z w' is not a plain HTTPS address")]
+   [InlineData("redirectUris", "redirect address(es) not an HTTPS app link or dotted private scheme: x  y z w, x  y z w")]
+   public async Task EachSignInValueReachesTheDetailOnlyInPrintableForm(string member, string detail)
+   {
+      const string Hostile = "x\r\ny\u2028z\u202Ew";
+      JsonObject metadata = JsonNode.Parse(ScriptedServer.OAuth)!.AsObject();
+      JsonObject values = metadata["values"]!.AsObject();
+      JsonObject grant = values["nativeSessionLogin"]!.AsObject();
+      switch(member)
+      {
+         case "type":
+            metadata["type"] = Hostile;
+            break;
+         case "scopes":
+            values["scopes"] = Hostile;
+            break;
+         case "redirectUris":
+            grant["redirectUris"] = new JsonArray(Hostile, Hostile);
+            break;
+         default:
+            grant[member] = Hostile;
+            break;
+      }
+      var info = new List<string>();
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery).Add(metadata.ToJsonString());
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: new QqqSessionDiagnostics(info.Add));
+      QqqCompatibilityProblem problem = Assert.Single((await client.CheckCompatibilityAsync()).Problems);
+      Assert.Equal(QqqCompatibilityIssue.SignInUnavailable, problem.Issue);
+      Assert.Equal(detail, problem.Detail);
+      Assert.Equal($"Compatibility check found 1 problem(s): SignInUnavailable ({detail}).", Assert.Single(info, line => line.StartsWith("Compatibility check found", StringComparison.Ordinal)));
+   }
+
+
+
+   /// <summary>
+   /// When every value is hostile and long at once, with the most redirect addresses a grant may list, the joined detail
+   /// is still one bounded line: 512 units and the mark of the cut. The printing extension version shown beside the
+   /// result is bounded and printable in the same way.
+   /// </summary>
+   [Fact]
+   public async Task JoinedDetailAndDisplayedVersionAreBoundedHoweverMuchTheServerSends()
+   {
+      string hostile = string.Concat(Enumerable.Repeat("9\r\nINFO forged line\u2028\u202E", 60));
+      JsonObject metadata = JsonNode.Parse(ScriptedServer.OAuth)!.AsObject();
+      JsonObject values = metadata["values"]!.AsObject();
+      JsonObject grant = values["nativeSessionLogin"]!.AsObject();
+      values["scopes"] = hostile;
+      foreach(string member in new[] { "flow", "codeChallengeMethod", "prompt", "nonceValidation", "issuer", "discoveryUrl" })
+      { grant[member] = hostile; }
+      grant["redirectUris"] = new JsonArray([.. Enumerable.Range(0, 32).Select(index => (JsonNode?)(index + hostile[..500]))]);
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery).Add(metadata.ToJsonString())
+         .Add(ScriptedServer.Discovery.Replace("2.4.0", JsonEncodedText.Encode(hostile).ToString(), StringComparison.Ordinal));
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+
+      QqqCompatibilityProblem signIn = Assert.Single((await client.CheckCompatibilityAsync()).Problems);
+      Assert.Equal(QqqCompatibilityIssue.SignInUnavailable, signIn.Issue);
+      Assert.Equal(515, signIn.Detail.Length);
+      Assert.StartsWith("grant flow is '9  INFO forged line  9  INFO forged line  ", signIn.Detail, StringComparison.Ordinal);
+      Assert.EndsWith("...", signIn.Detail, StringComparison.Ordinal);
+      Assert.All(signIn.Detail, character => Assert.True(IsPlain(character)));
+
+      QqqServerCompatibility versioned = await client.CheckCompatibilityAsync();
+      string version = Assert.IsType<string>(versioned.Discovery!.PrintingExtensionVersion);
+      Assert.Equal(83, version.Length);
+      Assert.StartsWith("9  INFO forged line  ", version, StringComparison.Ordinal);
+      Assert.All(version, character => Assert.True(IsPlain(character)));
+      Assert.All(versioned.Problems, problem => Assert.All(problem.Detail, character => Assert.True(IsPlain(character))));
+   }
+
+
+
+   /// <summary>A detail is cut one unit early when the limit falls inside a surrogate pair, so the cut never leaves half a character.</summary>
+   [Fact]
+   public void DetailCutNeverSplitsASurrogatePair()
+   {
+      var whole = new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, new string('x', 512));
+      var cut = new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, new string('x', 513));
+      var pair = new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, new string('x', 511) + "\U0001F5A8");
+      Assert.Equal(new string('x', 512), whole.Detail);
+      Assert.Equal(new string('x', 512) + "...", cut.Detail);
+      Assert.Equal(new string('x', 511) + "...", pair.Detail);
+      Assert.Equal(whole, new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, new string('x', 512)));
+   }
+
+
+
+   /// <summary>True for a character that cannot end a line, reorder text or hide: not a control, format, separator or surrogate character.</summary>
+   private static bool IsPlain(char character) => char.GetUnicodeCategory(character) is not (System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format
+      or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator or System.Globalization.UnicodeCategory.Surrogate);
 
 
 

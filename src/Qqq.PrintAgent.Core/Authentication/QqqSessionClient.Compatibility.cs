@@ -102,7 +102,7 @@ public sealed partial class QqqSessionClient
    private QqqServerCompatibility Report(QqqServerCompatibility result)
    {
       _diagnostics.Info(result.IsCompatible
-         ? $"Compatibility check passed: printing extension {QqqCompatibilityProblem.Printable(result.Discovery?.PrintingExtensionVersion)}; sign-in by {result.SignInMethods}."
+         ? $"Compatibility check passed: printing extension {result.Discovery?.PrintingExtensionVersion}; sign-in by {result.SignInMethods}."
          : $"Compatibility check found {result.Problems.Count} problem(s): {string.Join("; ", result.Problems.Select(problem => problem.Issue + " (" + problem.Detail + ")"))}.");
       return result;
    }

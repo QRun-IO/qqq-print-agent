@@ -3,15 +3,35 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Globalization;
+using System.Text;
+
 namespace Qqq.PrintAgent.Core.Authentication;
 
 /// <summary>
 /// One shortfall found while checking a server: what kind it is and a plain sentence fragment saying exactly what was
-/// wrong. Text taken from the server is cut to a short printable form first, so a hostile value cannot inject lines into
-/// a log or flood a screen, and no detail ever contains a credential.
+/// wrong. A wizard shows the detail to an operator before anyone has signed in, so it is bounded twice: every piece of
+/// text taken from the server goes through <see cref="Printable"/> first, and the whole detail is cut at
+/// <see cref="DetailLimit"/> however many pieces were joined into it. A hostile value can therefore neither inject
+/// lines into a log, reorder what a screen shows, nor flood either, and no detail ever contains a credential.
 /// </summary>
 public sealed record QqqCompatibilityProblem(QqqCompatibilityIssue Issue, string Detail)
 {
+   /// <summary>The most UTF-16 units of one server-supplied value that are shown; a version, a path or an address worth reading is shorter.</summary>
+   internal const int ValueLimit = 80;
+
+   /// <summary>The most UTF-16 units a detail holds before it is cut.</summary>
+   internal const int DetailLimit = 512;
+
+   private const string Cut = "...";
+
+
+
+   /// <summary>What was wrong, in plain words: at most <see cref="DetailLimit"/> UTF-16 units, followed by an ellipsis when it was cut.</summary>
+   public string Detail { get; } = Bounded(Detail);
+
+
+
    /// <summary>The check this problem belongs to, so a wizard can mark the earlier checks as passed.</summary>
    public QqqCompatibilityStage Stage => Issue switch
    {
@@ -25,14 +45,46 @@ public sealed record QqqCompatibilityProblem(QqqCompatibilityIssue Issue, string
 
 
    /// <summary>
-   /// Makes server-supplied text safe to show: control characters become spaces and anything past 80 characters is cut,
-   /// with a missing value shown as such. A version or path is never legitimately longer or multi-line.
+   /// Makes server-supplied text safe to show. Anything that is not a visible character or a plain space becomes a
+   /// space: control characters, the line and paragraph separators (U+2028, U+2029) that end a line as surely as a
+   /// newline, the format characters that reorder or hide text (the bidirectional embeddings, overrides and isolates,
+   /// the zero-width characters), private-use and unassigned code points, and a surrogate without its partner. The
+   /// text is read as whole code points and cut after <see cref="ValueLimit"/> UTF-16 units, never in the middle of a
+   /// surrogate pair, and reading stops there, so a value of any length costs the same. A missing value is shown as
+   /// such.
    /// </summary>
    internal static string Printable(string? value)
    {
       if(string.IsNullOrEmpty(value))
       { return "(missing)"; }
-      string cleaned = new([.. value.Take(80).Select(character => char.IsControl(character) ? ' ' : character)]);
-      return value.Length > 80 ? cleaned + "..." : cleaned;
+      var shown = new StringBuilder(ValueLimit + Cut.Length);
+      foreach(Rune rune in value.EnumerateRunes())
+      {
+         if(shown.Length + rune.Utf16SequenceLength > ValueLimit)
+         { return shown.Append(Cut).ToString(); }
+         shown.Append(IsShown(rune) ? rune.ToString() : " ");
+      }
+      return shown.ToString();
+   }
+
+
+
+   /// <summary>
+   /// True for a code point that shows as itself and cannot change how the text around it is laid out. A surrogate
+   /// without its partner never arrives here as one: reading by code point has already replaced it with U+FFFD, which
+   /// is shown.
+   /// </summary>
+   private static bool IsShown(Rune rune) => Rune.GetUnicodeCategory(rune) is not (UnicodeCategory.Control or UnicodeCategory.Format
+      or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned);
+
+
+
+   /// <summary>Cuts a detail at the limit, one unit earlier when the limit falls inside a surrogate pair, and marks the cut.</summary>
+   private static string Bounded(string detail)
+   {
+      if(detail.Length <= DetailLimit)
+      { return detail; }
+      int end = char.IsHighSurrogate(detail[DetailLimit - 1]) ? DetailLimit - 1 : DetailLimit;
+      return string.Concat(detail.AsSpan(0, end), Cut);
    }
 }

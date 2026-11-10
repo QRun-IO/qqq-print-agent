@@ -164,14 +164,19 @@ public sealed class QqqApiDiscovery
 
 
 
-   /// <summary>The version of the single printing extension the server advertises, or null when there is none or more than one, for display beside the compatibility result. It is derived, so it is never written to JSON.</summary>
+   /// <summary>
+   /// The version of the single printing extension the server advertises, or null when there is none or more than one,
+   /// for display beside the compatibility result. Because it is shown, it is the printable form of what the server
+   /// sent (see <see cref="QqqCompatibilityProblem.Printable"/>): a version that passed validation is unchanged by
+   /// that, and anything else can neither break a line nor run long. It is derived, so it is never written to JSON.
+   /// </summary>
    [System.Text.Json.Serialization.JsonIgnore]
    public string? PrintingExtensionVersion
    {
       get
       {
          Extension[] printing = [.. (Extensions ?? []).Where(extension => extension is not null && string.Equals(extension.Name, "printing", StringComparison.Ordinal))];
-         return printing.Length == 1 ? printing[0].Version : null;
+         return printing.Length == 1 ? QqqCompatibilityProblem.Printable(printing[0].Version) : null;
       }
    }
 

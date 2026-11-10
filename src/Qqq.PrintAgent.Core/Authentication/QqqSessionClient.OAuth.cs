@@ -267,7 +267,8 @@ public sealed partial class QqqSessionClient
    /// <summary>
    /// Lists, in plain words, every reason the published native-session grant cannot be used; an empty list means it can.
    /// The sign-in path throws on a non-empty list and the compatibility check reports it, so both judge the grant by the
-   /// same rules.
+   /// same rules. The reasons are shown to an operator before anyone has signed in, so every value the server supplied
+   /// is quoted through <see cref="QqqCompatibilityProblem.Printable"/>, never raw.
    /// </summary>
    private List<string> NativeGrantProblems(QqqAuthenticationMetadata metadata)
    {
@@ -276,7 +277,7 @@ public sealed partial class QqqSessionClient
       if(!string.Equals(Origin.Scheme, "https", StringComparison.Ordinal))
       { problems.Add("the server origin is not HTTPS"); }
       if(!string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
-      { problems.Add($"authentication type is '{metadata.Type}', not OAUTH2"); }
+      { problems.Add($"authentication type is '{QqqCompatibilityProblem.Printable(metadata.Type)}', not OAUTH2"); }
       if(grant is null)
       { problems.Add("no nativeSessionLogin grant is published"); }
       else
@@ -284,7 +285,7 @@ public sealed partial class QqqSessionClient
       if(string.IsNullOrWhiteSpace(metadata.Values?.ClientId) || metadata.Values.ClientId.Length > 1024)
       { problems.Add("client id is missing or too long"); }
       if(string.IsNullOrWhiteSpace(metadata.Values?.Scopes) || !metadata.Values.Scopes.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("openid", StringComparer.Ordinal))
-      { problems.Add($"scopes '{metadata.Values?.Scopes}' do not include openid"); }
+      { problems.Add($"scopes '{QqqCompatibilityProblem.Printable(metadata.Values?.Scopes)}' do not include openid"); }
       return problems;
    }
 
@@ -294,19 +295,19 @@ public sealed partial class QqqSessionClient
    private static void AddGrantProblems(QqqAuthenticationMetadata.NativeGrant grant, List<string> problems)
    {
       if(!string.Equals(grant.Flow, QqqAuthenticationMetadata.NativeSessionFlow, StringComparison.Ordinal))
-      { problems.Add($"grant flow is '{grant.Flow}', expected {QqqAuthenticationMetadata.NativeSessionFlow}"); }
+      { problems.Add($"grant flow is '{QqqCompatibilityProblem.Printable(grant.Flow)}', expected {QqqAuthenticationMetadata.NativeSessionFlow}"); }
       if(!string.Equals(grant.CodeChallengeMethod, "S256", StringComparison.Ordinal))
-      { problems.Add($"code challenge method is '{grant.CodeChallengeMethod}', expected S256"); }
+      { problems.Add($"code challenge method is '{QqqCompatibilityProblem.Printable(grant.CodeChallengeMethod)}', expected S256"); }
       if(!string.Equals(grant.Prompt, "login", StringComparison.Ordinal))
-      { problems.Add($"prompt is '{grant.Prompt}', expected login"); }
+      { problems.Add($"prompt is '{QqqCompatibilityProblem.Printable(grant.Prompt)}', expected login"); }
       // Absent means a legacy server; REQUIRED and OPTIONAL both mean the nonce is sent; any other value is a policy this client cannot honor, so refuse before any provider or browser step.
       if(!string.IsNullOrEmpty(grant.NonceValidation) && !string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceRequired, StringComparison.Ordinal)
          && !string.Equals(grant.NonceValidation, QqqAuthenticationMetadata.NativeGrant.NonceOptional, StringComparison.Ordinal))
-      { problems.Add($"nonce validation policy '{grant.NonceValidation}' is not one this client supports (expected REQUIRED, OPTIONAL or absent)"); }
+      { problems.Add($"nonce validation policy '{QqqCompatibilityProblem.Printable(grant.NonceValidation)}' is not one this client supports (expected REQUIRED, OPTIONAL or absent)"); }
       if(!TryHttps(grant.Issuer, out _))
-      { problems.Add($"issuer '{grant.Issuer}' is not a plain HTTPS address"); }
+      { problems.Add($"issuer '{QqqCompatibilityProblem.Printable(grant.Issuer)}' is not a plain HTTPS address"); }
       if(!TryHttps(grant.DiscoveryUrl, out _))
-      { problems.Add($"discovery address '{grant.DiscoveryUrl}' is not a plain HTTPS address"); }
+      { problems.Add($"discovery address '{QqqCompatibilityProblem.Printable(grant.DiscoveryUrl)}' is not a plain HTTPS address"); }
       if(grant.RedirectUris is null || grant.RedirectUris.Count is < 1 or > 32)
       {
          problems.Add($"{grant.RedirectUris?.Count ?? 0} redirect address(es) listed; expected 1 to 32");
@@ -314,7 +315,7 @@ public sealed partial class QqqSessionClient
       }
       string[] invalid = [.. grant.RedirectUris.Where(value => !Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) || !ValidRedirect(uri))];
       if(invalid.Length != 0)
-      { problems.Add("redirect address(es) not an HTTPS app link or dotted private scheme: " + string.Join(", ", invalid)); }
+      { problems.Add("redirect address(es) not an HTTPS app link or dotted private scheme: " + string.Join(", ", invalid.Select(QqqCompatibilityProblem.Printable))); }
    }
 
 
