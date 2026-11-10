@@ -47,7 +47,7 @@ Retention is one pass run by the host, not by each store:
 
 Printer sharing and printer profiles get new tables keyed by `server_id` (`server_printers`, `server_printer_profiles`). The old machine-wide tables are not reused under a new meaning: an older build that somehow ran against this directory would otherwise read every server's sharing as its own.
 
-The schema carries a version (`PRAGMA user_version`) and is migrated once, when the service starts, in a transaction. Opening a store no longer creates or alters tables. A service that finds a version newer than it knows does not start its connections and does not touch the state. It keeps serving the pipe: the snapshot says that a newer build wrote this state and that the newer build must be reinstalled, the update operations work so that it can be, and everything else is answered `state_newer`. It never migrates down. This matters between release candidates, because the installer allows any build with the same numeric version to replace another (`AllowSameVersionUpgrades`), so an older candidate can be installed over a newer one.
+The schema carries a version (`PRAGMA user_version`) and is migrated once, when the service starts, in a transaction. Opening a store no longer creates or alters tables. A service that finds a version newer than it knows does not start its connections and does not touch the state. It keeps serving the pipe: the snapshot says that a newer build wrote this state and that the newer build must be reinstalled; the snapshot, the log operations and the update operations work, so that it can be; and every other operation, `servers.add` included, is answered `state_newer`. It never migrates down. This matters between release candidates, because the installer allows any build with the same numeric version to replace another (`AllowSameVersionUpgrades`), so an older candidate can be installed over a newer one.
 
 ### Upgrade from 1.x
 
@@ -66,7 +66,7 @@ Every move ends, so step 4 cannot hold the service forever:
 | Absent | Present | Already done; row deleted. |
 | Present | Present | Something other than the upgrade wrote the destination. The destination is kept, the source is moved beside it under a recovery name, the row is deleted and the event is logged. |
 | Absent | Absent | The file is gone. The row is deleted and logged; the server then simply lacks that file, and shows as needing a sign-in or a new pairing. |
-| A move fails (in use, access denied) | | Tried three times in that start. Then the service starts without connections, the snapshot reports the upgrade as incomplete and names the file, and per-server operations are answered `migration_incomplete`. The next start tries again. |
+| A move fails (in use, access denied) | | Tried three times in that start. Then the service starts without connections and the snapshot reports the upgrade as incomplete and names the file. As with a newer schema, the snapshot, the log operations and the update operations work, and every other operation is answered `migration_incomplete`. The next start tries again. |
 
 The service is first started by the installer before the installation commits. If the installer then rolls back, 1.x is left on state that 2.0 has already moved, and shows no pairing. This is accepted: nothing has been deleted, reinstalling 2.0 picks up where it stopped, and keeping a second copy of the secrets in the root to cover it would leave credentials behind that nothing maintains. It is read from the installer's authoring and is checked during upgrade qualification.
 
@@ -76,11 +76,11 @@ The cases:
 | --- | --- |
 | Pairing and session readable | One server, paired and signed in. |
 | Session only (signed in, never enrolled) | One server named by the session's origin, signed in, not paired. |
-| A pairing for one server and a session for another (1.x allows it, and treats the computer as not signed in) | One server, from the pairing, needing a sign-in. The other server's session is moved into that server's folder under a recovery name and never used. |
+| A pairing for one server and a session for another (1.x allows it: signed in to the second server, with printing blocked) | One server, from the pairing, needing a sign-in. The other server's session is moved into that server's folder under a recovery name and never used. |
 | Pairing unreadable, session readable | One server named by the session's origin; the unreadable pairing is moved with it and reported; the journal rows of the unknown scope belong to no server. |
 | Pairing readable, session missing or unreadable | One server, paired, needing a sign-in. |
 | Neither readable | No servers; the files stay where they are, untouched, and the computer says why. |
-| A certificate exception for the server's origin | Carried over as an exception that is not yet pinned; see "Certificate exception" below. |
+| A certificate exception for the server's origin | Carried over for that origin; see "Certificate exception" below. |
 | A certificate exception for another origin than the server's | Not copied, and logged: it cannot apply to this server. |
 | Journal scopes from earlier pairings or other servers | Belong to no server; removed by retention. They were already invisible in 1.x. |
 
@@ -116,7 +116,7 @@ Requests and replies are JSON objects on the existing framing.
 | `server_limit`, `server_exists` | Eight servers already exist; or this origin is already a server. |
 | `busy` | Another operation that changes this server's session or pairing is running. |
 | `not_signed_in`, `not_paired` | The operation needs a session, or a pairing, that this server does not have. |
-| `server_incompatible`, `certificate_untrusted` | The compatibility check failed; `details` carries its stages and, for the second, the certificate that was presented. |
+| `server_incompatible`, `certificate_untrusted` | The compatibility check failed; `details` carries its stages and, for the second, a description of the certificate that was presented. |
 | `sign_in_refused`, `bind_refused`, `identity_changed` | The server refused the session; refused to bind the pairing; or bound it for a different account than the approved one. |
 | `enrollment_refused`, `enrollment_unconfirmed` | The server refused the code; or the outcome is not known and `details` says what was left behind. |
 | `printer_not_found`, `job_not_found`, `job_not_current` | No such printer or job for this server; or the job belongs to an earlier pairing and is history. |
@@ -159,16 +159,19 @@ Operations:
 
 When a server comes to exist:
 
-- `servers.check` takes an address and, optionally, the fingerprint of a certificate the operator has accepted for it. The service runs the compatibility check itself, under its own identity and certificate store, and returns the typed stages. This is the check that matters, because the service is what connects; in 1.x the companion checked under the user's certificate store while the service validated as LocalSystem, so the two could disagree.
-- `servers.add` takes the address, the name, the accepted certificate's fingerprint if any, and the session credential from a completed sign-in. It is atomic: the server, its certificate exception and its session are stored together, or nothing is. `servers.add` never creates a server without a session, so there is no provisional server to clean up. A server can lose its session later (sign-out, expiry, an upgrade that found only a pairing); that is what `not_signed_in` is for.
+- `servers.check` takes an address and, optionally, the operator's acceptance of the certificate exception for it. It also works for an address that is already a server, using that server's stored exception; that is how a repair re-checks. The service runs the compatibility check itself, under its own identity and certificate store, and returns the typed stages. This is the check that matters, because the service is what connects; in 1.x the companion checked under the user's certificate store while the service validated as LocalSystem, so the two could disagree.
+- `servers.add` takes the address, the name, the certificate exception if the operator accepted one, and the session credential from a completed sign-in. It is atomic: the server, its certificate exception and its session are stored together, or nothing is. `servers.add` never creates a server without a session, so there is no provisional server to clean up. A server can lose its session later (sign-out, expiry, an upgrade that found only a pairing); that is what `not_signed_in` is for.
 - `trust.set` and `session.signIn` are for servers that already exist.
 
 Certificate exception:
 
-- In 1.x the development exception means "accept any certificate from this origin", and it also applies when the service fetches from the identity provider. In 2.0 it is a pin: the SHA-256 fingerprint of the one certificate the operator accepted, checked for connections to that server's own origin and nowhere else. A different certificate from the same origin is refused and shown to the operator like any untrusted one.
-- When the trust stage fails, `servers.check` returns the presented certificate's fingerprint, subject, issuer and expiry, so the wizard can show what the operator is accepting.
-- An exception carried over from 1.x has no fingerprint. The service pins the first certificate that origin presents after the upgrade and logs its fingerprint; from then on it is a pin like any other. This is no weaker than what 1.x did on every connection, and it lets an upgraded development setup keep working without a visit to the companion.
-- Core needs the fingerprint check and the binding to the server's origin; that closes audit finding C9.
+- It stays what it is in 1.x, a development-only switch that accepts a certificate Windows does not trust, and it gets a boundary it lacks today. In 1.x, once switched on, it applies to every host the client contacts. In 2.0 it applies to two origins and no others: the server's own, and the sign-in provider that server names. Both are recorded with the server and shown to the operator in the warning.
+- Pinning the accepted certificate's fingerprint was considered and rejected. The exception exists for self-signed certificates and private authorities such as a local Caddy root, and a private authority reissues its certificates on a short cycle; a pin would stop matching at each renewal and unattended printing would stop with it. The durable way to trust a private authority is to install its root in the Local Machine trusted root store, which needs no exception at all. The wizard and the Connection page say so wherever the exception is offered.
+- When the trust stage fails, `servers.check` returns a description of the presented certificate (subject, issuer, expiry, fingerprint, and why Windows refused it), so the operator sees what the exception would accept. `trust.get` returns the same for an existing server, together with the two origins the exception covers.
+- A server with the exception switched on says so in the snapshot, and the companion shows it on the server's node and its Connection page for as long as it is on, so a development setting is not forgotten.
+- If a server later names a different sign-in provider, the exception does not follow it: sign-in fails as untrusted and the operator accepts the new origin or does not.
+- An exception carried over from 1.x covers the server's origin. The provider's origin is recorded from the first sign-in description the service reads after the upgrade, and logged. The companion's sign-in uses the same exception for the same two origins, from the snapshot, so the two cannot disagree about what is accepted.
+- Core needs the per-origin check in place of the one switch; that closes audit finding C9.
 
 Removing a server:
 
