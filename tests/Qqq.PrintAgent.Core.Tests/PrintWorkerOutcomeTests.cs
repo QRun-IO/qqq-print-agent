@@ -94,7 +94,9 @@ public sealed class PrintWorkerOutcomeTests
 
    /// <summary>
    /// A lane does not recover the journal itself (the runtime does that once, at start). If it is nevertheless offered a
-   /// job the journal shows as submitting, it must not print it a second time: it leaves the job for recovery to report.
+   /// job the journal shows as submitting, it must not print it a second time: it leaves the job for the lane that is
+   /// submitting it, or for recovery, to report. It says so in the log, once, with the job and the reason, and it ends
+   /// its pass after that one claim: the server would only offer the same job again, so claiming on would spin.
    /// </summary>
    [Fact]
    public async Task LaneNeverResubmitsAJobAlreadyRecordedAsSubmitting()
@@ -109,11 +111,14 @@ public sealed class PrintWorkerOutcomeTests
       journal.Acknowledge("received-before-crash");
       journal.Acknowledge("submitting-before-crash");
       var printer = new FakePrinterBackend();
-      Assert.False(await new PrintWorker(api, printer, journal, options: new PrintWorkerOptions { RecoverIncomplete = false }).RunOnceAsync());
+      var lines = new List<string>();
+      Assert.False(await new PrintWorker(api, printer, journal, lines.Add, options: new PrintWorkerOptions { RecoverIncomplete = false }).RunOnceAsync());
+      Assert.Equal(1, server.Claims);
       Assert.Equal(new[] { "RECEIVED", "SUBMITTING" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Empty(server.Events);
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
+      Assert.Equal("job-1: offered again while recorded as SUBMITTING, so its submission has started and not concluded; it is not submitted a second time and this pass claims nothing more.", Assert.Single(lines));
    }
 
 

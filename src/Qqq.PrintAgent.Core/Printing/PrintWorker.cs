@@ -15,7 +15,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// nothing is pending, dispatch is allowed and the connection is synchronized does it discover printers and claim at
    /// most one job. Returns true when a job was spooled, or, when recovery is switched off (realtime lanes, where the
    /// runtime recovers once and each lane only drains), whenever a claimed job was processed whatever its outcome so
-   /// the lane keeps draining; false when idle, paused, blocked, or the claimed job was already final.
+   /// the lane keeps draining; false when idle, paused, blocked, or the claimed job was one the journal already holds as
+   /// final or as submitting, which ends a lane's pass because the server would only offer that job again.
    /// </summary>
    public async Task<bool> RunOnceAsync(CancellationToken token = default)
    {
@@ -69,8 +70,9 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// Claims one job under the shared claim gate and registers it locally before anything else can happen to it. The
    /// server keeps replaying CLAIMED until RECEIVED commits, so admission is serialized through that acknowledgement; if
    /// it is interrupted the job is recorded FAILED with no bytes submitted. A job the journal already holds in a final
-   /// state is dropped here so a replayed claim can never print twice. A claimed job that breaks the contract but names
-   /// itself is refused and reported instead of returned.
+   /// state, or as submitting, is dropped here so a replayed claim can never print twice; the pass then ends, because
+   /// the server would only offer that job again. A claimed job that breaks the contract but names itself is refused
+   /// and reported instead of returned.
    /// </summary>
    private async Task<Claim> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
@@ -88,10 +90,19 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          if(job is null)
          { return default; }
          Track(job, inventory);
-         // A job recorded as submitting was handed to a printer once already and never concluded. Whoever recovers the
-         // journal reports it as OUTCOME_UNKNOWN; claiming it again must never print it a second time.
          if(journal.GetState(job.JobId) is { } state && (PrintJobState.IsFinal(state) || string.Equals(state, PrintJobState.Submitting, StringComparison.Ordinal)))
-         { return default; }
+         {
+            ////////////////////////////////////////////////////////////////////////
+            // a job recorded as submitting was handed to a printer once already  //
+            // and has not concluded: another lane is submitting it now, or a run //
+            // stopped part-way and recovery will report it as OUTCOME_UNKNOWN.   //
+            // claiming it again must never print it a second time, and it must   //
+            // not pass silently, because the server should not be offering it    //
+            ////////////////////////////////////////////////////////////////////////
+            if(!PrintJobState.IsFinal(state))
+            { log?.Invoke($"{job.JobId}: offered again while recorded as {state}, so its submission has started and not concluded; it is not submitted a second time and this pass claims nothing more."); }
+            return default;
+         }
          options?.ActiveJobChanged?.Invoke(job);
          try
          {
