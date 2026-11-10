@@ -10,17 +10,17 @@ namespace Qqq.PrintAgent.Presentation.Jobs;
 /// <summary>The texts around the job table: the count line, the standing notice about what "sent to printer" means, the empty state, and what to say when the history could not be loaded.</summary>
 public static class JobPageSummary
 {
-   /// <summary>The count line when the service answered the query with an error; the rows on screen are from an earlier answer.</summary>
-   public const string Rejected = "History unavailable; previously shown rows may be stale";
-
-   /// <summary>The count line when no usable answer arrived from the service.</summary>
-   public const string Unavailable = "History unavailable; check the service and refresh";
-
    /// <summary>The title of the empty state.</summary>
    public const string EmptyTitle = "No matching jobs";
 
    /// <summary>The hint of the empty state.</summary>
    public const string EmptyMessage = "Try another prefix search or choose All states.";
+
+
+
+   /// <summary>The count line when the history could not be loaded: after the service answered with an error the rows on screen are from an earlier answer and may be stale, and when no usable answer arrived the operator is pointed to the service.</summary>
+   public static string Failure(bool rejected)
+      => rejected ? "History unavailable; previously shown rows may be stale" : "History unavailable; check the service and refresh";
 
 
 

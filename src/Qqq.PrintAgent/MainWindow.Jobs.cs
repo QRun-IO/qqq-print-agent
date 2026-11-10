@@ -97,7 +97,7 @@ public sealed partial class MainWindow
       {
          if(current)
          {
-            JobsSummary.Text = JobPageSummary.Unavailable;
+            JobsSummary.Text = JobPageSummary.Failure(rejected: false);
          }
          return false;
       }
@@ -111,7 +111,7 @@ public sealed partial class MainWindow
          {
             Feedback(ShellFeedback.ActionRejected(result.Message));
          }
-         JobsSummary.Text = result.Outcome == ServiceOutcome.Rejected ? JobPageSummary.Rejected : JobPageSummary.Unavailable;
+         JobsSummary.Text = JobPageSummary.Failure(result.Outcome == ServiceOutcome.Rejected);
          return false;
       }
       _jobs.Apply(result.Payload);

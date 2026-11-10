@@ -16,8 +16,9 @@ public static class UpdateStatus
 
 
 
-   /// <summary>The message when an interactive check could not finish; a quiet startup check stays quiet.</summary>
-   public static FeedbackMessage CheckUnavailable { get; } = new("Update check unavailable", "Open Logs for details, or use Release notes and downloads below.", FeedbackSeverity.Warning);
+   /// <summary>The message for an update check that could not finish. Only a check the operator asked for is reported; the quiet startup check says nothing, because the operator did not start it and the log has the reason.</summary>
+   public static FeedbackMessage? CheckFailed(bool interactive)
+      => interactive ? new FeedbackMessage("Update check unavailable", "Open Logs for details, or use Release notes and downloads below.", FeedbackSeverity.Warning) : null;
 
 
 

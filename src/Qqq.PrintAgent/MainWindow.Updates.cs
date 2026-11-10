@@ -162,9 +162,9 @@ public sealed partial class MainWindow
       catch(Exception exception)
       {
          App.Log.Error("[Companion] Update check could not finish.", exception);
-         if(interactive && !_updatesClosed)
+         if(UpdateStatus.CheckFailed(interactive) is { } message && !_updatesClosed)
          {
-            Feedback(UpdateStatus.CheckUnavailable);
+            Feedback(message);
          }
       }
       finally

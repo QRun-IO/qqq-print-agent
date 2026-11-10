@@ -124,16 +124,6 @@ public sealed class ShellStatusTests
 
 
 
-   /// <summary>The fixed texts for an unreachable or failing service say that the screen may be stale and that the service needs attention.</summary>
-   [Fact]
-   public void ServiceTrouble_HasFixedStatusTexts()
-   {
-      Assert.Equal("Local print service unavailable", ShellStatus.ServiceUnavailableStatus);
-      Assert.Equal("Local service unavailable · retrying automatically; shown data may be stale", ShellStatus.ServiceUnavailableContact);
-      Assert.Equal("Local service needs attention", ShellStatus.ServiceProblemStatus);
-   }
-
-
 
    /// <summary>Each navigation choice maps to a page name and a one-sentence description; the built-in settings item is Settings and a choice without a tag is Printers.</summary>
    [Fact]

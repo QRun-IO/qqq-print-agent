@@ -13,17 +13,24 @@ namespace Qqq.PrintAgent.Presentation.Tests.Settings;
 /// <summary>The Settings page texts: updates, diagnostic log settings, this computer's labels and the Windows service state.</summary>
 public sealed class SettingsTextTests
 {
-   /// <summary>The update texts name the channel, say what updates do or why they are unavailable, and report progress in fixed words.</summary>
+   /// <summary>The update texts follow the build and the installation: the channel is prerelease or stable, and in-app updates are described when the installation can update itself and explained away when it cannot.</summary>
    [Fact]
-   public void UpdateTexts_NameChannelAndAvailability()
+   public void UpdateTexts_FollowChannelAndInstallation()
    {
       Assert.Equal("Update channel: prerelease", UpdateStatus.Channel(prerelease: true));
       Assert.Equal("Update channel: stable", UpdateStatus.Channel(prerelease: false));
       Assert.Equal("Updates install the companion and print service together. You choose when to install.", UpdateStatus.Availability(supported: true));
       Assert.Equal("Install the machine MSI to enable in-app updates. Release downloads remain available below.", UpdateStatus.Availability(supported: false));
-      Assert.Equal("Checking for updates…", UpdateStatus.Checking);
-      Assert.Equal("Update check finished. Installation always requires your confirmation. See Logs for check details.", UpdateStatus.Finished);
-      Assert.Equal(new FeedbackMessage("Update check unavailable", "Open Logs for details, or use Release notes and downloads below.", FeedbackSeverity.Warning), UpdateStatus.CheckUnavailable);
+   }
+
+
+
+   /// <summary>An update check that could not finish is reported only when the operator asked for it; the quiet startup check says nothing.</summary>
+   [Fact]
+   public void FailedUpdateCheck_IsReportedOnlyWhenTheOperatorAskedForIt()
+   {
+      Assert.Equal(new FeedbackMessage("Update check unavailable", "Open Logs for details, or use Release notes and downloads below.", FeedbackSeverity.Warning), UpdateStatus.CheckFailed(interactive: true));
+      Assert.Null(UpdateStatus.CheckFailed(interactive: false));
    }
 
 

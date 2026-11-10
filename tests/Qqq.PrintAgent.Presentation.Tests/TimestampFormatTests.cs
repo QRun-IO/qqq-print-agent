@@ -22,6 +22,16 @@ public sealed class TimestampFormatTests
 
 
 
+   /// <summary>A timestamp without an offset is read as UTC, the way the service writes its times, not in the time zone of the machine that happens to run the companion.</summary>
+   [Fact]
+   public void TimestampWithoutAnOffset_IsReadAsUtc()
+   {
+      Assert.Equal("11/10/2026 12:00", TestData.Time.Brief("2026-11-10T10:00:00"));
+      Assert.Equal("11/10/2026 12:00:30", TestData.Time.Created("2026-11-10 10:00:30"));
+   }
+
+
+
    /// <summary>A missing or unreadable timestamp is never turned into a time: a status reads "Not yet" and a creation time "Not recorded".</summary>
    [Theory]
    [InlineData(null)]

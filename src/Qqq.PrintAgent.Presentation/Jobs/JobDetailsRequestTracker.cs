@@ -5,10 +5,19 @@
 
 namespace Qqq.PrintAgent.Presentation.Jobs;
 
-/// <summary>Fences asynchronous detail completions when a row or view is invalidated.</summary>
+/// <summary>
+/// Keeps a slow job-details reply from being shown in the wrong place. A row's details are loaded on demand, and by the
+/// time the service answers the row may have been collapsed, reused for another job, or reloaded; each of those advances a
+/// generation number, and a reply is applied only if it still carries the latest one. Without this, details for one job
+/// could appear under another, or an old reply could end the loading state of a newer request.
+/// </summary>
 public sealed class JobDetailsRequestTracker
 {
    private long _generation;
+
+
+
+   /// <summary>True while a request is on its way and has not been invalidated, which is when a second request must not start and the refresh button is disabled.</summary>
    public bool IsLoading { get; private set; }
 
 

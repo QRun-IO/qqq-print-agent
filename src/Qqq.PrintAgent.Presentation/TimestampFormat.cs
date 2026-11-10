@@ -10,7 +10,8 @@ namespace Qqq.PrintAgent.Presentation;
 /// <summary>
 /// Turns the service's timestamps into the user's local time and date format. The time zone comes from a
 /// <see cref="TimeProvider"/> and the culture can be fixed, so the companion shows local time in the user's own format
-/// while a test gets the same text on any machine. A timestamp the service never recorded becomes plain words, never an
+/// while a test gets the same text on any machine. A timestamp without an offset is read as UTC, which is what the service
+/// writes, not as this machine's local time. A timestamp the service never recorded becomes plain words, never an
 /// invented time.
 /// </summary>
 public sealed class TimestampFormat
@@ -44,9 +45,9 @@ public sealed class TimestampFormat
 
 
 
-   /// <summary>Reads a service timestamp the way the service writes it, independent of the user's culture.</summary>
+   /// <summary>Reads a service timestamp the way the service writes it, independent of the user's culture, taking a value without an offset as UTC so the result does not depend on the machine's time zone.</summary>
    private static bool TryRead(string? timestamp, out DateTimeOffset time)
-      => DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out time);
+      => DateTimeOffset.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out time);
 
 
 

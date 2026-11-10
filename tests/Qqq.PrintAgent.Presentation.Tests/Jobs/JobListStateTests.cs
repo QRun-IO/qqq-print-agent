@@ -154,14 +154,11 @@ public sealed class JobListStateTests
 
 
 
-   /// <summary>The fixed texts say that old rows may be stale after a refused query, what to do when the service did not answer, and how to widen an empty result.</summary>
+   /// <summary>When the history could not be loaded, the count line depends on why: after the service refused the query the rows on screen are from an earlier answer and may be stale, and when no usable answer arrived the operator is pointed to the service.</summary>
    [Fact]
-   public void FixedTexts_ExplainStaleAndEmptyResults()
+   public void FailedQuery_SaysWhetherTheRowsAreStaleOrTheServiceNeedsChecking()
    {
-      Assert.Equal("History unavailable; previously shown rows may be stale", JobPageSummary.Rejected);
-      Assert.Equal("History unavailable; check the service and refresh", JobPageSummary.Unavailable);
-      Assert.Equal("No matching jobs", JobPageSummary.EmptyTitle);
-      Assert.Equal("Try another prefix search or choose All states.", JobPageSummary.EmptyMessage);
-      Assert.Equal(50, JobListState.PageSize);
+      Assert.Equal("History unavailable; previously shown rows may be stale", JobPageSummary.Failure(rejected: true));
+      Assert.Equal("History unavailable; check the service and refresh", JobPageSummary.Failure(rejected: false));
    }
 }

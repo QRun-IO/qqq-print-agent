@@ -95,12 +95,25 @@ public sealed class PrinterSortTests
 
 
 
-   /// <summary>Without a comparer the user's own language rules are used, which for plain letters still ignore case.</summary>
+   /// <summary>Without a comparer the user's own language rules are used, ignoring case: under Swedish rules "Öland" sorts after "Zebra", which it would not under English rules, and "alpha" still sorts before "BETA".</summary>
    [Fact]
-   public void DefaultComparer_IgnoresCase()
+   public void DefaultComparer_FollowsTheUsersLanguageAndIgnoresCase()
    {
-      PrinterSort sort = new();
+      CultureInfo original = CultureInfo.CurrentCulture;
+      try
+      {
+         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("sv-SE");
+         PrinterSort swedish = new();
+         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+         PrinterSort english = new();
 
-      Assert.True(sort.Compare(TestData.Printer(id: "a", name: "alpha"), TestData.Printer(id: "b", name: "BETA")) < 0);
+         Assert.True(swedish.Compare(TestData.Printer(id: "a", name: "Öland"), TestData.Printer(id: "b", name: "Zebra")) > 0);
+         Assert.True(english.Compare(TestData.Printer(id: "a", name: "Öland"), TestData.Printer(id: "b", name: "Zebra")) < 0);
+         Assert.True(english.Compare(TestData.Printer(id: "a", name: "alpha"), TestData.Printer(id: "b", name: "BETA")) < 0);
+      }
+      finally
+      {
+         CultureInfo.CurrentCulture = original;
+      }
    }
 }
