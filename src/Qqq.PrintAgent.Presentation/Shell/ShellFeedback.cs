@@ -50,9 +50,10 @@ public static class ShellFeedback
 
    /// <summary>
    /// The message for a state-changing request. Saving details or log settings gets its own confirmation sentence and every
-   /// other action shows the service's reply. A refusal shows the service's reason. No usable answer is reported as "result
-   /// could not be confirmed", because a timed-out request may already have reached the server or the printer and must not
-   /// be blindly repeated.
+   /// other action shows the service's reply. A refusal shows the service's reason. A request that left and brought no
+   /// usable answer back is reported as "result could not be confirmed", because it may already have reached the server
+   /// or the printer and must not be blindly repeated. A request that never left this computer is a different thing and
+   /// is said to be one: nothing was sent, so nothing was printed, cancelled or saved.
    /// </summary>
    public static FeedbackMessage ForAction(string operation, ServiceResult<string> result)
    {
@@ -67,9 +68,17 @@ public static class ShellFeedback
             _ => result.Payload ?? string.Empty,
          }, FeedbackSeverity.Success),
          ServiceOutcome.Rejected => ActionRejected(result.Message),
-         _ => new FeedbackMessage("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", FeedbackSeverity.Warning),
+         _ => result.Unconfirmed
+            ? new FeedbackMessage("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", FeedbackSeverity.Warning)
+            : ActionNotSent(result.Message),
       };
    }
+
+
+
+   /// <summary>The message for a request that never left this computer, with the reason when there is one: nothing was sent, so there is nothing to check before trying again.</summary>
+   public static FeedbackMessage ActionNotSent(string reason)
+      => new("Request not sent", "Nothing was sent to the local service, so nothing was changed." + (string.IsNullOrEmpty(reason) ? string.Empty : " Reason: " + reason) + " Try again when the service can be reached.", FeedbackSeverity.Error);
 
 
 

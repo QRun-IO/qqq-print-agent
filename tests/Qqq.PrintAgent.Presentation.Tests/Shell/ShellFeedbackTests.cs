@@ -77,26 +77,28 @@ public sealed class ShellFeedbackTests
 
 
    /// <summary>
-   /// An action without a usable answer is reported as unconfirmed with a warning not to repeat it blindly, for every cause the
-   /// pipe can raise and whether or not the request had left: a print or a cancellation must never be repeated on the
-   /// strength of a message that sounds like "nothing happened". (An unreadable reply cannot occur for an action, whose
-   /// reply is plain text.)
+   /// An action that left this computer and got no usable answer is reported as unconfirmed, with a warning not to repeat
+   /// it blindly, for every cause the pipe can raise after the request left: a print or a cancellation must never be
+   /// repeated on the strength of a message that sounds like "nothing happened". A refusal or a failed Windows call that
+   /// arrives without the pipe client's "not sent" mark counts as possibly sent. (An unreadable reply cannot occur for an
+   /// action, whose reply is plain text.)
    /// </summary>
    [Theory]
    [MemberData(nameof(UnansweredActions))]
-   public async Task UnansweredAction_IsUnconfirmedRatherThanFailed(Exception failure, ServiceFailure cause)
+   public async Task ActionThatLeftWithoutAnAnswer_IsUnconfirmedRatherThanFailed(Exception failure, ServiceFailure cause)
    {
       ServiceClient client = new(_ => Task.FromException<string>(failure), new RecordingLog(), "QQQ");
       ServiceResult<string> result = await client.SendAsync(new PipeRequest("test-print"));
 
       Assert.Equal(cause, result.Failure);
+      Assert.True(result.Unconfirmed);
       Assert.Equal(new FeedbackMessage("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", FeedbackSeverity.Warning),
          ShellFeedback.ForAction("test-print", result));
    }
 
 
 
-   /// <summary>Every way an action can end without an answer: each cause after the request left, and each cause before it left.</summary>
+   /// <summary>Every way an action can end without an answer after the request left.</summary>
    public static TheoryData<Exception, ServiceFailure> UnansweredActions() => new()
    {
       { new OperationCanceledException("The reply did not arrive in time."), ServiceFailure.TimedOut },
@@ -104,25 +106,84 @@ public sealed class ShellFeedbackTests
       { new InvalidDataException("Local pipe message exceeds the permitted size."), ServiceFailure.InvalidData },
       { new UnauthorizedAccessException("Not the installed service."), ServiceFailure.AccessDenied },
       { new System.ComponentModel.Win32Exception(5, "Access is denied."), ServiceFailure.Native },
-      { new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")), ServiceFailure.TimedOut },
-      { new AgentPipeNotSentException(new IOException("The pipe could not be opened.")), ServiceFailure.Disconnected },
-      { new AgentPipeNotSentException(new InvalidDataException("Local pipe message exceeds the permitted size.")), ServiceFailure.InvalidData },
    };
 
 
 
-   /// <summary>An action whose wait the caller ended is unconfirmed too, with the same warning.</summary>
+   /// <summary>
+   /// An action the pipe client reports as never sent did nothing: no document was printed and no job was cancelled. The
+   /// operator is told exactly that, with the reason, instead of being warned that the request "may already have reached
+   /// the printer". This is safe to say only because the pipe client marks the failure as "not sent" itself.
+   /// </summary>
+   [Theory]
+   [MemberData(nameof(NeverSentActions))]
+   public async Task ActionThatNeverLeft_SaysNothingWasSent(Exception failure, ServiceFailure cause, string reason)
+   {
+      ServiceClient client = new(_ => Task.FromException<string>(failure), new RecordingLog(), "QQQ");
+      ServiceResult<string> result = await client.SendAsync(new PipeRequest("test-print"));
+
+      Assert.Equal(cause, result.Failure);
+      Assert.False(result.Unconfirmed);
+      Assert.Equal(new FeedbackMessage("Request not sent", "Nothing was sent to the local service, so nothing was changed. Reason: " + reason + " Try again when the service can be reached.", FeedbackSeverity.Error),
+         ShellFeedback.ForAction("test-print", result));
+   }
+
+
+
+   /// <summary>Every way an action can fail before its first byte is written.</summary>
+   public static TheoryData<Exception, ServiceFailure, string> NeverSentActions() => new()
+   {
+      { new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")), ServiceFailure.TimedOut, "Nothing is listening on the pipe." },
+      { new AgentPipeNotSentException(new IOException("The pipe could not be opened.")), ServiceFailure.Disconnected, "The pipe could not be opened." },
+      { new AgentPipeNotSentException(new InvalidDataException("Local pipe message exceeds the permitted size.")), ServiceFailure.InvalidData, "Local pipe message exceeds the permitted size." },
+   };
+
+
+
+   /// <summary>An action whose wait the caller ended after the request had left is unconfirmed, with the same warning: the service may still carry it out.</summary>
    [Fact]
    public async Task AbandonedAction_IsUnconfirmed()
    {
       using CancellationTokenSource cancellation = new();
+      int sent = 0;
+      ServiceClient client = new(_ =>
+      {
+         sent++;
+         return new TaskCompletionSource<string>().Task;
+      }, new RecordingLog(), "QQQ");
+
+      Task<ServiceResult<string>> waiting = client.SendAsync(new PipeRequest("retry-job"), cancellation.Token);
       await cancellation.CancelAsync();
-      ServiceClient client = new(_ => new TaskCompletionSource<string>().Task, new RecordingLog(), "QQQ");
+      ServiceResult<string> result = await waiting;
+
+      Assert.Equal(1, sent);
+      Assert.Equal(ServiceOutcome.Canceled, result.Outcome);
+      Assert.True(result.Unconfirmed);
+      Assert.Equal(new FeedbackMessage("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", FeedbackSeverity.Warning),
+         ShellFeedback.ForAction("retry-job", result));
+   }
+
+
+
+   /// <summary>An action whose wait had already ended before the request was made was never sent, and is said to be: there is no reason to give, and nothing to check.</summary>
+   [Fact]
+   public async Task ActionWhoseWaitHadAlreadyEnded_SaysNothingWasSent()
+   {
+      using CancellationTokenSource cancellation = new();
+      await cancellation.CancelAsync();
+      int sent = 0;
+      ServiceClient client = new(_ =>
+      {
+         sent++;
+         return Task.FromResult("A new job was created.");
+      }, new RecordingLog(), "QQQ");
 
       ServiceResult<string> result = await client.SendAsync(new PipeRequest("retry-job"), cancellation.Token);
 
+      Assert.Equal(0, sent);
       Assert.Equal(ServiceOutcome.Canceled, result.Outcome);
-      Assert.Equal("Result could not be confirmed", ShellFeedback.ForAction("retry-job", result).Title);
+      Assert.Equal(new FeedbackMessage("Request not sent", "Nothing was sent to the local service, so nothing was changed. Try again when the service can be reached.", FeedbackSeverity.Error),
+         ShellFeedback.ForAction("retry-job", result));
    }
 
 

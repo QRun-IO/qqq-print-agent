@@ -47,9 +47,10 @@ public sealed partial class MainWindow
 
    /// <summary>
    /// Sends one state-changing request to the service while the window is marked busy and shows the message
-   /// <see cref="ShellFeedback"/> gives for the result: a confirmation, the service's refusal, or "result could not be
-   /// confirmed" when no usable answer arrived, because the request may already have reached the server or the printer and
-   /// must not be blindly repeated. The list is refreshed afterwards either way.
+   /// <see cref="ShellFeedback"/> gives for the result: a confirmation, the service's refusal, "result could not be
+   /// confirmed" when the request left and no usable answer arrived, because it may already have reached the server or the
+   /// printer and must not be blindly repeated, or "request not sent" when it never left this computer. The list is
+   /// refreshed afterwards either way.
    /// </summary>
    private async Task RunActionAsync(PipeRequest request)
    {
