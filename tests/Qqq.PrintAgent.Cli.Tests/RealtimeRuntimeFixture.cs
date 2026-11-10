@@ -161,13 +161,9 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    internal async Task<Connection> ConnectAsync(bool loseSpoolAck = false, DeviceDesiredState? desiredState = null, bool restricted = false)
    {
       DeviceDesiredState desired = desiredState ?? new DeviceDesiredState(1, false, "CONNECTED");
-      WebSocket socket;
-      try
-      { socket = await Peer.AcceptAsync(_stopping.Token); }
-      catch(OperationCanceledException exception) when(_stopping.IsCancellationRequested) { throw new InvalidOperationException(Diagnostic("WebSocket handshake"), exception); }
+      (WebSocket socket, RealtimeEnvelope hello) = await AcceptAgentAsync();
       var connection = new Connection(socket, this, loseSpoolAck, _stopping.Token);
       _connections.Add(connection);
-      RealtimeEnvelope hello = await LoopbackWebSocketPeer.ReceiveAsync(socket, _stopping.Token);
       Assert.Equal("HELLO", hello.Type);
       LastHelloSettingsRevision = hello.Payload.GetProperty("lastSettingsRevision").GetInt64();
       LastHelloCapabilities = hello.Payload.GetProperty("capabilities").EnumerateArray().Select(item => item.GetString()!).ToArray();
@@ -181,6 +177,30 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
          return traffic ? Runtime.GetSnapshot().Connected : Runtime.GetTransportSnapshot().State is "CONNECTED";
       }, "initial realtime state synchronization");
       return connection;
+   }
+
+
+
+   /// <summary>
+   /// Accepts the agent's next live socket and reads its first message. An attempt the agent abandoned while the upgrade was
+   /// in flight (the service was restarted, or told to reconnect) is still in the listener's queue with nobody behind it; such
+   /// a socket fails before any message arrives, and the live attempt queued after it is taken instead.
+   /// </summary>
+   private async Task<(WebSocket Socket, RealtimeEnvelope Hello)> AcceptAgentAsync()
+   {
+      while(true)
+      {
+         WebSocket? socket = null;
+         try
+         {
+            socket = await Peer.AcceptAsync(_stopping.Token);
+            return (socket, await LoopbackWebSocketPeer.ReceiveAsync(socket, _stopping.Token));
+         }
+         catch(OperationCanceledException exception) when(_stopping.IsCancellationRequested)
+         { throw new InvalidOperationException(Diagnostic("WebSocket handshake"), exception); }
+         catch(Exception exception) when(exception is IOException or WebSocketException)
+         { socket?.Dispose(); }
+      }
    }
 
 
