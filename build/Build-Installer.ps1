@@ -188,7 +188,30 @@ if($CertificateThumbprint)
 }
 
 # WiX incremental inputs do not reliably invalidate a changed version/payload path.
-& dotnet build $installerProject --configuration Release -t:Rebuild '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$buildDirectory\" @brandInstallerArgs
+# WiX validates the MSI (ICE checks) through the Windows Installer service. A runner that logs on as a batch account cannot
+# open that service, so WiX fails every ICE action with WIX0217 ("The Windows Installer Service could not be accessed").
+# Validate whenever the service is reachable. Skip validation only when it is not, with a loud warning, and never for a
+# signed release build: that must be built on a host where validation works.
+$installerValidationArguments = @()
+try
+{
+   $installerService = Get-Service -Name msiserver -ErrorAction Stop
+   if($installerService.Status -ne 'Running')
+   {
+      $installerService.Start()
+      $installerService.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
+   }
+}
+catch
+{
+   if($CertificateThumbprint)
+   {
+      throw "The Windows Installer service is not reachable, so the MSI cannot be validated; refusing to build a signed release without validation. $($_.Exception.Message)"
+   }
+   Write-Warning "The Windows Installer service is not reachable from this session; building the MSI WITHOUT ICE validation (not a signed release build). $($_.Exception.Message)"
+   $installerValidationArguments = @('-p:SuppressValidation=true')
+}
+& dotnet build $installerProject --configuration Release -t:Rebuild '-p:RestoreLockedMode=true' "-p:ProductVersion=$ProductVersion" "-p:PayloadRoot=$payloadRoot" "-p:OutputPath=$buildDirectory\" @brandInstallerArgs @installerValidationArguments
 if($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
 $builtMsi = Join-Path $buildDirectory "$msiBaseName-$ProductVersion-x64.msi"
 if(-not (Test-Path -LiteralPath $builtMsi)) { throw 'MSI output was not produced.' }
