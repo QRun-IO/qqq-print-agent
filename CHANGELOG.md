@@ -42,7 +42,8 @@ Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the install
   only the service's reply and a successful enrollment writes nothing to standard error. A terminal that gives
   programs a pipe instead of a console (the default Git Bash window) is read as redirected input and may echo
   what is typed; an unattended caller whose console nobody types at must set the variable or redirect input.
-  White space around the code is dropped, whether it comes from the variable or standard input.
+  White space around the code and a leading byte-order mark are dropped, whether it comes from the variable or
+  standard input.
 - `service-status` and `snapshot` exit 1 when the service replies with `Error:`, as the other commands already
   did. The reply itself is still printed on standard output.
 

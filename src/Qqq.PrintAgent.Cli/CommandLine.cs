@@ -237,25 +237,36 @@ internal sealed class CommandLine(CommandLineHost host)
    /// Reads the one-time enrollment code from the environment, or else from standard input, so the code never appears in
    /// the command line or shell history. It is passed to the service and nowhere else: this class never prints it. With
    /// the variable or redirected input nothing is written, so standard error stays empty unless something fails.
-   /// Surrounding white space is dropped, because a code never has any and a shell can add it (cmd's "echo CODE | ..."
-   /// sends a trailing space).
+   /// What a shell adds around the code is dropped whichever way it arrives, and a source that holds nothing else counts
+   /// as holding no code.
    /// </summary>
    private string ReadEnrollmentCode()
    {
-      string? code = host.ReadEnvironmentVariable(EnrollmentCodeVariable);
-      if(string.IsNullOrWhiteSpace(code))
+      string code = WithoutShellAdditions(host.ReadEnvironmentVariable(EnrollmentCodeVariable));
+      if(code.Length == 0)
       {
          //////////////////////////////////////////////////////////////////////////////
          // redirected input is read silently. a prompt would be the only thing on   //
-         // standard error in a successful scripted enrollment, and Windows          //
-         // PowerShell turns any standard error output of a native program into an   //
-         // error, which with ErrorActionPreference Stop ends the script after the   //
-         // single-use code has already been spent                                   //
+         // standard error in a successful scripted enrollment. when a script        //
+         // redirects or captures standard error (2>&1, 2>file, the ISE, remoting),  //
+         // Windows PowerShell turns each line a native program writes there into an //
+         // error record, which with ErrorActionPreference Stop ends the script      //
+         // after the single-use code has already been spent                         //
          //////////////////////////////////////////////////////////////////////////////
-         code = host.IsInputRedirected() ? host.ReadLine() : PromptWithoutEcho();
+         code = WithoutShellAdditions(host.IsInputRedirected() ? host.ReadLine() : PromptWithoutEcho());
       }
-      return !string.IsNullOrWhiteSpace(code) ? code.Trim() : throw new InvalidOperationException("Enrollment code is required.");
+      return code.Length > 0 ? code : throw new InvalidOperationException("Enrollment code is required.");
    }
+
+
+
+   /// <summary>
+   /// Drops what a shell can put around a code that never has any of it: surrounding white space (cmd's "echo CODE | ..."
+   /// pipes a trailing space) and a leading byte-order mark (Windows PowerShell 5.1 puts one in front of piped text when
+   /// the console code page is UTF-8). The mark is not white space, so it is removed between two trims; left in, the
+   /// code would pass the blank check and the server would reject it as unknown. Nothing at all returns an empty string.
+   /// </summary>
+   private static string WithoutShellAdditions(string? text) => (text ?? "").Trim().TrimStart('\uFEFF').Trim();
 
 
 

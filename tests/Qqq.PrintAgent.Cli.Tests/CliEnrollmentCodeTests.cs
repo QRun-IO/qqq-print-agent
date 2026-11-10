@@ -64,7 +64,7 @@ public sealed class CliEnrollmentCodeTests
 
 
 
-   /// <summary>A scripted enrollment that succeeds writes nothing at all to standard error, whether the code came from the variable or was piped in. Windows PowerShell treats any standard error output of a native program as an error, and with ErrorActionPreference set to Stop that would end the script after the single-use code was already spent.</summary>
+   /// <summary>A scripted enrollment that succeeds writes nothing at all to standard error, whether the code came from the variable or was piped in. When a script redirects or captures standard error (2>&amp;1, a file, the ISE, remoting), Windows PowerShell turns each line a native program writes there into an error record, and with ErrorActionPreference set to Stop that would end the script after the single-use code was already spent.</summary>
    [Theory]
    [InlineData("variable")]
    [InlineData("piped")]
@@ -170,12 +170,16 @@ public sealed class CliEnrollmentCodeTests
 
 
 
-   /// <summary>White space around the code is dropped, whichever way it arrives, and white space inside it is kept. A code never begins or ends with white space, but a shell can add some: cmd's "echo CODE | ..." pipes a trailing space.</summary>
+   /// <summary>What a shell puts around the code is dropped, whichever way it arrives, and white space inside it is kept. A code never begins or ends with white space or a byte-order mark, but a shell can add them: cmd's "echo CODE | ..." pipes a trailing space, and Windows PowerShell 5.1 with a UTF-8 console code page pipes a leading byte-order mark, which is not white space and would otherwise reach the server as part of the code.</summary>
    [Theory]
    [InlineData("variable", "  synthetic-code-4471 ", "synthetic-code-4471")]
    [InlineData("piped", "synthetic-code-4471 ", "synthetic-code-4471")]
    [InlineData("piped", "\tsynthetic code 4471\t", "synthetic code 4471")]
    [InlineData("typed", " synthetic-code-4471  ", "synthetic-code-4471")]
+   [InlineData("piped", "\uFEFFsynthetic-code-4471", "synthetic-code-4471")]
+   [InlineData("piped", " \uFEFF synthetic-code-4471 ", "synthetic-code-4471")]
+   [InlineData("variable", "\uFEFFsynthetic-code-4471", "synthetic-code-4471")]
+   [InlineData("typed", "\uFEFFsynthetic-code-4471", "synthetic-code-4471")]
    public async Task WhiteSpaceAroundTheCode_IsDropped(string source, string given, string sent)
    {
       using CliFixture cli = new();
@@ -189,13 +193,17 @@ public sealed class CliEnrollmentCodeTests
 
 
 
-   /// <summary>When no code is available, enrollment fails with one line on standard error that says why, exit code 1, nothing on standard output and no request to the service. With redirected input (at its end, or holding a blank line) that line is all standard error gets; at a console (only Enter or spaces pressed) it follows the ended prompt line.</summary>
+   /// <summary>When no code is available, enrollment fails with one line on standard error that says why, exit code 1, nothing on standard output and no request to the service. With redirected input (at its end, or holding a blank line) that line is all standard error gets; at a console (only Enter or spaces pressed) it follows the ended prompt line. A source that holds only a byte-order mark, with or without white space, holds no code either: a mark alone is never sent as a code.</summary>
    [Theory]
    [InlineData("piped", null, "")]
    [InlineData("piped", "", "")]
    [InlineData("piped", "  ", "")]
    [InlineData("typed", "", Prompt)]
    [InlineData("typed", "   ", Prompt)]
+   [InlineData("piped", "\uFEFF", "")]
+   [InlineData("piped", " \uFEFF  ", "")]
+   [InlineData("variable", "\uFEFF", "")]
+   [InlineData("typed", "\uFEFF ", Prompt)]
    public async Task NoCodeAtAll_FailsWithoutContactingTheService(string source, string? given, string prompt)
    {
       using CliFixture cli = new();
