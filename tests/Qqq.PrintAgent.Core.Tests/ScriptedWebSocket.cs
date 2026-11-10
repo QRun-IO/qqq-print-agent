@@ -34,6 +34,11 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
+   /// <summary>Called with every frame the channel sent, after it is recorded; a test whose server answers by itself uses it to deliver the reply.</summary>
+   internal Func<JsonElement, Task>? Sent { get; set; }
+
+
+
    /// <summary>How many times the channel aborted the socket.</summary>
    internal int Aborts => Volatile.Read(ref _aborts);
 
@@ -175,8 +180,9 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
    /// <summary>
-   /// Runs the test's hook, then records the frame the channel sent. A socket that has ended, before the send or while
-   /// the hook held it, accepts nothing: the send fails as it does on the platform socket.
+   /// Runs the test's hook, then records the frame the channel sent and hands it to the test's answering hook. A socket
+   /// that has ended, before the send or while the first hook held it, accepts nothing: the send fails as it does on the
+   /// platform socket.
    /// </summary>
    public override async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
    {
@@ -186,7 +192,13 @@ internal sealed class ScriptedWebSocket : WebSocket
       ThrowIfEnded();
       Assert.Equal(WebSocketMessageType.Text, messageType);
       Assert.True(endOfMessage);
-      Assert.True(_sent.Writer.TryWrite(Encoding.UTF8.GetString(buffer)));
+      string frame = Encoding.UTF8.GetString(buffer);
+      Assert.True(_sent.Writer.TryWrite(frame));
+      if(Sent is not null)
+      {
+         using var document = JsonDocument.Parse(frame);
+         await Sent(document.RootElement.Clone());
+      }
    }
 
 

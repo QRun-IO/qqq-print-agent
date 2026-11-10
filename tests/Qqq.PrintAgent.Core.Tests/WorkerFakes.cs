@@ -14,7 +14,9 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>
 /// A hand-written fake of the device-facing print API for worker tests. It hands out the jobs a test offers (as raw
 /// JSON, so a malformed claim can be offered too), serves one document, and records every event, heartbeat and
-/// inventory it receives. A hook runs before each answer so a test can fail a request or move a clock at that point.
+/// inventory it receives. Job events reach it over HTTP or, from a worker composed as the service composes one, as
+/// realtime frames the test harness passes on. A hook runs before each answer so a test can fail a request, refuse
+/// an event or move a clock at that point.
 /// </summary>
 internal sealed class FakePrintServer : HttpMessageHandler
 {
@@ -57,6 +59,11 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 
+   /// <summary>Everything that arrived and was not a claim, a document request, a job event, a heartbeat or an inventory: the path of an HTTP request, or "frame" and the type of a realtime frame.</summary>
+   internal List<string> Unexpected { get; } = [];
+
+
+
    /// <summary>Runs before each answer with the kind of request ("claim", "content", "events", "heartbeat", "printers" or "other"); it may throw to fail that request.</summary>
    internal Func<string, CancellationToken, Task>? Arriving { get; set; }
 
@@ -82,6 +89,20 @@ internal sealed class FakePrintServer : HttpMessageHandler
    {
       _claims.Enqueue(body);
       return this;
+   }
+
+
+
+   /// <summary>
+   /// Takes one job event that arrived as a realtime frame. The hook runs first, as it does for a request, and the
+   /// event is recorded only when the hook lets it through; a hook that throws <see cref="HttpRequestException"/>
+   /// refuses the event, and the harness tells the worker so.
+   /// </summary>
+   internal async Task ReceiveEventAsync(string jobId, PrintEvent printEvent)
+   {
+      if(Arriving is not null)
+      { await Arriving("events", CancellationToken.None); }
+      Events.Add((jobId, printEvent));
    }
 
 
@@ -114,6 +135,9 @@ internal sealed class FakePrintServer : HttpMessageHandler
             break;
          case "printers":
             Inventories++;
+            break;
+         default:
+            Unexpected.Add(path);
             break;
       }
       return Json("{}");

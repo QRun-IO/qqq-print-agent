@@ -96,12 +96,10 @@ public sealed class ClaimedJobContractTests
       Assert.Equal(lowercase.ContentSha256.ToLowerInvariant(), lowercase.ContentSha256);
       PrintJob capitals = lowercase with { ContentSha256 = lowercase.ContentSha256.ToUpperInvariant() };
       Assert.NotEqual(lowercase.ContentSha256, capitals.ContentSha256, StringComparer.Ordinal);
-      using var server = new FakePrintServer();
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(capitals, documentMatches ? document : [3, 2, 1]);
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var printer = new FakePrinterBackend();
-      await new PrintWorker(api, printer, journal).RunOnceAsync();
+      Assert.True(await harness.RunOnceAsync());
       Assert.Equal(capitals.ContentSha256, journal.Jobs["job-1"].Job.ContentSha256);
       Assert.Equal(outcome, journal.GetState("job-1"));
       Assert.Equal(documentMatches ? 1 : 0, printer.Submissions);
@@ -369,25 +367,22 @@ public sealed class ClaimedJobContractTests
    public async Task OverDeepJobIsRefusedOnceAndOnlyAnUnparseableResponseStopsTheLane()
    {
       byte[] document = [1, 2, 3];
-      using var server = new FakePrintServer();
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(ClaimWithNestedOption(65)).Offer(FakePrintServer.Job(document, "job-2"), document).OfferRaw(ClaimWithNestedOption(1025).Replace("job-1", "job-3", StringComparison.Ordinal));
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var printer = new FakePrinterBackend();
-      var worker = new PrintWorker(api, printer, journal, options: new PrintWorkerOptions { RecoverIncomplete = false, SynchronizeInventory = false });
 
-      Assert.True(await worker.RunOnceAsync());
+      Assert.True(await harness.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Equal("The claimed job is nested deeper than the agent reads. No bytes were submitted.", journal.Last("job-1").Message);
       Assert.Equal(new[] { ("job-1", "RECEIVED"), ("job-1", "FAILED") }, server.Events.Select(entry => (entry.JobId, entry.Event.Status)));
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
 
-      Assert.True(await worker.RunOnceAsync());
+      Assert.True(await harness.RunOnceAsync());
       Assert.Equal("SPOOLED", journal.GetState("job-2"));
       Assert.Equal(1, printer.Submissions);
 
-      PrintingProtocolException unparseable = await Assert.ThrowsAsync<PrintingProtocolException>(() => worker.RunOnceAsync());
+      PrintingProtocolException unparseable = await Assert.ThrowsAsync<PrintingProtocolException>(() => harness.RunOnceAsync());
       Assert.Equal("The claim response is not valid JSON.", unparseable.Message);
       Assert.Null(unparseable.RejectedJob);
       Assert.Null(journal.GetState("job-3"));
@@ -497,24 +492,21 @@ public sealed class ClaimedJobContractTests
    public async Task JobWithARepeatedOptionIsRefusedOnceAndTheNextJobIsClaimed()
    {
       byte[] document = [1, 2, 3];
-      using var server = new FakePrintServer();
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(ValidJob()).Replace("\"copies\":1", "\"copies\":1,\"Copies\":2", StringComparison.Ordinal)).Offer(FakePrintServer.Job(document, "job-2"), document);
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var printer = new FakePrinterBackend();
-      var worker = new PrintWorker(api, printer, journal, options: new PrintWorkerOptions { RecoverIncomplete = false, SynchronizeInventory = false });
 
-      Assert.True(await worker.RunOnceAsync());
+      Assert.True(await harness.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Equal("The claimed job repeats a member the agent reads. No bytes were submitted.", journal.Last("job-1").Message);
       Assert.Equal(new[] { ("job-1", "RECEIVED"), ("job-1", "FAILED") }, server.Events.Select(entry => (entry.JobId, entry.Event.Status)));
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
 
-      Assert.True(await worker.RunOnceAsync());
+      Assert.True(await harness.RunOnceAsync());
       Assert.Equal("SPOOLED", journal.GetState("job-2"));
       Assert.Equal(1, printer.Submissions);
-      Assert.False(await worker.RunOnceAsync());
+      Assert.False(await harness.RunOnceAsync());
       Assert.Equal(3, server.Claims);
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Equal(2, server.Events.Count(entry => string.Equals(entry.JobId, "job-1", StringComparison.Ordinal)));
@@ -525,7 +517,8 @@ public sealed class ClaimedJobContractTests
    /// <summary>
    /// A claimed job with no options, the shape that used to reach the worker and fail on a null, is reported to the server
    /// as received and then FAILED with the reason, shown in history with its title and printer, and never downloaded or
-   /// printed. The next job in the queue is then claimed and spooled, so one bad job cannot block a device.
+   /// printed. The pass counts as having processed a job, and the next one claims and spools the job behind it, so one
+   /// bad job cannot block a device.
    /// </summary>
    [Fact]
    public async Task WorkerReportsARefusedJobAsFailedAndKeepsWorking()
@@ -533,14 +526,11 @@ public sealed class ClaimedJobContractTests
       byte[] document = [1, 2, 3];
       JsonObject malformed = ValidJob();
       malformed.Remove("options");
-      using var server = new FakePrintServer();
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(malformed)).Offer(FakePrintServer.Job(document, "job-2"), document);
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var printer = new FakePrinterBackend();
-      var worker = new PrintWorker(api, printer, journal);
 
-      Assert.False(await worker.RunOnceAsync());
+      Assert.True(await harness.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Equal("The claimed job has no print options. No bytes were submitted.", journal.Last("job-1").Message);
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, server.States, StringComparer.Ordinal);
@@ -550,27 +540,24 @@ public sealed class ClaimedJobContractTests
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
 
-      Assert.True(await worker.RunOnceAsync());
+      Assert.True(await harness.RunOnceAsync());
       Assert.Equal("SPOOLED", journal.GetState("job-2"));
       Assert.Equal(1, printer.Submissions);
    }
 
 
 
-   /// <summary>A realtime lane, which drains until the queue is empty, counts a refused job as processed, so it goes on to claim the job behind it instead of stopping the wave.</summary>
+   /// <summary>A lane, which drains until the queue is empty, counts a refused job as processed, so it goes on to claim the job behind it instead of stopping the wave; a pass that then finds the queue empty ends it.</summary>
    [Fact]
    public async Task LaneKeepsDrainingAfterARefusedJob()
    {
       JsonObject malformed = ValidJob();
       malformed["contentLength"] = 0;
-      using var server = new FakePrintServer();
-      server.OfferRaw(Claim(malformed));
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var worker = new PrintWorker(api, new FakePrinterBackend(), journal, options: new PrintWorkerOptions { RecoverIncomplete = false, SynchronizeInventory = false });
-      Assert.True(await worker.RunOnceAsync());
-      Assert.Equal("FAILED", journal.GetState("job-1"));
-      Assert.False(await worker.RunOnceAsync());
+      await using var harness = new WorkerHarness();
+      harness.Server.OfferRaw(Claim(malformed));
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Equal("FAILED", harness.Journal.GetState("job-1"));
+      Assert.False(await harness.RunOnceAsync());
    }
 
 
@@ -594,16 +581,13 @@ public sealed class ClaimedJobContractTests
       JsonObject malformed = ValidJob();
       malformed.Remove("options");
       malformed["title"] = "Replayed title";
-      using var server = new FakePrintServer();
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(malformed));
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
       journal.TrackJob(FakePrintServer.Job([1], "job-1") with { Title = "Original title" }, "Original printer");
       journal.Record("job-1", new PrintEvent("earlier", state));
       journal.Acknowledge("earlier");
-      var printer = new FakePrinterBackend();
-      var lines = new List<string>();
-      Assert.False(await new PrintWorker(api, printer, journal, lines.Add, options: new PrintWorkerOptions { RecoverIncomplete = false }).RunOnceAsync());
+      Assert.False(await harness.RunOnceAsync());
       Assert.Equal(new[] { state }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Empty(journal.Pending());
       Assert.Empty(server.Events);
@@ -612,7 +596,7 @@ public sealed class ClaimedJobContractTests
       Assert.Equal("Original printer", journal.Jobs["job-1"].PrinterName);
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
-      Assert.Equal($"job-1: offered again in a form that breaks the contract while already recorded as {state}; nothing was recorded or reported for it. The claimed job has no print options.", Assert.Single(lines));
+      Assert.Equal($"job-1: offered again in a form that breaks the contract while already recorded as {state}; nothing was recorded or reported for it. The claimed job has no print options.", Assert.Single(harness.Log));
    }
 
 
@@ -623,12 +607,10 @@ public sealed class ClaimedJobContractTests
    {
       JsonObject malformed = ValidJob();
       malformed["jobId"] = "not a safe identifier";
-      using var server = new FakePrintServer();
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(malformed));
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var printer = new FakePrinterBackend();
-      await Assert.ThrowsAsync<PrintingProtocolException>(() => new PrintWorker(api, printer, journal).RunOnceAsync());
+      await Assert.ThrowsAsync<PrintingProtocolException>(() => harness.RunOnceAsync());
       Assert.Empty(journal.Jobs);
       Assert.Empty(journal.Pending());
       Assert.Empty(server.Events);
@@ -637,26 +619,21 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>When the refusal cannot be delivered because the server stopped answering, both events stay in the journal and are delivered, in order, by the next run; the job is not offered to the printer in between.</summary>
+   /// <summary>When the refusal cannot be delivered because the server does not accept the events, both stay in the journal and are delivered, in order, by the next run; the job is not offered to the printer in between.</summary>
    [Fact]
    public async Task UndeliveredRefusalStaysInTheOutboxAndIsDeliveredLater()
    {
       JsonObject malformed = ValidJob();
       malformed.Remove("options");
       bool down = true;
-      using var server = new FakePrintServer
-      {
-         Arriving = (kind, _) => down && string.Equals(kind, "events", StringComparison.Ordinal) ? throw new HttpRequestException("Synthetic outage.") : Task.CompletedTask,
-      };
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      server.Arriving = (kind, _) => down && string.Equals(kind, "events", StringComparison.Ordinal) ? throw new HttpRequestException("Synthetic refusal.") : Task.CompletedTask;
       server.OfferRaw(Claim(malformed));
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var printer = new FakePrinterBackend();
-      var worker = new PrintWorker(api, printer, journal);
-      await Assert.ThrowsAsync<HttpRequestException>(() => worker.RunOnceAsync());
+      await Assert.ThrowsAsync<HttpRequestException>(() => harness.RunOnceAsync());
       Assert.Equal(2, journal.Pending().Count);
       down = false;
-      Assert.False(await worker.RunOnceAsync());
+      Assert.False(await harness.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, server.States, StringComparer.Ordinal);
       Assert.Empty(journal.Pending());
       Assert.Equal(0, printer.Submissions);
@@ -669,17 +646,15 @@ public sealed class ClaimedJobContractTests
    public async Task JobFinalizedWhileItsReceiptWasInFlightIsNotSubmitted()
    {
       byte[] document = [1, 2, 3];
-      using var server = new FakePrintServer();
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(FakePrintServer.Job(document), document);
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
       journal.Recorded = (jobId, printEvent) =>
       {
          if(string.Equals(printEvent.Status, "RECEIVED", StringComparison.Ordinal))
          { journal.Record(jobId, new PrintEvent("finalized-elsewhere", "FAILED", "Cancelled by the operator.")); }
       };
-      var printer = new FakePrinterBackend();
-      Assert.False(await new PrintWorker(api, printer, journal).RunOnceAsync());
+      Assert.False(await harness.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);

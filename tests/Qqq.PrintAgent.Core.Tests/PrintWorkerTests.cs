@@ -17,61 +17,69 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// </summary>
 public sealed class PrintWorkerTests
 {
+   private static readonly byte[] Document = Encoding.UTF8.GetBytes("^XA^FO10,10^FDQQQ test^FS^XZ");
+
+
+
    /// <summary>
    /// If the printer's selected media changes between claiming and submission, either as seen by inventory or by the native
-   /// layer, the job fails without spooling, and a refusal the native layer made before printing is reported as FAILED rather
-   /// than the uncertain state. An unchanged printer spools exactly once. Inventory drift also stops before SUBMITTING is recorded.
+   /// layer, the job fails without a spooler receipt, and a refusal the native layer made before printing is reported as
+   /// FAILED rather than the uncertain state. An unchanged printer spools exactly once. Inventory drift stops before
+   /// SUBMITTING is recorded, so the native layer is never reached.
    /// </summary>
    [Theory]
    [InlineData(true, false, "FAILED", 0)]
-   [InlineData(false, true, "FAILED", 0)]
+   [InlineData(false, true, "FAILED", 1)]
    [InlineData(false, false, "SPOOLED", 1)]
-   public async Task SelectedMediaDriftCannotSpoolAndKnownNativeRefusalIsNotUncertain(bool discoveryDrift, bool nativeDrift, string expected, int spoolCount)
+   public async Task SelectedMediaDriftCannotSpoolAndKnownNativeRefusalIsNotUncertain(bool discoveryDrift, bool nativeDrift, string expected, int reachedNative)
    {
-      byte[] content = [1];
       PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
-      PrintOptions options = new(MediaProfile: new(profile.Id, profile.Revision));
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), 1, options, "", "CLAIMED");
-      using FixtureHandler handler = new(job, content);
-      using PrintApiClient api = new("http://localhost", "fixture", handler);
-      MemoryJournal journal = new();
-      FakePrinter printer = new(profile: profile, discoveryDrift: discoveryDrift, nativeDrift: nativeDrift);
-      await new PrintWorker(api, printer, journal).RunOnceAsync();
-      Assert.Equal(spoolCount, printer.PrintCount);
-      Assert.Equal(expected, journal.GetState(job.JobId));
-      if(discoveryDrift)
-      { Assert.DoesNotContain("SUBMITTING", handler.Events, StringComparer.Ordinal); }
+      await using var harness = new WorkerHarness();
+      FakeFilePrinterBackend printer = harness.Printer;
+      printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile] };
+      printer.Discovering = () =>
+      {
+         if(discoveryDrift && printer.Discoveries > 1)
+         { printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile with { Revision = new string('b', 64) }] }; }
+      };
+      if(nativeDrift)
+      { printer.PrintingFile = (_, _, _) => throw new PrinterMediaMismatchException("Fixture default changed before native submission."); }
+      harness.Server.Offer(FakePrintServer.Job(Document, options: new PrintOptions(MediaProfile: new(profile.Id, profile.Revision))), Document);
+
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Equal(reachedNative, printer.Submissions);
+      Assert.Equal(expected, harness.Journal.GetState("job-1"));
+      bool spooled = string.Equals(expected, "SPOOLED", StringComparison.Ordinal);
+      Assert.Equal(spooled ? "spool-file-1" : null, harness.Journal.Last("job-1").SpoolerJobId);
+      Assert.Equal(discoveryDrift ? ["RECEIVED", "FAILED"] : new[] { "RECEIVED", "SUBMITTING", expected }, harness.Server.States, StringComparer.Ordinal);
    }
 
 
 
    /// <summary>
-   /// While dispatch is paused (or the device is disconnected) the worker still delivers any pending receipt and, only when
-   /// synchronizing is allowed, sends inventory and a heartbeat. It must not claim, so the server never hands out work to a
-   /// device that has been told to stop.
+   /// While dispatch is paused, whether or not the connection is synchronized, the worker still delivers any pending
+   /// receipt. It must not claim, so the server never hands out work to a device that has been told to stop, and it
+   /// sends nothing else: inventory and heartbeats are the runtime's to send.
    /// </summary>
    [Theory]
    [InlineData(true)]
    [InlineData(false)]
    public async Task PausedOrDisconnectedDrainsReceiptsWithoutClaiming(bool synchronize)
    {
-      using FixtureHandler handler = new(null, []);
-      using PrintApiClient api = new("http://localhost", "fixture", handler);
-      MemoryJournal journal = new();
-      journal.Record("finished", new PrintEvent("receipt", "SPOOLED", SpoolerJobId: "1"));
-      FakePrinter printer = new();
-      Assert.False(await new PrintWorker(api, printer, journal, canDispatch: () => false, canSynchronize: () => synchronize).RunOnceAsync());
-      Assert.Equal(0, handler.Claims);
-      Assert.Equal(synchronize ? 1 : 0, handler.Inventories);
-      Assert.Equal(synchronize ? 1 : 0, handler.Heartbeats);
-      Assert.Empty(journal.Pending());
-      Assert.Equal("SPOOLED", Assert.Single(handler.Events));
-      Assert.Equal(0, printer.PrintCount);
+      await using var harness = new WorkerHarness { CanDispatch = () => false, CanSynchronize = () => synchronize };
+      harness.Server.Offer(FakePrintServer.Job(Document), Document);
+      harness.Journal.Record("finished", new PrintEvent("receipt", "SPOOLED", SpoolerJobId: "1"));
+      Assert.False(await harness.RunOnceAsync());
+      Assert.Equal(0, harness.Server.Claims);
+      Assert.Empty(harness.Journal.Pending());
+      Assert.Equal("SPOOLED", Assert.Single(harness.Server.States));
+      Assert.Empty(harness.Server.Unexpected);
+      Assert.Equal(0, harness.Printer.Submissions);
    }
 
 
 
-   /// <summary>A server that offers a job the journal already holds in a terminal state (spooled, completed, failed or unknown) must not cause another print and must not generate new receipts; this is the protection against duplicate output after a redelivery.</summary>
+   /// <summary>A server that offers a job the journal already holds in a terminal state (spooled, completed, failed or unknown) must not cause another download or print and must not generate new receipts; this is the protection against duplicate output after a redelivery.</summary>
    [Theory]
    [InlineData("SPOOLED")]
    [InlineData("SPOOLER_COMPLETED")]
@@ -79,39 +87,37 @@ public sealed class PrintWorkerTests
    [InlineData("OUTCOME_UNKNOWN")]
    public async Task RunOnce_RetainedTerminalStateNeverResubmits(string state)
    {
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", new string('0', 64), 1, new PrintOptions(), "", "CLAIMED");
-      using FixtureHandler handler = new(job, [1]);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      MemoryJournal journal = new();
-      journal.Record("job1", new PrintEvent("previous", state));
-      journal.Acknowledge("previous");
-      FakePrinter printer = new();
-      await new PrintWorker(api, printer, journal).RunOnceAsync();
-      Assert.Equal(0, printer.PrintCount);
-      Assert.Empty(handler.Events);
-      Assert.Equal(state, journal.GetState("job1"));
+      await using var harness = new WorkerHarness();
+      harness.Server.Offer(FakePrintServer.Job(Document), Document);
+      harness.Journal.Record("job-1", new PrintEvent("previous", state));
+      harness.Journal.Acknowledge("previous");
+      Assert.False(await harness.RunOnceAsync());
+      Assert.Equal(1, harness.Server.Claims);
+      Assert.Equal(0, harness.Server.Downloads);
+      Assert.Equal(0, harness.Printer.Submissions);
+      Assert.Empty(harness.Server.Events);
+      Assert.Equal(new[] { state }, harness.Journal.StatesOf("job-1"), StringComparer.Ordinal);
    }
 
 
 
-   /// <summary>The normal path: a job whose bytes match its hash is printed once and receipted RECEIVED, SUBMITTING, SPOOLED in order; the next poll finds nothing, and the journal keeps the job and printer name.</summary>
+   /// <summary>The normal path: a job whose bytes match its hash is staged, printed once from the staged file and receipted RECEIVED, SUBMITTING, SPOOLED in order; the next pass finds nothing, the journal keeps the job and printer name, and nothing is left in the staging folder.</summary>
    [Fact]
    public async Task RunOnce_SubmitsVerifiedContentAndDoesNotDuplicate()
    {
-      byte[] content = Encoding.UTF8.GetBytes("^XA^FO10,10^FDQQQ test^FS^XZ");
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), content.Length, new PrintOptions(), "2026-10-29T00:00:00Z", "CLAIMED");
-      using FixtureHandler handler = new(job, content);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      MemoryJournal journal = new();
-      FakePrinter printer = new();
-      PrintWorker worker = new(api, printer, journal);
-      Assert.True(await worker.RunOnceAsync());
-      Assert.False(await worker.RunOnceAsync());
-      Assert.Equal(1, printer.PrintCount);
-      Assert.Equal("SPOOLED", journal.GetState("job1"));
-      Assert.Equal(job, journal.Jobs["job1"].Job);
-      Assert.Equal("Test", journal.Jobs["job1"].PrinterName);
-      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "SPOOLED" }, handler.Events, StringComparer.Ordinal);
+      PrintJob job = FakePrintServer.Job(Document);
+      await using var harness = new WorkerHarness();
+      harness.Server.Offer(job, Document);
+      Assert.True(await harness.RunOnceAsync());
+      Assert.False(await harness.RunOnceAsync());
+      Assert.Equal(1, harness.Printer.Submissions);
+      Assert.Equal(Document, Assert.Single(harness.Printer.Files).Content);
+      Assert.Equal("SPOOLED", harness.Journal.GetState("job-1"));
+      Assert.Equal(job, harness.Journal.Jobs["job-1"].Job);
+      Assert.Equal("Queue one", harness.Journal.Jobs["job-1"].PrinterName);
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "SPOOLED" }, harness.Server.States, StringComparer.Ordinal);
+      Assert.Empty(harness.Server.Unexpected);
+      Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
    }
 
 
@@ -124,19 +130,16 @@ public sealed class PrintWorkerTests
    public async Task RunOnce_LogsOnePhaseTimingLinePerJobWithoutDocumentContent()
    {
       byte[] content = Encoding.UTF8.GetBytes("^XA^FO10,10^FDprivate label text^FS^XZ");
-      PrintJob job = new("timing-job", "printer1", "Test", "ZPL", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), content.Length, new PrintOptions(), "2026-10-29T00:00:00Z", "CLAIMED");
-      using FixtureHandler handler = new(job, content);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      List<string> lines = [];
-      PrintWorker worker = new(api, new FakePrinter(), new MemoryJournal(), lines.Add);
-      Assert.True(await worker.RunOnceAsync());
-      string timing = Assert.Single(lines, line => line.Contains(": timing ", StringComparison.Ordinal));
+      await using var harness = new WorkerHarness();
+      harness.Server.Offer(FakePrintServer.Job(content, "timing-job"), content);
+      Assert.True(await harness.RunOnceAsync());
+      string timing = Assert.Single(harness.Log, line => line.Contains(": timing ", StringComparison.Ordinal));
       Assert.StartsWith("timing-job: timing ", timing, StringComparison.Ordinal);
       foreach(string phase in new[] { "inventory=", "claim=", "download=", "revalidate=", "gate=", "submit=" })
       {
          Assert.Contains(phase, timing, StringComparison.Ordinal);
       }
-      Assert.DoesNotContain(lines, line => line.Contains("private label text", StringComparison.Ordinal));
+      Assert.DoesNotContain(harness.Log, line => line.Contains("private label text", StringComparison.Ordinal));
    }
 
 
@@ -144,20 +147,17 @@ public sealed class PrintWorkerTests
    /// <summary>The receipt records the operator's friendly printer name when one is set and falls back to the queue name otherwise, while the job's printer id used for dispatch stays unchanged.</summary>
    [Theory]
    [InlineData("Dispatch labels", "Dispatch labels")]
-   [InlineData("", "Test")]
-   [InlineData(null, "Test")]
+   [InlineData("", "Queue one")]
+   [InlineData(null, "Queue one")]
    public async Task ReceiptCapturesFriendlyNameWithoutChangingDispatchIdentity(string? displayName, string expected)
    {
-      byte[] content = [1];
-      PrintJob job = new("named-job", "printer1", "Test", "ZPL", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), 1, new PrintOptions(), "2026-01-01T00:00:00Z", "CLAIMED");
-      using FixtureHandler handler = new(job, content);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      MemoryJournal journal = new();
-      FakePrinter printer = new(displayName);
-      await new PrintWorker(api, printer, journal).RunOnceAsync();
-      Assert.Equal(expected, journal.Jobs[job.JobId].PrinterName);
-      Assert.Equal("printer1", journal.Jobs[job.JobId].Job.PrinterId);
-      Assert.Equal(1, printer.PrintCount);
+      await using var harness = new WorkerHarness();
+      harness.Printer.Printers[0] = harness.Printer.Printers[0] with { DisplayName = displayName };
+      harness.Server.Offer(FakePrintServer.Job(Document, "named-job"), Document);
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Equal(expected, harness.Journal.Jobs["named-job"].PrinterName);
+      Assert.Equal("printer1", harness.Journal.Jobs["named-job"].Job.PrinterId);
+      Assert.Equal(1, harness.Printer.Submissions);
    }
 
 
@@ -223,18 +223,46 @@ public sealed class PrintWorkerTests
 
 
 
-   /// <summary>Content whose hash does not match the claim is never sent to the printer; the job is marked FAILED instead.</summary>
+   /// <summary>Content whose hash does not match the claim is never sent to the printer; the job is marked FAILED instead, and the partial file is gone from the staging folder.</summary>
    [Fact]
    public async Task RunOnce_BadHashNeverSubmits()
    {
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", new string('0', 64), 1, new PrintOptions(), "", "CLAIMED");
-      using FixtureHandler handler = new(job, [1]);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      MemoryJournal journal = new();
-      FakePrinter printer = new();
-      await new PrintWorker(api, printer, journal).RunOnceAsync();
-      Assert.Equal(0, printer.PrintCount);
-      Assert.Equal("FAILED", journal.GetState("job1"));
+      await using var harness = new WorkerHarness();
+      harness.Server.Offer(FakePrintServer.Job(Document) with { ContentSha256 = new string('0', 64) }, Document);
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Equal(1, harness.Server.Downloads);
+      Assert.Equal(0, harness.Printer.Submissions);
+      Assert.Equal("FAILED", harness.Journal.GetState("job-1"));
+      Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
+   }
+
+
+
+   /// <summary>
+   /// Events a previous run recorded and never delivered go out first, in the order they were recorded, before the
+   /// worker asks for work: the two receipts of an interrupted job and the outcome the runtime's recovery recorded for
+   /// it reach the server as RECEIVED, SUBMITTING, OUTCOME_UNKNOWN, so its history stays in the sequence things
+   /// happened. The job is not printed, and the claim that follows finds all three already delivered.
+   /// </summary>
+   [Fact]
+   public async Task EventsLeftFromAPreviousRunAreDeliveredInRecordedOrderBeforeAnyClaim()
+   {
+      await using var harness = new WorkerHarness();
+      harness.Journal.Record("interrupted", new PrintEvent("received", "RECEIVED"));
+      harness.Journal.Record("interrupted", new PrintEvent("submitting", "SUBMITTING"));
+      harness.Journal.Record("interrupted", new PrintEvent("recovered", "OUTCOME_UNKNOWN", "Agent stopped during native submission; inspect the printer before retrying."));
+      int deliveredBeforeTheClaim = -1;
+      harness.Server.Arriving = (kind, _) =>
+      {
+         if(string.Equals(kind, "claim", StringComparison.Ordinal))
+         { deliveredBeforeTheClaim = harness.Server.Events.Count; }
+         return Task.CompletedTask;
+      };
+      Assert.False(await harness.RunOnceAsync());
+      Assert.Equal(new[] { "received", "submitting", "recovered" }, harness.Server.Events.Select(entry => entry.Event.EventId), StringComparer.Ordinal);
+      Assert.Equal(3, deliveredBeforeTheClaim);
+      Assert.Empty(harness.Journal.Pending());
+      Assert.Equal(0, harness.Printer.Submissions);
    }
 
 

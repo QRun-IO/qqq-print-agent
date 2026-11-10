@@ -240,28 +240,24 @@ public sealed class InjectedClockTests
    {
       var time = new ManualTimeProvider();
       byte[] document = [1, 2, 3];
-      using var server = new FakePrintServer
-      {
-         Arriving = (kind, _) =>
-         {
-            time.Advance(TimeSpan.FromMilliseconds(kind switch { "claim" => 7, "content" => 11, "events" => 2, _ => 0 }));
-            return Task.CompletedTask;
-         },
-      };
-      server.Offer(FakePrintServer.Job(document), document);
-      using var api = new PrintApiClient("http://localhost", "synthetic-device-token", server);
-      var printer = new FakePrinterBackend
+      var printer = new FakeFilePrinterBackend
       {
          Discovering = () => time.Advance(TimeSpan.FromMilliseconds(5)),
-         Printing = (_, _) =>
+         PrintingFile = (_, _, _) =>
          {
             time.Advance(TimeSpan.FromMilliseconds(13));
             return Task.FromResult("spool-1");
          },
       };
-      var lines = new List<string>();
-      Assert.True(await new PrintWorker(api, printer, new RecordingJournal(), lines.Add, options: new PrintWorkerOptions { TimeProvider = time }).RunOnceAsync());
-      Assert.Contains("job-1: timing inventory=5ms claim=9ms download=11ms revalidate=5ms gate=2ms submit=13ms", lines, StringComparer.Ordinal);
+      await using var harness = new WorkerHarness(time) { Printer = printer };
+      harness.Server.Arriving = (kind, _) =>
+      {
+         time.Advance(TimeSpan.FromMilliseconds(kind switch { "claim" => 7, "content" => 11, "events" => 2, _ => 0 }));
+         return Task.CompletedTask;
+      };
+      harness.Server.Offer(FakePrintServer.Job(document), document);
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Contains("job-1: timing inventory=5ms claim=9ms download=11ms revalidate=5ms gate=2ms submit=13ms", harness.Log, StringComparer.Ordinal);
    }
 
 
