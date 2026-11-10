@@ -149,10 +149,10 @@ public sealed class ServiceClientOperationsTests
 
 
 
-   /// <summary>Enrollment succeeds only on the service's "Enrolled device" sentence; any other reply, marked as an error or not, is a rejection whose message is the whole reply, which is the text the operator is shown.</summary>
+   /// <summary>Enrollment succeeds only on the service's "Enrolled device" sentence; any other reply is a rejection whose message is the reply without the error marker when it has one, while the whole reply, which is what the operator is shown, stays available.</summary>
    [Theory]
    [InlineData("Enrolled device device-1", ServiceOutcome.Success, "")]
-   [InlineData("Error: The enrollment code was not accepted.", ServiceOutcome.Rejected, "Error: The enrollment code was not accepted.")]
+   [InlineData("Error: The enrollment code was not accepted.", ServiceOutcome.Rejected, "The enrollment code was not accepted.")]
    [InlineData("The server refused this device.", ServiceOutcome.Rejected, "The server refused this device.")]
    public async Task Enroll_SucceedsOnlyOnTheEnrolledSentence(string reply, ServiceOutcome expected, string message)
    {
@@ -172,34 +172,41 @@ public sealed class ServiceClientOperationsTests
 
 
 
-   /// <summary>Sign-in hands over only the credential and the pairing choice, and succeeds only on the "Signed in to" sentence that names this edition's server; "Signed in. Enroll this computer" and errors are rejections shown whole.</summary>
+   /// <summary>
+   /// Sign-in hands over only the credential and the pairing choice. The service confirms with "Signed in to" and this
+   /// edition's server name, and the rest of its sentence becomes a value: printing is enabled, this computer still has to
+   /// be enrolled, or some other condition. A reply for another server's name, or an error, is a rejection whose message
+   /// has no error marker. The sentences are the ones the service really sends.
+   /// </summary>
    [Theory]
-   [InlineData("QQQ", "Signed in to QQQ. Printing is ready.", ServiceOutcome.Success)]
-   [InlineData("Forge", "Signed in to Forge.", ServiceOutcome.Success)]
-   [InlineData("Forge", "Signed in to QQQ.", ServiceOutcome.Rejected)]
-   [InlineData("QQQ", "Signed in. Enroll this computer to enable printing.", ServiceOutcome.Rejected)]
-   [InlineData("QQQ", "Error: The session belongs to another user.", ServiceOutcome.Rejected)]
-   public async Task SignIn_SucceedsOnlyOnTheSignedInSentenceForThisServer(string serverName, string reply, ServiceOutcome expected)
+   [InlineData("QQQ", "Signed in to QQQ. Printing is enabled.", SignInReadiness.PrintingEnabled, null)]
+   [InlineData("Forge", "Signed in to Forge. Enroll this computer to enable printing.", SignInReadiness.EnrollmentNeeded, null)]
+   [InlineData("QQQ", "Signed in to QQQ. QQQ authorization is required. Sign in again; pairing and history are preserved.", SignInReadiness.NotReady, null)]
+   [InlineData("Forge", "Signed in to QQQ. Printing is enabled.", null, "Signed in to QQQ. Printing is enabled.")]
+   [InlineData("QQQ", "Error: The session belongs to another user.", null, "The session belongs to another user.")]
+   public async Task SignIn_IsConfirmedByTheServiceSentenceAndSaysWhatIsStillMissing(string serverName, string reply, SignInReadiness? readiness, string? rejection)
    {
       ServiceClient client = Client(serverName);
       QqqSessionCredential credential = new(new Uri("https://print.example.com"), "session-token");
       _reply = reply;
 
-      ServiceResult<string> result = await client.SignInAsync(credential, claimLegacyDevice: true, startNewPairing: false);
+      ServiceResult<SignInConfirmation> result = await client.SignInAsync(credential, claimLegacyDevice: true, startNewPairing: false);
 
       PipeRequest request = Assert.Single(_sent);
       Assert.Equal("sign-in", request.Operation);
       Assert.Same(credential, request.SessionCredential);
       Assert.True(request.ClaimLegacyDevice);
       Assert.False(request.StartNewPairing);
-      Assert.Equal(expected, result.Outcome);
       Assert.Equal(reply, result.Reply);
-      Assert.Equal(expected == ServiceOutcome.Success ? string.Empty : reply, result.Message);
+      Assert.Equal(readiness is null ? ServiceOutcome.Rejected : ServiceOutcome.Success, result.Outcome);
+      Assert.Equal(readiness, result.Payload?.Readiness);
+      Assert.Equal(readiness is null ? null : reply, result.Payload?.Message);
+      Assert.Equal(rejection ?? string.Empty, result.Message);
    }
 
 
 
-   /// <summary>A sign-out reply that is a document keeps its message and the provider sign-out; a plain sentence, or a document without a message, becomes a result whose message is the reply and that has no provider sign-out.</summary>
+   /// <summary>A sign-out reply that is a document keeps its message and the provider sign-out; a plain sentence becomes a result whose message is the sentence and that has no provider sign-out; an error is a rejection.</summary>
    [Fact]
    public async Task SignOut_ReadsADocumentOrKeepsTheSentence()
    {
@@ -209,8 +216,6 @@ public sealed class ServiceClientOperationsTests
       ServiceResult<PipeSignOutResult> document = await client.SignOutAsync("io.qrun.qqq-print-agent:/oauth/callback");
       _reply = "Signed out of QQQ.";
       ServiceResult<PipeSignOutResult> sentence = await client.SignOutAsync("io.qrun.qqq-print-agent:/oauth/callback");
-      _reply = "{}";
-      ServiceResult<PipeSignOutResult> empty = await client.SignOutAsync("io.qrun.qqq-print-agent:/oauth/callback");
       _reply = "Error: The sign-out callback is not this application's registered callback.";
       ServiceResult<PipeSignOutResult> refused = await client.SignOutAsync("io.qrun.qqq-print-agent:/oauth/callback");
 
@@ -220,9 +225,34 @@ public sealed class ServiceClientOperationsTests
       Assert.Equal("state-1", document.Payload?.ProviderLogout?.State);
       Assert.Equal("Signed out of QQQ.", sentence.Payload?.Message);
       Assert.Null(sentence.Payload?.ProviderLogout);
-      Assert.Equal("{}", empty.Payload?.Message);
-      Assert.Null(empty.Payload?.ProviderLogout);
       Assert.Equal(ServiceOutcome.Rejected, refused.Outcome);
       Assert.Equal("The sign-out callback is not this application's registered callback.", refused.Message);
+   }
+
+
+
+   /// <summary>
+   /// A sign-out reply that opens like a JSON object is the document that carries the identity provider's token hint, so it
+   /// is never used as text. Without a message, or when it cannot be read, it is an unreadable reply: nothing of it reaches
+   /// the result or the log.
+   /// </summary>
+   [Theory]
+   [InlineData("""{"providerLogout":{"endSessionUri":"https://id.example.com/logout?id_token_hint=secret-hint","redirectUri":"io.qrun.qqq-print-agent:/oauth/callback","state":"state-1"}}""")]
+   [InlineData("""  {"message":"Signed out.","providerLogout":"https://id.example.com/logout?id_token_hint=secret-hint" """)]
+   [InlineData("{}")]
+   public async Task SignOutDocumentWithoutAReadableMessage_IsNeverUsedAsText(string reply)
+   {
+      RecordingLog log = new();
+      ServiceClient client = new(_ => Task.FromResult(reply), log, "QQQ");
+
+      ServiceResult<PipeSignOutResult> result = await client.SignOutAsync("io.qrun.qqq-print-agent:/oauth/callback");
+
+      Assert.Equal(ServiceOutcome.Unavailable, result.Outcome);
+      Assert.Equal(ServiceFailure.UnreadableReply, result.Failure);
+      Assert.True(result.Unconfirmed);
+      Assert.Null(result.Payload);
+      Assert.Null(result.Reply);
+      Assert.Equal("The service's reply could not be read.", result.Message);
+      Assert.DoesNotContain(log.Entries, entry => entry.Contains("secret-hint", StringComparison.Ordinal));
    }
 }

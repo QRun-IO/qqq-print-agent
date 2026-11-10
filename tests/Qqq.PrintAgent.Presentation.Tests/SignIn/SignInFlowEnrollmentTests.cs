@@ -50,7 +50,7 @@ public sealed class SignInFlowEnrollmentTests
 
 
 
-   /// <summary>A successful enrollment sends the address without surrounding spaces or a trailing slash and the trimmed code, shows the next steps, returns the service's confirmation as the status line, and logs that enrollment completed without the code.</summary>
+   /// <summary>A successful enrollment sends the address without surrounding spaces or a trailing slash and the trimmed code, shows the next steps, returns the service's confirmation as the status line, and logs that enrollment completed without the code. The flow is in its enrolling stage meanwhile and returns to where it was.</summary>
    [Fact]
    public async Task AcceptedCode_ConnectsTheDevice()
    {
@@ -65,7 +65,26 @@ public sealed class SignInFlowEnrollmentTests
       Assert.Equal("code-123", request.EnrollmentCode);
       Assert.Equal([new FeedbackMessage("Connecting", "The service is enrolling this device with the server…", FeedbackSeverity.Informational),
          new FeedbackMessage("Device connected", "Enrolled device device-42. Select which printers to expose here, then approve the discovered queues in the server.", FeedbackSeverity.Success)], fixture.Shown);
-      Assert.Equal(["INFO Print device enrollment completed."], fixture.Log.Entries);
+      Assert.Equal("INFO Print device enrollment completed.", Assert.Single(fixture.Log.Entries));
+      Assert.Equal([SignInStage.Enrolling, SignInStage.Idle], fixture.Stages);
+      Assert.False(fixture.Flow.IsBusy);
+   }
+
+
+
+   /// <summary>Enrolling does not disturb a discovered sign-in: the session, the offered methods and the stage are as they were afterwards.</summary>
+   [Fact]
+   public async Task Enrollment_LeavesADiscoveredSignInAsItWas()
+   {
+      SignInFixture fixture = new();
+      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+      fixture.Service = _ => Task.FromResult("Enrolled device device-42");
+
+      _ = await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123");
+
+      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
+      Assert.True(fixture.Flow.HasSession);
+      Assert.True(fixture.Flow.PasswordOffered);
    }
 
 
@@ -84,11 +103,16 @@ public sealed class SignInFlowEnrollmentTests
 
 
 
-   /// <summary>A timed-out enrollment is not called a failure: the code may have been used, so the operator is told to check the server before trying again.</summary>
-   [Fact]
-   public async Task TimedOutEnrollment_AsksToCheckTheServerFirst()
+   /// <summary>
+   /// An enrollment that left this computer without a usable answer (the reply time limit, a pipe that closed mid-reply, an
+   /// oversize reply) is not called a failure: the code may have been used, so the operator is told to check the server before
+   /// trying again, and the service is not reported as unreachable.
+   /// </summary>
+   [Theory]
+   [MemberData(nameof(UnconfirmedFailures))]
+   public async Task EnrollmentThatLeftWithoutAnAnswer_AsksToCheckTheServerFirst(Exception failure)
    {
-      SignInFixture fixture = new() { Service = _ => Task.FromException<string>(new OperationCanceledException()) };
+      SignInFixture fixture = new() { Service = _ => Task.FromException<string>(failure) };
 
       EnrollmentResult result = await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123");
 
@@ -98,16 +122,73 @@ public sealed class SignInFlowEnrollmentTests
 
 
 
-   /// <summary>When the service cannot be reached the flow reports that to the caller and shows nothing more itself, so the window shows its service-unavailable state.</summary>
-   [Fact]
-   public async Task UnreachableService_IsLeftToTheCaller()
+   /// <summary>The failures after which the code may have been used.</summary>
+   public static TheoryData<Exception> UnconfirmedFailures() => new()
    {
-      SignInFixture fixture = new() { Service = _ => Task.FromException<string>(new UnauthorizedAccessException("The local endpoint is not the installed Windows print service.")) };
+      new OperationCanceledException("The reply did not arrive in time."),
+      new IOException("Service connection closed before a complete response was received."),
+      new InvalidDataException("Local pipe message exceeds the permitted size."),
+   };
+
+
+
+   /// <summary>Cancelling the wait for an enrollment that was sent is unconfirmed too: the service may still enroll the device, so the same check-the-server message is shown.</summary>
+   [Fact]
+   public async Task CancelledEnrollment_IsUnconfirmed()
+   {
+      SignInFixture fixture = new();
+      (Task reached, _) = fixture.HoldService();
+      using CancellationTokenSource cancellation = new();
+
+      Task<EnrollmentResult> running = fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123", cancellation.Token);
+      await reached;
+      Assert.Equal(SignInStage.Enrolling, fixture.Flow.Stage);
+      await cancellation.CancelAsync();
+
+      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), await running);
+      Assert.Equal("Connecting > Enrollment could not be confirmed", fixture.Titles);
+   }
+
+
+
+   /// <summary>
+   /// When the request never left this computer (nothing is listening, the pipe was refused, the service was not verified), the
+   /// code was not used: the flow reports that to the caller and shows nothing more itself, so the window shows its
+   /// service-unavailable state instead of a warning about a consumed code.
+   /// </summary>
+   [Theory]
+   [MemberData(nameof(NotSentFailures))]
+   public async Task EnrollmentThatNeverLeft_IsLeftToTheCallerAsAnUnreachableService(Exception failure)
+   {
+      SignInFixture fixture = new() { Service = _ => Task.FromException<string>(failure) };
 
       EnrollmentResult result = await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123");
 
       Assert.Equal(new EnrollmentResult(null, ServiceReachable: false), result);
       Assert.Equal("Connecting", Assert.Single(fixture.Shown).Title);
+   }
+
+
+
+   /// <summary>The failures after which the code was certainly not used.</summary>
+   public static TheoryData<Exception> NotSentFailures() => new()
+   {
+      new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")),
+      new AgentPipeNotSentException(new IOException("The pipe could not be opened.")),
+      new UnauthorizedAccessException("The local endpoint is not the installed Windows print service."),
+   };
+
+
+
+   /// <summary>An enrollment without an address or a code is a programming error, since the form is checked first; it is refused before the flow is claimed.</summary>
+   [Fact]
+   public async Task EnrollmentWithoutItsValues_IsRefused()
+   {
+      SignInFixture fixture = new();
+
+      await Assert.ThrowsAsync<ArgumentNullException>(() => fixture.Flow.EnrollAsync(null!, "code-123"));
+      await Assert.ThrowsAsync<ArgumentNullException>(() => fixture.Flow.EnrollAsync(SignInFixture.Server, null!));
+      Assert.False(fixture.Flow.IsBusy);
    }
 
 
@@ -123,6 +204,7 @@ public sealed class SignInFlowEnrollmentTests
       Assert.Equal(new ServerTrust(true, "https://dev.example.com:8443"), fixture.Flow.Trust);
       Assert.Equal("get-server-trust", Assert.Single(fixture.Requests).Operation);
       Assert.Equal(1, fixture.TrustAnnouncements);
+      Assert.False(fixture.Flow.IsBusy);
       Assert.Equal("Allow untrusted server certificate for https://dev.example.com:8443 (development only)", SignInMessages.TrustLabel(fixture.Flow.Trust));
       Assert.Equal("Allow untrusted server certificate for this server (development only)", SignInMessages.TrustLabel(new ServerTrust()));
    }
@@ -143,6 +225,35 @@ public sealed class SignInFlowEnrollmentTests
 
       Assert.Equal(new ServerTrust(), fixture.Flow.Trust);
       Assert.Contains(expectedLog, fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal(answered, !fixture.Log.Entries.Any(entry => entry.StartsWith("DEBUG Service request 'get-server-trust' failure detail: System.IO.IOException", StringComparison.Ordinal)));
+   }
+
+
+
+   /// <summary>Disposing the flow while the exception is being read or saved ends the wait and keeps the exception the flow already held; a save in flight still puts the checkbox back and is not reported as an unreachable service.</summary>
+   [Fact]
+   public async Task DisposedWhileReadingOrSaving_KeepsWhatWasHeld()
+   {
+      SignInFixture reading = new();
+      (Task readReached, _) = reading.HoldService();
+      Task load = reading.Flow.LoadTrustAsync();
+      await readReached;
+      reading.Flow.Dispose();
+      await load;
+
+      SignInFixture saving = new();
+      (Task saveReached, _) = saving.HoldService();
+      Task<bool> save = saving.Flow.SetTrustAsync(allow: true, "https://dev.example.com");
+      await saveReached;
+      saving.Flow.Dispose();
+
+      Assert.True(await save);
+      Assert.Equal(0, reading.TrustAnnouncements);
+      Assert.Equal(new ServerTrust(), reading.Flow.Trust);
+      Assert.Equal(1, saving.TrustAnnouncements);
+      Assert.Equal(new ServerTrust(), saving.Flow.Trust);
+      Assert.Empty(saving.Shown);
+      Assert.DoesNotContain(saving.Log.Entries, entry => entry.StartsWith("ERROR", StringComparison.Ordinal));
    }
 
 
@@ -179,7 +290,7 @@ public sealed class SignInFlowEnrollmentTests
       Assert.Equal(new ServerTrust(true, "https://dev.example.com:8443"), request.ServerTrust);
       Assert.Equal(new ServerTrust(true, "https://dev.example.com:8443"), fixture.Flow.Trust);
       Assert.Equal(new FeedbackMessage("Untrusted certificate allowed for https://dev.example.com:8443", "The service and companion will accept any certificate from this one server until this is turned off. Other servers keep normal validation. Use only with a development server.", FeedbackSeverity.Warning), Assert.Single(fixture.Shown));
-      Assert.Equal(["WARN Untrusted server certificates ALLOWED by the operator for https://dev.example.com:8443 (development only)."], fixture.Log.Entries);
+      Assert.Equal("WARN Untrusted server certificates ALLOWED by the operator for https://dev.example.com:8443 (development only).", Assert.Single(fixture.Log.Entries));
    }
 
 
@@ -201,7 +312,7 @@ public sealed class SignInFlowEnrollmentTests
 
 
 
-   /// <summary>When the service refuses to save, its reply is shown and the saved state is announced again unchanged; when it cannot be reached, the caller is told and the reason is logged.</summary>
+   /// <summary>When the service refuses to save, its reply is shown and the saved state is announced again unchanged; when it gives no usable answer, the caller is told and the reason is logged with the full exception as debug detail.</summary>
    [Theory]
    [InlineData(true)]
    [InlineData(false)]
@@ -214,6 +325,7 @@ public sealed class SignInFlowEnrollmentTests
       Assert.Equal(answered, reachable);
       Assert.Equal(new ServerTrust(), fixture.Flow.Trust);
       Assert.Equal(1, fixture.TrustAnnouncements);
+      Assert.False(fixture.Flow.IsBusy);
       if(answered)
       {
          Assert.Equal(new FeedbackMessage("Server trust not saved", "Error: Only an administrator may change this.", FeedbackSeverity.Error), Assert.Single(fixture.Shown));
@@ -222,6 +334,7 @@ public sealed class SignInFlowEnrollmentTests
       {
          Assert.Empty(fixture.Shown);
          Assert.Contains("ERROR Server trust setting could not be saved: Service connection closed.", fixture.Log.Entries, StringComparer.Ordinal);
+         Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("DEBUG Service request 'set-server-trust' failure detail: System.IO.IOException", StringComparison.Ordinal));
       }
    }
 }

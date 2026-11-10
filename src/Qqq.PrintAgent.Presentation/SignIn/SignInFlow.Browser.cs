@@ -20,42 +20,50 @@ public sealed partial class SignInFlow
 
    private static readonly TimeSpan s_traceWindow = TimeSpan.FromMinutes(10);
    private CancellationTokenSource? _browserWait;
+   private bool _callbackArrived;
 
 
 
    /// <summary>
    /// Runs the browser sign-in with a three minute limit, then hands the session to the service. The redirect address must
    /// be the one this application's installer registered, and only an address the server also lists is used, so a server
-   /// cannot steer the callback elsewhere. Cancelling or timing out discards the half-finished session and withdraws the
-   /// browser option until discovery is run again; any other failure asks the operator to try again explicitly.
+   /// cannot steer the callback elsewhere. Cancelling or timing out discards the half-finished session, and discovery has
+   /// to be run again; any other failure asks the operator to try again explicitly. The limit and the Cancel button apply
+   /// to the exchange with the browser, not to the hand-over that follows it, which only the caller's token or disposing
+   /// the flow ends.
    /// </summary>
-   public async Task SignInWithBrowserAsync(PairingChoice pairing)
+   public async Task SignInWithBrowserAsync(PairingChoice pairing, CancellationToken cancellationToken = default)
    {
-      if(IsRunning || _session is not { } session)
+      if(_session is not { } session || !TryBegin(SignInStage.WaitingForBrowser))
       {
          return;
       }
       bool confirmed = false;
+      _callbackArrived = false;
       BrowserPending = true;
-      Stage = SignInStage.WaitingForBrowser;
+      using CancellationTokenSource wait = Link(cancellationToken);
       try
       {
          _log.Info("Browser sign-in requested for " + session.Origin.Authority + "; this application's callback is " + _callbacks.RedirectUri + ".");
          string redirect = _metadata?.Values?.NativeSessionLogin?.RedirectUris.FirstOrDefault(value => string.Equals(value, _callbacks.RedirectUri, StringComparison.Ordinal))
             ?? throw Unlisted();
          using CancellationTokenSource limit = new(BrowserSignInLimit, _time);
-         _browserWait = limit;
+         using var exchange = CancellationTokenSource.CreateLinkedTokenSource(limit.Token, wait.Token);
+         _browserWait = exchange;
          Report(SignInMessages.WaitingForBrowser);
-         await ExchangeWithBrowserAsync(session, new Uri(redirect), limit.Token);
-         ServiceResult<string> handover = await HandOverAsync(session, pairing);
+         await ExchangeWithBrowserAsync(session, new Uri(redirect), exchange.Token);
+         _browserWait = null;
+         ServiceResult<SignInConfirmation> handover = await HandOverAsync(session, pairing, wait.Token);
          confirmed = handover.Succeeded;
          AfterBrowserHandOver(handover);
       }
       catch(OperationCanceledException)
       {
-         AbandonBrowserSignIn();
+         AbandonBrowserSignIn(_callbackArrived
+            ? "Browser sign-in cancelled or timed out (three minute limit) after the callback arrived, before the sign-in was completed."
+            : "Browser sign-in cancelled or timed out (three minute limit) before a callback arrived.");
       }
-      catch(Exception exception) when(exception is IOException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or Win32Exception)
+      catch(Exception exception) when(exception is IOException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or Win32Exception or InvalidDataException)
       {
          LogFailure("Browser sign-in not completed", exception);
          ReportCallbackTrace();
@@ -65,13 +73,13 @@ public sealed partial class SignInFlow
       {
          _browserWait = null;
          BrowserPending = false;
-         Settle(confirmed);
+         End(Settled(confirmed));
       }
    }
 
 
 
-   /// <summary>Cancels the browser sign-in that is waiting for its callback, if one is running; the Cancel button and closing the dialog both end here.</summary>
+   /// <summary>Cancels the browser sign-in that is waiting for the browser, if one is; the Cancel button and closing the dialog both end here. It has no effect once the callback was received and the session is being handed to the service.</summary>
    public void CancelBrowserSignIn() => _browserWait?.Cancel();
 
 
@@ -79,7 +87,8 @@ public sealed partial class SignInFlow
    /// <summary>
    /// The browser exchange itself: open the callback inbox first (so a fast redirect is not lost), begin the login, open the
    /// provider's page in the default browser, wait for the forwarded callback, and complete the login on the session
-   /// that started it. The inbox is disposed when the exchange ends. Only the provider's host is logged.
+   /// that started it. The inbox is disposed when the exchange ends. Only the provider's host is logged. A callback that is
+   /// malformed or too large is refused by the inbox as invalid data, which the caller reports like any other failed exchange.
    /// </summary>
    private async Task ExchangeWithBrowserAsync(ISignInSession session, Uri redirect, CancellationToken cancellationToken)
    {
@@ -89,6 +98,7 @@ public sealed partial class SignInFlow
       _log.Info("Opening the identity provider's sign-in page in the default browser (" + authorization.Authority + ").");
       _browser.Open(authorization);
       Uri callback = await inbox.ReceiveAsync(cancellationToken);
+      _callbackArrived = true;
       _log.Info("Browser callback received; completing the sign-in.");
       await session.CompleteBrowserSignInAsync(callback, cancellationToken);
    }
@@ -96,35 +106,37 @@ public sealed partial class SignInFlow
 
 
    /// <summary>
-   /// Handles a hand-over the service did not answer. A time limit or cancellation is treated like a cancelled browser
-   /// sign-in, and any other failure as "not completed" with the reason, which is how these failures have always been
-   /// shown for a browser sign-in. When the service answered, the hand-over already reported the result.
+   /// Handles a hand-over the service did not answer. A time limit is treated like a cancelled browser sign-in, which is how
+   /// it has always been shown, but the log says what really happened: whether the request reached the pipe, and that the
+   /// browser part had completed. Any other failure is "not completed" with the reason. When the service answered, the
+   /// hand-over already reported the result; when the caller stopped waiting, the hand-over already logged it.
    /// </summary>
-   private void AfterBrowserHandOver(ServiceResult<string> handover)
+   private void AfterBrowserHandOver(ServiceResult<SignInConfirmation> handover)
    {
       if(handover.Outcome != ServiceOutcome.Unavailable)
       {
          return;
       }
-      if(handover.Interrupted)
+      if(handover.Failure == ServiceFailure.TimedOut)
       {
-         AbandonBrowserSignIn();
+         AbandonBrowserSignIn(handover.Unconfirmed
+            ? "The hand-over to the service timed out after the browser sign-in completed; whether the service signed in is not confirmed, and the attempt was discarded."
+            : "The service did not accept a connection for the hand-over after the browser sign-in completed; nothing was handed over, and the attempt was discarded.");
          return;
       }
-      _log.Error("Browser sign-in not completed: the service did not answer (" + handover.Failure + ").");
+      _log.Error("Browser sign-in not completed: the service did not answer (" + Describe(handover) + ").");
       ReportCallbackTrace();
       Report(SignInMessages.BrowserNotCompleted(handover.Message));
    }
 
 
 
-   /// <summary>Ends a cancelled or timed-out browser sign-in: the session is discarded, the browser option is withdrawn, and the operator is told to run discovery again.</summary>
-   private void AbandonBrowserSignIn()
+   /// <summary>Ends a cancelled or timed-out browser sign-in with the log entry that says where it stopped: the session and the methods it offered are discarded, and the operator is told to run discovery again.</summary>
+   private void AbandonBrowserSignIn(string entry)
    {
-      _log.Info("Browser sign-in cancelled or timed out (three minute limit) before a callback arrived.");
+      _log.Info(entry);
       ReportCallbackTrace();
       DropSession();
-      BrowserOffered = false;
       Report(SignInMessages.BrowserCanceled);
    }
 

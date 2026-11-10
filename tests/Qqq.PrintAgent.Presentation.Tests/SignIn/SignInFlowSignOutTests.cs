@@ -25,13 +25,14 @@ public sealed class SignInFlowSignOutTests
 
 
 
-   /// <summary>A plain sign-out asks the service with this application's callback, discards the discovered session, and shows the service's sentence.</summary>
+   /// <summary>A plain sign-out asks the service with this application's callback, discards the discovered session together with the sign-in methods it offered, and shows the service's sentence.</summary>
    [Fact]
    public async Task PlainSignOut_EndsTheSessionAndShowsTheServiceSentence()
    {
       SignInFixture fixture = new();
       await fixture.Flow.DiscoverAsync(SignInFixture.Server);
       fixture.Service = _ => Task.FromResult("Signed out of QQQ.");
+      fixture.Stages.Clear();
 
       bool reachable = await fixture.Flow.SignOutAsync();
 
@@ -41,8 +42,9 @@ public sealed class SignInFlowSignOutTests
       Assert.Equal(SignInFixture.Callback, request.PostLogoutRedirectUri);
       Assert.True(fixture.Sessions[0].Disposed);
       Assert.False(fixture.Flow.HasSession);
-      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
-      Assert.True(fixture.Flow.PasswordOffered);
+      Assert.False(fixture.Flow.PasswordOffered);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.Equal([SignInStage.SigningOut, SignInStage.Idle], fixture.Stages);
       Assert.Equal(new FeedbackMessage("Account sign-out", "Signed out of QQQ.", FeedbackSeverity.Informational), fixture.Shown[^1]);
       Assert.Contains("INFO Sign-out requested; asking the service to end the session.", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Contains("INFO Service sign-out result: Signed out of QQQ.", fixture.Log.Entries, StringComparer.Ordinal);
@@ -51,34 +53,91 @@ public sealed class SignInFlowSignOutTests
 
 
 
-   /// <summary>A sign-out the service answers with an error is shown whole, as a warning.</summary>
+   /// <summary>Signing out after a confirmed sign-in forgets what that sign-in said about printing.</summary>
    [Fact]
-   public async Task ServiceError_IsShownAsAWarning()
+   public async Task SignOutAfterSigningIn_ForgetsTheSignIn()
    {
-      SignInFixture fixture = new() { Service = _ => Task.FromResult("Error: The session could not be ended.") };
+      SignInFixture fixture = new();
+      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+      fixture.Service = _ => Task.FromResult("Signed out of QQQ.");
 
       Assert.True(await fixture.Flow.SignOutAsync());
 
-      Assert.Equal(new FeedbackMessage("Account sign-out", "Error: The session could not be ended.", FeedbackSeverity.Warning), Assert.Single(fixture.Shown));
+      Assert.Null(fixture.Flow.Readiness);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
    }
 
 
 
-   /// <summary>When the service cannot be reached nothing is changed or shown by the flow: the session stays and the caller is told, so the window shows its service-unavailable state.</summary>
+   /// <summary>A sign-out the service answers with an error is shown whole, as a warning; the service answered, so the flow's session and what it offered are discarded all the same.</summary>
    [Fact]
-   public async Task UnreachableService_ChangesNothing()
+   public async Task ServiceError_IsShownAsAWarningAndTheSessionIsStillDiscarded()
+   {
+      SignInFixture fixture = new() { ConfigureSession = session => session.Metadata = SignInFixture.Offers(password: true, SignInFixture.Callback) };
+      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+      fixture.Forget();
+      fixture.Service = _ => Task.FromResult("Error: The session could not be ended.");
+
+      Assert.True(await fixture.Flow.SignOutAsync());
+
+      Assert.Equal(new FeedbackMessage("Account sign-out", "Error: The session could not be ended.", FeedbackSeverity.Warning), Assert.Single(fixture.Shown));
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.False(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.PasswordOffered);
+      Assert.False(fixture.Flow.BrowserOffered);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+   }
+
+
+
+   /// <summary>
+   /// When the service gives no usable answer, the flow shows nothing itself, keeps its session and stage, and tells the caller,
+   /// so the window shows its service-unavailable state. The log says which of two things happened: the request never left and
+   /// nothing was changed, or it left and the session may have ended anyway.
+   /// </summary>
+   [Theory]
+   [InlineData(false, "ERROR Sign-out could not reach the service; nothing was changed: Nothing is listening on the pipe.")]
+   [InlineData(true, "ERROR Sign-out was sent, but the service's answer did not arrive, so the session may or may not have ended: The reply did not arrive in time.")]
+   public async Task UnansweredSignOut_KeepsTheFlowAsItWasAndSaysWhetherTheSessionMayHaveEnded(bool sent, string entry)
    {
       SignInFixture fixture = new();
       await fixture.Flow.DiscoverAsync(SignInFixture.Server);
-      fixture.Shown.Clear();
-      fixture.Service = _ => Task.FromException<string>(new IOException("Service connection closed."));
+      fixture.Forget();
+      fixture.Service = _ => Task.FromException<string>(sent
+         ? new OperationCanceledException("The reply did not arrive in time.")
+         : new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")));
 
       bool reachable = await fixture.Flow.SignOutAsync();
 
       Assert.False(reachable);
       Assert.True(fixture.Flow.HasSession);
+      Assert.True(fixture.Flow.PasswordOffered);
       Assert.Empty(fixture.Shown);
-      Assert.Contains("ERROR Sign-out could not reach the service: Service connection closed.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal([SignInStage.SigningOut, SignInStage.Ready], fixture.Stages);
+      Assert.Contains(entry, fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Contains(fixture.Log.Entries, candidate => candidate.StartsWith("DEBUG Service request 'sign-out' failure detail: ", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>Cancelling the caller's token while the service is asked ends the wait without calling the service unavailable; the log says the session may still end.</summary>
+   [Fact]
+   public async Task CancelledSignOut_IsNotReportedAsAnUnavailableService()
+   {
+      SignInFixture fixture = new();
+      (Task reached, _) = fixture.HoldService();
+      using CancellationTokenSource cancellation = new();
+
+      Task<bool> running = fixture.Flow.SignOutAsync(cancellation.Token);
+      await reached;
+      Assert.Equal(SignInStage.SigningOut, fixture.Flow.Stage);
+      await cancellation.CancelAsync();
+
+      Assert.True(await running);
+      Assert.Empty(fixture.Shown);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.Contains("INFO Sign-out is no longer waited for; the service may still end the session.", fixture.Log.Entries, StringComparer.Ordinal);
    }
 
 
@@ -92,6 +151,7 @@ public sealed class SignInFlowSignOutTests
       Task<bool> running = fixture.Flow.SignOutAsync();
       FakeInbox inbox = Assert.Single(fixture.Inboxes);
       Assert.Equal(new Uri("https://id.example.com/logout?id_token_hint=secret-hint"), Assert.Single(fixture.Opened));
+      Assert.Equal(SignInStage.SigningOut, fixture.Flow.Stage);
       inbox.Deliver(new Uri(SignInFixture.Callback + "?state=state-1"));
 
       Assert.True(await running);
@@ -124,22 +184,40 @@ public sealed class SignInFlowSignOutTests
 
 
 
-   /// <summary>When the provider does not come back within two minutes, or the browser cannot be opened, the sign-out still completes locally and the operator is warned that the provider did not confirm.</summary>
+   /// <summary>
+   /// When the provider does not come back within two minutes, the browser cannot be opened, the caller cancels, or the flow is
+   /// disposed, the wait ends, the sign-out still completes locally, and the operator is warned that the provider did not confirm.
+   /// </summary>
    [Theory]
-   [InlineData(true)]
-   [InlineData(false)]
-   public async Task ProviderThatDoesNotReturn_IsReportedAsUnconfirmed(bool browserStarts)
+   [InlineData("limit", "TaskCanceledException")]
+   [InlineData("browser", "Win32Exception: The system cannot find the file specified.")]
+   [InlineData("token", "TaskCanceledException")]
+   [InlineData("dispose", "TaskCanceledException")]
+   public async Task ProviderThatDoesNotReturn_IsReportedAsUnconfirmed(string ending, string cause)
    {
       SignInFixture fixture = WithProviderSignOut();
-      fixture.BrowserFailure = browserStarts ? null : new Win32Exception(2, "The system cannot find the file specified.");
+      fixture.BrowserFailure = string.Equals(ending, "browser", StringComparison.Ordinal) ? new Win32Exception(2, "The system cannot find the file specified.") : null;
+      using CancellationTokenSource cancellation = new();
 
-      Task<bool> running = fixture.Flow.SignOutAsync();
-      fixture.Time.Advance(TimeSpan.FromMinutes(2));
+      Task<bool> running = fixture.Flow.SignOutAsync(cancellation.Token);
+      if(string.Equals(ending, "limit", StringComparison.Ordinal))
+      {
+         fixture.Time.Advance(TimeSpan.FromMinutes(2));
+      }
+      else if(string.Equals(ending, "token", StringComparison.Ordinal))
+      {
+         await cancellation.CancelAsync();
+      }
+      else if(string.Equals(ending, "dispose", StringComparison.Ordinal))
+      {
+         fixture.Flow.Dispose();
+      }
 
       Assert.True(await running);
       Assert.Equal(FeedbackSeverity.Warning, fixture.Shown[^1].Severity);
       Assert.EndsWith("did not confirm; close that page and sign out there if it is still open.", fixture.Shown[^1].Message, StringComparison.Ordinal);
-      Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("WARN Identity provider sign-out was not confirmed: " + (browserStarts ? "TaskCanceledException" : "Win32Exception: The system cannot find the file specified."), StringComparison.Ordinal));
+      Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("WARN Identity provider sign-out was not confirmed: " + cause, StringComparison.Ordinal));
       Assert.True(fixture.Inboxes[0].Disposed);
+      Assert.False(fixture.Flow.IsBusy);
    }
 }

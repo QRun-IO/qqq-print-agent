@@ -5,7 +5,7 @@
 
 namespace Qqq.PrintAgent.Presentation.SignIn;
 
-/// <summary>Where a sign-in is. The flow moves between these stages and nothing else, so a view can show the right step and a test can assert the path taken.</summary>
+/// <summary>Where the connection flow is. The flow moves between these stages and nothing else, so a view can show the right step and a test can assert the path taken.</summary>
 public enum SignInStage
 {
    /// <summary>No server has been discovered, or the last attempt was abandoned; discovery is the only way forward.</summary>
@@ -26,6 +26,12 @@ public enum SignInStage
    /// <summary>The server accepted the user and the session is being handed to the service.</summary>
    HandingOver,
 
-   /// <summary>The service confirmed the sign-in.</summary>
+   /// <summary>The service confirmed the sign-in and now holds the session; the flow holds none, so another attempt starts with discovery.</summary>
    SignedIn,
+
+   /// <summary>The service is enrolling this computer with an enrollment code.</summary>
+   Enrolling,
+
+   /// <summary>The service is ending its session, and the identity provider's sign-out may be open in the browser.</summary>
+   SigningOut,
 }

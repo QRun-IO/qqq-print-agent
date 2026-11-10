@@ -5,28 +5,29 @@
 
 namespace Qqq.PrintAgent.Presentation.Service;
 
-/// <summary>Why no usable answer arrived from the local service. Each value stands for one kind of failure the pipe client raises, so callers can tell a timeout (the request may have been carried out) from a refusal (it was not).</summary>
+/// <summary>
+/// What went wrong when no usable answer arrived from the local service. It names the cause only. Whether the service may
+/// have acted is a separate question, answered by <see cref="ServiceResult{T}.Unconfirmed"/>, because the same cause (a
+/// time limit, a broken pipe) can strike before the request was sent or after.
+/// </summary>
 public enum ServiceFailure
 {
-   /// <summary>The request did not fail this way: the service answered.</summary>
+   /// <summary>The request did not fail this way: the service answered, or the caller stopped waiting.</summary>
    None,
 
-   /// <summary>The pipe's own time limit ran out. The service may still have carried out the request.</summary>
+   /// <summary>A time limit ran out: the connect limit when nothing is listening, or the request's own limit while waiting for the reply.</summary>
    TimedOut,
 
-   /// <summary>The caller's own cancellation token stopped the wait. The service may still have carried out the request.</summary>
-   Canceled,
-
-   /// <summary>The pipe could not be opened or closed before a complete reply arrived.</summary>
+   /// <summary>The pipe could not be opened, or it closed before a complete reply arrived.</summary>
    Disconnected,
 
-   /// <summary>Windows refused access, or the process at the other end was not the installed service; nothing was sent.</summary>
+   /// <summary>Windows refused access, or the process at the other end was not verified as the installed service; nothing was sent.</summary>
    AccessDenied,
 
-   /// <summary>A Windows call made while verifying the other end of the pipe failed.</summary>
+   /// <summary>A Windows call failed before the request was sent.</summary>
    Native,
 
-   /// <summary>A pipe message was larger than the permitted size.</summary>
+   /// <summary>A pipe message was larger than the permitted size: the request before it was sent, or the reply.</summary>
    InvalidData,
 
    /// <summary>A reply arrived but was not the data this version expects, which usually means the companion and service versions differ.</summary>

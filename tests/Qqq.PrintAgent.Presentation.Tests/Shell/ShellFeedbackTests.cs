@@ -76,14 +76,53 @@ public sealed class ShellFeedbackTests
 
 
 
-   /// <summary>An action without a usable answer is reported as unconfirmed with a warning not to repeat it blindly, whatever the failure was.</summary>
-   [Fact]
-   public async Task UnansweredAction_IsUnconfirmedRatherThanFailed()
+   /// <summary>
+   /// An action without a usable answer is reported as unconfirmed with a warning not to repeat it blindly, for every cause the
+   /// pipe can raise and whether or not the request had left: a print or a cancellation must never be repeated on the
+   /// strength of a message that sounds like "nothing happened". (An unreadable reply cannot occur for an action, whose
+   /// reply is plain text.)
+   /// </summary>
+   [Theory]
+   [MemberData(nameof(UnansweredActions))]
+   public async Task UnansweredAction_IsUnconfirmedRatherThanFailed(Exception failure, ServiceFailure cause)
    {
-      FeedbackMessage expected = new("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", FeedbackSeverity.Warning);
+      ServiceClient client = new(_ => Task.FromException<string>(failure), new RecordingLog(), "QQQ");
+      ServiceResult<string> result = await client.SendAsync(new PipeRequest("test-print"));
 
-      Assert.Equal(expected, await ActionAsync("test-print", () => Task.FromException<string>(new OperationCanceledException())));
-      Assert.Equal(expected, await ActionAsync("test-print", () => Task.FromException<string>(new InvalidDataException("too large"))));
+      Assert.Equal(cause, result.Failure);
+      Assert.Equal(new FeedbackMessage("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", FeedbackSeverity.Warning),
+         ShellFeedback.ForAction("test-print", result));
+   }
+
+
+
+   /// <summary>Every way an action can end without an answer: each cause after the request left, and each cause before it left.</summary>
+   public static TheoryData<Exception, ServiceFailure> UnansweredActions() => new()
+   {
+      { new OperationCanceledException("The reply did not arrive in time."), ServiceFailure.TimedOut },
+      { new IOException("Service connection closed."), ServiceFailure.Disconnected },
+      { new InvalidDataException("Local pipe message exceeds the permitted size."), ServiceFailure.InvalidData },
+      { new UnauthorizedAccessException("Not the installed service."), ServiceFailure.AccessDenied },
+      { new System.ComponentModel.Win32Exception(5, "Access is denied."), ServiceFailure.Native },
+      { new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")), ServiceFailure.TimedOut },
+      { new AgentPipeNotSentException(new IOException("The pipe could not be opened.")), ServiceFailure.Disconnected },
+      { new AgentPipeNotSentException(new InvalidDataException("Local pipe message exceeds the permitted size.")), ServiceFailure.InvalidData },
+   };
+
+
+
+   /// <summary>An action whose wait the caller ended is unconfirmed too, with the same warning.</summary>
+   [Fact]
+   public async Task AbandonedAction_IsUnconfirmed()
+   {
+      using CancellationTokenSource cancellation = new();
+      await cancellation.CancelAsync();
+      ServiceClient client = new(_ => new TaskCompletionSource<string>().Task, new RecordingLog(), "QQQ");
+
+      ServiceResult<string> result = await client.SendAsync(new PipeRequest("retry-job"), cancellation.Token);
+
+      Assert.Equal(ServiceOutcome.Canceled, result.Outcome);
+      Assert.Equal("Result could not be confirmed", ShellFeedback.ForAction("retry-job", result).Title);
    }
 
 

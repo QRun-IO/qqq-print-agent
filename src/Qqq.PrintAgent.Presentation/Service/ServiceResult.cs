@@ -9,24 +9,26 @@ namespace Qqq.PrintAgent.Presentation.Service;
 
 /// <summary>
 /// The typed answer to one request to the local service: a payload when it succeeded, the service's message when it refused,
-/// or the kind of failure when no usable answer arrived. It replaces matching reply text by prefix and catching pipe
-/// exceptions in every caller, so each caller decides what to show from <see cref="Outcome"/> alone.
+/// the cause when no usable answer arrived, or a note that the caller stopped waiting. It replaces matching reply text by
+/// prefix and catching pipe exceptions in every caller, so each caller decides what to show from <see cref="Outcome"/> and
+/// <see cref="Unconfirmed"/> alone.
 /// </summary>
 public sealed class ServiceResult<T>
 {
-   /// <summary>Records one outcome; the factory methods below are the only callers, so the three shapes stay consistent.</summary>
-   private ServiceResult(ServiceOutcome outcome, T? payload, string message, string? reply, ServiceFailure failure)
+   /// <summary>Records one outcome; the factory methods below are the only callers, so the shapes stay consistent.</summary>
+   private ServiceResult(ServiceOutcome outcome, T? payload, string message, string? reply, ServiceFailure failure, bool unconfirmed)
    {
       Outcome = outcome;
       Payload = payload;
       Message = message;
       Reply = reply;
       Failure = failure;
+      Unconfirmed = unconfirmed;
    }
 
 
 
-   /// <summary>Which of the three ways the request ended.</summary>
+   /// <summary>Which way the request ended.</summary>
    public ServiceOutcome Outcome { get; }
 
 
@@ -36,7 +38,7 @@ public sealed class ServiceResult<T>
 
 
 
-   /// <summary>The service's own error text without its "Error:" marker when it refused, a plain reason when no usable answer arrived, and empty on success.</summary>
+   /// <summary>The service's own text without its "Error:" marker when it refused, a plain reason when no usable answer arrived, and empty on success or when the caller stopped waiting.</summary>
    public string Message { get; }
 
 
@@ -46,8 +48,17 @@ public sealed class ServiceResult<T>
 
 
 
-   /// <summary>Why no usable answer arrived; <see cref="ServiceFailure.None"/> whenever the service answered.</summary>
+   /// <summary>What went wrong when no usable answer arrived; <see cref="ServiceFailure.None"/> otherwise.</summary>
    public ServiceFailure Failure { get; }
+
+
+
+   /// <summary>
+   /// True when the request left this process and no usable answer came back (a reply time limit, a pipe that closed
+   /// mid-reply, an oversize or unreadable reply, or a wait the caller ended), so the service may have carried it out and
+   /// the operator must check before repeating it. False when the service answered and when nothing was sent at all.
+   /// </summary>
+   public bool Unconfirmed { get; }
 
 
 
@@ -57,21 +68,21 @@ public sealed class ServiceResult<T>
 
 
 
-   /// <summary>True when the wait ended on a time limit or a cancellation, the two cases in which the service may have acted anyway.</summary>
-   public bool Interrupted => Failure is ServiceFailure.TimedOut or ServiceFailure.Canceled;
-
-
-
    /// <summary>A successful answer carrying its payload and the reply it was read from.</summary>
-   internal static ServiceResult<T> Success(T payload, string reply) => new(ServiceOutcome.Success, payload, string.Empty, reply, ServiceFailure.None);
+   internal static ServiceResult<T> Success(T payload, string reply) => new(ServiceOutcome.Success, payload, string.Empty, reply, ServiceFailure.None, unconfirmed: false);
 
 
 
    /// <summary>An answer in which the service reported an error or refused, with the message to show and the whole reply.</summary>
-   internal static ServiceResult<T> Rejection(string message, string reply) => new(ServiceOutcome.Rejected, default, message, reply, ServiceFailure.None);
+   internal static ServiceResult<T> Rejection(string message, string reply) => new(ServiceOutcome.Rejected, default, message, reply, ServiceFailure.None, unconfirmed: false);
 
 
 
-   /// <summary>No usable answer: the kind of failure and a plain reason a message can quote.</summary>
-   internal static ServiceResult<T> Unreachable(ServiceFailure failure, string reason) => new(ServiceOutcome.Unavailable, default, reason, null, failure);
+   /// <summary>No usable answer: the cause, whether the request had been sent, and a plain reason a message can quote.</summary>
+   internal static ServiceResult<T> Unreachable(ServiceFailure failure, bool sent, string reason) => new(ServiceOutcome.Unavailable, default, reason, null, failure, unconfirmed: sent);
+
+
+
+   /// <summary>The caller ended the wait; the request may still be carried out.</summary>
+   internal static ServiceResult<T> Abandoned() => new(ServiceOutcome.Canceled, default, string.Empty, null, ServiceFailure.None, unconfirmed: true);
 }

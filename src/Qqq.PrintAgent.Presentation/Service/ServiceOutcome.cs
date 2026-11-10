@@ -5,7 +5,7 @@
 
 namespace Qqq.PrintAgent.Presentation.Service;
 
-/// <summary>The three ways a request to the local service can end, so a caller chooses its message from a value instead of matching reply text or catching exceptions.</summary>
+/// <summary>The ways a request to the local service can end, so a caller chooses its message from a value instead of matching reply text or catching exceptions.</summary>
 public enum ServiceOutcome
 {
    /// <summary>The service answered and the answer was the expected kind; the payload is available.</summary>
@@ -16,4 +16,7 @@ public enum ServiceOutcome
 
    /// <summary>No usable answer arrived: the service could not be reached, timed out, was not trusted or sent something unreadable.</summary>
    Unavailable,
+
+   /// <summary>The caller's own cancellation token ended the wait. This is not a failure of the service, which may still carry the request out.</summary>
+   Canceled,
 }

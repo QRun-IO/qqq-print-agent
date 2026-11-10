@@ -20,27 +20,47 @@ public sealed partial class SignInFlow
 
 
 
-   /// <summary>Reads the saved exception from the service. When the service cannot be reached or refuses, no exception is assumed and the reason is logged.</summary>
+   /// <summary>
+   /// Reads the saved exception from the service. When the service cannot be reached or refuses, no exception is assumed and
+   /// the reason is logged. While another operation is running, or when the flow was disposed during the read, the value
+   /// already held is kept.
+   /// </summary>
    public async Task LoadTrustAsync()
    {
-      ServiceResult<ServerTrust> result = await _service.GetServerTrustAsync();
-      if(result.Outcome == ServiceOutcome.Rejected)
+      if(!TryBegin())
       {
-         _log.Warning("Could not read the server trust setting: " + result.Reply);
+         return;
       }
-      else if(!result.Succeeded)
+      try
       {
-         _log.Error("Could not read the server trust setting from the service: " + result.Message);
+         ServiceResult<ServerTrust> result = await _service.GetServerTrustAsync(_lifetime.Token);
+         if(result.Outcome == ServiceOutcome.Canceled)
+         {
+            return;
+         }
+         if(result.Outcome == ServiceOutcome.Rejected)
+         {
+            _log.Warning("Could not read the server trust setting: " + result.Reply);
+         }
+         else if(!result.Succeeded)
+         {
+            _log.Error("Could not read the server trust setting from the service: " + result.Message);
+         }
+         ShowTrust(result.Payload ?? new ServerTrust());
       }
-      ShowTrust(result.Payload ?? new ServerTrust());
+      finally
+      {
+         End(Stage);
+      }
    }
 
 
 
    /// <summary>
    /// Saves the exception for the entered server, or removes it, and logs the change loudly. Allowing needs a server address,
-   /// because the exception is bound to one server. It returns false only when the service could not be reached; in every
-   /// case the saved state is announced again, so a checkbox that was clicked but not saved goes back.
+   /// because the exception is bound to one server. It returns false only when the service gave no usable answer; in every
+   /// case, including a save that was refused because another operation is running, the saved state is announced again, so
+   /// a checkbox that was clicked but not saved goes back.
    /// </summary>
    public async Task<bool> SetTrustAsync(bool allow, string? address)
    {
@@ -51,14 +71,38 @@ public sealed partial class SignInFlow
          Report(SignInMessages.EnterAddressFirst);
          return true;
       }
-      ServerTrust requested = origin is null ? new ServerTrust() : new ServerTrust(true, ServerTrust.Normalize(origin));
-      ServiceResult<string> result = await _service.SetServerTrustAsync(requested);
+      if(!TryBegin())
+      {
+         ShowTrust(_trust);
+         return true;
+      }
+      try
+      {
+         ServerTrust requested = origin is null ? new ServerTrust() : new ServerTrust(true, ServerTrust.Normalize(origin));
+         ServiceResult<string> result = await _service.SetServerTrustAsync(requested, _lifetime.Token);
+         return ApplyTrustResult(requested, result);
+      }
+      finally
+      {
+         End(Stage);
+      }
+   }
+
+
+
+   /// <summary>Takes the service's answer to a save: the new exception when it was saved, and otherwise the saved state again with the service's refusal shown or the missing answer logged.</summary>
+   private bool ApplyTrustResult(ServerTrust requested, ServiceResult<string> result)
+   {
       if(!result.Succeeded)
       {
          ShowTrust(_trust);
          if(result.Reply is string reply)
          {
             Report(SignInMessages.TrustNotSaved(reply));
+            return true;
+         }
+         if(result.Outcome == ServiceOutcome.Canceled)
+         {
             return true;
          }
          _log.Error("Server trust setting could not be saved: " + result.Message);

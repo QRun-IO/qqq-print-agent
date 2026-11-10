@@ -29,11 +29,13 @@ public sealed class SignInFlowDiscoveryTests
       Assert.True(fixture.Flow.PasswordOffered);
       Assert.False(fixture.Flow.BrowserOffered);
       Assert.True(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.Null(fixture.Flow.Readiness);
       Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
       Assert.Equal(new Uri(SignInFixture.Server), Assert.Single(fixture.Sessions).Origin);
       Assert.False(fixture.Sessions[0].AllowUntrustedCertificate);
       Assert.Equal(new FeedbackMessage("Sign-in options ready", "Use the sign-in method configured by this server.", FeedbackSeverity.Informational), Assert.Single(fixture.Shown));
-      Assert.Equal(["INFO Discover sign-in options requested for 'https://print.example.com'.", "INFO Sign-in options for print.example.com: password sign-in offered, browser sign-in not offered."], fixture.Log.Entries);
+      Assert.Equal(["INFO Discover sign-in options requested for https://print.example.com/.", "INFO Sign-in options for print.example.com: password sign-in offered, browser sign-in not offered."], fixture.Log.Entries);
       Assert.Equal([SignInStage.Discovering, SignInStage.Ready], fixture.Stages);
    }
 
@@ -72,12 +74,27 @@ public sealed class SignInFlowDiscoveryTests
 
 
 
-   /// <summary>An address that is not an absolute URL is refused before any session is created, with the reason on screen and in the log.</summary>
+   /// <summary>An address pasted with a user name, password, query or fragment is logged as scheme, host, port and path only, so no credential or token reaches the shared log.</summary>
+   [Fact]
+   public async Task AddressWithCredentialsOrAToken_IsLoggedWithoutThem()
+   {
+      SignInFixture fixture = new();
+
+      await fixture.Flow.DiscoverAsync("https://operator:hunter2@print.example.com:8443/base?token=private-token#fragment-secret");
+
+      Assert.Contains("INFO Discover sign-in options requested for https://print.example.com:8443/base.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("hunter2", StringComparison.Ordinal) || entry.Contains("operator", StringComparison.Ordinal)
+         || entry.Contains("private-token", StringComparison.Ordinal) || entry.Contains("fragment-secret", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>An address that is not an absolute URL is refused before any session is created, with the reason on screen; the log says so without repeating what was typed.</summary>
    [Theory]
-   [InlineData("print.example.com")]
+   [InlineData("print.example.com/?token=private-token")]
    [InlineData("")]
    [InlineData(null)]
-   public async Task AddressThatIsNotAUrl_FailsDiscoveryWithoutASession(string? address)
+   public async Task AddressThatIsNotAUrl_FailsDiscoveryWithoutASessionAndIsNotLogged(string? address)
    {
       SignInFixture fixture = new();
 
@@ -87,9 +104,11 @@ public sealed class SignInFlowDiscoveryTests
       Assert.False(fixture.Flow.HasSession);
       Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
       Assert.Equal(new FeedbackMessage("Discovery failed", "The server did not provide compatible authentication and printing discovery. Reason: Enter a valid server origin. The activity log has the full detail.", FeedbackSeverity.Error), Assert.Single(fixture.Shown));
+      Assert.Equal("INFO Discover sign-in options requested for an address that could not be read; it is not logged.", fixture.Log.Entries[0]);
       Assert.Contains("WARN The server address is not an absolute URL (expected https://host[:port]).", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Contains("ERROR Discovery failed: InvalidOperationException: Enter a valid server origin.", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("DEBUG Discovery failed detail: System.InvalidOperationException", StringComparison.Ordinal));
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("private-token", StringComparison.Ordinal));
    }
 
 
@@ -122,6 +141,52 @@ public sealed class SignInFlowDiscoveryTests
       Assert.Equal("The server did not provide compatible authentication and printing discovery. Reason: The server could not be reached. Connection refused. The activity log has the full detail.", Assert.Single(fixture.Shown).Message);
       Assert.Contains("ERROR Discovery failed: HttpRequestException: The server could not be reached. <- IOException: Connection refused.", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Equal([SignInStage.Discovering, SignInStage.Idle], fixture.Stages);
+   }
+
+
+
+   /// <summary>A server that takes too long is a failed discovery with the time limit as its reason, which is different from a discovery the caller cancelled.</summary>
+   [Fact]
+   public async Task ServerTimeLimit_IsAFailedDiscovery()
+   {
+      SignInFixture fixture = new() { ConfigureSession = session => session.DiscoverFailure = new TaskCanceledException("The server did not answer in time.") };
+
+      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+
+      Assert.Equal("Discovery failed", Assert.Single(fixture.Shown).Title);
+      Assert.Contains("Reason: The server did not answer in time.", fixture.Shown[0].Message, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>Cancelling the caller's token, or disposing the flow, while the server is being asked ends discovery quietly: no failure is shown, no session is left, and the flow is idle.</summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public async Task CancelledDiscovery_EndsQuietlyWithoutASession(bool byToken)
+   {
+      SignInFixture fixture = new() { ConfigureSession = session => session.PendingDiscovery = new TaskCompletionSource<QqqAuthenticationMetadata>() };
+      using CancellationTokenSource cancellation = new();
+
+      Task running = fixture.Flow.DiscoverAsync(SignInFixture.Server, cancellation.Token);
+      Assert.True(fixture.Flow.IsBusy);
+      Assert.Equal(SignInStage.Discovering, fixture.Flow.Stage);
+      if(byToken)
+      {
+         await cancellation.CancelAsync();
+      }
+      else
+      {
+         fixture.Flow.Dispose();
+      }
+      await running;
+
+      Assert.Empty(fixture.Shown);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.False(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.Contains("DEBUG Discovery was cancelled before the server answered.", fixture.Log.Entries, StringComparer.Ordinal);
    }
 
 
@@ -161,7 +226,7 @@ public sealed class SignInFlowDiscoveryTests
 
 
 
-   /// <summary>A failure that is not a discovery failure (a programming error) is not swallowed, but it still leaves the flow idle without a session rather than stuck in the discovering stage.</summary>
+   /// <summary>A failure that is not a discovery failure (a programming error) is not swallowed, but it still leaves the flow idle and free for the next operation, without a session, rather than stuck in the discovering stage.</summary>
    [Fact]
    public async Task UnexpectedFailure_PropagatesAndLeavesTheFlowIdle()
    {
@@ -170,9 +235,37 @@ public sealed class SignInFlowDiscoveryTests
       await Assert.ThrowsAsync<NotSupportedException>(() => fixture.Flow.DiscoverAsync(SignInFixture.Server));
 
       Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.False(fixture.Flow.IsBusy);
       Assert.False(fixture.Flow.HasSession);
       Assert.True(fixture.Sessions[0].Disposed);
       Assert.Empty(fixture.Shown);
+   }
+
+
+
+   /// <summary>A disposed flow starts nothing: discovery, sign-in, sign-out, enrollment and the certificate exception are all refused without a request, and disposing twice is harmless.</summary>
+   [Fact]
+   public async Task DisposedFlow_StartsNothing()
+   {
+      SignInFixture fixture = new();
+      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+      fixture.Flow.Dispose();
+      fixture.Flow.Dispose();
+      fixture.Forget();
+
+      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+      await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      await fixture.Flow.LoadTrustAsync();
+
+      Assert.True(await fixture.Flow.SignOutAsync());
+      Assert.True(await fixture.Flow.SetTrustAsync(allow: false, null));
+      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123"));
+      Assert.Single(fixture.Sessions);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.Empty(fixture.Requests);
+      Assert.Empty(fixture.Shown);
+      Assert.False(fixture.Flow.HasSession);
    }
 
 

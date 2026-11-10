@@ -35,31 +35,46 @@ public sealed partial class SignInFlow
 
    /// <summary>
    /// Enrolls this device through the service with an address and code that passed <see cref="CheckEnrollment"/>. A
-   /// refusal shows the service's reply, a time limit says the code may have been used and must be checked on the server
-   /// before another attempt, and an unreachable service is left for the caller to show. The code is sent once and not kept.
+   /// refusal shows the service's reply. A request that left without a usable answer (a reply time limit, a pipe that closed
+   /// mid-reply, a wait the caller ended) says the code may have been used and must be checked on the server before another
+   /// attempt. A request that never left is reported to the caller as an unreachable service, because the code was not
+   /// used. The code is sent once and not kept. While another operation is running the request is refused and nothing happens.
    /// </summary>
-   public async Task<EnrollmentResult> EnrollAsync(string address, string code)
+   public async Task<EnrollmentResult> EnrollAsync(string address, string code, CancellationToken cancellationToken = default)
    {
       ArgumentNullException.ThrowIfNull(address);
       ArgumentNullException.ThrowIfNull(code);
-      Report(SignInMessages.Enrolling);
-      ServiceResult<string> result = await _service.EnrollAsync(address.Trim().TrimEnd('/'), code.Trim());
-      if(result.Succeeded)
+      SignInStage before = Stage;
+      if(!TryBegin(SignInStage.Enrolling))
       {
-         Report(SignInMessages.DeviceConnected(result.Payload));
-         _log.Info("Print device enrollment completed.");
-         return new EnrollmentResult(result.Payload, ServiceReachable: true);
-      }
-      if(result.Reply is string reply)
-      {
-         Report(SignInMessages.EnrollmentFailed(reply));
          return new EnrollmentResult(null, ServiceReachable: true);
       }
-      if(result.Interrupted)
+      using CancellationTokenSource wait = Link(cancellationToken);
+      try
       {
-         Report(SignInMessages.EnrollmentUnconfirmed);
-         return new EnrollmentResult(null, ServiceReachable: true);
+         Report(SignInMessages.Enrolling);
+         ServiceResult<string> result = await _service.EnrollAsync(address.Trim().TrimEnd('/'), code.Trim(), wait.Token);
+         if(result.Succeeded)
+         {
+            Report(SignInMessages.DeviceConnected(result.Payload));
+            _log.Info("Print device enrollment completed.");
+            return new EnrollmentResult(result.Payload, ServiceReachable: true);
+         }
+         if(result.Reply is string reply)
+         {
+            Report(SignInMessages.EnrollmentFailed(reply));
+            return new EnrollmentResult(null, ServiceReachable: true);
+         }
+         if(result.Unconfirmed)
+         {
+            Report(SignInMessages.EnrollmentUnconfirmed);
+            return new EnrollmentResult(null, ServiceReachable: true);
+         }
+         return new EnrollmentResult(null, ServiceReachable: false);
       }
-      return new EnrollmentResult(null, ServiceReachable: false);
+      finally
+      {
+         End(before);
+      }
    }
 }

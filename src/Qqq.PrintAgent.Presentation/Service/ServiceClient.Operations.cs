@@ -16,6 +16,11 @@ namespace Qqq.PrintAgent.Presentation.Service;
 /// </summary>
 public sealed partial class ServiceClient
 {
+   private const string PrintingEnabled = " Printing is enabled.";
+   private const string EnrollmentNeeded = " Enroll this computer to enable printing.";
+
+
+
    /// <summary>Reads the service's health, printers and connection state.</summary>
    public Task<ServiceResult<AgentSnapshot>> SnapshotAsync(CancellationToken cancellationToken = default)
       => SendAsync<AgentSnapshot>(new PipeRequest("snapshot"), cancellationToken);
@@ -73,20 +78,24 @@ public sealed partial class ServiceClient
 
 
 
-   /// <summary>Enrolls this device with an enrollment code. Success is the service's "Enrolled device" sentence; anything else is a rejection carrying the whole reply.</summary>
+   /// <summary>Enrolls this device with an enrollment code. Success is the service's "Enrolled device" sentence; anything else is a rejection.</summary>
    public Task<ServiceResult<string>> EnrollAsync(string serverUrl, string enrollmentCode, CancellationToken cancellationToken = default)
-      => ExchangeAsync(new PipeRequest("enroll", serverUrl, enrollmentCode), static reply => Opening(reply, "Enrolled device "), cancellationToken);
+      => ExchangeAsync(new PipeRequest("enroll", serverUrl, enrollmentCode), static reply => Opening(reply, "Enrolled device ", static text => text), cancellationToken);
 
 
 
    /// <summary>
-   /// Hands a session credential to the service with the operator's pairing choice. Success is the service's "Signed in to"
-   /// sentence naming this edition's server; anything else, including a sign-in that still needs enrollment, is a rejection
-   /// carrying the whole reply.
+   /// Hands a session credential to the service with the operator's pairing choice. The service confirms with a sentence
+   /// that opens "Signed in to" and this edition's server name, and then says whether printing is enabled or what is still
+   /// missing; that second half is returned as <see cref="SignInReadiness"/>, so "signed in, enrollment still needed" is a
+   /// value and not text to match. A reply that does not open that way is a rejection.
    /// </summary>
-   public Task<ServiceResult<string>> SignInAsync(QqqSessionCredential credential, bool claimLegacyDevice, bool startNewPairing, CancellationToken cancellationToken = default)
-      => ExchangeAsync(new PipeRequest("sign-in", SessionCredential: credential, ClaimLegacyDevice: claimLegacyDevice, StartNewPairing: startNewPairing),
-         reply => Opening(reply, "Signed in to " + _serverName + "."), cancellationToken);
+   public Task<ServiceResult<SignInConfirmation>> SignInAsync(QqqSessionCredential credential, bool claimLegacyDevice, bool startNewPairing, CancellationToken cancellationToken = default)
+   {
+      string opening = "Signed in to " + _serverName + ".";
+      return ExchangeAsync(new PipeRequest("sign-in", SessionCredential: credential, ClaimLegacyDevice: claimLegacyDevice, StartNewPairing: startNewPairing),
+         reply => Opening(reply, opening, text => new SignInConfirmation(text, ReadReadiness(text[opening.Length..]))), cancellationToken);
+   }
 
 
 
@@ -96,6 +105,16 @@ public sealed partial class ServiceClient
    /// </summary>
    public Task<ServiceResult<PipeSignOutResult>> SignOutAsync(string postLogoutRedirectUri, CancellationToken cancellationToken = default)
       => ExchangeAsync(new PipeRequest("sign-out", PostLogoutRedirectUri: postLogoutRedirectUri), static reply => Marked(reply, ReadSignOut), cancellationToken);
+
+
+
+   /// <summary>Reads what the service said after its sign-in opening: printing is enabled, the computer still has to be enrolled, or some other condition.</summary>
+   private static SignInReadiness ReadReadiness(string remainder) => remainder switch
+   {
+      PrintingEnabled => SignInReadiness.PrintingEnabled,
+      EnrollmentNeeded => SignInReadiness.EnrollmentNeeded,
+      _ => SignInReadiness.NotReady,
+   };
 
 
 
@@ -109,16 +128,19 @@ public sealed partial class ServiceClient
 
 
 
-   /// <summary>Reads the sign-out reply as a document when it is one with a message, and otherwise keeps the text itself as the message.</summary>
+   /// <summary>
+   /// Reads the sign-out reply. Text that does not open like a JSON object is the service's sentence and becomes the message.
+   /// Anything that does open like one is read as the sign-out document and must carry a message: the document is the reply
+   /// that holds the identity provider's token hint, so it is never used as text, and a document that cannot be read or has
+   /// no message is unreadable rather than shown or logged.
+   /// </summary>
    private static PipeSignOutResult ReadSignOut(string reply)
    {
-      try
-      {
-         return JsonSerializer.Deserialize<PipeSignOutResult>(reply, PrintApiClient.JsonOptions) is { Message: not null } result ? result : new PipeSignOutResult(reply, null);
-      }
-      catch(JsonException)
+      if(!reply.TrimStart().StartsWith('{'))
       {
          return new PipeSignOutResult(reply, null);
       }
+      return JsonSerializer.Deserialize<PipeSignOutResult>(reply, PrintApiClient.JsonOptions) is { Message: not null } document
+         ? document : throw new JsonException("The sign-out document has no message.");
    }
 }

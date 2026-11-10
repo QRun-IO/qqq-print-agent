@@ -25,7 +25,7 @@ public sealed partial class MainWindow
 
    /// <summary>
    /// Shows what the flow announces: which sign-in methods are offered, whether a browser sign-in can be cancelled, the
-   /// saved certificate exception, and each message. The flow raises these on the thread that called it, which is the UI thread.
+   /// saved certificate exception, and each message. The flow raises these on the thread that called it, which is the UI thread; a presentation test (SignInFlowThreadingTests) holds it to that.
    /// </summary>
    private void SignIn_PropertyChanged(object? sender, PropertyChangedEventArgs e)
    {

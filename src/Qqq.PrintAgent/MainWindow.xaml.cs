@@ -44,7 +44,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
    /// <summary>Initialize the shared shell and the printing setup screen.</summary>
-   public MainWindow() : this(AgentPipeClient.SendAsync)
+   public MainWindow() : this(AgentPipeClient.SendReportingPhaseAsync)
    {
    }
 
@@ -276,7 +276,10 @@ public sealed partial class MainWindow : Window, IDisposable
 
    /// <summary>
    /// Query diagnostic information without exposing credentials. Overlapping refreshes are skipped, and a reply that arrived
-   /// after an administration request started is dropped, because that request will render a newer state itself.
+   /// after an administration request started is dropped, because that request will render a newer state itself. Anything in
+   /// the request or in rendering its answer that fails as an invalid operation or a missing key is shown as a status this
+   /// version cannot read, with a red footer, and never leaves this method: the timer, the Refresh button, the tray command
+   /// and the window's start all call it without a handler of their own.
    /// </summary>
    private async Task RefreshAsync()
    {
@@ -296,6 +299,11 @@ public sealed partial class MainWindow : Window, IDisposable
          }
          ApplyStatus(result);
       }
+      catch(Exception exception) when(exception is InvalidOperationException or KeyNotFoundException)
+      {
+         SetHealth("RED");
+         Feedback(ShellFeedback.UnreadableStatus);
+      }
       finally
       {
          _refreshing = false;
@@ -306,8 +314,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
    /// <summary>
    /// Shows the outcome of a status request: the snapshot, the service's own error, a reply this version cannot read (which
-   /// means mismatched versions), or an unreachable service. A snapshot whose content cannot be rendered is reported the same
-   /// way as an unreadable one.
+   /// means mismatched versions), or an unreachable service.
    /// </summary>
    private void ApplyStatus(ServiceResult<AgentSnapshot> result)
    {
@@ -329,15 +336,7 @@ public sealed partial class MainWindow : Window, IDisposable
          ServiceUnavailable();
          return;
       }
-      try
-      {
-         RenderSnapshot(result.Payload);
-      }
-      catch(Exception exception) when(exception is InvalidOperationException or KeyNotFoundException)
-      {
-         SetHealth("RED");
-         Feedback(ShellFeedback.UnreadableStatus);
-      }
+      RenderSnapshot(result.Payload);
    }
 
 

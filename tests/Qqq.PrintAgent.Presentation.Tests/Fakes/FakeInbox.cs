@@ -7,10 +7,14 @@ using Qqq.PrintAgent.Presentation.SignIn;
 
 namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 
-/// <summary>A callback inbox a test delivers to by hand. Waiting ends when a callback is delivered, when a failure is injected, or when the flow's token is cancelled, exactly like the real pipe inbox.</summary>
+/// <summary>
+/// A callback inbox a test delivers to by hand. Waiting ends when a callback is delivered, when a failure is injected, or
+/// when the flow's token is cancelled, exactly like the real pipe inbox. Like the real one it finishes on whatever thread
+/// delivered the callback, not on the caller's, so a flow that forgot to return to its own thread is caught by a test.
+/// </summary>
 internal sealed class FakeInbox : IBrowserCallbackInbox
 {
-   private readonly TaskCompletionSource<Uri> _callback = new();
+   private readonly TaskCompletionSource<Uri> _callback = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 
 
@@ -29,17 +33,16 @@ internal sealed class FakeInbox : IBrowserCallbackInbox
 
 
 
-   /// <summary>Makes the wait fail, as a broken inbox pipe would.</summary>
+   /// <summary>Makes the wait fail, as a broken inbox pipe or a malformed callback would.</summary>
    internal void Fail(Exception failure) => _callback.SetException(failure);
 
 
 
    /// <summary>Waits for a delivery, a failure or cancellation of the token.</summary>
-   public async Task<Uri> ReceiveAsync(CancellationToken cancellationToken)
+   public Task<Uri> ReceiveAsync(CancellationToken cancellationToken)
    {
       Waiting = true;
-      await using CancellationTokenRegistration registration = cancellationToken.Register(() => _callback.TrySetCanceled(cancellationToken));
-      return await _callback.Task;
+      return _callback.Task.WaitAsync(cancellationToken);
    }
 
 

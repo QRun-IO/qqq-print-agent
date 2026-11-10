@@ -23,6 +23,12 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
    /// <summary>The callback the fake installation has registered.</summary>
    internal const string Callback = "io.qrun.qqq-print-agent:/oauth/callback";
 
+   /// <summary>The sentence the real service sends when it took over a session and printing is enabled.</summary>
+   internal const string SignedInAndPrinting = "Signed in to QQQ. Printing is enabled.";
+
+   /// <summary>The sentence the real service sends when it took over a session but this computer is not enrolled yet.</summary>
+   internal const string SignedInNeedsEnrollment = "Signed in to QQQ. Enroll this computer to enable printing.";
+
 
 
    /// <summary>Builds the flow over the fakes and starts recording what it announces.</summary>
@@ -83,8 +89,8 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
 
 
 
-   /// <summary>How the scripted service answers; by default it confirms a sign-in.</summary>
-   internal Func<PipeRequest, Task<string>> Service { get; set; } = _ => Task.FromResult("Signed in to QQQ. Printing is ready.");
+   /// <summary>How the scripted service answers; by default it confirms a sign-in with the service's real sentence.</summary>
+   internal Func<PipeRequest, Task<string>> Service { get; set; } = _ => Task.FromResult(SignedInAndPrinting);
 
 
 
@@ -149,6 +155,34 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
       Type = password ? "TABLE_BASED" : "OAUTH2",
       Values = new QqqAuthenticationMetadata.ProviderValues { NativeSessionLogin = new QqqAuthenticationMetadata.NativeGrant { RedirectUris = redirects } },
    };
+
+
+
+   /// <summary>
+   /// Makes the service hold its next answer. The returned task completes when the flow's request has reached the service,
+   /// and the returned source is what the test completes, fails or leaves open to decide how that request ends.
+   /// </summary>
+   internal (Task Reached, TaskCompletionSource<string> Reply) HoldService()
+   {
+      TaskCompletionSource reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+      TaskCompletionSource<string> reply = new(TaskCreationOptions.RunContinuationsAsynchronously);
+      Service = _ =>
+      {
+         reached.TrySetResult();
+         return reply.Task;
+      };
+      return (reached.Task, reply);
+   }
+
+
+
+   /// <summary>Forgets what was announced and logged so far, so a test asserts only what its own step produced.</summary>
+   internal void Forget()
+   {
+      Shown.Clear();
+      Stages.Clear();
+      Log.Entries.Clear();
+   }
 
 
 
