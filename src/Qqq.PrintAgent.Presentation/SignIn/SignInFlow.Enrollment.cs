@@ -36,24 +36,26 @@ public sealed partial class SignInFlow
    /// <summary>
    /// Enrolls this device through the service with an address and code that passed <see cref="CheckEnrollment"/>. A
    /// refusal shows the service's reply. A request that left without a usable answer (a reply time limit, a pipe that closed
-   /// mid-reply, a wait the caller ended) says the code may have been used and must be checked on the server before another
-   /// attempt. A request that never left is reported to the caller as an unreachable service, because the code was not
-   /// used. The code is sent once and not kept. While another operation is running the request is refused and nothing happens.
+   /// mid-reply, an answer that could not be read, a wait the caller ended) says what happened and that the code may have
+   /// been used and must be checked on the server before another attempt. A request that never left is reported to the
+   /// caller as an unreachable service, because the code was not used. The code is sent once and not kept. While another
+   /// operation is running the request is refused: the result says it was not started, so the caller keeps what the
+   /// operator typed, and the flow says that another operation is still running.
    /// </summary>
    public async Task<EnrollmentResult> EnrollAsync(string address, string code, CancellationToken cancellationToken = default)
    {
       ArgumentNullException.ThrowIfNull(address);
       ArgumentNullException.ThrowIfNull(code);
       SignInStage before = Stage;
-      if(!TryBegin(SignInStage.Enrolling))
+      if(!TryBegin("Enrollment"))
       {
-         return new EnrollmentResult(null, ServiceReachable: true);
+         return new EnrollmentResult(null, ServiceReachable: true, Started: false);
       }
-      using CancellationTokenSource wait = Link(cancellationToken);
-      try
+      return await RunAsync("Enrollment", SignInStage.Enrolling, async token =>
       {
          Report(SignInMessages.Enrolling);
-         ServiceResult<string> result = await _service.EnrollAsync(address.Trim().TrimEnd('/'), code.Trim(), wait.Token);
+         ServiceResult<string> result = await _service.EnrollAsync(address.Trim().TrimEnd('/'), code.Trim(), token);
+         ThrowIfDisposed();
          if(result.Succeeded)
          {
             Report(SignInMessages.DeviceConnected(result.Payload));
@@ -67,14 +69,10 @@ public sealed partial class SignInFlow
          }
          if(result.Unconfirmed)
          {
-            Report(SignInMessages.EnrollmentUnconfirmed);
+            Report(SignInMessages.EnrollmentUnconfirmed(SignInMessages.Unanswered(result)));
             return new EnrollmentResult(null, ServiceReachable: true);
          }
          return new EnrollmentResult(null, ServiceReachable: false);
-      }
-      finally
-      {
-         End(before);
-      }
+      }, new EnrollmentResult(null, ServiceReachable: true), () => before, cancellationToken);
    }
 }

@@ -12,7 +12,9 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// A scripted sign-in session that keeps the rules of the real one: a browser sign-in can only be completed after it was
 /// begun and only with the callback of the latest attempt, and a credential exists only after a sign-in completed. Each
 /// step succeeds unless a failure is set for it, can be held open until the test releases it, and records what the flow
-/// passed in. It never touches a network.
+/// passed in. Disposing it behaves like the real client too: a call that is still in flight fails with "disposed" when
+/// it finishes, whatever else happened to it, and every later call is refused. A held call resumes on another thread, as
+/// the real client's network calls do. It never touches a network.
 /// </summary>
 internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : ISignInSession
 {
@@ -103,13 +105,21 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
 
 
    /// <summary>Returns the scripted metadata, waits for the test, or fails.</summary>
-   public Task<QqqAuthenticationMetadata> DiscoverAsync(CancellationToken cancellationToken)
+   public async Task<QqqAuthenticationMetadata> DiscoverAsync(CancellationToken cancellationToken)
    {
-      if(DiscoverFailure is not null)
+      ObjectDisposedException.ThrowIf(Disposed, this);
+      try
       {
-         return Task.FromException<QqqAuthenticationMetadata>(DiscoverFailure);
+         if(DiscoverFailure is not null)
+         {
+            throw DiscoverFailure;
+         }
+         return PendingDiscovery is null ? Metadata : await PendingDiscovery.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
       }
-      return PendingDiscovery is null ? Task.FromResult(Metadata) : PendingDiscovery.Task.WaitAsync(cancellationToken);
+      finally
+      {
+         Release();
+      }
    }
 
 
@@ -117,16 +127,24 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
    /// <summary>Records the credentials and succeeds, waits for the test, or fails as scripted; only success leaves a credential.</summary>
    public async Task SignInWithPasswordAsync(string username, string password, CancellationToken cancellationToken)
    {
+      ObjectDisposedException.ThrowIf(Disposed, this);
       PasswordAttempt = (username, password);
-      if(PasswordFailure is not null)
+      try
       {
-         throw PasswordFailure;
+         if(PasswordFailure is not null)
+         {
+            throw PasswordFailure;
+         }
+         if(PendingPassword is not null)
+         {
+            await PendingPassword.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+         }
+         _signedIn = true;
       }
-      if(PendingPassword is not null)
+      finally
       {
-         await PendingPassword.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+         Release();
       }
-      _signedIn = true;
    }
 
 
@@ -134,6 +152,7 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
    /// <summary>Starts a new browser attempt with its own state, replacing any earlier one, and returns the provider page; or fails.</summary>
    public Task<Uri> BeginBrowserSignInAsync(Uri redirect, CancellationToken cancellationToken)
    {
+      ObjectDisposedException.ThrowIf(Disposed, this);
       Redirect = redirect;
       if(BeginFailure is not null)
       {
@@ -149,6 +168,7 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
    /// <summary>Completes the open attempt when the callback carries that attempt's state; a callback without a begun attempt, or with another attempt's state, is refused the way the real session refuses it.</summary>
    public Task CompleteBrowserSignInAsync(Uri callback, CancellationToken cancellationToken)
    {
+      ObjectDisposedException.ThrowIf(Disposed, this);
       Callback = callback;
       if(!_attemptOpen)
       {
@@ -182,6 +202,15 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
 
 
 
-   /// <summary>Marks the session discarded.</summary>
+   /// <summary>Marks the session discarded. From then on a call in flight fails as it finishes and a new call is refused, which is what disposing the real client under a running call does.</summary>
    public void Dispose() => Disposed = true;
+
+
+
+   /// <summary>
+   /// What the real client does at the end of every call: it releases its gate, and a gate that was disposed meanwhile
+   /// throws. Because this runs as the call unwinds, it replaces whatever the call was about to return or throw, so a
+   /// flow that disposes its session under a running call sees "disposed" instead of the cancellation it asked for.
+   /// </summary>
+   private void Release() => ObjectDisposedException.ThrowIf(Disposed, this);
 }

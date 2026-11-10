@@ -106,33 +106,34 @@ public sealed class SignInFlowEnrollmentTests
    /// <summary>
    /// An enrollment that left this computer without a usable answer (the reply time limit, a pipe that closed mid-reply, an
    /// oversize reply) is not called a failure: the code may have been used, so the operator is told to check the server before
-   /// trying again, and the service is not reported as unreachable.
+   /// trying again, and the service is not reported as unreachable. The message starts with what really happened, so it
+   /// says "timed out" only for a time limit.
    /// </summary>
    [Theory]
    [MemberData(nameof(UnconfirmedFailures))]
-   public async Task EnrollmentThatLeftWithoutAnAnswer_AsksToCheckTheServerFirst(Exception failure)
+   public async Task EnrollmentThatLeftWithoutAnAnswer_AsksToCheckTheServerFirst(Exception failure, string cause)
    {
       SignInFixture fixture = new() { Service = _ => Task.FromException<string>(failure) };
 
       EnrollmentResult result = await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123");
 
       Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), result);
-      Assert.Equal(new FeedbackMessage("Enrollment could not be confirmed", "The request timed out. Check the device list in the server before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", FeedbackSeverity.Warning), fixture.Shown[^1]);
+      Assert.Equal(new FeedbackMessage("Enrollment could not be confirmed", cause + " Check the device list in the server before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", FeedbackSeverity.Warning), fixture.Shown[^1]);
    }
 
 
 
-   /// <summary>The failures after which the code may have been used.</summary>
-   public static TheoryData<Exception> UnconfirmedFailures() => new()
+   /// <summary>The failures after which the code may have been used, and the sentence that says what happened for each.</summary>
+   public static TheoryData<Exception, string> UnconfirmedFailures() => new()
    {
-      new OperationCanceledException("The reply did not arrive in time."),
-      new IOException("Service connection closed before a complete response was received."),
-      new InvalidDataException("Local pipe message exceeds the permitted size."),
+      { new OperationCanceledException("The reply did not arrive in time."), "The request timed out." },
+      { new IOException("Service connection closed before a complete response was received."), "The connection to the service closed before its answer arrived." },
+      { new InvalidDataException("Local pipe message exceeds the permitted size."), "The service's answer was larger than the companion accepts." },
    };
 
 
 
-   /// <summary>Cancelling the wait for an enrollment that was sent is unconfirmed too: the service may still enroll the device, so the same check-the-server message is shown.</summary>
+   /// <summary>Cancelling the wait for an enrollment that was sent is unconfirmed too: the service may still enroll the device, so the same check-the-server message is shown, and it says the wait was ended instead of claiming a time limit.</summary>
    [Fact]
    public async Task CancelledEnrollment_IsUnconfirmed()
    {
@@ -145,8 +146,34 @@ public sealed class SignInFlowEnrollmentTests
       Assert.Equal(SignInStage.Enrolling, fixture.Flow.Stage);
       await cancellation.CancelAsync();
 
-      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), await running);
+      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), await SignInFixture.EndsAsync(running));
       Assert.Equal("Connecting > Enrollment could not be confirmed", fixture.Titles);
+      Assert.StartsWith("The wait for the service's answer was ended. Check the device list in the server before trying again: the code may have been consumed.", fixture.Shown[^1].Message, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// Disposing the flow while the service is enrolling ends the wait: the enrollment ends by itself, quietly, without
+   /// telling a closed window that the enrollment could not be confirmed, and announces nothing more.
+   /// </summary>
+   [Fact]
+   public async Task DisposedDuringEnrollment_EndsQuietly()
+   {
+      SignInFixture fixture = new();
+      (Task reached, _) = fixture.HoldService();
+
+      Task<EnrollmentResult> running = fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123");
+      await reached;
+      int announced = fixture.Changes.Count;
+      fixture.Flow.Dispose();
+
+      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), await SignInFixture.EndsAsync(running));
+      Assert.Equal("Connecting", fixture.Titles);
+      Assert.Equal(announced, fixture.Changes.Count);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.Equal("DEBUG Enrollment ended because the connection flow was closed (OperationCanceledException).", fixture.Log.Entries[^1]);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal));
    }
 
 
@@ -217,7 +244,7 @@ public sealed class SignInFlowEnrollmentTests
    [InlineData(false, "ERROR Could not read the server trust setting from the service: Service connection closed.")]
    public async Task UnreadableException_MeansNoException(bool answered, string expectedLog)
    {
-      SignInFixture fixture = new() { Service = _ => Task.FromResult("Saved.") };
+      SignInFixture fixture = new();
       Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com"));
       fixture.Service = _ => answered ? Task.FromResult("Error: Access denied.") : Task.FromException<string>(new IOException("Service connection closed."));
 
@@ -230,30 +257,35 @@ public sealed class SignInFlowEnrollmentTests
 
 
 
-   /// <summary>Disposing the flow while the exception is being read or saved ends the wait and keeps the exception the flow already held; a save in flight still puts the checkbox back and is not reported as an unreachable service.</summary>
+   /// <summary>Disposing the flow while the exception is being read or saved ends the wait and keeps the exception the flow already held. Nothing is announced to the closed window, not even the checkbox going back, a save in flight is not reported as an unreachable service, and nothing is logged as a warning or an error.</summary>
    [Fact]
-   public async Task DisposedWhileReadingOrSaving_KeepsWhatWasHeld()
+   public async Task DisposedWhileReadingOrSaving_KeepsWhatWasHeldAndAnnouncesNothing()
    {
       SignInFixture reading = new();
       (Task readReached, _) = reading.HoldService();
       Task load = reading.Flow.LoadTrustAsync();
       await readReached;
+      reading.Forget();
       reading.Flow.Dispose();
-      await load;
+      await load.WaitAsync(TimeSpan.FromSeconds(10));
 
       SignInFixture saving = new();
       (Task saveReached, _) = saving.HoldService();
       Task<bool> save = saving.Flow.SetTrustAsync(allow: true, "https://dev.example.com");
       await saveReached;
+      saving.Forget();
       saving.Flow.Dispose();
 
-      Assert.True(await save);
-      Assert.Equal(0, reading.TrustAnnouncements);
+      Assert.True(await SignInFixture.EndsAsync(save));
+      Assert.Empty(reading.Changes);
       Assert.Equal(new ServerTrust(), reading.Flow.Trust);
-      Assert.Equal(1, saving.TrustAnnouncements);
+      Assert.Equal("DEBUG Reading the certificate exception ended because the connection flow was closed (OperationCanceledException).", reading.Log.Entries[^1]);
+      Assert.Empty(saving.Changes);
       Assert.Equal(new ServerTrust(), saving.Flow.Trust);
-      Assert.Empty(saving.Shown);
-      Assert.DoesNotContain(saving.Log.Entries, entry => entry.StartsWith("ERROR", StringComparison.Ordinal));
+      Assert.Equal("DEBUG Saving the certificate exception ended because the connection flow was closed (OperationCanceledException).", saving.Log.Entries[^1]);
+      Assert.DoesNotContain(reading.Log.Entries.Concat(saving.Log.Entries), entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal));
+      Assert.False(reading.Flow.IsBusy);
+      Assert.False(saving.Flow.IsBusy);
    }
 
 
@@ -281,7 +313,7 @@ public sealed class SignInFlowEnrollmentTests
    [Fact]
    public async Task Allowing_SavesTheExceptionForOneOrigin()
    {
-      SignInFixture fixture = new() { Service = _ => Task.FromResult("Saved.") };
+      SignInFixture fixture = new();
 
       Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "  https://Dev.Example.com:8443/qqq/path  "));
 
@@ -299,7 +331,7 @@ public sealed class SignInFlowEnrollmentTests
    [Fact]
    public async Task Refusing_RemovesTheException()
    {
-      SignInFixture fixture = new() { Service = _ => Task.FromResult("Saved.") };
+      SignInFixture fixture = new();
       Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com"));
 
       Assert.True(await fixture.Flow.SetTrustAsync(allow: false, "not an address"));

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Presentation.SignIn;
@@ -38,7 +39,7 @@ public static class SignInMessages
 
 
 
-   /// <summary>The browser sign-in was cancelled or timed out; the half-finished attempt was discarded.</summary>
+   /// <summary>The browser sign-in was cancelled or timed out before anything was handed to the service; the half-finished attempt was discarded.</summary>
    public static FeedbackMessage BrowserCanceled { get; } = new("Browser sign-in canceled", "No new sign-in was accepted. Choose Discover sign-in options to start a new attempt.", FeedbackSeverity.Informational);
 
 
@@ -53,8 +54,8 @@ public static class SignInMessages
 
 
 
-   /// <summary>The enrollment request timed out, so the code may have been used; the operator must check the server before trying again.</summary>
-   public static FeedbackMessage EnrollmentUnconfirmed { get; } = new("Enrollment could not be confirmed", "The request timed out. Check the device list in the server before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", FeedbackSeverity.Warning);
+   /// <summary>An operation was asked for while another one was still running. It was not started, and nothing the operator entered was used or cleared.</summary>
+   public static FeedbackMessage Busy { get; } = new("Another operation is still running", "This request was not started. Wait for the current operation to finish, then try again.", FeedbackSeverity.Warning);
 
 
 
@@ -83,6 +84,49 @@ public static class SignInMessages
    /// <summary>A browser sign-in did not complete, with the reason and what to check before trying again.</summary>
    public static FeedbackMessage BrowserNotCompleted(string reason)
       => new("Browser sign-in not completed", "No validated account session was received. Reason: " + reason + " Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly." + LogHint, FeedbackSeverity.Warning);
+
+
+
+   /// <summary>
+   /// Says what really happened to a request that left for the service and brought no usable answer back, in one
+   /// sentence: its time limit ran out, the connection closed, the answer was too large or could not be read, or the wait
+   /// was ended. The messages that follow an unconfirmed request start with this sentence, so none of them claims a time
+   /// limit that did not happen.
+   /// </summary>
+   public static string Unanswered<T>(ServiceResult<T> result)
+   {
+      ArgumentNullException.ThrowIfNull(result);
+      return result switch
+      {
+         { Outcome: ServiceOutcome.Canceled } => "The wait for the service's answer was ended.",
+         { Failure: ServiceFailure.TimedOut } => "The request timed out.",
+         { Failure: ServiceFailure.Disconnected } => "The connection to the service closed before its answer arrived.",
+         { Failure: ServiceFailure.InvalidData } => "The service's answer was larger than the companion accepts.",
+         { Failure: ServiceFailure.UnreadableReply } => "The service answered, but its answer could not be read.",
+         _ => "The service's answer did not arrive. Reason: " + result.Message,
+      };
+   }
+
+
+
+   /// <summary>
+   /// The session was sent to the service and no usable answer came back, so the service may have signed in or not. The
+   /// operator is told to look at the status before trying again, and how to start over when it shows no sign-in.
+   /// </summary>
+   public static FeedbackMessage HandOverUnconfirmed(string cause)
+      => new("Sign-in could not be confirmed", cause + " The sign-in was sent to the service, which may still complete it. Check the connection status before trying again; if it does not show this account as signed in, choose Discover sign-in options and sign in again." + LogHint, FeedbackSeverity.Warning);
+
+
+
+   /// <summary>The enrollment request left and no usable answer came back, so the code may have been used; the operator must check the server before trying again.</summary>
+   public static FeedbackMessage EnrollmentUnconfirmed(string cause)
+      => new("Enrollment could not be confirmed", cause + " Check the device list in the server before trying again: the code may have been consumed. Revoke any unused device created by this attempt, then generate a fresh enrollment code. Your prior connection remains available unless this enrollment completed.", FeedbackSeverity.Warning);
+
+
+
+   /// <summary>The sign-out request left and no usable answer came back, so the session may have ended or not; this is not the same as the service being unavailable.</summary>
+   public static FeedbackMessage SignOutUnconfirmed(string cause)
+      => new("Sign-out could not be confirmed", cause + " The session may have ended. Check the connection status before trying again." + LogHint, FeedbackSeverity.Warning);
 
 
 

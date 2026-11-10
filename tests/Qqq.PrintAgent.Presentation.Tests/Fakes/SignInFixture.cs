@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Presentation.SignIn;
 using Qqq.PrintAgent.Windows;
@@ -17,6 +19,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// </summary>
 internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, IBrowserCallbackSource
 {
+   private TaskCompletionSource<FakeInbox>? _awaitedInbox;
    /// <summary>The address tests use for the server.</summary>
    internal const string Server = "https://print.example.com";
 
@@ -24,10 +27,16 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
    internal const string Callback = "io.qrun.qqq-print-agent:/oauth/callback";
 
    /// <summary>The sentence the real service sends when it took over a session and printing is enabled.</summary>
-   internal const string SignedInAndPrinting = "Signed in to QQQ. Printing is enabled.";
+   internal const string SignedInAndPrinting = "Signed in to QQQ." + SignInSentences.PrintingEnabled;
 
    /// <summary>The sentence the real service sends when it took over a session but this computer is not enrolled yet.</summary>
-   internal const string SignedInNeedsEnrollment = "Signed in to QQQ. Enroll this computer to enable printing.";
+   internal const string SignedInNeedsEnrollment = "Signed in to QQQ." + SignInSentences.EnrollmentNeeded;
+
+   /// <summary>The sentence the real service sends when it ended its session.</summary>
+   internal const string SignedOut = "Signed out. Device pairing and print history were preserved.";
+
+   /// <summary>The sentence the real service sends when it enrolled this computer.</summary>
+   internal const string Enrolled = "Enrolled device 7";
 
 
 
@@ -37,6 +46,7 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
       Flow = new SignInFlow(new ServiceClient(SendAsync, Log, "QQQ"), this, this, this, Log, Time);
       Flow.PropertyChanged += (_, change) =>
       {
+         Changes.Add(change.PropertyName!);
          if(string.Equals(change.PropertyName, nameof(SignInFlow.Feedback), StringComparison.Ordinal))
          {
             Shown.Add(Flow.Feedback!);
@@ -79,6 +89,11 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
 
 
 
+   /// <summary>The name of every property the flow announced a change of, oldest first; its length proves that nothing more was announced after a point.</summary>
+   internal List<string> Changes { get; } = [];
+
+
+
    /// <summary>How many times the flow announced the certificate exception, which is when a view re-applies its checkbox.</summary>
    internal int TrustAnnouncements { get; private set; }
 
@@ -89,8 +104,8 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
 
 
 
-   /// <summary>How the scripted service answers; by default it confirms a sign-in with the service's real sentence.</summary>
-   internal Func<PipeRequest, Task<string>> Service { get; set; } = _ => Task.FromResult(SignedInAndPrinting);
+   /// <summary>How the scripted service answers; by default each operation gets the answer the real service gives it when all is well.</summary>
+   internal Func<PipeRequest, Task<string>> Service { get; set; } = static request => Task.FromResult(RealReply(request));
 
 
 
@@ -159,6 +174,24 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
 
 
    /// <summary>
+   /// What the real service answers to each operation the flow sends when all is well: its sign-in sentence, the sign-out
+   /// document it sends whenever a callback address was supplied (here without a provider sign-out), its enrollment
+   /// sentence, and the certificate exception as a document, which is also how it confirms a save. Any other operation
+   /// is refused the way the service refuses an unknown command.
+   /// </summary>
+   internal static string RealReply(PipeRequest request) => request.Operation switch
+   {
+      "sign-in" => SignedInAndPrinting,
+      "sign-out" => JsonSerializer.Serialize(new PipeSignOutResult(SignedOut, null), PrintApiClient.JsonOptions),
+      "enroll" => Enrolled,
+      "get-server-trust" => JsonSerializer.Serialize(new ServerTrust(), PrintApiClient.JsonOptions),
+      "set-server-trust" => JsonSerializer.Serialize(request.ServerTrust, PrintApiClient.JsonOptions),
+      _ => "Error: Unknown command.",
+   };
+
+
+
+   /// <summary>
    /// Makes the service hold its next answer. The returned task completes when the flow's request has reached the service,
    /// and the returned source is what the test completes, fails or leaves open to decide how that request ends.
    /// </summary>
@@ -181,7 +214,36 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
    {
       Shown.Clear();
       Stages.Clear();
+      Changes.Clear();
       Log.Entries.Clear();
+   }
+
+
+
+   /// <summary>Puts the scripted service back to answering every operation the way the real service does.</summary>
+   internal void AnswerAsTheRealService() => Service = static request => Task.FromResult(RealReply(request));
+
+
+
+   /// <summary>
+   /// Awaits an operation that has to end by itself and fails the test, instead of hanging the run, when it does not. The
+   /// limit is real time, but it only ever runs out when the flow is broken; a passing test never waits for it.
+   /// </summary>
+   internal static async Task<T> EndsAsync<T>(Task<T> operation) => await operation.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+
+
+
+   /// <summary>
+   /// Completes with the next inbox the flow opens, once the flow has started waiting on it. A test whose flow reaches
+   /// its inbox on another thread's schedule uses this to deliver a callback to a wait that has really begun, without
+   /// sleeping. It must be called before the flow opens the inbox.
+   /// </summary>
+   internal async Task<FakeInbox> NextInboxAsync()
+   {
+      _awaitedInbox = new TaskCompletionSource<FakeInbox>(TaskCreationOptions.RunContinuationsAsynchronously);
+      FakeInbox inbox = await _awaitedInbox.Task.ConfigureAwait(false);
+      await inbox.Listening.ConfigureAwait(false);
+      return inbox;
    }
 
 
@@ -231,6 +293,7 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
       }
       FakeInbox inbox = new();
       Inboxes.Add(inbox);
+      _awaitedInbox?.TrySetResult(inbox);
       return inbox;
    }
 

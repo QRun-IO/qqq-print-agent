@@ -15,7 +15,8 @@ namespace Qqq.PrintAgent;
 /// hand-over to the service, sign-out, enrollment and the certificate exception) is decided by <see cref="SignInFlow"/>;
 /// this part passes the dialog's fields to it, marks the window busy around each operation, and shows the state and
 /// messages the flow announces. The window never stores a password or a provider token, and the password and enrollment
-/// boxes are cleared after every attempt.
+/// boxes are cleared after every attempt. An attempt the flow refused because another operation was still running is not
+/// an attempt: the flow says so, and what the operator typed stays.
 /// </summary>
 public sealed partial class MainWindow
 {
@@ -108,7 +109,7 @@ public sealed partial class MainWindow
 
 
 
-   /// <summary>Signs in with the entered user name and password and the selected pairing choice. The password box is cleared whether or not sign-in worked.</summary>
+   /// <summary>Signs in with the entered user name and password and the selected pairing choice. The password box is cleared whether or not sign-in worked, and kept only when the flow refused to start because another operation was running.</summary>
    private async void PasswordSignIn_Click(object sender, RoutedEventArgs e)
    {
       if(_busy || !_signIn.HasSession)
@@ -116,13 +117,17 @@ public sealed partial class MainWindow
          return;
       }
       SetBusy(true);
+      bool refused = false;
       try
       {
-         await _signIn.SignInWithPasswordAsync(UsernameBox.Text, QqqPasswordBox.Password, PairingSelection.FromIndex(PairingChoice.SelectedIndex));
+         refused = !await _signIn.SignInWithPasswordAsync(UsernameBox.Text, QqqPasswordBox.Password, PairingSelection.FromIndex(PairingChoice.SelectedIndex));
       }
       finally
       {
-         QqqPasswordBox.Password = string.Empty;
+         if(!refused)
+         {
+            QqqPasswordBox.Password = string.Empty;
+         }
          SetBusy(false);
       }
    }
@@ -175,7 +180,8 @@ public sealed partial class MainWindow
    /// <summary>
    /// Enrolls this device through the service with the entered address and code; the window never receives or stores the
    /// device token. An incomplete form is refused before anything is sent, the service's confirmation becomes the status
-   /// line, and the code box is cleared after every attempt.
+   /// line, and the code box is cleared after every attempt. When the flow refused to start because another operation was
+   /// running, the code was not used and stays in the box.
    /// </summary>
    private async void Enroll_Click(object sender, RoutedEventArgs e)
    {
@@ -184,9 +190,11 @@ public sealed partial class MainWindow
          return;
       }
       SetBusy(true);
+      bool refused = false;
       try
       {
          EnrollmentResult result = await _signIn.EnrollAsync(ServerBox.Text, EnrollmentBox.Password);
+         refused = !result.Started;
          if(result.StatusText is string status)
          {
             StatusText.Text = status;
@@ -198,7 +206,10 @@ public sealed partial class MainWindow
       }
       finally
       {
-         EnrollmentBox.Password = string.Empty;
+         if(!refused)
+         {
+            EnrollmentBox.Password = string.Empty;
+         }
          SetBusy(false);
       }
    }

@@ -13,8 +13,8 @@ namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 /// <summary>Discovery: asking a server which sign-in methods it offers, and what the flow shows and keeps afterwards.</summary>
 public sealed class SignInFlowDiscoveryTests
 {
-   /// <summary>The failure the real session client raises for an address it will not talk to, such as plain HTTP to a remote host.</summary>
-   private static ArgumentException Refused(string origin) => new("The server origin must use HTTPS, not " + origin + ".", nameof(origin));
+   /// <summary>The failure the real session client raises for an address it will not talk to, such as plain HTTP to a remote host. It is taken from the real client, which refuses before it opens any connection, so the text here cannot drift from the real one.</summary>
+   private static ArgumentException Refused(string address) => Assert.Throws<ArgumentException>(() => new QqqSessionClient(new Uri(address)));
 
 
 
@@ -121,7 +121,7 @@ public sealed class SignInFlowDiscoveryTests
 
       await fixture.Flow.DiscoverAsync("http://print.example.com");
 
-      Assert.Equal("The server did not provide compatible authentication and printing discovery. Reason: The server origin must use HTTPS, not http://print.example.com. (Parameter 'origin') The activity log has the full detail.", Assert.Single(fixture.Shown).Message);
+      Assert.Equal("The server did not provide compatible authentication and printing discovery. Reason: Use an HTTPS server origin, or explicitly enabled loopback HTTP. (Parameter 'origin') The activity log has the full detail.", Assert.Single(fixture.Shown).Message);
       Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
    }
 
@@ -159,18 +159,25 @@ public sealed class SignInFlowDiscoveryTests
 
 
 
-   /// <summary>Cancelling the caller's token, or disposing the flow, while the server is being asked ends discovery quietly: no failure is shown, no session is left, and the flow is idle.</summary>
+   /// <summary>
+   /// Cancelling the caller's token, or disposing the flow, while the server is being asked ends discovery quietly: no
+   /// failure is shown or logged, no session is left, and the flow is idle. The session is discarded by the discovery
+   /// itself once its call has ended, never under the running call: the scripted session fails a call it is disposed
+   /// under the way the real client does, which would show here as "Discovery failed ... disposed". After a dispose
+   /// nothing more is announced at all.
+   /// </summary>
    [Theory]
-   [InlineData(true)]
-   [InlineData(false)]
-   public async Task CancelledDiscovery_EndsQuietlyWithoutASession(bool byToken)
+   [InlineData(true, "DEBUG Discovery was cancelled by its caller (TaskCanceledException).")]
+   [InlineData(false, "DEBUG Discovery ended because the connection flow was closed (TaskCanceledException).")]
+   public async Task CancelledDiscovery_EndsQuietlyWithoutASession(bool byToken, string entry)
    {
       SignInFixture fixture = new() { ConfigureSession = session => session.PendingDiscovery = new TaskCompletionSource<QqqAuthenticationMetadata>() };
       using CancellationTokenSource cancellation = new();
 
-      Task running = fixture.Flow.DiscoverAsync(SignInFixture.Server, cancellation.Token);
+      Task<bool> running = fixture.Flow.DiscoverAsync(SignInFixture.Server, cancellation.Token);
       Assert.True(fixture.Flow.IsBusy);
       Assert.Equal(SignInStage.Discovering, fixture.Flow.Stage);
+      int announced = fixture.Changes.Count;
       if(byToken)
       {
          await cancellation.CancelAsync();
@@ -179,14 +186,59 @@ public sealed class SignInFlowDiscoveryTests
       {
          fixture.Flow.Dispose();
       }
-      await running;
 
+      Assert.True(await SignInFixture.EndsAsync(running));
       Assert.Empty(fixture.Shown);
       Assert.True(fixture.Sessions[0].Disposed);
       Assert.False(fixture.Flow.HasSession);
       Assert.False(fixture.Flow.IsBusy);
       Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
-      Assert.Contains("DEBUG Discovery was cancelled before the server answered.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal(entry, fixture.Log.Entries[^1]);
+      Assert.DoesNotContain(fixture.Log.Entries, candidate => candidate.StartsWith("WARN", StringComparison.Ordinal) || candidate.StartsWith("ERROR", StringComparison.Ordinal));
+      Assert.Equal(byToken, fixture.Changes.Count > announced);
+   }
+
+
+
+   /// <summary>A discovery asked for with a token that is already cancelled does nothing: no session is created and nothing is shown.</summary>
+   [Fact]
+   public async Task DiscoveryWithAWaitThatAlreadyEnded_DoesNothing()
+   {
+      SignInFixture fixture = new();
+      using CancellationTokenSource cancellation = new();
+      await cancellation.CancelAsync();
+
+      Assert.True(await fixture.Flow.DiscoverAsync(SignInFixture.Server, cancellation.Token));
+
+      Assert.Empty(fixture.Sessions);
+      Assert.Empty(fixture.Shown);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.Equal("DEBUG Discovery was cancelled by its caller (OperationCanceledException).", Assert.Single(fixture.Log.Entries));
+   }
+
+
+
+   /// <summary>
+   /// What the last confirmed sign-in said about printing belongs to that sign-in. Discovering again forgets it at once,
+   /// before the server has answered, so a view never shows "printing is enabled" for a server that is only being asked.
+   /// </summary>
+   [Fact]
+   public async Task Rediscovery_ForgetsWhatTheLastSignInAchieved()
+   {
+      SignInFixture fixture = new();
+      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+      Assert.Equal(SignInReadiness.PrintingEnabled, fixture.Flow.Readiness);
+      fixture.ConfigureSession = session => session.PendingDiscovery = new TaskCompletionSource<QqqAuthenticationMetadata>();
+
+      Task<bool> running = fixture.Flow.DiscoverAsync(SignInFixture.Server);
+
+      Assert.Null(fixture.Flow.Readiness);
+      fixture.Sessions[1].PendingDiscovery!.SetResult(fixture.Sessions[1].Metadata);
+      Assert.True(await SignInFixture.EndsAsync(running));
+      Assert.Null(fixture.Flow.Readiness);
+      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
    }
 
 
@@ -214,7 +266,7 @@ public sealed class SignInFlowDiscoveryTests
    [Fact]
    public async Task CertificateException_AppliesOnlyToItsOwnServer()
    {
-      SignInFixture fixture = new() { Service = _ => Task.FromResult("Saved.") };
+      SignInFixture fixture = new();
       Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com:8443/"));
 
       await fixture.Flow.DiscoverAsync("https://dev.example.com:8443");
@@ -243,28 +295,39 @@ public sealed class SignInFlowDiscoveryTests
 
 
 
-   /// <summary>A disposed flow starts nothing: discovery, sign-in, sign-out, enrollment and the certificate exception are all refused without a request, and disposing twice is harmless.</summary>
+   /// <summary>
+   /// A disposed flow starts nothing and says nothing: discovery, sign-in, sign-out, enrollment and the certificate
+   /// exception are all refused without a request, every result says "not started", nothing is announced or logged (not
+   /// even a form check or a checkbox going back), and disposing twice is harmless. When nothing was running, disposing
+   /// discards the session itself.
+   /// </summary>
    [Fact]
-   public async Task DisposedFlow_StartsNothing()
+   public async Task DisposedFlow_StartsNothingAndAnnouncesNothing()
    {
       SignInFixture fixture = new();
       await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+      FeedbackMessage? last = fixture.Flow.Feedback;
       fixture.Flow.Dispose();
       fixture.Flow.Dispose();
       fixture.Forget();
 
-      await fixture.Flow.DiscoverAsync(SignInFixture.Server);
-      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
-      await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      Assert.False(await fixture.Flow.DiscoverAsync(SignInFixture.Server));
+      Assert.False(await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent));
+      Assert.False(await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent));
       await fixture.Flow.LoadTrustAsync();
-
       Assert.True(await fixture.Flow.SignOutAsync());
       Assert.True(await fixture.Flow.SetTrustAsync(allow: false, null));
-      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123"));
+      Assert.True(await fixture.Flow.SetTrustAsync(allow: true, null));
+      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true, Started: false), await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123"));
+      Assert.False(fixture.Flow.CheckEnrollment(null, null));
+
       Assert.Single(fixture.Sessions);
       Assert.True(fixture.Sessions[0].Disposed);
       Assert.Empty(fixture.Requests);
       Assert.Empty(fixture.Shown);
+      Assert.Empty(fixture.Changes);
+      Assert.Empty(fixture.Log.Entries);
+      Assert.Same(last, fixture.Flow.Feedback);
       Assert.False(fixture.Flow.HasSession);
    }
 

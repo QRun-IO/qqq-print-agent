@@ -24,24 +24,25 @@ public sealed partial class SignInFlow
 
    /// <summary>
    /// Asks the service to sign out and forget its session, then discards the flow's own session and what it offered. It
-   /// returns false when no usable answer arrived, and the caller then shows its service-unavailable state: if the request
-   /// never left, nothing was changed; if it left, the service may have signed out anyway, and the log says which. It
-   /// returns true in every other case, including a request that was refused because another operation is running. A
-   /// service error is shown as a warning; a provider sign-out is opened and its confirmation awaited.
+   /// returns false only when the request never left this computer, and the caller then shows its service-unavailable
+   /// state, because nothing was changed. A request that left without a usable answer is not "unavailable": the operator
+   /// is told the sign-out could not be confirmed and that the session may have ended. It returns true in every other
+   /// case too, including a request that was refused because another operation is running. A service error is shown as a
+   /// warning; a provider sign-out is opened and its confirmation awaited.
    /// </summary>
    public async Task<bool> SignOutAsync(CancellationToken cancellationToken = default)
    {
       SignInStage before = Stage;
-      if(!TryBegin(SignInStage.SigningOut))
+      if(!TryBegin("Sign-out"))
       {
          return true;
       }
       bool answered = false;
-      using CancellationTokenSource wait = Link(cancellationToken);
-      try
+      return await RunAsync("Sign-out", SignInStage.SigningOut, async token =>
       {
          _log.Info("Sign-out requested; asking the service to end the session.");
-         ServiceResult<PipeSignOutResult> result = await _service.SignOutAsync(_callbacks.RedirectUri, wait.Token);
+         ServiceResult<PipeSignOutResult> result = await _service.SignOutAsync(_callbacks.RedirectUri, token);
+         ThrowIfDisposed();
          if(result.Reply is not string reply)
          {
             return SignOutUnanswered(result);
@@ -49,29 +50,30 @@ public sealed partial class SignInFlow
          answered = true;
          DropSession();
          Readiness = null;
-         await ReportSignOutAsync(result, reply, wait.Token);
+         await ReportSignOutAsync(result, reply, token);
          return true;
-      }
-      finally
-      {
-         End(answered ? SignInStage.Idle : before);
-      }
+      }, stopped: true, () => answered ? SignInStage.Idle : before, cancellationToken);
    }
 
 
 
-   /// <summary>Logs a sign-out that got no answer, saying whether the session may have ended anyway, and tells the caller whether to show the service as unavailable.</summary>
+   /// <summary>
+   /// Handles a sign-out that got no usable answer. When nothing was sent, nothing was changed, and the caller is told to
+   /// show the service as unavailable. When the request left, the session may have ended anyway: that is logged with what
+   /// really happened (no answer in time, a closed connection, an answer that could not be read, a wait that was ended)
+   /// and shown as "could not be confirmed", which is not the same as the service being unavailable.
+   /// </summary>
    private bool SignOutUnanswered(ServiceResult<PipeSignOutResult> result)
    {
-      if(result.Outcome == ServiceOutcome.Canceled)
+      if(!result.Unconfirmed)
       {
-         _log.Info("Sign-out is no longer waited for; the service may still end the session.");
-         return true;
+         _log.Error("Sign-out could not reach the service; nothing was changed: " + result.Message);
+         return false;
       }
-      _log.Error(result.Unconfirmed
-         ? "Sign-out was sent, but the service's answer did not arrive, so the session may or may not have ended: " + result.Message
-         : "Sign-out could not reach the service; nothing was changed: " + result.Message);
-      return false;
+      string cause = SignInMessages.Unanswered(result);
+      _log.Error("Sign-out could not be confirmed, so the session may or may not have ended: " + cause);
+      Report(SignInMessages.SignOutUnconfirmed(cause));
+      return true;
    }
 
 
@@ -98,7 +100,8 @@ public sealed partial class SignInFlow
    /// Opens the identity provider's end-session page in the default browser and waits up to two minutes for the browser to return
    /// to this application's registered callback with this sign-out's own state. The inbox is opened first so a fast redirect is not lost.
    /// The request carries a sensitive token hint, so only its host is logged. Returns whether the provider confirmed; the wait
-   /// also ends when the caller's token does or the flow is disposed.
+   /// also ends when the caller's token does. When the flow is disposed the wait ends without a result, and that is left
+   /// to the runner as a quiet end instead of being reported as an unconfirmed sign-out.
    /// </summary>
    private async Task<bool> CompleteProviderSignOutAsync(QqqProviderLogout logout, CancellationToken cancellationToken)
    {
@@ -110,11 +113,12 @@ public sealed partial class SignInFlow
          _log.Info("Opening the identity provider's sign-out page in the default browser (" + logout.EndSessionUri.Authority + ").");
          _browser.Open(logout.EndSessionUri);
          Uri callback = await inbox.ReceiveAsync(wait.Token);
+         ThrowIfDisposed();
          bool matched = logout.Matches(callback);
          _log.Info("Identity provider sign-out callback " + (matched ? "matched." : "did not match this sign-out."));
          return matched;
       }
-      catch(Exception exception) when(exception is OperationCanceledException or IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception)
+      catch(Exception exception) when(!_disposed && exception is OperationCanceledException or IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception)
       {
          _log.Warning("Identity provider sign-out was not confirmed: " + QqqSessionDiagnostics.Describe(exception));
          return false;

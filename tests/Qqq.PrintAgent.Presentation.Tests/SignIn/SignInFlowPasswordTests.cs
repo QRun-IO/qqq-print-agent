@@ -25,13 +25,13 @@ public sealed class SignInFlowPasswordTests
 
 
 
-   /// <summary>Without a discovered session a sign-in does nothing: no request, no message.</summary>
+   /// <summary>Without a discovered session a sign-in does nothing: no request, no message, and the caller is told nothing was attempted.</summary>
    [Fact]
    public async Task WithoutDiscovery_NothingHappens()
    {
       SignInFixture fixture = new();
 
-      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+      Assert.False(await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent));
 
       Assert.Empty(fixture.Requests);
       Assert.Empty(fixture.Shown);
@@ -52,7 +52,7 @@ public sealed class SignInFlowPasswordTests
    {
       SignInFixture fixture = await DiscoveredAsync();
 
-      await fixture.Flow.SignInWithPasswordAsync("  operator ", " pass word ", PairingChoice.KeepCurrent);
+      Assert.True(await fixture.Flow.SignInWithPasswordAsync("  operator ", " pass word ", PairingChoice.KeepCurrent));
 
       Assert.Equal(("operator", " pass word "), fixture.Sessions[0].PasswordAttempt);
       PipeRequest request = Assert.Single(fixture.Requests);
@@ -163,10 +163,14 @@ public sealed class SignInFlowPasswordTests
 
 
 
-   /// <summary>When the service gives no usable answer to the hand-over, whatever the pipe failure (including kinds that used to escape the handler), the sign-in is reported as not completed with the failure's reason; the log says whether the request had left, and keeps the full exception as debug detail.</summary>
+   /// <summary>
+   /// When the hand-over never left this computer (nothing is listening, the service was not verified), nothing was
+   /// handed over: the sign-in is reported as not completed with the failure's reason, the log says nothing was sent and
+   /// keeps the full exception as debug detail, and the session stays for another attempt.
+   /// </summary>
    [Theory]
-   [MemberData(nameof(PipeFailures))]
-   public async Task UnansweredHandOver_IsReportedAsNotCompleted(Exception failure, string phase)
+   [MemberData(nameof(NotSentFailures))]
+   public async Task HandOverThatNeverLeft_IsReportedAsNotCompletedAndTheSessionStays(Exception failure, ServiceFailure cause)
    {
       SignInFixture fixture = await DiscoveredAsync();
       fixture.Service = _ => Task.FromException<string>(failure);
@@ -174,23 +178,96 @@ public sealed class SignInFlowPasswordTests
       await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
 
       Assert.Equal(new FeedbackMessage("Sign-in not completed", "The server did not authorize this connection, or the service could not confirm it. Reason: " + failure.Message + " The activity log has the full detail.", FeedbackSeverity.Error), fixture.Shown[^1]);
-      Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("ERROR Password sign-in not completed: the service did not answer (", StringComparison.Ordinal) && entry.EndsWith(", " + phase + ").", StringComparison.Ordinal));
+      Assert.Contains("ERROR Password sign-in not completed: the service did not answer (" + cause + ", nothing sent).", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("DEBUG Service request 'sign-in' failure detail: ", StringComparison.Ordinal));
       Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
       Assert.True(fixture.Flow.HasSession);
+      Assert.False(fixture.Sessions[0].Disposed);
    }
 
 
 
-   /// <summary>The pipe failures of <see cref="UnansweredHandOver_IsReportedAsNotCompleted"/> and whether the request had left.</summary>
-   public static TheoryData<Exception, string> PipeFailures() => new()
+   /// <summary>The failures of <see cref="HandOverThatNeverLeft_IsReportedAsNotCompletedAndTheSessionStays"/>, after which the service certainly holds nothing.</summary>
+   public static TheoryData<Exception, ServiceFailure> NotSentFailures() => new()
    {
-      { new IOException("Service connection closed before a complete response was received."), "request sent" },
-      { new OperationCanceledException("The reply did not arrive in time."), "request sent" },
-      { new InvalidDataException("Local pipe message exceeds the permitted size."), "request sent" },
-      { new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")), "nothing sent" },
-      { new AgentPipeNotSentException(new UnauthorizedAccessException("The local endpoint is not the installed Windows print service.")), "nothing sent" },
+      { new AgentPipeNotSentException(new OperationCanceledException("Nothing is listening on the pipe.")), ServiceFailure.TimedOut },
+      { new AgentPipeNotSentException(new UnauthorizedAccessException("The local endpoint is not the installed Windows print service.")), ServiceFailure.AccessDenied },
    };
+
+
+
+   /// <summary>
+   /// When the hand-over left this computer and no usable answer came back, the service may have signed in all the same.
+   /// The operator is not told the sign-in failed: the message says it could not be confirmed, what really happened to the
+   /// request, and to check the status before trying again. The flow discards its session, because the service may now
+   /// hold it, so the companion never keeps a session next to the service's.
+   /// </summary>
+   [Theory]
+   [MemberData(nameof(UnconfirmedFailures))]
+   public async Task HandOverThatLeftWithoutAnAnswer_IsUnconfirmedAndTheSessionIsDiscarded(Exception failure, string cause)
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Service = _ => Task.FromException<string>(failure);
+
+      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+
+      Assert.Equal(new FeedbackMessage("Sign-in could not be confirmed", cause + " The sign-in was sent to the service, which may still complete it. Check the connection status before trying again; if it does not show this account as signed in, choose Discover sign-in options and sign in again. The activity log has the full detail.", FeedbackSeverity.Warning), fixture.Shown[^1]);
+      Assert.Equal("Signing in > Sign-in could not be confirmed", fixture.Titles);
+      Assert.Contains("ERROR The hand-over to the service could not be confirmed, so the service may or may not have signed in; the attempt was discarded: " + cause, fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.False(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.PasswordOffered);
+      Assert.Null(fixture.Flow.Readiness);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+   }
+
+
+
+   /// <summary>The failures of <see cref="HandOverThatLeftWithoutAnAnswer_IsUnconfirmedAndTheSessionIsDiscarded"/> and the sentence that says what happened for each: a refusal or a failed Windows call that arrives without the "not sent" mark is treated as possibly sent, and its reason is quoted.</summary>
+   public static TheoryData<Exception, string> UnconfirmedFailures() => new()
+   {
+      { new OperationCanceledException("The reply did not arrive in time."), "The request timed out." },
+      { new IOException("Service connection closed before a complete response was received."), "The connection to the service closed before its answer arrived." },
+      { new InvalidDataException("Local pipe message exceeds the permitted size."), "The service's answer was larger than the companion accepts." },
+      { new UnauthorizedAccessException("Access to the path is denied."), "The service's answer did not arrive. Reason: Access to the path is denied." },
+   };
+
+
+
+   /// <summary>An answer to the hand-over that cannot be understood is unconfirmed too, and the message says the service did answer.</summary>
+   [Fact]
+   public async Task HandOverAnsweredUnreadably_IsUnconfirmed()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Service = _ => Task.FromException<string>(new System.Text.Json.JsonException("The reply was not what the operation answers."));
+
+      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+
+      Assert.Equal("Sign-in could not be confirmed", fixture.Shown[^1].Title);
+      Assert.StartsWith("The service answered, but its answer could not be read. The sign-in was sent to the service, which may still complete it.", fixture.Shown[^1].Message, StringComparison.Ordinal);
+      Assert.False(fixture.Flow.HasSession);
+   }
+
+
+
+   /// <summary>
+   /// The server's own time limit is a failure like any other and is shown as "not completed" with its reason. It is a
+   /// cancellation nobody here asked for, so it must not be mistaken for the caller ending the wait, which ends quietly.
+   /// </summary>
+   [Fact]
+   public async Task ServerTimeLimit_IsShownAsNotCompleted()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Sessions[0].PasswordFailure = new TaskCanceledException("The server did not answer in time.");
+
+      Assert.True(await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent));
+
+      Assert.Empty(fixture.Requests);
+      Assert.Equal(new FeedbackMessage("Sign-in not completed", "The server did not authorize this connection, or the service could not confirm it. Reason: The server did not answer in time. The activity log has the full detail.", FeedbackSeverity.Error), fixture.Shown[^1]);
+      Assert.Contains("ERROR Password sign-in not completed: TaskCanceledException: The server did not answer in time.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
+      Assert.True(fixture.Flow.HasSession);
+   }
 
 
 
@@ -238,38 +315,45 @@ public sealed class SignInFlowPasswordTests
       fixture.Sessions[0].PendingPassword = new TaskCompletionSource();
       using CancellationTokenSource cancellation = new();
 
-      Task running = fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent, cancellation.Token);
+      Task<bool> running = fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent, cancellation.Token);
       Assert.Equal(SignInStage.SigningIn, fixture.Flow.Stage);
       await cancellation.CancelAsync();
-      await running;
 
+      Assert.True(await SignInFixture.EndsAsync(running));
       Assert.Empty(fixture.Requests);
       Assert.Equal("Signing in", Assert.Single(fixture.Shown).Title);
       Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
-      Assert.Contains("DEBUG Password sign-in was cancelled before the server answered.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.True(fixture.Flow.HasSession);
+      Assert.Equal("DEBUG Password sign-in was cancelled by its caller (TaskCanceledException).", fixture.Log.Entries[^1]);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal));
    }
 
 
 
-   /// <summary>Cancelling while the service is taking over the session ends the wait, not the hand-over: nothing is claimed either way, the log says the service may still complete the sign-in, and the session stays.</summary>
+   /// <summary>
+   /// Cancelling while the service is taking over the session ends the wait, not the hand-over: the request has left, so
+   /// the service may still sign in. Neither success nor failure is claimed: the operator is told the sign-in could not
+   /// be confirmed because the wait was ended, and the session is discarded because the service may hold it.
+   /// </summary>
    [Fact]
-   public async Task CancelledDuringTheHandOver_ClaimsNothing()
+   public async Task CancelledDuringTheHandOver_IsUnconfirmedAndTheSessionIsDiscarded()
    {
       SignInFixture fixture = await DiscoveredAsync();
       (Task reached, _) = fixture.HoldService();
       using CancellationTokenSource cancellation = new();
 
-      Task running = fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent, cancellation.Token);
+      Task<bool> running = fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent, cancellation.Token);
       await reached;
       Assert.Equal(SignInStage.HandingOver, fixture.Flow.Stage);
       await cancellation.CancelAsync();
-      await running;
 
-      Assert.Equal("Signing in", Assert.Single(fixture.Shown).Title);
-      Assert.Contains("INFO The hand-over to the service is no longer waited for; the service may still complete the sign-in.", fixture.Log.Entries, StringComparer.Ordinal);
-      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal));
-      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
-      Assert.True(fixture.Flow.HasSession);
+      Assert.True(await SignInFixture.EndsAsync(running));
+      Assert.Equal("Signing in > Sign-in could not be confirmed", fixture.Titles);
+      Assert.StartsWith("The wait for the service's answer was ended. The sign-in was sent to the service, which may still complete it.", fixture.Shown[^1].Message, StringComparison.Ordinal);
+      Assert.Contains("ERROR The hand-over to the service could not be confirmed, so the service may or may not have signed in; the attempt was discarded: The wait for the service's answer was ended.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.False(fixture.Flow.HasSession);
       Assert.Null(fixture.Flow.Readiness);
    }
 }

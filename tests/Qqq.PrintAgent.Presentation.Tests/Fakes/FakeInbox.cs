@@ -15,6 +15,8 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 internal sealed class FakeInbox : IBrowserCallbackInbox
 {
    private readonly TaskCompletionSource<Uri> _callback = new(TaskCreationOptions.RunContinuationsAsynchronously);
+   private readonly TaskCompletionSource _listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
+   private Task<Uri>? _wait;
 
 
 
@@ -25,6 +27,16 @@ internal sealed class FakeInbox : IBrowserCallbackInbox
 
    /// <summary>True once the flow started waiting for a callback.</summary>
    internal bool Waiting { get; private set; }
+
+
+
+   /// <summary>Completes when the flow starts waiting for a callback.</summary>
+   internal Task Listening => _listening.Task;
+
+
+
+   /// <summary>True once the flow's wait has ended, with a callback or otherwise. A delivery reaches the wait on another thread a moment later, so a test that must act after the callback arrived and before the flow continues waits for this.</summary>
+   internal bool Received => _wait is { IsCompleted: true };
 
 
 
@@ -42,7 +54,9 @@ internal sealed class FakeInbox : IBrowserCallbackInbox
    public Task<Uri> ReceiveAsync(CancellationToken cancellationToken)
    {
       Waiting = true;
-      return _callback.Task.WaitAsync(cancellationToken);
+      _listening.TrySetResult();
+      _wait = _callback.Task.WaitAsync(cancellationToken);
+      return _wait;
    }
 
 

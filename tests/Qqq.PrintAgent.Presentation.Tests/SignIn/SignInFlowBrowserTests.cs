@@ -25,13 +25,13 @@ public sealed class SignInFlowBrowserTests
 
 
 
-   /// <summary>Without a discovered session a browser sign-in does nothing.</summary>
+   /// <summary>Without a discovered session a browser sign-in does nothing, and the caller is told nothing was attempted.</summary>
    [Fact]
    public async Task WithoutDiscovery_NothingHappens()
    {
       SignInFixture fixture = new();
 
-      await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      Assert.False(await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent));
 
       Assert.Empty(fixture.Inboxes);
       Assert.Empty(fixture.Opened);
@@ -195,22 +195,86 @@ public sealed class SignInFlowBrowserTests
 
 
 
-   /// <summary>Disposing the flow while a browser sign-in waits cancels it and discards the session, so nothing keeps listening after the window closed.</summary>
+   /// <summary>
+   /// Disposing the flow while a browser sign-in waits cancels it and discards the session, so nothing keeps listening
+   /// after the window closed. It ends quietly: the closed window is not told "canceled", nothing more is announced, and
+   /// the log has one debug line instead of the handler trace of a failed sign-in.
+   /// </summary>
    [Fact]
-   public async Task Disposing_CancelsAWaitingSignIn()
+   public async Task Disposing_CancelsAWaitingSignInQuietly()
    {
       SignInFixture fixture = await DiscoveredAsync();
 
-      Task running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      int announced = fixture.Changes.Count;
       fixture.Flow.Dispose();
-      await running;
 
+      Assert.True(await SignInFixture.EndsAsync(running));
       Assert.True(fixture.Sessions[0].Disposed);
       Assert.True(fixture.Inboxes[0].Disposed);
       Assert.False(fixture.Flow.BrowserPending);
       Assert.False(fixture.Flow.IsBusy);
+      Assert.False(fixture.Flow.HasSession);
       fixture.Flow.CancelBrowserSignIn();
       Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.Equal("Waiting for the browser", fixture.Titles);
+      Assert.Equal(announced, fixture.Changes.Count);
+      Assert.Equal("DEBUG Browser sign-in ended because the connection flow was closed (TaskCanceledException).", fixture.Log.Entries[^1]);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal) || entry.Contains("cancelled or timed out", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// The Cancel button reaches the wait for the browser, and only that wait. While a failed exchange is being reported
+   /// the wait is already over, so a Cancel that arrives from the handler of that very message does nothing; it used to
+   /// reach a cancellation source that had already been released, and threw.
+   /// </summary>
+   [Fact]
+   public async Task CancelWhileAFailedExchangeIsReported_DoesNothing()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Flow.PropertyChanged += (_, change) =>
+      {
+         if(string.Equals(change.PropertyName, nameof(SignInFlow.Feedback), StringComparison.Ordinal) && string.Equals(fixture.Flow.Feedback?.Title, "Browser sign-in not completed", StringComparison.Ordinal))
+         {
+            fixture.Flow.CancelBrowserSignIn();
+         }
+      };
+
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Inboxes[0].Fail(new IOException("The callback inbox closed."));
+
+      Assert.True(await SignInFixture.EndsAsync(running));
+      Assert.Equal("Waiting for the browser > Browser sign-in not completed", fixture.Titles);
+      Assert.True(fixture.Flow.HasSession);
+      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
+   }
+
+
+
+   /// <summary>
+   /// Each attempt starts without a callback. After an attempt whose callback did arrive, a second attempt that is
+   /// cancelled before its own callback says so in the log, instead of repeating what was true of the first.
+   /// </summary>
+   [Fact]
+   public async Task SecondAttemptCancelledBeforeItsCallback_SaysSoInTheLog()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Sessions[0].CompleteFailure = new HttpRequestException("The server rejected the callback.");
+      Task<bool> first = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
+      await SignInFixture.EndsAsync(first);
+      Assert.Equal("Browser sign-in not completed", fixture.Shown[^1].Title);
+      fixture.Forget();
+
+      Task<bool> second = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Flow.CancelBrowserSignIn();
+      await SignInFixture.EndsAsync(second);
+
+      Assert.Equal("Browser sign-in canceled", fixture.Shown[^1].Title);
+      Assert.Contains("INFO Browser sign-in cancelled or timed out (three minute limit) before a callback arrived.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("after the callback arrived", StringComparison.Ordinal));
    }
 
 
@@ -344,57 +408,108 @@ public sealed class SignInFlowBrowserTests
 
 
 
-   /// <summary>Disposing the flow, or cancelling the caller's token, during the hand-over ends the wait without claiming anything: no "canceled" or "not completed" message, and the log says the service may still complete the sign-in.</summary>
-   [Theory]
-   [InlineData(true)]
-   [InlineData(false)]
-   public async Task CallerEndingTheWaitDuringTheHandOver_ClaimsNothing(bool byToken)
+   /// <summary>
+   /// Cancelling the caller's token during the hand-over ends the wait, not the hand-over: the request has left, so the
+   /// service may still sign in. The operator is not told "canceled": the message says the sign-in could not be confirmed
+   /// because the wait was ended, and the session is discarded because the service may hold it.
+   /// </summary>
+   [Fact]
+   public async Task CallerEndingTheWaitDuringTheHandOver_IsUnconfirmed()
    {
       SignInFixture fixture = await DiscoveredAsync();
       (Task reached, _) = fixture.HoldService();
       using CancellationTokenSource cancellation = new();
 
-      Task running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent, cancellation.Token);
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent, cancellation.Token);
       fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
       await reached;
-      if(byToken)
-      {
-         await cancellation.CancelAsync();
-      }
-      else
-      {
-         fixture.Flow.Dispose();
-      }
-      await running;
+      await cancellation.CancelAsync();
 
-      Assert.Equal("Waiting for the browser", Assert.Single(fixture.Shown).Title);
-      Assert.Contains("INFO The hand-over to the service is no longer waited for; the service may still complete the sign-in.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.True(await SignInFixture.EndsAsync(running));
+      Assert.Equal("Waiting for the browser > Sign-in could not be confirmed", fixture.Titles);
+      Assert.StartsWith("The wait for the service's answer was ended. The sign-in was sent to the service, which may still complete it.", fixture.Shown[^1].Message, StringComparison.Ordinal);
+      Assert.False(fixture.Flow.HasSession);
       Assert.False(fixture.Flow.BrowserPending);
       Assert.False(fixture.Flow.IsBusy);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
    }
 
 
 
    /// <summary>
-   /// When the hand-over to the service runs into a time limit, the browser sign-in is ended like a cancellation, as it always
-   /// has been, and discovery must be run again. The log no longer claims that no callback arrived: it says the browser part
-   /// had completed and whether the request reached the service at all.
+   /// Disposing the flow during the hand-over ends the wait and claims nothing to a window that has closed: no
+   /// "canceled", "not completed" or "could not be confirmed" message, nothing announced after the dispose, and the
+   /// session is discarded by the sign-in itself as it ends.
    /// </summary>
-   [Theory]
-   [InlineData(true, "INFO The hand-over to the service timed out after the browser sign-in completed; whether the service signed in is not confirmed, and the attempt was discarded.")]
-   [InlineData(false, "INFO The service did not accept a connection for the hand-over after the browser sign-in completed; nothing was handed over, and the attempt was discarded.")]
-   public async Task HandOverThatTimesOut_EndsLikeACancellationAndTheLogSaysWhatHappened(bool sent, string entry)
+   [Fact]
+   public async Task DisposingDuringTheHandOver_EndsQuietly()
    {
       SignInFixture fixture = await DiscoveredAsync();
-      OperationCanceledException limit = new("The time limit ran out.");
-      fixture.Service = _ => Task.FromException<string>(sent ? limit : new AgentPipeNotSentException(limit));
+      (Task reached, _) = fixture.HoldService();
 
-      Task running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
       fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
-      await running;
+      await reached;
+      int announced = fixture.Changes.Count;
+      fixture.Flow.Dispose();
 
-      Assert.Equal("Browser sign-in canceled", fixture.Shown[^1].Title);
-      Assert.Contains(entry, fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.True(await SignInFixture.EndsAsync(running));
+      Assert.Equal("Waiting for the browser", fixture.Titles);
+      Assert.Equal(announced, fixture.Changes.Count);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.False(fixture.Flow.BrowserPending);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.Equal("DEBUG Browser sign-in ended because the connection flow was closed (OperationCanceledException).", fixture.Log.Entries[^1]);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// When the browser sign-in completed and the hand-over was sent, but the service's answer did not arrive in time, the
+   /// service may complete the sign-in all the same. The operator must not be told "canceled, no new sign-in was accepted":
+   /// the whole message says the sign-in could not be confirmed, that the request timed out, and to check the status
+   /// before trying again. The attempt is discarded, because the service may hold the session.
+   /// </summary>
+   [Fact]
+   public async Task HandOverThatWasSentAndTimedOut_IsUnconfirmedNotCanceled()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Service = _ => Task.FromException<string>(new OperationCanceledException("The time limit ran out."));
+
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
+      await SignInFixture.EndsAsync(running);
+
+      Assert.Equal(new FeedbackMessage("Sign-in could not be confirmed", "The request timed out. The sign-in was sent to the service, which may still complete it. Check the connection status before trying again; if it does not show this account as signed in, choose Discover sign-in options and sign in again. The activity log has the full detail.", FeedbackSeverity.Warning), fixture.Shown[^1]);
+      Assert.Equal("Waiting for the browser > Sign-in could not be confirmed", fixture.Titles);
+      Assert.Contains("ERROR The hand-over to the service could not be confirmed, so the service may or may not have signed in; the attempt was discarded: The request timed out.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, candidate => candidate.Contains("cancelled or timed out", StringComparison.Ordinal) || candidate.Contains("before a callback arrived", StringComparison.Ordinal));
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.False(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.BrowserOffered);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+   }
+
+
+
+   /// <summary>
+   /// When the service did not accept a connection for the hand-over in time, nothing was sent, so no sign-in can have
+   /// been accepted: this is the one hand-over outcome that still ends like a cancellation, with the whole "canceled"
+   /// message, and discovery must be run again. The log says the browser part had completed and nothing was handed over.
+   /// </summary>
+   [Fact]
+   public async Task HandOverThatNeverLeftInTime_EndsLikeACancellation()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Service = _ => Task.FromException<string>(new AgentPipeNotSentException(new OperationCanceledException("The time limit ran out.")));
+
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
+      await SignInFixture.EndsAsync(running);
+
+      Assert.Equal(new FeedbackMessage("Browser sign-in canceled", "No new sign-in was accepted. Choose Discover sign-in options to start a new attempt.", FeedbackSeverity.Informational), fixture.Shown[^1]);
+      Assert.Contains("INFO The service did not accept a connection for the hand-over after the browser sign-in completed; nothing was handed over, and the attempt was discarded.", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.DoesNotContain(fixture.Log.Entries, candidate => candidate.Contains("before a callback arrived", StringComparison.Ordinal));
       Assert.False(fixture.Flow.HasSession);
       Assert.False(fixture.Flow.BrowserOffered);
@@ -403,21 +518,39 @@ public sealed class SignInFlowBrowserTests
 
 
 
-   /// <summary>When the service gives no usable answer to the hand-over for another reason, the sign-in is reported as not completed with the failure's reason, the log says whether the request had left, and the handler trace is logged.</summary>
+   /// <summary>When the hand-over left and no usable answer came back for another reason, it is unconfirmed in the same way, with the sentence for what really happened, and the attempt is discarded.</summary>
    [Fact]
-   public async Task UnansweredHandOver_IsReportedAsNotCompleted()
+   public async Task HandOverThatLeftWithoutAnAnswer_IsUnconfirmed()
    {
       SignInFixture fixture = await DiscoveredAsync();
       fixture.Service = _ => Task.FromException<string>(new InvalidDataException("Local pipe message exceeds the permitted size."));
 
-      Task running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
       fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
-      await running;
+      await SignInFixture.EndsAsync(running);
 
-      Assert.Equal("Browser sign-in not completed", fixture.Shown[^1].Title);
-      Assert.Contains("Reason: Local pipe message exceeds the permitted size.", fixture.Shown[^1].Message, StringComparison.Ordinal);
-      Assert.Contains("ERROR Browser sign-in not completed: the service did not answer (InvalidData, request sent).", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal("Sign-in could not be confirmed", fixture.Shown[^1].Title);
+      Assert.StartsWith("The service's answer was larger than the companion accepts. The sign-in was sent to the service, which may still complete it.", fixture.Shown[^1].Message, StringComparison.Ordinal);
       Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("DEBUG Service request 'sign-in' failure detail: System.IO.InvalidDataException", StringComparison.Ordinal));
+      Assert.False(fixture.Flow.HasSession);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+   }
+
+
+
+   /// <summary>When the hand-over never left this computer for a reason other than a time limit, the sign-in is reported as not completed with the failure's reason, the log says nothing was sent, the handler trace is logged, and the session stays for an explicit retry.</summary>
+   [Fact]
+   public async Task HandOverThatNeverLeft_IsReportedAsNotCompleted()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Service = _ => Task.FromException<string>(new AgentPipeNotSentException(new IOException("The pipe could not be opened.")));
+
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
+      await SignInFixture.EndsAsync(running);
+
+      Assert.Equal(new FeedbackMessage("Browser sign-in not completed", "No validated account session was received. Reason: The pipe could not be opened. Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly. The activity log has the full detail.", FeedbackSeverity.Warning), fixture.Shown[^1]);
+      Assert.Contains("ERROR Browser sign-in not completed: the service did not answer (Disconnected, nothing sent).", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("WARN The browser never launched the sign-in protocol handler", StringComparison.Ordinal));
       Assert.True(fixture.Flow.HasSession);
       Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
@@ -427,26 +560,44 @@ public sealed class SignInFlowBrowserTests
 
    /// <summary>
    /// While a browser sign-in is running, the flow starts nothing else: a password sign-in, a second browser sign-in, a new
-   /// discovery, a sign-out, an enrollment and both certificate-exception operations are refused without a request, and a
-   /// refused change of the exception announces the saved state again so the checkbox goes back.
+   /// discovery, a sign-out, an enrollment and both certificate-exception operations are refused without a request. No
+   /// refusal is silent: each one is logged by name and tells the operator that another operation is still running, each
+   /// result says the operation was not started, and a refused change of the exception announces the saved state again
+   /// so the checkbox goes back. The running sign-in is not disturbed.
    /// </summary>
    [Fact]
-   public async Task WhileRunning_EveryOtherOperationIsRefused()
+   public async Task WhileRunning_EveryOtherOperationIsRefusedOutLoud()
    {
       SignInFixture fixture = await DiscoveredAsync(password: true);
+      FeedbackMessage busy = new("Another operation is still running", "This request was not started. Wait for the current operation to finish, then try again.", FeedbackSeverity.Warning);
 
-      Task running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
-      await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
-      await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
-      await fixture.Flow.DiscoverAsync("https://other.example.com");
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Forget();
+      bool password = await fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+      bool browser = await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      bool discovery = await fixture.Flow.DiscoverAsync("https://other.example.com");
       await fixture.Flow.LoadTrustAsync();
       bool signOut = await fixture.Flow.SignOutAsync();
       bool trust = await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com");
       EnrollmentResult enrollment = await fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123");
 
+      Assert.False(password);
+      Assert.False(browser);
+      Assert.False(discovery);
       Assert.True(signOut);
       Assert.True(trust);
-      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true), enrollment);
+      Assert.Equal(new EnrollmentResult(null, ServiceReachable: true, Started: false), enrollment);
+      Assert.Equal(Enumerable.Repeat(busy, 7), fixture.Shown);
+      Assert.Equal(
+      [
+         "WARN Password sign-in was not started: another operation is still running.",
+         "WARN Browser sign-in was not started: another operation is still running.",
+         "WARN Discovery was not started: another operation is still running.",
+         "WARN Reading the certificate exception was not started: another operation is still running.",
+         "WARN Sign-out was not started: another operation is still running.",
+         "WARN Saving the certificate exception was not started: another operation is still running.",
+         "WARN Enrollment was not started: another operation is still running.",
+      ], fixture.Log.Entries);
       Assert.Equal(1, fixture.TrustAnnouncements);
       Assert.Equal(new ServerTrust(), fixture.Flow.Trust);
       Assert.Empty(fixture.Requests);
@@ -454,10 +605,10 @@ public sealed class SignInFlowBrowserTests
       Assert.Single(fixture.Inboxes);
       Assert.Single(fixture.Sessions);
       Assert.True(fixture.Flow.PasswordOffered);
-      Assert.Equal("Waiting for the browser", fixture.Titles);
+      Assert.Empty(fixture.Stages);
       Assert.Equal(SignInStage.WaitingForBrowser, fixture.Flow.Stage);
       fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
-      await running;
+      Assert.True(await SignInFixture.EndsAsync(running));
       Assert.Equal(SignInStage.SignedIn, fixture.Flow.Stage);
    }
 }

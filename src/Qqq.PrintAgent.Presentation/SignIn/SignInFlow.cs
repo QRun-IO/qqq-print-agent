@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Presentation.Service;
@@ -16,9 +17,11 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// certificate exception. It owns the sign-in session and decides every transition and message; a view calls its methods
 /// and shows its properties. The browser, the callback inbox and the session client are behind interfaces, so the same
 /// logic drives today's dialog and a later wizard, and a test can run it without a network, a browser or a pipe.
-/// One operation runs at a time: every operation claims the same gate and a second one is refused, not interleaved, so
-/// the flow does not depend on its caller's own busy flag. Every wait ends when the flow is disposed. The session is
-/// discarded as soon as the service confirms it took it over, so the companion does not keep a usable server session.
+/// One operation runs at a time: every operation claims the same gate and a second one is refused with a message, not
+/// interleaved, so the flow does not depend on its caller's own busy flag. Disposing the flow only cancels: the running
+/// operation ends itself, discards the session on its way out, and from then on nothing is announced, reported or sent.
+/// The session is discarded as soon as the service confirms it took it over, and also when the service may have taken it
+/// over without confirming, so the companion does not keep a usable server session.
 /// </summary>
 public sealed partial class SignInFlow : ObservableObject, IDisposable
 {
@@ -119,16 +122,29 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
    /// <summary>
    /// Asks the entered server which sign-in methods it offers. Any earlier session is discarded first, so each attempt starts
    /// clean; a server that offers neither method is reported as needing configuration, and a failure or a cancellation leaves
-   /// no session behind. The address is logged without user information, query or fragment.
+   /// no session behind. The address is logged without user information, query or fragment. It returns false only when
+   /// the request was refused because another operation is running.
    /// </summary>
-   public async Task DiscoverAsync(string? address, CancellationToken cancellationToken = default)
+   public async Task<bool> DiscoverAsync(string? address, CancellationToken cancellationToken = default)
    {
-      if(!TryBegin(SignInStage.Discovering))
+      if(!TryBegin("Discovery"))
       {
-         return;
+         return false;
       }
       bool discovered = false;
-      using CancellationTokenSource wait = Link(cancellationToken);
+      return await RunAsync("Discovery", SignInStage.Discovering, async token =>
+      {
+         discovered = await TryDiscoverAsync(address, token);
+         return true;
+      }, stopped: true, () => discovered ? SignInStage.Ready : SignInStage.Idle, cancellationToken);
+   }
+
+
+
+   /// <summary>The discovery itself. It returns whether the server answered with its sign-in methods; whenever it did not, for whatever reason, the session it created is discarded before it returns or throws.</summary>
+   private async Task<bool> TryDiscoverAsync(string? address, CancellationToken token)
+   {
+      bool discovered = false;
       try
       {
          DropSession();
@@ -136,18 +152,15 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
          Uri origin = ReadOrigin(address);
          _session = _sessions.Create(origin, _trust.AppliesTo(origin));
          OnPropertyChanged(nameof(HasSession));
-         _metadata = await _session.DiscoverAsync(wait.Token);
+         _metadata = await _session.DiscoverAsync(token);
+         token.ThrowIfCancellationRequested();
          PasswordOffered = string.Equals(_metadata.Type, "TABLE_BASED", StringComparison.Ordinal);
          BrowserOffered = _metadata.Values?.NativeSessionLogin is not null;
          _log.Info("Sign-in options for " + origin.Authority + ": password sign-in " + (PasswordOffered ? "offered" : "not offered") + ", browser sign-in " + (BrowserOffered ? "offered" : "not offered") + ".");
          Report(PasswordOffered || BrowserOffered ? SignInMessages.OptionsReady : SignInMessages.ConfigurationRequired);
          discovered = true;
       }
-      catch(OperationCanceledException) when(wait.IsCancellationRequested)
-      {
-         _log.Debug("Discovery was cancelled before the server answered.");
-      }
-      catch(Exception exception) when(exception is IOException or ArgumentException or InvalidOperationException or HttpRequestException or OperationCanceledException)
+      catch(Exception exception) when(Reportable(exception, token) && exception is IOException or ArgumentException or InvalidOperationException or HttpRequestException or OperationCanceledException)
       {
          LogFailure("Discovery failed", exception);
          Report(SignInMessages.DiscoveryFailed(QqqSessionDiagnostics.Explain(exception)));
@@ -158,8 +171,8 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
          {
             DropSession();
          }
-         End(discovered ? SignInStage.Ready : SignInStage.Idle);
       }
+      return discovered;
    }
 
 
@@ -167,41 +180,51 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
    /// <summary>
    /// Signs in with a user name and password, then hands the resulting session to the service. Nothing happens without a
    /// discovered session. The password is passed straight through and never kept, and a failure is reported without saying
-   /// which part (credentials, device ownership or permission) was wrong.
+   /// which part (credentials, device ownership or permission) was wrong. It returns false when nothing was attempted (no
+   /// session, or another operation is running), so the caller knows the password was not used.
    /// </summary>
-   public async Task SignInWithPasswordAsync(string? username, string password, PairingChoice pairing, CancellationToken cancellationToken = default)
+   public async Task<bool> SignInWithPasswordAsync(string? username, string password, PairingChoice pairing, CancellationToken cancellationToken = default)
    {
-      if(_session is not { } session || !TryBegin(SignInStage.SigningIn))
+      if(_session is not { } session || !TryBegin("Password sign-in"))
       {
-         return;
+         return false;
       }
       bool confirmed = false;
-      using CancellationTokenSource wait = Link(cancellationToken);
+      return await RunAsync("Password sign-in", SignInStage.SigningIn, async token =>
+      {
+         confirmed = await TrySignInWithPasswordAsync(session, (username ?? string.Empty).Trim(), password, pairing, token);
+         return true;
+      }, stopped: true, () => Settled(confirmed), cancellationToken);
+   }
+
+
+
+   /// <summary>
+   /// The password sign-in and its hand-over; it returns whether the service confirmed. A failure of the server's sign-in,
+   /// including the server's own time limit, is shown as "not completed". A wait that the caller or disposal ended is not
+   /// a failure and is left to the runner. Nothing is handed to the service once the wait has ended.
+   /// </summary>
+   private async Task<bool> TrySignInWithPasswordAsync(ISignInSession session, string username, string password, PairingChoice pairing, CancellationToken token)
+   {
       try
       {
          _log.Info("Password sign-in submitted for " + session.Origin.Authority + ".");
          Report(SignInMessages.SigningIn);
-         await session.SignInWithPasswordAsync((username ?? string.Empty).Trim(), password, wait.Token);
-         ServiceResult<SignInConfirmation> handover = await HandOverAsync(session, pairing, wait.Token);
-         confirmed = handover.Succeeded;
-         if(handover.Outcome == ServiceOutcome.Unavailable)
+         await session.SignInWithPasswordAsync(username, password, token);
+         token.ThrowIfCancellationRequested();
+         ServiceResult<SignInConfirmation> handover = await HandOverAsync(session, pairing, token);
+         if(handover is { Outcome: ServiceOutcome.Unavailable, Unconfirmed: false })
          {
             _log.Error("Password sign-in not completed: the service did not answer (" + Describe(handover) + ").");
             Report(SignInMessages.PasswordNotCompleted(handover.Message));
          }
+         return handover.Succeeded;
       }
-      catch(OperationCanceledException) when(wait.IsCancellationRequested)
-      {
-         _log.Debug("Password sign-in was cancelled before the server answered.");
-      }
-      catch(Exception exception) when(exception is IOException or ArgumentException or HttpRequestException or OperationCanceledException or UnauthorizedAccessException)
+      catch(Exception exception) when(Reportable(exception, token) && exception is IOException or ArgumentException or HttpRequestException or OperationCanceledException or UnauthorizedAccessException)
       {
          LogFailure("Password sign-in not completed", exception);
          Report(SignInMessages.PasswordNotCompleted(QqqSessionDiagnostics.Explain(exception)));
-      }
-      finally
-      {
-         End(Settled(confirmed));
+         return false;
       }
    }
 
@@ -211,8 +234,10 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
    /// Hands the session credential, and nothing else, to the service together with the pairing choice. The service verifies
    /// it and keeps it protected. When the service confirms, its sentence is shown as success, what it said is still missing
    /// is kept as <see cref="Readiness"/>, and the flow's own session is discarded at once: from then on the service is the
-   /// only process holding it. Any other answer is shown as an error. When the service did not answer, the caller decides
-   /// what that means for its kind of sign-in.
+   /// only process holding it. A refusal is shown as an error. When the request left and no usable answer came back, the
+   /// service may have signed in all the same: the operator is told the sign-in could not be confirmed and to check the
+   /// status before trying again, and the session is discarded too, because the service may hold it. When nothing was sent,
+   /// the caller decides what that means for its kind of sign-in.
    /// </summary>
    private async Task<ServiceResult<SignInConfirmation>> HandOverAsync(ISignInSession session, PairingChoice pairing, CancellationToken cancellationToken)
    {
@@ -225,6 +250,7 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
       };
       _log.Info("Sign-in accepted by the server; handing the session to the service (" + choice + ").");
       ServiceResult<SignInConfirmation> result = await _service.SignInAsync(session.ExportCredential(), pairing == PairingChoice.ClaimLegacyDevice, pairing == PairingChoice.StartNewPairing, cancellationToken);
+      ThrowIfDisposed();
       if(result.Succeeded)
       {
          _log.Info("Service sign-in result: " + result.Payload.Message);
@@ -237,16 +263,23 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
          _log.Error("Service sign-in result: " + reply);
          Report(SignInMessages.HandedOver(reply, confirmed: false));
       }
-      else if(result.Outcome == ServiceOutcome.Canceled)
+      else if(result.Unconfirmed)
       {
-         _log.Info("The hand-over to the service is no longer waited for; the service may still complete the sign-in.");
+         string cause = SignInMessages.Unanswered(result);
+         _log.Error("The hand-over to the service could not be confirmed, so the service may or may not have signed in; the attempt was discarded: " + cause);
+         DropSession();
+         Report(SignInMessages.HandOverUnconfirmed(cause));
       }
       return result;
    }
 
 
 
-   /// <summary>Stops everything the flow holds: every wait is cancelled, the session is discarded, and no further operation starts.</summary>
+   /// <summary>
+   /// Ends the flow. It only cancels: an operation that is still running sees the cancellation, ends quietly and discards
+   /// the session itself, because discarding the session under a call that is still using it makes that call fail in ways
+   /// that look like errors. When nothing is running the session is discarded here. After this nothing is announced.
+   /// </summary>
    public void Dispose()
    {
       if(_disposed)
@@ -255,39 +288,107 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
       }
       _disposed = true;
       _lifetime.Cancel();
-      DropSession();
+      if(!_operating)
+      {
+         DropSession();
+      }
       _lifetime.Dispose();
    }
 
 
 
-   /// <summary>
-   /// Claims the flow for one operation, moving to the operation's stage when it has one. It refuses while another operation
-   /// is running and after the flow was disposed; the caller then does nothing, so two operations can never interleave.
-   /// </summary>
-   private bool TryBegin(SignInStage? stage = null)
+   /// <summary>Announces a change, unless the flow was disposed: a view that has closed must not be called back by an operation that was still finishing.</summary>
+   protected override void OnPropertyChanged(PropertyChangedEventArgs e)
    {
-      if(_operating || _disposed)
+      if(!_disposed)
+      {
+         base.OnPropertyChanged(e);
+      }
+   }
+
+
+
+   /// <summary>
+   /// Claims the flow for one operation. After the flow was disposed it refuses silently. While another operation is
+   /// running it refuses out loud: the refusal is logged and the operator is told that another operation is still running,
+   /// so a click that did nothing is never silent. Nothing is announced by a successful claim; the runner does that inside
+   /// its own protection.
+   /// </summary>
+   private bool TryBegin(string operation)
+   {
+      if(_disposed)
       {
          return false;
       }
-      _operating = true;
-      OnPropertyChanged(nameof(IsBusy));
-      if(stage is { } running)
+      if(_operating)
       {
-         Stage = running;
+         _log.Warning(operation + " was not started: another operation is still running.");
+         Report(SignInMessages.Busy);
+         return false;
       }
+      _operating = true;
       return true;
    }
 
 
 
-   /// <summary>Releases the flow after an operation and moves to the stage the operation ended in.</summary>
-   private void End(SignInStage stage)
+   /// <summary>
+   /// Runs one claimed operation and always releases the flow afterwards, whatever the operation or a subscriber does.
+   /// The operation's token ends when the caller's does or when the flow is disposed. Everything that announces something
+   /// happens inside the protected part, so a subscriber that throws cannot leave the flow claimed forever. An operation
+   /// that ended because the flow was disposed, or because its caller stopped waiting, is not a failure: it is noted as
+   /// debug detail and <paramref name="stopped"/> is returned. The stage the operation ends in is asked for last, when
+   /// the operation knows how it went.
+   /// </summary>
+   private async Task<T> RunAsync<T>(string operation, SignInStage? stage, Func<CancellationToken, Task<T>> body, T stopped, Func<SignInStage> settle, CancellationToken cancellationToken)
    {
-      _operating = false;
-      OnPropertyChanged(nameof(IsBusy));
-      Stage = stage;
+      CancellationTokenSource? wait = null;
+      try
+      {
+         wait = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellationToken);
+         OnPropertyChanged(nameof(IsBusy));
+         if(stage is { } running)
+         {
+            Stage = running;
+         }
+         wait.Token.ThrowIfCancellationRequested();
+         return await body(wait.Token);
+      }
+      catch(Exception exception) when(_disposed || exception is OperationCanceledException && wait is { IsCancellationRequested: true })
+      {
+         _log.Debug(operation + (_disposed ? " ended because the connection flow was closed (" : " was cancelled by its caller (") + exception.GetType().Name + ").");
+         return stopped;
+      }
+      finally
+      {
+         End(settle, wait);
+      }
+   }
+
+
+
+   /// <summary>
+   /// Releases the flow after an operation. The stage is set first and the flow released after it, so a subscriber that
+   /// starts the next operation when the flow becomes free does not have its stage overwritten by this one's. The release
+   /// happens even when a subscriber throws. A flow that was disposed while the operation ran discards its session here,
+   /// now that no call is using it, before the stage the operation ends in is worked out.
+   /// </summary>
+   private void End(Func<SignInStage> settle, CancellationTokenSource? wait)
+   {
+      try
+      {
+         if(_disposed)
+         {
+            DropSession();
+         }
+         Stage = settle();
+      }
+      finally
+      {
+         wait?.Dispose();
+         _operating = false;
+         OnPropertyChanged(nameof(IsBusy));
+      }
    }
 
 
@@ -298,9 +399,24 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
 
 
 
-   /// <summary>A cancellation source for one operation's waits: it ends when the caller's token does or when the flow is disposed.</summary>
-   private CancellationTokenSource Link(CancellationToken cancellationToken)
-      => CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellationToken);
+   /// <summary>
+   /// Whether a failure is one to show. A failure seen after the flow was disposed never is, and neither is the
+   /// cancellation that the operation's own token asked for. A cancellation nobody here asked for, such as the server's
+   /// own time limit, is a failure like any other and must be shown.
+   /// </summary>
+   private bool Reportable(Exception exception, CancellationToken token)
+      => !_disposed && !(exception is OperationCanceledException && token.IsCancellationRequested);
+
+
+
+   /// <summary>Stops an operation that has just come back from the service when the flow was disposed meanwhile, before it logs, announces or changes anything.</summary>
+   private void ThrowIfDisposed()
+   {
+      if(_disposed)
+      {
+         throw new OperationCanceledException("The connection flow was closed.");
+      }
+   }
 
 
 
@@ -335,9 +451,13 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
 
 
 
-   /// <summary>Publishes a message and always announces it.</summary>
+   /// <summary>Publishes a message and always announces it; after the flow was disposed nothing is published.</summary>
    private void Report(FeedbackMessage message)
    {
+      if(_disposed)
+      {
+         return;
+      }
       _feedback = message;
       OnPropertyChanged(nameof(Feedback));
    }
