@@ -218,12 +218,19 @@
           "KofTwentyTwo.AppKit": "[0.1.0, )"
         }
       },
+      "qqq.printagent.presentation": {
+        "type": "Project",
+        "dependencies": {
+          "CommunityToolkit.Mvvm": "[8.4.2, )",
+          "Qqq.PrintAgent.Windows": "[1.2.1, )"
+        }
+      },
       "qqq.printagent.windows": {
         "type": "Project",
         "dependencies": {
           "KofTwentyTwo.AppKit.Updates": "[0.1.0, )",
           "Microsoft.Data.Sqlite.Core": "[10.0.0, )",
-          "Qqq.PrintAgent.Core": "[0.3.0-rc.1, )",
+          "Qqq.PrintAgent.Core": "[1.2.1, )",
           "SQLitePCLRaw.provider.winsqlite3": "[2.1.11, )",
           "System.Security.Cryptography.ProtectedData": "[10.0.0, )",
           "System.ServiceProcess.ServiceController": "[10.0.0, )"

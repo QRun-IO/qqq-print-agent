@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-namespace Qqq.PrintAgent.UiTests;
+using Qqq.PrintAgent.Presentation.Shell;
+
+namespace Qqq.PrintAgent.Presentation.Tests.Shell;
 
 /// <summary>How the footer turns raw transport numbers and addresses into text: unusable values read "Unavailable", units are binary and distinct, the server label never exposes credentials, and a missing transport is never shown as a live WebSocket.</summary>
 public sealed class TransportFormattingTests
@@ -53,4 +55,15 @@ public sealed class TransportFormattingTests
       Assert.Equal("WebSocket reconnecting (WSS)", TransportFormatting.State("WSS", "RECONNECTING"));
       Assert.Equal("WebSocket sign-in required (WS)", TransportFormatting.State("WS", "AUTHORIZATION_REQUIRED"));
    }
+
+
+
+   /// <summary>A live socket reads connected or connecting, and any state this build does not know (or none at all) reads disconnected, never as a working connection.</summary>
+   [Theory]
+   [InlineData("CONNECTED", "WebSocket connected (WSS)")]
+   [InlineData("CONNECTING", "WebSocket connecting (WSS)")]
+   [InlineData("SOMETHING_NEW", "WebSocket disconnected (WSS)")]
+   [InlineData(null, "WebSocket disconnected (WSS)")]
+   public void WebSocketState_IsWordedAndUnknownStatesReadDisconnected(string? state, string expected)
+      => Assert.Equal(expected, TransportFormatting.State("WSS", state));
 }

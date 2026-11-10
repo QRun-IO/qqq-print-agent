@@ -256,7 +256,7 @@ public sealed partial class AgentRuntime
             && string.Equals(binding.DeviceId, configuration.DeviceId, StringComparison.Ordinal);
          _authorizationBlocked = false;
          _nextSessionResume = ObservationTime + SessionResumeInterval;
-         _authenticationMessage = _authorizationReady ? $"Signed in to {AppIdentity.ServerName}." : "Signed in. Enroll this computer to enable printing.";
+         _authenticationMessage = _authorizationReady ? $"Signed in to {AppIdentity.ServerName}." : SignInSentences.SignedInEnrollmentNeeded;
          ready = _authorizationReady;
          _lastAuthorizationNote = null;
       }

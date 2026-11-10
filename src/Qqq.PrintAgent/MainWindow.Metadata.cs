@@ -7,6 +7,8 @@ using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Presentation.Service;
+using Qqq.PrintAgent.Presentation.Settings;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
@@ -25,8 +27,7 @@ public sealed partial class MainWindow
    private void UpdateDeviceProfile(AgentSnapshot snapshot)
    {
       _deviceProfile = snapshot.DeviceProfile ?? new DeviceProfile();
-      string name = string.IsNullOrWhiteSpace(_deviceProfile.Name) ? Environment.MachineName : _deviceProfile.Name;
-      DeviceProfileText.Text = $"{name}\nLocation: {_deviceProfile.Location ?? "Not set"}\n{_deviceProfile.Description}";
+      DeviceProfileText.Text = MachineStatus.DeviceProfile(_deviceProfile, Environment.MachineName);
    }
 
 
@@ -38,7 +39,7 @@ public sealed partial class MainWindow
       editor.NameBox.PlaceholderText = Environment.MachineName;
       if(await EditProfileAsync("Edit computer details", editor))
       {
-         await RunActionAsync(new PipeRequest("set-device-profile", DeviceProfile: new DeviceProfile(editor.NameBox.Text, editor.DescriptionBox.Text, editor.LocationBox.Text)));
+         await RunActionAsync(ServiceRequests.SetDeviceProfile(editor.NameBox.Text, editor.DescriptionBox.Text, editor.LocationBox.Text));
       }
    }
 
@@ -89,15 +90,10 @@ public sealed partial class MainWindow
    {
       var editor = new ProfileEditor(printer.DisplayName, printer.Description, printer.Location);
       editor.NameBox.PlaceholderText = printer.Name;
-      editor.AddPrinterContext(printer.Name, FriendlyState(printer.Status));
+      editor.AddPrinterContext(printer.Name, JobLabels.Status(printer.Status));
       if(await EditProfileAsync("Edit printer details", editor))
       {
-         await RunActionAsync(new PipeRequest("set-printer-profile", PrinterId: printer.PrinterId, PrinterProfile: new PrinterProfile(editor.NameBox.Text, editor.DescriptionBox.Text, editor.LocationBox.Text)));
+         await RunActionAsync(ServiceRequests.SetPrinterProfile(printer.PrinterId, editor.NameBox.Text, editor.DescriptionBox.Text, editor.LocationBox.Text));
       }
    }
-
-
-
-   /// <summary>The name to show for a printer: the operator's friendly name when set, otherwise the Windows queue name.</summary>
-   private static string PrinterLabel(PrinterSnapshot printer) => string.IsNullOrWhiteSpace(printer.DisplayName) ? printer.Name : printer.DisplayName;
 }

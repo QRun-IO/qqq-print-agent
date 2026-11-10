@@ -10,6 +10,7 @@ using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Qqq.PrintAgent.Presentation.Settings;
 using Qqq.PrintAgent.Windows;
 
 
@@ -51,10 +52,8 @@ public sealed partial class MainWindow
       var prompter = new LifetimeUserPrompter(new ContentDialogPrompter(UpdateDialogRoot), _updateLifetime.Token);
       _updates = new UpdateCoordinator(_updateService, prompter, AppIdentity.Info.DisplayName, App.Log);
       VersionText.Text = "Version " + BuildVersion.Describe(typeof(MainWindow).Assembly);
-      UpdateChannelText.Text = BuildVersion.IsPrerelease(typeof(MainWindow).Assembly) ? "Update channel: prerelease" : "Update channel: stable";
-      UpdateStatusText.Text = _updateService.IsSupported
-         ? "Updates install the companion and print service together. You choose when to install."
-         : "Install the machine MSI to enable in-app updates. Release downloads remain available below.";
+      UpdateChannelText.Text = UpdateStatus.Channel(BuildVersion.IsPrerelease(typeof(MainWindow).Assembly));
+      UpdateStatusText.Text = UpdateStatus.Availability(_updateService.IsSupported);
       CheckUpdatesButton.IsEnabled = _updateService.IsSupported;
       CheckUpdatesMenuItem.IsEnabled = _updateService.IsSupported;
       string? outcome = MsiUpdateInstaller.ReadLastOutcomeMessage();
@@ -111,7 +110,7 @@ public sealed partial class MainWindow
       }
       try
       {
-         await Task.Delay(_settings.ShowSplashScreen ? _settings.SplashMilliseconds + 500 : 1000, _updateLifetime.Token);
+         await Task.Delay(UpdateStatus.StartupDelay(_settings.ShowSplashScreen, _settings.SplashMilliseconds), _updateLifetime.Token);
          if(_settings.CheckForUpdatesOnStartup)
          {
             await CheckUpdatesAsync(interactive: false);
@@ -144,7 +143,7 @@ public sealed partial class MainWindow
       _checkingUpdates = true;
       CheckUpdatesButton.IsEnabled = false;
       CheckUpdatesMenuItem.IsEnabled = false;
-      UpdateStatusText.Text = "Checking for updates…";
+      UpdateStatusText.Text = UpdateStatus.Checking;
       try
       {
          if(interactive)
@@ -163,9 +162,9 @@ public sealed partial class MainWindow
       catch(Exception exception)
       {
          App.Log.Error("[Companion] Update check could not finish.", exception);
-         if(interactive && !_updatesClosed)
+         if(UpdateStatus.CheckFailed(interactive) is { } message && !_updatesClosed)
          {
-            Feedback("Update check unavailable", "Open Logs for details, or use Release notes and downloads below.", InfoBarSeverity.Warning);
+            Feedback(message);
          }
       }
       finally
@@ -175,7 +174,7 @@ public sealed partial class MainWindow
          {
             CheckUpdatesButton.IsEnabled = _updateService?.IsSupported == true;
             CheckUpdatesMenuItem.IsEnabled = _updateService?.IsSupported == true;
-            UpdateStatusText.Text = "Update check finished. Installation always requires your confirmation. See Logs for check details.";
+            UpdateStatusText.Text = UpdateStatus.Finished;
          }
       }
    }

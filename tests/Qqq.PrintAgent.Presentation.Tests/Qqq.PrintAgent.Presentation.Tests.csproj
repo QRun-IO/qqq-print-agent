@@ -1,0 +1,30 @@
+<!--
+  Copyright (c) 2026 James Maes
+  SPDX-License-Identifier: MIT
+-->
+
+<Project Sdk="Microsoft.NET.Sdk">
+
+   <!-- Unit tests for the companion's UI-free presentation assembly. They run in build/Verify.ps1 and
+        feed the 100% line-coverage gate, so they use hand-written fakes, an injected clock and no real
+        pipe, profile or registry. -->
+   <PropertyGroup>
+      <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+   </PropertyGroup>
+
+   <ItemGroup>
+      <PackageReference Include="coverlet.collector" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" />
+      <PackageReference Include="xunit" />
+      <PackageReference Include="xunit.runner.visualstudio" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <Using Include="Xunit" />
+   </ItemGroup>
+
+   <ItemGroup>
+      <ProjectReference Include="..\..\src\Qqq.PrintAgent.Presentation\Qqq.PrintAgent.Presentation.csproj" />
+   </ItemGroup>
+
+</Project>

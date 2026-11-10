@@ -7,6 +7,11 @@ using System.ComponentModel;
 using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Qqq.PrintAgent.Presentation;
+using Qqq.PrintAgent.Presentation.Printers;
+using Qqq.PrintAgent.Presentation.Service;
+using Qqq.PrintAgent.Presentation.Settings;
+using Qqq.PrintAgent.Presentation.Shell;
 using Qqq.PrintAgent.Windows;
 
 
@@ -28,35 +33,24 @@ public sealed partial class MainWindow
    /// Asks the operator to confirm an action in a dialog whose default button is Back, so pressing Enter cancels rather than
    /// proceeds. It declines without showing anything while another request is running or the window is closing.
    /// </summary>
-   private async Task<bool> ConfirmAsync(string title, string message, string action, XamlRoot? owner = null)
+   private async Task<bool> ConfirmAsync(ConfirmationPrompt prompt, XamlRoot? owner = null)
    {
       if(_updatesClosed || _busy)
       {
          return false;
       }
-      var dialog = new ContentDialog { Title = title, Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap }, PrimaryButtonText = action, CloseButtonText = "Back", DefaultButton = ContentDialogButton.Close, XamlRoot = owner ?? Content.XamlRoot };
+      var dialog = new ContentDialog { Title = prompt.Title, Content = new TextBlock { Text = prompt.Message, TextWrapping = TextWrapping.Wrap }, PrimaryButtonText = prompt.Action, CloseButtonText = "Back", DefaultButton = ContentDialogButton.Close, XamlRoot = owner ?? Content.XamlRoot };
       return await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary;
    }
 
 
 
-   /// <summary>Recognises the service's "Error:" reply, shows its text as feedback and reports true, so callers can stop instead of parsing an error as data.</summary>
-   private bool IsActionError(string response)
-   {
-      if(!response.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-      {
-         return false;
-      }
-      Feedback("Action could not be completed", response[6..], InfoBarSeverity.Error);
-      return true;
-   }
-
-
-
    /// <summary>
-   /// Sends one state-changing request to the service while the window is marked busy. A timeout or broken pipe is reported
-   /// as "result could not be confirmed" with advice to check Jobs and Logs, because the request may already have reached the
-   /// server or the printer and must not be blindly repeated. The list is refreshed afterwards either way.
+   /// Sends one state-changing request to the service while the window is marked busy and shows the message
+   /// <see cref="ShellFeedback"/> gives for the result: a confirmation, the service's refusal, "result could not be
+   /// confirmed" when the request left and no usable answer arrived, because it may already have reached the server or the
+   /// printer and must not be blindly repeated, or "request not sent" when it never left this computer. The list is
+   /// refreshed afterwards either way.
    /// </summary>
    private async Task RunActionAsync(PipeRequest request)
    {
@@ -67,22 +61,7 @@ public sealed partial class MainWindow
       SetBusy(true);
       try
       {
-         string response = await _sendRequest(request);
-         if(!IsActionError(response))
-         {
-            string message = request.Operation switch
-            {
-               "set-device-profile" => "Computer details saved. They will synchronize when the service next contacts the server.",
-               "set-printer-profile" => "Printer details saved. They will synchronize when the service next contacts the server.",
-               "set-log-settings" => "Diagnostic log settings saved for the service and companion.",
-               _ => response,
-            };
-            Feedback("Request completed", message, InfoBarSeverity.Success);
-         }
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
-      {
-         Feedback("Result could not be confirmed", "Check Jobs and Logs before trying again. A timed-out request may already have reached the server or the printer.", InfoBarSeverity.Warning);
+         Feedback(ShellFeedback.ForAction(request.Operation, await _service.SendAsync(request)));
       }
       finally
       {
@@ -100,14 +79,14 @@ public sealed partial class MainWindow
       {
          return;
       }
-      var editor = new TestPrintEditor(printer, PrinterLabel(printer));
+      var editor = new TestPrintEditor(printer, PrinterRow.DisplayName(printer));
       ContentDialog dialog = CreateWideDialog("Print a test", editor);
       dialog.PrimaryButtonText = "Print one test";
       dialog.CloseButtonText = "Back";
       dialog.DefaultButton = ContentDialogButton.Close;
       if(await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary && editor.SelectedProfile is string profile)
       {
-         await RunActionAsync(new PipeRequest("test-print", PrinterId: printer.PrinterId, Format: editor.SelectedFormat, TestProfile: profile));
+         await RunActionAsync(ServiceRequests.TestPrint(printer.PrinterId, editor.SelectedFormat, profile));
       }
    }
 
@@ -161,7 +140,7 @@ public sealed partial class MainWindow
             return;
          }
          _serviceStatus = state.Service;
-         ServiceStateText.Text = state.Service.Installed ? $"Windows service: {state.Service.State}" : "Windows service is not installed";
+         ServiceStateText.Text = MachineStatus.ServiceState(state.Service);
          ServiceGuidanceText.Text = state.Service.Guidance;
          StartServiceButton.IsEnabled = state.Service.CanStart;
          RestartServiceButton.IsEnabled = state.Service.CanRestart;
@@ -172,9 +151,9 @@ public sealed partial class MainWindow
       }
       catch(Exception exception) when(exception is Win32Exception or InvalidOperationException or TimeoutException or UnauthorizedAccessException or IOException or System.Xml.XmlException or FormatException or OperationCanceledException)
       {
-         ServiceStateText.Text = "Service status unavailable";
-         ServiceGuidanceText.Text = "Open Windows Services to inspect the service, then refresh.";
-         StartupGuidanceText.Text = "Startup status could not be read. The preference was not changed.";
+         ServiceStateText.Text = MachineStatus.ServiceUnknown;
+         ServiceGuidanceText.Text = MachineStatus.ServiceUnknownGuidance;
+         StartupGuidanceText.Text = MachineStatus.StartupUnknownGuidance;
          Feedback("Cannot read Windows settings", exception.Message, InfoBarSeverity.Error);
       }
       finally
@@ -193,7 +172,7 @@ public sealed partial class MainWindow
    /// <summary>Restarts the service only after the operator confirms, because a job being submitted could be left with an uncertain outcome.</summary>
    private async void RestartService_Click(object sender, RoutedEventArgs e)
    {
-      if(await ConfirmAsync("Restart the print service?", "A job being submitted could have an uncertain outcome. Wait for active jobs to finish when possible.", "Restart service"))
+      if(await ConfirmAsync(MachineStatus.RestartPrompt))
       {
          await ChangeServiceAsync(restart: true);
       }

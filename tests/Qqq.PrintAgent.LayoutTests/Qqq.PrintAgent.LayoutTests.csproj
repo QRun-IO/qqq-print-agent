@@ -26,6 +26,7 @@
       <Content Include="../../src/Qqq.PrintAgent/Assets/Query/*" Link="Assets/Query/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
       <Using Include="Qqq.PrintAgent.Core" />
       <ProjectReference Include="../../src/Qqq.PrintAgent.Core/Qqq.PrintAgent.Core.csproj" />
+      <ProjectReference Include="../../src/Qqq.PrintAgent.Presentation/Qqq.PrintAgent.Presentation.csproj" />
       <ProjectReference Include="../../src/Qqq.PrintAgent.Windows/Qqq.PrintAgent.Windows.csproj" />
       <PackageReference Include="KofTwentyTwo.AppKit.WinUI" />
       <PackageReference Include="H.NotifyIcon.WinUI" />

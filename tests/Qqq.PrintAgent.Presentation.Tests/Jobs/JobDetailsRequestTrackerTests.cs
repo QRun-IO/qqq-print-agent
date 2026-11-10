@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
-namespace Qqq.PrintAgent.UiTests;
+using Qqq.PrintAgent.Presentation.Jobs;
+
+namespace Qqq.PrintAgent.Presentation.Tests.Jobs;
 
 /// <summary>Exercises the same generation guard used by inline rows without launching a desktop.</summary>
 public sealed class JobDetailsRequestTrackerTests

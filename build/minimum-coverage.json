@@ -1,5 +1,6 @@
 {
    "Qqq.PrintAgent.Core": 100,
+   "Qqq.PrintAgent.Presentation": 100,
    "Qqq.PrintAgent.Windows": 69,
    "qqq-print-agent": 100
 }

@@ -3,122 +3,76 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Diagnostics;
-using System.Text.Json;
+using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Qqq.PrintAgent.Core.Authentication;
-using Qqq.PrintAgent.Windows;
+using Qqq.PrintAgent.Presentation.SignIn;
 
 namespace Qqq.PrintAgent;
 
 /// <summary>
-/// Sign-in part of the main window. The companion discovers what the server offers, signs the operator in (password or
-/// browser), and hands only the resulting session credential to the service, which keeps it protected; the window never
-/// stores a password or a provider token, and the password box is cleared after every attempt.
+/// Connection dialog part of the main window. What happens on each button (discovery, password and browser sign-in, the
+/// hand-over to the service, sign-out, enrollment and the certificate exception) is decided by <see cref="SignInFlow"/>;
+/// this part passes the dialog's fields to it, marks the window busy around each operation, and shows the state and
+/// messages the flow announces. The window never stores a password or a provider token, and the password and enrollment
+/// boxes are cleared after every attempt. An attempt the flow refused because another operation was still running is not
+/// an attempt: the flow says so, and what the operator typed stays.
 /// </summary>
 public sealed partial class MainWindow
 {
-   private QqqSessionClient? _signInClient;
-   private QqqAuthenticationMetadata? _signInMetadata;
-   private CancellationTokenSource? _browserSignInCancellation;
-   private ServerTrust _serverTrust = new();
+   private readonly SignInFlow _signIn;
 
 
 
-   /// <summary>The companion's progress sink for the sign-in client: steps at INFO, request detail at DEBUG, in the shared log the service also writes.</summary>
-   private static QqqSessionDiagnostics CompanionDiagnostics() => new(message => App.Log.Info("[Companion] " + message),
-      message => App.Log.Debug("[Companion] " + message), () => App.Log.IsDebugEnabled);
-
-
-
-   /// <summary>Records a companion-side failure: type and message at ERROR, the full exception as debug detail.</summary>
-   private static void LogFailure(string context, Exception exception)
+   /// <summary>
+   /// Shows what the flow announces: which sign-in methods are offered, whether a browser sign-in can be cancelled, the
+   /// saved certificate exception, and each message. The flow raises these on the thread that called it, which is the UI thread; a presentation test (SignInFlowThreadingTests) holds it to that.
+   /// </summary>
+   private void SignIn_PropertyChanged(object? sender, PropertyChangedEventArgs e)
    {
-      App.Log.Error("[Companion] " + context + ": " + QqqSessionDiagnostics.Describe(exception));
-      App.Log.Debug("[Companion] " + context + " detail: " + exception);
-   }
-
-
-
-   /// <summary>Reads the service's transport trust setting into the connection dialog's checkbox; when the service cannot be reached the box stays unchecked and the reason is logged.</summary>
-   private async Task LoadServerTrustAsync()
-   {
-      try
+      switch(e.PropertyName)
       {
-         string response = await _sendRequest(new PipeRequest("get-server-trust"));
-         if(!response.StartsWith("Error:", StringComparison.Ordinal))
-         {
-            _serverTrust = JsonSerializer.Deserialize<ServerTrust>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions) ?? new();
+         case nameof(SignInFlow.PasswordOffered):
+            PasswordSignInPanel.Visibility = _signIn.PasswordOffered ? Visibility.Visible : Visibility.Collapsed;
+            break;
+         case nameof(SignInFlow.BrowserOffered):
+            BrowserSignInButton.Visibility = _signIn.BrowserOffered ? Visibility.Visible : Visibility.Collapsed;
+            break;
+         case nameof(SignInFlow.BrowserPending):
+            CancelBrowserSignInButton.Visibility = _signIn.BrowserPending ? Visibility.Visible : Visibility.Collapsed;
+            break;
+         case nameof(SignInFlow.Trust):
             ShowServerTrust();
-            return;
-         }
-         App.Log.Warning("[Companion] Could not read the server trust setting: " + response);
+            break;
+         case nameof(SignInFlow.Feedback) when _signIn.Feedback is { } message:
+            Feedback(message);
+            break;
+         default:
+            break;
       }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
-      {
-         LogFailure("Could not read the server trust setting from the service", exception);
-      }
-      _serverTrust = new ServerTrust();
-      ShowServerTrust();
    }
 
 
 
-   /// <summary>Reflects the saved exception in the checkbox and names the server it is bound to, so an exception saved for another server is visibly not in force for the one being entered.</summary>
+   /// <summary>Reads the service's certificate exception into the connection dialog's checkbox before the dialog opens; when the service cannot be reached the box stays unchecked and the flow logs the reason.</summary>
+   private Task LoadServerTrustAsync() => _signIn.LoadTrustAsync();
+
+
+
+   /// <summary>Reflects the saved exception in the checkbox and names the server it is bound to, so an exception saved for another server is visibly not in force for the one being entered. While a change is unconfirmed the box is shown undetermined (neither checked nor unchecked) and the label says so.</summary>
    private void ShowServerTrust()
    {
-      AllowUntrustedCertificateBox.IsChecked = _serverTrust.AllowUntrustedCertificate;
-      AllowUntrustedCertificateLabel.Text = _serverTrust.AllowUntrustedCertificate
-         ? "Allow untrusted server certificate for " + _serverTrust.Origin + " (development only)"
-         : "Allow untrusted server certificate for this server (development only)";
+      AllowUntrustedCertificateBox.IsChecked = _signIn.TrustKnown ? _signIn.Trust.AllowUntrustedCertificate : null;
+      AllowUntrustedCertificateLabel.Text = SignInMessages.TrustLabel(_signIn.Trust, _signIn.TrustKnown);
    }
 
 
 
-   /// <summary>True when the saved exception is on and bound to exactly the server being signed in to.</summary>
-   private bool AllowsUntrustedCertificate(Uri origin) => _serverTrust.AppliesTo(origin);
-
-
-
-   /// <summary>Saves the checkbox to the service so the service's own sessions honor it, and logs the change loudly; a failed save reverts the box and shows why.</summary>
+   /// <summary>Saves the checkbox through the flow so the service's own sessions honor it; a save that did not happen puts the box back, a service the request never reached is shown as unavailable, and a save that was sent and not confirmed leaves the box undetermined until the setting has been read again.</summary>
    private async void AllowUntrustedCertificate_Click(object sender, RoutedEventArgs e)
    {
-      bool allow = AllowUntrustedCertificateBox.IsChecked == true;
-      Uri? origin = null;
-      if(allow && !Uri.TryCreate(ServerBox.Text.Trim(), UriKind.Absolute, out origin))
+      if(!await _signIn.SetTrustAsync(AllowUntrustedCertificateBox.IsChecked == true, ServerBox.Text))
       {
-         AllowUntrustedCertificateBox.IsChecked = false;
-         Feedback("Enter the server address first", "The certificate exception is saved for one server only, so the server address must be entered before it can be allowed.", InfoBarSeverity.Warning);
-         return;
-      }
-      ServerTrust requested = allow ? new ServerTrust(true, ServerTrust.Normalize(origin!)) : new ServerTrust();
-      try
-      {
-         string response = await _sendRequest(new PipeRequest("set-server-trust", ServerTrust: requested));
-         if(response.StartsWith("Error:", StringComparison.Ordinal))
-         {
-            ShowServerTrust();
-            Feedback("Server trust not saved", response, InfoBarSeverity.Error);
-            return;
-         }
-         _serverTrust = requested;
-         ShowServerTrust();
-         if(allow)
-         {
-            App.Log.Warning("[Companion] Untrusted server certificates ALLOWED by the operator for " + requested.Origin + " (development only).");
-            Feedback("Untrusted certificate allowed for " + requested.Origin, "The service and companion will accept any certificate from this one server until this is turned off. Other servers keep normal validation. Use only with a development server.", InfoBarSeverity.Warning);
-         }
-         else
-         {
-            App.Log.Info("[Companion] Untrusted server certificates refused again for every server (default).");
-            Feedback("Untrusted certificates refused", "Only certificates Windows trusts for the service account are accepted again.", InfoBarSeverity.Informational);
-         }
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
-      {
-         ShowServerTrust();
-         LogFailure("Server trust setting could not be saved", exception);
          ServiceUnavailable();
       }
    }
@@ -126,237 +80,97 @@ public sealed partial class MainWindow
 
 
    /// <summary>Cancels the browser sign-in that is waiting for its callback, if one is running.</summary>
-   private void CancelBrowserSignIn_Click(object sender, RoutedEventArgs e) => _browserSignInCancellation?.Cancel();
+   private void CancelBrowserSignIn_Click(object sender, RoutedEventArgs e) => _signIn.CancelBrowserSignIn();
 
 
 
    /// <summary>Cancels a waiting browser sign-in when the connection dialog closes, so no attempt keeps listening after the operator left.</summary>
-   private void ConnectionDialog_Closing(ContentDialog sender, ContentDialogClosingEventArgs args) => _browserSignInCancellation?.Cancel();
+   private void ConnectionDialog_Closing(ContentDialog sender, ContentDialogClosingEventArgs args) => _signIn.CancelBrowserSignIn();
 
 
 
-   /// <summary>
-   /// Asks the entered server which sign-in methods it offers and shows only those: the password form for a table-based
-   /// server, and the browser button when the server advertises a native grant. A server that offers neither is reported as
-   /// needing configuration. Any previous sign-in client is disposed first, so each attempt starts from a clean session.
-   /// </summary>
+   /// <summary>Asks the entered server which sign-in methods it offers; the flow shows only those and reports a server that offers neither as needing configuration.</summary>
    private async void DiscoverSignIn_Click(object sender, RoutedEventArgs e)
    {
       if(_busy)
-      { return; }
-      SetBusy(true);
-      PasswordSignInPanel.Visibility = Visibility.Collapsed;
-      BrowserSignInButton.Visibility = Visibility.Collapsed;
-      try
       {
-         _signInClient?.Dispose();
-         _signInClient = null;
-         string entered = ServerBox.Text.Trim();
-         App.Log.Info("[Companion] Discover sign-in options requested for '" + entered + "'.");
-         if(!Uri.TryCreate(entered, UriKind.Absolute, out Uri? origin))
-         {
-            App.Log.Warning("[Companion] The server address is not an absolute URL (expected https://host[:port]).");
-            throw new InvalidOperationException("Enter a valid server origin.");
-         }
-         QqqSessionClient client = new(origin, allowLoopbackHttp: origin.IsLoopback, diagnostics: CompanionDiagnostics(), allowUntrustedCertificate: AllowsUntrustedCertificate(origin));
-         _signInClient = client;
-         _ = await client.DiscoverAsync();
-         _signInMetadata = await client.GetAuthenticationMetadataAsync();
-         PasswordSignInPanel.Visibility = string.Equals(_signInMetadata.Type, "TABLE_BASED", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
-         BrowserSignInButton.Visibility = _signInMetadata.Values?.NativeSessionLogin is not null ? Visibility.Visible : Visibility.Collapsed;
-         bool supported = PasswordSignInPanel.Visibility == Visibility.Visible || BrowserSignInButton.Visibility == Visibility.Visible;
-         App.Log.Info("[Companion] Sign-in options for " + origin.Authority + ": password sign-in "
-            + (PasswordSignInPanel.Visibility == Visibility.Visible ? "offered" : "not offered") + ", browser sign-in "
-            + (BrowserSignInButton.Visibility == Visibility.Visible ? "offered" : "not offered") + ".");
-         Feedback(supported ? "Sign-in options ready" : "Server configuration required",
-            supported ? "Use the sign-in method configured by this server." : "This server has not enabled a supported native sign-in grant. Ask its administrator to configure it.",
-            supported ? InfoBarSeverity.Informational : InfoBarSeverity.Warning);
+         return;
       }
-      catch(Exception exception) when(exception is IOException or ArgumentException or InvalidOperationException or HttpRequestException or OperationCanceledException)
-      {
-         LogFailure("Discovery failed", exception);
-         Feedback("Discovery failed", "The server did not provide compatible authentication and printing discovery. Reason: " + QqqSessionDiagnostics.Explain(exception) + " The activity log has the full detail.", InfoBarSeverity.Error);
-      }
-      finally { SetBusy(false); }
-   }
-
-
-
-   /// <summary>
-   /// Signs in with the entered user name and password, then transfers the resulting session to the service. The password
-   /// box is cleared in a finally block whether or not sign-in worked, and the failure message deliberately does not say
-   /// which part (credentials, device ownership or permission) was wrong.
-   /// </summary>
-   private async void PasswordSignIn_Click(object sender, RoutedEventArgs e)
-   {
-      if(_busy || _signInClient is null)
-      { return; }
       SetBusy(true);
       try
       {
-         App.Log.Info("[Companion] Password sign-in submitted for " + _signInClient.Origin.Authority + ".");
-         Feedback("Signing in", "Checking the username and password with the server.", InfoBarSeverity.Informational);
-         await _signInClient.SignInWithPasswordAsync(UsernameBox.Text.Trim(), QqqPasswordBox.Password);
-         await TransferSignInAsync();
-      }
-      catch(Exception exception) when(exception is IOException or ArgumentException or HttpRequestException or OperationCanceledException or UnauthorizedAccessException)
-      {
-         LogFailure("Password sign-in not completed", exception);
-         Feedback("Sign-in not completed", "The server did not authorize this connection, or the service could not confirm it. Reason: " + QqqSessionDiagnostics.Explain(exception) + " The activity log has the full detail.", InfoBarSeverity.Error);
+         await _signIn.DiscoverAsync(ServerBox.Text);
       }
       finally
       {
-         QqqPasswordBox.Password = string.Empty;
          SetBusy(false);
       }
    }
 
 
 
-   /// <summary>
-   /// Hands the session credential, and nothing else, to the service together with the operator's pairing choice (keep the
-   /// current pairing, claim a legacy device, or start a new pairing). The service verifies it and keeps it protected; the
-   /// result is shown as success only when the service confirms it signed in.
-   /// </summary>
-   private async Task TransferSignInAsync()
+   /// <summary>Signs in with the entered user name and password and the selected pairing choice. The password box is cleared whether or not sign-in worked, and kept only when the flow refused to start because another operation was running.</summary>
+   private async void PasswordSignIn_Click(object sender, RoutedEventArgs e)
    {
-      string choice = PairingChoice.SelectedIndex == 2 ? "start a new pairing" : PairingChoice.SelectedIndex == 1 ? "associate with the existing pairing" : "keep the current pairing";
-      App.Log.Info("[Companion] Sign-in accepted by the server; handing the session to the service (" + choice + ").");
-      string result = await _sendRequest(new PipeRequest("sign-in", SessionCredential: _signInClient!.ExportCredential(),
-         ClaimLegacyDevice: PairingChoice.SelectedIndex == 1, StartNewPairing: PairingChoice.SelectedIndex == 2));
-      bool success = result.StartsWith("Signed in to " + AppIdentity.ServerName + ".", StringComparison.Ordinal);
-      if(success)
-      { App.Log.Info("[Companion] Service sign-in result: " + result); }
-      else
-      { App.Log.Error("[Companion] Service sign-in result: " + result); }
-      Feedback(success ? "Signed in" : "Service authorization not completed", result, success ? InfoBarSeverity.Success : InfoBarSeverity.Error);
+      if(_busy || !_signIn.HasSession)
+      {
+         return;
+      }
+      SetBusy(true);
+      bool refused = false;
+      try
+      {
+         refused = !await _signIn.SignInWithPasswordAsync(UsernameBox.Text, QqqPasswordBox.Password, PairingSelection.FromIndex(PairingChoice.SelectedIndex));
+      }
+      finally
+      {
+         if(!refused)
+         {
+            QqqPasswordBox.Password = string.Empty;
+         }
+         SetBusy(false);
+      }
    }
 
 
 
-   /// <summary>
-   /// Asks the service to sign out and forget its session, then drops the window's own sign-in client. The identity provider is meant
-   /// to be invisible, so the service also returns the provider's own sign-out when the server offers one and this window opens it in
-   /// the browser: staying signed in to the provider would let the next sign-in skip the credential prompt. Pairing and job history are not removed.
-   /// </summary>
+   /// <summary>Runs the browser sign-in with the selected pairing choice; the flow shows the Cancel button while it waits for the browser.</summary>
+   private async void BrowserSignIn_Click(object sender, RoutedEventArgs e)
+   {
+      if(_busy || !_signIn.HasSession)
+      {
+         return;
+      }
+      SetBusy(true);
+      try
+      {
+         await _signIn.SignInWithBrowserAsync(PairingSelection.FromIndex(PairingChoice.SelectedIndex));
+      }
+      finally
+      {
+         SetBusy(false);
+      }
+   }
+
+
+
+   /// <summary>Asks the service to sign out and forget its session; the flow also finishes the identity provider's own sign-out when the server offers one. Pairing and job history are not removed.</summary>
    private async void SignOut_Click(object sender, RoutedEventArgs e)
    {
       if(_busy)
-      { return; }
+      {
+         return;
+      }
       SetBusy(true);
       try
       {
-         App.Log.Info("[Companion] Sign-out requested; asking the service to end the session.");
-         string result = await _sendRequest(new PipeRequest("sign-out", PostLogoutRedirectUri: QqqBrowserCallback.RedirectUri));
-         _signInClient?.Dispose();
-         _signInClient = null;
-         PipeSignOutResult? outcome = ReadSignOutResult(result);
-         string message = outcome?.Message ?? result;
-         App.Log.Info("[Companion] Service sign-out result: " + message + (outcome?.ProviderLogout is null ? "" : " The identity provider sign-out is ready; opening it in the browser."));
-         InfoBarSeverity severity = message.StartsWith("Error:", StringComparison.Ordinal) ? InfoBarSeverity.Warning : InfoBarSeverity.Informational;
-         if(outcome?.ProviderLogout is { } providerLogout)
+         if(!await _signIn.SignOutAsync())
          {
-            Feedback("Account sign-out", message + " Finish signing out of the identity provider on the page that opened in your browser.", severity);
-            bool providerEnded = await CompleteProviderSignOutAsync(providerLogout);
-            Feedback("Account sign-out", providerEnded ? message + " The identity provider session ended too, so the next sign-in asks for credentials."
-               : message + " The identity provider sign-out was opened in your browser but did not confirm; close that page and sign out there if it is still open.",
-               providerEnded ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+            ServiceUnavailable();
          }
-         else
-         { Feedback("Account sign-out", message, severity); }
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
-      {
-         LogFailure("Sign-out could not reach the service", exception);
-         ServiceUnavailable();
-      }
-      finally { SetBusy(false); }
-   }
-
-
-
-   /// <summary>Reads the service's sign-out reply: structured text when a provider sign-out was requested, or null for a plain message or an error text.</summary>
-   private static PipeSignOutResult? ReadSignOutResult(string response)
-   {
-      if(response.StartsWith("Error:", StringComparison.Ordinal))
-      { return null; }
-      try
-      { return JsonSerializer.Deserialize<PipeSignOutResult>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions); }
-      catch(JsonException)
-      { return null; }
-   }
-
-
-
-   /// <summary>
-   /// Opens the identity provider's end-session page in the default browser and waits up to two minutes for the browser to return
-   /// to this application's registered callback with this sign-out's own state. The inbox is opened first so a fast redirect is not lost.
-   /// The request carries a sensitive token hint, so only its host is logged. Returns whether the provider confirmed.
-   /// </summary>
-   private static async Task<bool> CompleteProviderSignOutAsync(QqqProviderLogout logout)
-   {
-      try
-      {
-         using QqqBrowserCallback inbox = new();
-         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(2));
-         App.Log.Info("[Companion] Opening the identity provider's sign-out page in the default browser (" + logout.EndSessionUri.Authority + ").");
-         _ = Process.Start(new ProcessStartInfo(logout.EndSessionUri.AbsoluteUri) { UseShellExecute = true });
-         Uri callback = await inbox.ReceiveAsync(timeout.Token);
-         bool matched = logout.Matches(callback);
-         App.Log.Info("[Companion] Identity provider sign-out callback " + (matched ? "matched." : "did not match this sign-out."));
-         return matched;
-      }
-      catch(Exception exception) when(exception is OperationCanceledException or IOException or InvalidDataException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-      {
-         App.Log.Warning("[Companion] Identity provider sign-out was not confirmed: " + QqqSessionDiagnostics.Describe(exception));
-         return false;
-      }
-   }
-
-
-
-   /// <summary>
-   /// Runs the browser sign-in with a three minute limit and a Cancel button. The redirect address must be the one this
-   /// application's installer registered, and only an address the server also lists is used, so a server cannot steer the
-   /// callback elsewhere. Cancelling discards the half-finished client, and a failure asks the operator to start again explicitly.
-   /// </summary>
-   private async void BrowserSignIn_Click(object sender, RoutedEventArgs e)
-   {
-      if(_busy || _signInClient is null)
-      { return; }
-      SetBusy(true);
-      CancelBrowserSignInButton.Visibility = Visibility.Visible;
-      try
-      {
-         App.Log.Info("[Companion] Browser sign-in requested for " + _signInClient.Origin.Authority + "; this application's callback is " + QqqBrowserCallback.RedirectUri + ".");
-         string redirect = _signInMetadata?.Values?.NativeSessionLogin?.RedirectUris.FirstOrDefault(value =>
-            string.Equals(value, QqqBrowserCallback.RedirectUri, StringComparison.Ordinal))
-            ?? throw Unlisted();
-         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
-         _browserSignInCancellation = timeout;
-         Feedback("Waiting for the browser", "Finish signing in on the page that opened in your browser. This dialog updates when the sign-in completes, is canceled or times out after three minutes.", InfoBarSeverity.Informational);
-         await CompleteBrowserSignInAsync(new Uri(redirect), timeout.Token);
-         await TransferSignInAsync();
-      }
-      catch(OperationCanceledException)
-      {
-         App.Log.Info("[Companion] Browser sign-in cancelled or timed out (three minute limit) before a callback arrived.");
-         ReportCallbackTrace();
-         _signInClient?.Dispose();
-         _signInClient = null;
-         BrowserSignInButton.Visibility = Visibility.Collapsed;
-         Feedback("Browser sign-in canceled", "No new sign-in was accepted. Choose Discover sign-in options to start a new attempt.", InfoBarSeverity.Informational);
-      }
-      catch(Exception exception) when(exception is IOException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-      {
-         LogFailure("Browser sign-in not completed", exception);
-         ReportCallbackTrace();
-         Feedback("Browser sign-in not completed", "No validated account session was received. Reason: " + QqqSessionDiagnostics.Explain(exception) + " Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly. The activity log has the full detail.", InfoBarSeverity.Warning);
       }
       finally
       {
-         _browserSignInCancellation = null;
-         CancelBrowserSignInButton.Visibility = Visibility.Collapsed;
          SetBusy(false);
       }
    }
@@ -364,47 +178,39 @@ public sealed partial class MainWindow
 
 
    /// <summary>
-   /// Copies the protocol handler's recent trace into the activity log, or states that the browser never launched the
-   /// handler at all, so a hand-off that stops outside the companion is still visible in one place.
+   /// Enrolls this device through the service with the entered address and code; the window never receives or stores the
+   /// device token. An incomplete form is refused before anything is sent, the service's confirmation becomes the status
+   /// line, and the code box is cleared after every attempt. When the flow refused to start because another operation was
+   /// running, the code was not used and stays in the box.
    /// </summary>
-   private static void ReportCallbackTrace()
+   private async void Enroll_Click(object sender, RoutedEventArgs e)
    {
-      IReadOnlyList<string> lines = QqqBrowserCallback.RecentTrace(TimeSpan.FromMinutes(10));
-      if(lines.Count == 0)
+      if(_busy || !_signIn.CheckEnrollment(ServerBox.Text, EnrollmentBox.Password))
       {
-         App.Log.Warning("[Companion] The browser never launched the sign-in protocol handler in the last 10 minutes (no entries in " + QqqBrowserCallback.TracePath
-            + "). Either the identity provider did not redirect to " + QqqBrowserCallback.RedirectUri + " (check the provider's allowed redirect URIs and any error page it showed), or the browser blocked opening the QQQ Print Agent sign-in link.");
          return;
       }
-      App.Log.Warning("[Companion] Protocol handler trace from " + QqqBrowserCallback.TracePath + ":" + Environment.NewLine + string.Join(Environment.NewLine, lines));
-   }
-
-
-
-   /// <summary>
-   /// The browser exchange itself: open the callback inbox first (so a fast redirect is not lost), begin the login, open the
-   /// provider's page in the default browser, wait for the forwarded callback, and complete the login against the attempt
-   /// that started it. The inbox is disposed when the exchange ends.
-   /// </summary>
-   private async Task CompleteBrowserSignInAsync(Uri redirect, CancellationToken token)
-   {
-      using QqqBrowserCallback inbox = new();
-      App.Log.Info("[Companion] Browser callback inbox open; starting the sign-in attempt.");
-      QqqBrowserLogin attempt = await _signInClient!.BeginBrowserLoginAsync(redirect, token);
-      App.Log.Info("[Companion] Opening the identity provider's sign-in page in the default browser (" + attempt.AuthorizationUri.Authority + ").");
-      _ = Process.Start(new ProcessStartInfo(attempt.AuthorizationUri.AbsoluteUri) { UseShellExecute = true });
-      Uri callbackUri = await inbox.ReceiveAsync(token);
-      App.Log.Info("[Companion] Browser callback received; completing the sign-in.");
-      await _signInClient.CompleteBrowserLoginAsync(attempt, callbackUri, token);
-   }
-
-
-
-   /// <summary>Logs which callbacks the server does list before reporting that this application's callback is not among them.</summary>
-   private InvalidOperationException Unlisted()
-   {
-      App.Log.Warning("[Companion] The server's native grant does not list this application's callback " + QqqBrowserCallback.RedirectUri + "; it lists ["
-         + string.Join(", ", _signInMetadata?.Values?.NativeSessionLogin?.RedirectUris ?? []) + "]. Add the callback to the QQQ native session grant.");
-      return new InvalidOperationException("No approved native browser callback is configured.");
+      SetBusy(true);
+      bool refused = false;
+      try
+      {
+         EnrollmentResult result = await _signIn.EnrollAsync(ServerBox.Text, EnrollmentBox.Password);
+         refused = !result.Started;
+         if(result.StatusText is string status)
+         {
+            StatusText.Text = status;
+         }
+         if(!result.ServiceReachable)
+         {
+            ServiceUnavailable();
+         }
+      }
+      finally
+      {
+         if(!refused)
+         {
+            EnrollmentBox.Password = string.Empty;
+         }
+         SetBusy(false);
+      }
    }
 }

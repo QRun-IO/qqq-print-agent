@@ -5,7 +5,7 @@
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Qqq.PrintAgent.Windows;
+using Qqq.PrintAgent.Presentation.Jobs;
 
 namespace Qqq.PrintAgent;
 
@@ -13,72 +13,66 @@ namespace Qqq.PrintAgent;
 internal sealed class JobDetailsView : StackPanel
 {
    /// <summary>
-   /// Builds the job details: a field summary, then the event history. The compact form used inline shows only the latest five
-   /// events in an expander; the full form shows up to 200. Text states that "sent to printer" is spool acceptance, not confirmed
-   /// paper output, and notes when retention removed older events.
+   /// Lays out prepared job details: the field summary, then the event history. The compact form used inline puts the events in
+   /// an expander; the full form shows them under a heading. Which fields, how many events and every sentence are decided by
+   /// <see cref="JobDetailsContent"/>; this view only arranges them.
    /// </summary>
-   internal JobDetailsView(JobDetailsSnapshot details, Func<string, string> state, Func<string?, string> time, bool compact = false)
+   internal JobDetailsView(JobDetailsContent content, bool compact = false)
    {
       Spacing = 20;
-      JobSnapshot job = details.Job;
-      Children.Add(Summary(job, state, time, compact));
+      Children.Add(Summary(content));
       if(compact)
       {
          Children.Add(new Expander
          {
-            Header = "Recent events (up to 5)",
+            Header = content.EventsHeading,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Content = History(details.Events.TakeLast(5).ToArray(), state, time),
+            Content = History(content),
          });
-         Children.Add(Text("Use Full details for the retained event history. Sent to printer is spool acceptance, not confirmed paper output."));
+         Children.Add(Text(content.EventsNote));
       }
       else
       {
-         Children.Add(Text("Event history", heading: true));
-         Children.Add(Text("The service returns up to 200 retained events. Sent to printer means Windows accepted the job, not confirmed physical output."));
-         Children.Add(History(details.Events.Take(200).ToArray(), state, time));
+         Children.Add(Text(content.EventsHeading, heading: true));
+         Children.Add(Text(content.EventsNote));
+         Children.Add(History(content));
       }
-      if(details.HistoryPruned)
+      if(content.PrunedNote is not null)
       {
-         Children.Add(Text("Older event detail has been removed by the retention policy. The job summary remains available."));
+         Children.Add(Text(content.PrunedNote));
       }
       Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(this, compact ? "JobInlineDetailsContent" : "JobDetailsContent");
    }
 
 
 
-   /// <summary>Builds the labelled summary rows for one job, shortening long values in the compact form and falling back to "Not recorded" for facts an older record never had.</summary>
-   private static StackPanel Summary(JobSnapshot job, Func<string, string> state, Func<string?, string> time, bool compact)
+   /// <summary>Builds the labelled summary rows for one job.</summary>
+   private static StackPanel Summary(JobDetailsContent content)
    {
       StackPanel summary = new() { Spacing = 12 };
-      AddField(summary, "Document", job.Title ?? "Not recorded", compact);
-      AddField(summary, "Printer", job.PrinterName ?? job.PrinterId ?? "Not recorded", compact);
-      AddField(summary, "Status", state(job.Status) + (job.FailureAcknowledged ? " · Reviewed" : ""));
-      AddField(summary, "Created", job.CreatedAt is null ? "Not recorded" : time(job.CreatedAt));
-      AddField(summary, "Last update", time(job.UpdatedAt));
-      AddField(summary, "Outcome", string.IsNullOrWhiteSpace(job.Message) ? "No additional outcome message recorded." : job.Message, compact);
-      AddField(summary, "Format", job.Format ?? "Not recorded");
-      AddField(summary, "Job ID", job.JobId);
-      AddField(summary, "Windows job", job.SpoolerJobId ?? "Not assigned");
+      foreach(JobDetailField field in content.Fields)
+      {
+         AddField(summary, field);
+      }
       return summary;
    }
 
 
 
-   /// <summary>Adds one label and value row. In the compact form the value is limited to three lines with the full text in a tooltip, so a long outcome message cannot push the rest of the table out of view.</summary>
-   private static void AddField(Panel parent, string label, string value, bool compact = false)
+   /// <summary>Adds one label and value row. A shortened value is limited to three lines with the full text in a tooltip, so a long outcome message cannot push the rest of the table out of view.</summary>
+   private static void AddField(Panel parent, JobDetailField detail)
    {
       Grid field = new() { ColumnSpacing = 16 };
       field.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) });
       field.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-      TextBlock title = Text(label, heading: true);
-      TextBlock content = Text(value);
-      if(compact)
+      TextBlock title = Text(detail.Label, heading: true);
+      TextBlock content = Text(detail.Value);
+      if(detail.Shortened)
       {
          content.MaxLines = 3;
          content.TextTrimming = TextTrimming.CharacterEllipsis;
-         ToolTipService.SetToolTip(content, value);
+         ToolTipService.SetToolTip(content, detail.Value);
       }
       Grid.SetColumn(content, 1);
       field.Children.Add(title);
@@ -88,23 +82,18 @@ internal sealed class JobDetailsView : StackPanel
 
 
 
-   /// <summary>Builds the event table: a heading row, then one row per event with its time, status and a message that also shows whether it was reported to the server and the Windows job number when there is one.</summary>
-   private static StackPanel History(JobEventSnapshot[] events, Func<string, string> state, Func<string?, string> time)
+   /// <summary>Builds the event table: a heading row, then one row per event, and a sentence instead of an empty table when no events are retained.</summary>
+   private static StackPanel History(JobDetailsContent content)
    {
       StackPanel history = new() { Spacing = 12 };
-      history.Children.Add(EventRow("Time", "Status", "Message and delivery", heading: true));
-      foreach(JobEventSnapshot entry in events)
+      history.Children.Add(EventRow(content.EventColumns, heading: true));
+      foreach(JobEventRow entry in content.Events)
       {
-         string message = $"{entry.Message ?? "No message"}\n{(entry.Delivered ? "Reported to server" : "Waiting to report")}\nEvent: {entry.EventId}";
-         if(entry.SpoolerJobId is not null)
-         {
-            message += $"\nWindows job: {entry.SpoolerJobId}";
-         }
-         history.Children.Add(EventRow(time(entry.RecordedAt), state(entry.Status), message));
+         history.Children.Add(EventRow(entry));
       }
-      if(events.Length == 0)
+      if(content.NoEventsNote is not null)
       {
-         history.Children.Add(Text("No retained local events are available for this job."));
+         history.Children.Add(Text(content.NoEventsNote));
       }
       return history;
    }
@@ -112,13 +101,13 @@ internal sealed class JobDetailsView : StackPanel
 
 
    /// <summary>Builds one three-column row (time, status, message) of the event table, bold for the heading row.</summary>
-   private static Grid EventRow(string timestamp, string status, string message, bool heading = false)
+   private static Grid EventRow(JobEventRow entry, bool heading = false)
    {
       Grid row = new() { ColumnSpacing = 16 };
       row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) });
       row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(132) });
       row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-      string[] values = [timestamp, status, message];
+      string[] values = [entry.Time, entry.Status, entry.Message];
       for(int index = 0; index < values.Length; index++)
       {
          TextBlock cell = Text(values[index], heading);

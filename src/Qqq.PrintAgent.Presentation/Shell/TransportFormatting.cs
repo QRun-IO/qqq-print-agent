@@ -5,17 +5,17 @@
 
 using System.Globalization;
 
-namespace Qqq.PrintAgent;
+namespace Qqq.PrintAgent.Presentation.Shell;
 
 /// <summary>Readable transport observations without exposing URL credentials or inventing missing measurements.</summary>
-internal static class TransportFormatting
+public static class TransportFormatting
 {
    private static readonly string[] Units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
 
 
 
    /// <summary>Formats a byte count in binary units (B, KiB, MiB and so on) with one decimal, and says "Unavailable" for a negative or non-finite value instead of inventing a number.</summary>
-   internal static string Bytes(double value)
+   public static string Bytes(double value)
    {
       if(!double.IsFinite(value) || value < 0)
       {
@@ -33,12 +33,12 @@ internal static class TransportFormatting
 
 
    /// <summary>Formats a bytes-per-second rate, or "Unavailable" when there is no valid measurement.</summary>
-   internal static string Rate(double value) => !double.IsFinite(value) || value < 0 ? "Unavailable" : Bytes(value) + "/s";
+   public static string Rate(double value) => !double.IsFinite(value) || value < 0 ? "Unavailable" : Bytes(value) + "/s";
 
 
 
    /// <summary>Shows only the host and port of the server address, never credentials; an address with a user name, an unsupported scheme or no address at all becomes the generic "Connection settings" label.</summary>
-   internal static string Server(string? address)
+   public static string Server(string? address)
    {
       if(!Uri.TryCreate(address, UriKind.Absolute, out Uri? origin)
          || (!string.Equals(origin.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) && !string.Equals(origin.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal))
@@ -52,7 +52,7 @@ internal static class TransportFormatting
 
 
    /// <summary>Words the WebSocket state as text such as "WebSocket connected (WSS)", so the state is readable without relying on a color, and says "unavailable" when the protocol is not a WebSocket one.</summary>
-   internal static string State(string? protocol, string? state)
+   public static string State(string? protocol, string? state)
    {
       if(protocol is not ("WS" or "WSS"))
       {

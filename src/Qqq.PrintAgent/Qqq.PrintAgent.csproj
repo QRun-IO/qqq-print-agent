@@ -5,8 +5,9 @@
 
 <Project Sdk="Microsoft.NET.Sdk">
 
-   <!-- The WinUI 3 shell: views, dialogs, and startup plumbing only; everything testable
-        lives in Qqq.PrintAgent.Core. The companion ships with the service in a machine MSI. -->
+   <!-- The WinUI 3 shell: views, dialogs, and startup plumbing only. What the views decide and
+        say lives in Qqq.PrintAgent.Presentation, where unit tests reach it, and protocol logic in
+        Qqq.PrintAgent.Core. The companion ships with the service in a machine MSI. -->
    <PropertyGroup>
       <OutputType>WinExe</OutputType>
       <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -62,6 +63,7 @@
 
    <ItemGroup>
       <ProjectReference Include="..\Qqq.PrintAgent.Core\Qqq.PrintAgent.Core.csproj" />
+      <ProjectReference Include="..\Qqq.PrintAgent.Presentation\Qqq.PrintAgent.Presentation.csproj" />
       <ProjectReference Include="..\Qqq.PrintAgent.Windows\Qqq.PrintAgent.Windows.csproj" />
    </ItemGroup>
 

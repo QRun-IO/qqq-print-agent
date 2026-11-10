@@ -5,7 +5,7 @@
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Qqq.PrintAgent.Windows;
+using Qqq.PrintAgent.Presentation.Printers;
 
 namespace Qqq.PrintAgent;
 
@@ -40,16 +40,16 @@ internal sealed class PrinterDetailsView : StackPanel
 
 
 
-   /// <summary>Fills the fields from a printer snapshot, showing "Not set" for an empty location or description so a blank is never mistaken for a missing control.</summary>
-   internal void Update(PrinterSnapshot printer, string name, string status, string server)
+   /// <summary>Fills the fields from the prepared row and details texts; "Not set" for an empty location or description is decided there, so a blank is never mistaken for a missing control.</summary>
+   internal void Update(PrinterDetails details, PrinterRow row)
    {
-      _name.Text = name;
-      _queue.Text = printer.Name;
-      _status.Text = status;
-      _server.Text = server;
-      _location.Text = string.IsNullOrWhiteSpace(printer.Location) ? "Not set" : printer.Location;
-      _description.Text = string.IsNullOrWhiteSpace(printer.Description) ? "Not set" : printer.Description;
-      _technical.Text = $"Driver: {printer.DriverName}\nPort: {printer.PortName}\nPrinter ID: {printer.PrinterId}";
+      _name.Text = row.Name;
+      _queue.Text = details.Queue;
+      _status.Text = row.Status;
+      _server.Text = row.ServerDetail;
+      _location.Text = details.Location;
+      _description.Text = details.Description;
+      _technical.Text = details.Technical;
    }
 
 

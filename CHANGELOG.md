@@ -69,6 +69,89 @@ Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the install
 - `service-status` and `snapshot` exit 1 when the service replies with `Error:`, as the other commands already
   did. The reply itself is still printed on standard output.
 
+The companion's presentation logic moved out of the views into a new UI-free assembly,
+`Qqq.PrintAgent.Presentation`, gated at 100% line coverage ([ADR-0003](docs/adr/0003-version-2.md)): one typed
+client for the local service pipe, the texts and enablement rules of the printer, job, footer and settings
+views, the Jobs page's paging and sorting state, and the connection dialog's flow (discovery, sign-in, sign-out,
+enrollment, certificate exception) as a state machine. The pipe's wire format is unchanged except for one member:
+the `control` object of the status snapshot (also printed by the command line's `snapshot`) no longer carries
+`authorizationRequired`. Only the polling prerelease ever set it; it had been always false since, and the footer
+sentence it selected, "Server authorization required — sign in again", could no longer appear. Missing authorization
+is shown from the authentication status, as before.
+What the operator sees is the same except for the following, each of them deliberate:
+
+- **The companion keeps no session after sign-in.** Once the service confirms that it took over the session, the
+  companion discards its own copy, so the service is the only process holding it. It also discards it when the
+  hand-over was sent and could not be confirmed, because the service may hold it by then. The password form and the
+  browser button disappear with it; signing in again starts with **Discover sign-in options**. They also disappear
+  after **Sign out** and after a cancelled or timed-out browser sign-in, where they used to stay visible without
+  doing anything.
+- **"Not sent" and "sent, result unknown" are told apart.** The pipe client now reports whether a failed request
+  ever left (`AgentPipeClient.SendReportingPhaseAsync`, `AgentPipeNotSentException`), and only that report counts
+  as "not sent". An enrollment that never reached the service (nothing listening, pipe refused, service not
+  verified) is shown as **Service unavailable**, because the code was not used; it used to say the code might have
+  been consumed. A request that left and brought no usable answer back is never called a failure or a
+  cancellation, and its message starts with what really happened (the request timed out, the connection closed
+  before the answer arrived, the answer was too large, the answer could not be read):
+  - enrollment says **Enrollment could not be confirmed** (a lost reply used to say the service was unavailable,
+    and every cause used to be worded as a time limit);
+  - a sign-in whose hand-over to the service left says **Sign-in could not be confirmed** and to check the
+    connection status before trying again. This replaces **Browser sign-in canceled. No new sign-in was accepted.**
+    after a browser sign-in whose hand-over timed out, and **Sign-in not completed** / **Browser sign-in not
+    completed** after a hand-over whose reply was lost: the service may complete the sign-in in all of these.
+    "Canceled" is now only said when nothing was handed to the service;
+  - a sign-out says **Sign-out could not be confirmed** and that the session may have ended, instead of **Service
+    unavailable**. This includes a sign-out the service answered with a document the companion cannot read;
+  - a change to the certificate exception says **Certificate exception could not be confirmed**, instead of **Service
+    unavailable** with the checkbox put back. The service may hold either value, so the checkbox is shown
+    undetermined and its label says the last change was not confirmed; the companion applies no exception meanwhile,
+    and the setting is read again as soon as the service answers a status request;
+  - an action on a printer or a job (test print, retry, cancel, saving details) that never left this computer says
+    **Request not sent. Nothing was sent to the local service, so nothing was changed**, with the reason. It used to
+    say **Result could not be confirmed** and that the request might already have reached the printer, which stays
+    the message for an action that did leave.
+- **Pipe failures the window did not handle are handled.** A failure while verifying the service, an oversize pipe
+  message, and a malformed callback written to the browser sign-in inbox now show the same "service unavailable"
+  or "not completed" message as the other failures instead of escaping the handler. The identity check itself now
+  always answers with one of two sentences, in the command-line tool and the in-app update as well as the
+  companion (a check that could not be carried out used to show the underlying Windows or .NET message): **The
+  local endpoint is not the installed Windows print service...** for a process that is running and is not the
+  service, and **The Windows print service stopped or restarted before it could be verified... Wait a moment and
+  try again** when the process that served the pipe has ended, which is what a service restart between the
+  connection and the check looks like. Exit codes and the update's behavior are unchanged.
+- **A click that cannot run says so.** While one operation of the connection dialog is running, another one is
+  refused with **Another operation is still running** and a log line; it used to do nothing. A refused enrollment
+  or password sign-in keeps the code or password that was typed, because it was not used. This is reachable
+  because saving the certificate checkbox does not block the dialog's other buttons.
+- **Closing the window during an operation is quiet.** The operation ends by itself; it used to be able to fail
+  with "Cannot access a disposed object", shown and logged as a discovery or sign-in failure, and could still send
+  its request to the service after the window had closed.
+- **An update the service is not ready for says why.** When jobs claimed before the update's pause are still
+  running after the preparation limit, the in-app update shows the service's own sentence ("Not ready for update:
+  1 job(s) were still in progress after 25 seconds. They will finish; try the update again afterwards.") after "The
+  update was not started, and the current version remains installed." A preparation that was interrupted (printing
+  was resumed, or a sign-in began, while it waited) is shown the same way, in the service's words. Any other answer
+  is shown as an answer the update could not use. All of these used to follow "Let active printing finish and try
+  again", whatever the service said.
+- **Full details** no longer opens a dialog for a details reply that names another job or has no job or events;
+  the message was already shown, and the dialog used to open anyway.
+- A service error shown as **Action could not be completed** no longer starts with a space. A sign-out reply
+  that is a document without a message, or with an incomplete identity-provider part, is treated as unreadable
+  and never shown as text (it is the reply that carries the identity provider's token hint). A timestamp without
+  an offset is read as UTC, not as this computer's local time; the service writes offsets, so this is a safeguard.
+  A log-settings reply of JSON `null` shows **Log settings unavailable** instead of doing nothing.
+
+Activity log changes: the first failed request to the local service per operation is a warning that names the
+cause and whether the request was sent, the same failure repeating is a debug line, each failure keeps its full
+exception as debug detail, and the first answer afterwards is noted once, so the status polls do not fill the log.
+An answer that arrived and could not be read is logged as that, not as a request that did not complete. Discovery
+logs the entered address as scheme, host, port and path only, and does not log an address it cannot read. A
+hand-over, a sign-out or an enrollment that left without a usable answer is logged as unconfirmed with the same
+sentence the operator sees; a browser sign-in is logged as cancelled only when nothing was handed over, and the log
+no longer claims that no callback arrived when one did. A refused operation is a warning that names it. An
+operation ended by closing the window or by its caller is one debug line. "Print device enrollment completed." now
+carries the `[Companion]` prefix.
+
 ## 1.2.1
 
 Release-pipeline fix only; same source as 1.2.0 otherwise. The stable release workflow's per-edition

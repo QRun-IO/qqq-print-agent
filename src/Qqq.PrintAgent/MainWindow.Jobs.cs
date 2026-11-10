@@ -3,26 +3,25 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Presentation.Jobs;
+using Qqq.PrintAgent.Presentation.Service;
+using Qqq.PrintAgent.Presentation.Shell;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
 
 /// <summary>
 /// Jobs page part of the main window: filtered, sorted, paged history fetched from the service and rendered as stable
-/// rows. Queries are versioned so a slow reply for an older filter, page or sort can never overwrite a newer one.
+/// rows. Where the page is in the history, and which reply is still the newest, is kept by <see cref="JobListState"/>; the
+/// texts and the row contents come from the presentation assembly, and this part moves them into controls.
 /// </summary>
 public sealed partial class MainWindow
 {
    private readonly Dictionary<string, JobRowView> _jobRows = new(StringComparer.Ordinal);
-   private int _jobQueryVersion;
-   private int _jobOffset;
-   private int _jobTotal;
-   private const int JobPageSize = 50;
+   private readonly JobListState _jobs = new();
 
 
 
@@ -37,10 +36,9 @@ public sealed partial class MainWindow
          return;
       }
       InvalidateJobDetails();
-      _jobOffset = 0;
-      int version = ++_jobQueryVersion;
+      int version = _jobs.FiltersChanged();
       await Task.Delay(300);
-      if(version == _jobQueryVersion && !_updatesClosed)
+      if(_jobs.IsCurrent(version) && !_updatesClosed)
       {
          await RefreshJobPageAsync();
       }
@@ -60,52 +58,66 @@ public sealed partial class MainWindow
       {
          return;
       }
-      int version = ++_jobQueryVersion;
-      string filter = (JobStatusFilter.SelectedItem as ComboBoxItem)?.Tag as string ?? "ALL";
+      JobQuery query = _jobs.BeginQuery(JobSearch.Text, (JobStatusFilter.SelectedItem as ComboBoxItem)?.Tag as string, out int version);
       int mutationVersion = _mutationVersion;
-      var query = new JobQuery(Search: JobSearch.Text.Trim(), Status: filter is "ALL" or "ATTENTION" ? null : filter,
-         NeedsAttentionOnly: string.Equals(filter, "ATTENTION", StringComparison.Ordinal), Offset: _jobOffset, PageSize: JobPageSize, SortBy: _jobSortBy, Descending: _jobSortDescending);
       JobsPrevious.IsEnabled = false;
       JobsNext.IsEnabled = false;
       bool refreshDetails = false;
       try
       {
-         string response = await _sendRequest(new PipeRequest("query-jobs", JobQuery: query));
-         if(version != _jobQueryVersion || _updatesClosed || _busy || mutationVersion != _mutationVersion)
-         {
-            return;
-         }
-         if(IsActionError(response))
-         {
-            JobsSummary.Text = "History unavailable; previously shown rows may be stale";
-            return;
-         }
-         JobPage page = JsonSerializer.Deserialize<JobPage>(response, PrintApiClient.JsonOptions) ?? throw new JsonException("Missing job page.");
-         _jobOffset = page.Offset;
-         _jobTotal = page.TotalCount;
-         RenderJobPage(page);
-         UpdateJobSortHeaders(query.SortBy, query.Descending);
-         refreshDetails = true;
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
-      {
-         if(version == _jobQueryVersion && !_updatesClosed)
-         {
-            JobsSummary.Text = "History unavailable; check the service and refresh";
-         }
+         ServiceResult<JobPage> result = await _service.QueryJobsAsync(query);
+         refreshDetails = ApplyJobPage(result, query, version, mutationVersion);
       }
       finally
       {
-         if(version == _jobQueryVersion && !_updatesClosed)
+         if(_jobs.IsCurrent(version) && !_updatesClosed)
          {
-            JobsPrevious.IsEnabled = !_busy && _jobOffset > 0;
-            JobsNext.IsEnabled = !_busy && _jobOffset + JobPageSize < _jobTotal;
+            JobsPrevious.IsEnabled = _jobs.CanGoPrevious(_busy);
+            JobsNext.IsEnabled = _jobs.CanGoNext(_busy);
          }
       }
-      if(refreshDetails && version == _jobQueryVersion && !_updatesClosed)
+      if(refreshDetails && _jobs.IsCurrent(version) && !_updatesClosed)
       {
          await RefreshExpandedJobAsync();
       }
+   }
+
+
+
+   /// <summary>
+   /// Applies the answer to a job query and says whether a page was rendered. No usable answer only changes the count line,
+   /// and only if this query is still the newest. A reply (a page, an error or something unreadable) is dropped when it is no
+   /// longer the newest or an administration request started meanwhile; otherwise an error is shown with a note that the
+   /// rows on screen may be stale, and a page replaces the rows and confirms the sort the service applied.
+   /// </summary>
+   private bool ApplyJobPage(ServiceResult<JobPage> result, JobQuery query, int version, int mutationVersion)
+   {
+      bool current = _jobs.IsCurrent(version) && !_updatesClosed;
+      if(result.Outcome == ServiceOutcome.Unavailable && result.Failure != ServiceFailure.UnreadableReply)
+      {
+         if(current)
+         {
+            JobsSummary.Text = JobPageSummary.Failure(rejected: false);
+         }
+         return false;
+      }
+      if(!current || _busy || mutationVersion != _mutationVersion)
+      {
+         return false;
+      }
+      if(!result.Succeeded)
+      {
+         if(result.Outcome == ServiceOutcome.Rejected)
+         {
+            Feedback(ShellFeedback.ActionRejected(result.Message));
+         }
+         JobsSummary.Text = JobPageSummary.Failure(result.Outcome == ServiceOutcome.Rejected);
+         return false;
+      }
+      _jobs.Apply(result.Payload);
+      RenderJobPage(result.Payload);
+      UpdateJobSortHeaders(query.SortBy, query.Descending);
+      return true;
    }
 
 
@@ -125,12 +137,11 @@ public sealed partial class MainWindow
       {
          _renderingJobPage = false;
       }
-      JobsSummary.Text = $"{page.Jobs.Count} of {page.TotalCount} matching jobs · page {page.Offset / JobPageSize + 1}";
+      JobsSummary.Text = JobPageSummary.Text(page);
       JobsEmpty.Visibility = page.Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-      JobsEmptyTitle.Text = "No matching jobs";
-      JobsEmptyMessage.Text = "Try another prefix search or choose All states.";
-      JobsNotice.Text = (page.ServerQueueLimited ? "Cloud queue preview is limited to 50; local history remains searchable. " : "")
-         + "Sent to printer means Windows accepted the job. Check the printer to confirm physical output.";
+      JobsEmptyTitle.Text = JobPageSummary.EmptyTitle;
+      JobsEmptyMessage.Text = JobPageSummary.EmptyMessage;
+      JobsNotice.Text = JobPageSummary.Notice(page);
       UpdateSelectedJob();
    }
 
@@ -160,7 +171,7 @@ public sealed partial class MainWindow
             _jobRows.Add(job.JobId, row);
             JobsList.Items.Insert(index, row);
          }
-         row.Update(job, FriendlyState(job.Status), FormatJobCreated(job.CreatedAt));
+         row.Update(job, JobRow.From(job, _time));
          if(JobsList.Items.IndexOf(row) != index)
          {
             JobsList.Items.Remove(row);
@@ -176,17 +187,11 @@ public sealed partial class MainWindow
 
 
 
-   /// <summary>Formats a job's creation time in the user's local time and culture, or "Not recorded" for the historical rows that never had one.</summary>
-   private static string FormatJobCreated(string? value) => DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
-      System.Globalization.DateTimeStyles.None, out DateTimeOffset timestamp) ? timestamp.ToLocalTime().ToString("G", System.Globalization.CultureInfo.CurrentCulture) : "Not recorded";
-
-
-
    /// <summary>Moves back one page, not below the first, and reloads.</summary>
    private async void PreviousJobs_Click(object sender, RoutedEventArgs e)
    {
       InvalidateJobDetails();
-      _jobOffset = Math.Max(0, _jobOffset - JobPageSize);
+      _jobs.Previous();
       await RefreshJobPageAsync();
    }
 
@@ -195,10 +200,9 @@ public sealed partial class MainWindow
    /// <summary>Moves forward one page only when more rows exist, so a double click cannot run past the end.</summary>
    private async void NextJobs_Click(object sender, RoutedEventArgs e)
    {
-      if(_jobOffset + JobPageSize < _jobTotal)
+      if(_jobs.Next())
       {
          InvalidateJobDetails();
-         _jobOffset += JobPageSize;
          await RefreshJobPageAsync();
       }
    }
@@ -216,23 +220,19 @@ public sealed partial class MainWindow
          return;
       }
       SetBusy(true);
-      JobDetailsSnapshot? details = null;
+      JobDetailsSnapshot? details;
       try
       {
-         string response = await _sendRequest(new PipeRequest("job-details", JobId: job.JobId));
-         if(IsActionError(response))
+         ServiceResult<JobDetailsSnapshot> result = await _service.JobDetailsAsync(job.JobId);
+         details = result.Payload;
+         if(result.Outcome == ServiceOutcome.Rejected)
          {
-            return;
+            Feedback(ShellFeedback.ActionRejected(result.Message));
          }
-         details = JsonSerializer.Deserialize<JobDetailsSnapshot>(response, PrintApiClient.JsonOptions);
-         if(details?.Job is null || details.Events is null || !string.Equals(details.Job.JobId, job.JobId, StringComparison.Ordinal))
+         else if(!result.Succeeded)
          {
-            throw new JsonException("Job details do not match the selected row.");
+            Feedback(JobActions.DetailsUnavailable);
          }
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
-      {
-         Feedback("Job details unavailable", "The service could not return this job. Refresh and try again.", InfoBarSeverity.Error);
       }
       finally
       {
@@ -249,7 +249,7 @@ public sealed partial class MainWindow
    /// <summary>Shows the details in a wide dialog through the shared dialog guard so it cannot open over another dialog.</summary>
    private async Task ShowJobDetailsAsync(JobDetailsSnapshot details)
    {
-      ContentDialog dialog = CreateWideDialog("Print job details", new JobDetailsView(details, FriendlyState, FormatTime));
+      ContentDialog dialog = CreateWideDialog("Print job details", new JobDetailsView(JobDetailsContent.From(details, _time, compact: false)));
       await KofTwentyTwo.AppKit.WinUI.DialogGuard.ShowAsync(dialog);
    }
 
@@ -261,9 +261,9 @@ public sealed partial class MainWindow
    /// </summary>
    private async Task RetryJobAsync(JobSnapshot job)
    {
-      if(await ConfirmAsync("Print another copy?", $"{job.Title ?? job.JobId}\n{job.PrinterName ?? job.PrinterId}\n\nThis creates a new job. Check the printer first: the previous attempt may already have produced output.", "Print again"))
+      if(await ConfirmAsync(JobActions.RetryPrompt(job)))
       {
-         await RunActionAsync(new PipeRequest("retry-job", JobId: job.JobId, ConfirmDuplicateRisk: true));
+         await RunActionAsync(ServiceRequests.RetryJob(job.JobId));
       }
    }
 
@@ -272,9 +272,9 @@ public sealed partial class MainWindow
    /// <summary>Confirms, then asks the service to cancel; the prompt says cancellation is best effort because pages already sent to the printer may still print.</summary>
    private async Task CancelJobAsync(JobSnapshot job)
    {
-      if(await ConfirmAsync("Cancel this job?", "Cancellation is best effort. Pages or labels already sent to the printer may still print.", "Cancel job"))
+      if(await ConfirmAsync(JobActions.CancelPrompt))
       {
-         await RunActionAsync(new PipeRequest("cancel-job", JobId: job.JobId));
+         await RunActionAsync(ServiceRequests.CancelJob(job.JobId));
       }
    }
 
@@ -283,9 +283,9 @@ public sealed partial class MainWindow
    /// <summary>Confirms, then records the operator's review of a failed or uncertain job; the prompt states that this changes no printing result.</summary>
    private async Task AcknowledgeJobAsync(JobSnapshot job)
    {
-      if(await ConfirmAsync("Mark this job reviewed?", "This clears its attention indicator. It does not print, cancel or change the recorded outcome.", "Mark reviewed"))
+      if(await ConfirmAsync(JobActions.ReviewPrompt))
       {
-         await RunActionAsync(new PipeRequest("acknowledge-job", JobId: job.JobId));
+         await RunActionAsync(ServiceRequests.AcknowledgeJob(job.JobId));
       }
    }
 }

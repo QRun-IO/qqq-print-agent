@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Text.Json;
 using KofTwentyTwo.AppKit.WinUI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Presentation.Service;
+using Qqq.PrintAgent.Presentation.Settings;
+using Qqq.PrintAgent.Presentation.Shell;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
@@ -43,18 +44,17 @@ public sealed partial class MainWindow
       content.Children.Add(segments);
       content.Children.Add(debug);
       content.Children.Add(new TextBlock { Text = "Debug logging adds request routes, status codes, timings and realtime frames. Credentials, documents and enrollment codes are never logged at any level.", TextWrapping = TextWrapping.Wrap, Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] });
-      string usage = $"Current log file: {settings.CurrentFileBytes / (1024d * 1024d):0.0} MiB; rolled over {settings.SegmentsToday} time(s) today.";
-      content.Children.Add(new TextBlock { Text = usage, TextWrapping = TextWrapping.Wrap });
+      content.Children.Add(new TextBlock { Text = LogSettingsForm.Usage(settings), TextWrapping = TextWrapping.Wrap });
       var dialog = new ContentDialog { Title = "Log settings", Content = content, PrimaryButtonText = "Save", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
       if(await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary)
       {
-         if(double.IsNaN(retention.Value) || double.IsNaN(limit.Value) || double.IsNaN(segments.Value))
+         if(LogSettingsForm.Read(retention.Value, limit.Value, segments.Value, debug.IsOn) is not LogSettings requested)
          {
-            Feedback("Log settings not saved", "Enter valid retention, file size and segment values.", InfoBarSeverity.Warning);
+            Feedback(LogSettingsForm.Invalid);
             return;
          }
-         App.Log.Info($"[Companion] Log settings saved: retention {(int)retention.Value} days, file size {(int)limit.Value} MiB, {(int)segments.Value} segments per day, debug logging {(debug.IsOn ? "on" : "off")}.");
-         await RunActionAsync(new PipeRequest("set-log-settings", LogSettings: new LogSettings((int)retention.Value, (int)limit.Value, (int)segments.Value, debug.IsOn)));
+         App.Log.Info("[Companion] " + LogSettingsForm.SavedEntry(requested));
+         await RunActionAsync(ServiceRequests.SetLogSettings(requested));
       }
    }
 
@@ -70,13 +70,16 @@ public sealed partial class MainWindow
       SetBusy(true);
       try
       {
-         string response = await _sendRequest(new PipeRequest("get-log-settings"));
-         return IsActionError(response) ? null : JsonSerializer.Deserialize<LogSettings>(response, PrintApiClient.JsonOptions);
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
-      {
-         Feedback("Log settings unavailable", "Check the local service and try again.", InfoBarSeverity.Error);
-         return null;
+         ServiceResult<LogSettings> result = await _service.GetLogSettingsAsync();
+         if(result.Outcome == ServiceOutcome.Rejected)
+         {
+            Feedback(ShellFeedback.ActionRejected(result.Message));
+         }
+         else if(!result.Succeeded)
+         {
+            Feedback(LogSettingsForm.Unavailable);
+         }
+         return result.Payload;
       }
       finally
       {
@@ -94,9 +97,9 @@ public sealed partial class MainWindow
    /// <summary>Confirms in the window the operator is looking at, then asks the service (which owns the files) to clear the logs.</summary>
    private async Task ClearLogsAsync(XamlRoot owner)
    {
-      if(await ConfirmAsync("Clear local diagnostic logs?", "This permanently deletes retained service and companion diagnostic logs. Print jobs, printer settings and job history are preserved. New events will start a fresh log.", "Clear logs", owner))
+      if(await ConfirmAsync(LogSettingsForm.ClearPrompt, owner))
       {
-         await RunActionAsync(new PipeRequest("clear-logs"));
+         await RunActionAsync(ServiceRequests.ClearLogs());
       }
    }
 

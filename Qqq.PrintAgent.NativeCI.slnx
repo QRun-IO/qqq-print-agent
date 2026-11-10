@@ -11,12 +11,14 @@
       <Platform Solution="*|x86" Project="x86" />
     </Project>
     <Project Path="src/Qqq.PrintAgent.Core/Qqq.PrintAgent.Core.csproj" />
+    <Project Path="src/Qqq.PrintAgent.Presentation/Qqq.PrintAgent.Presentation.csproj" />
     <Project Path="src/Qqq.PrintAgent.Cli/Qqq.PrintAgent.Cli.csproj" />
     <Project Path="src/Qqq.PrintAgent.Windows/Qqq.PrintAgent.Windows.csproj" />
     <Project Path="src/Qqq.PrintAgent.Service/Qqq.PrintAgent.Service.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Qqq.PrintAgent.Cli.Tests/Qqq.PrintAgent.Cli.Tests.csproj" />
+    <Project Path="tests/Qqq.PrintAgent.Presentation.Tests/Qqq.PrintAgent.Presentation.Tests.csproj" />
     <Project Path="tests/Qqq.PrintAgent.UiTests/Qqq.PrintAgent.UiTests.csproj" />
     <Project Path="tests/Qqq.PrintAgent.WorkerFixture/Qqq.PrintAgent.WorkerFixture.csproj" />
   </Folder>
