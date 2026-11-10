@@ -35,7 +35,7 @@ internal sealed class WorkerHarness : IAsyncDisposable
    {
       _time = time;
       Reconnect();
-      Api = new PrintApiClient("https://synthetic.invalid", handler: Server, timeProvider: time).WithRealtime(_links[0].Channel, new RealtimeSettings(), () => _links[^1].Channel);
+      Api = FakeSessionClient.ApiOver(Server, time).WithRealtime(_links[0].Channel, new RealtimeSettings(), () => _links[^1].Channel);
       Options = new PrintWorkerOptions
       {
          StagingDirectory = Staging.Path,

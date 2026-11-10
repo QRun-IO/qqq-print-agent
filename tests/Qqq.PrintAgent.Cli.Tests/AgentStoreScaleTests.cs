@@ -5,9 +5,7 @@
 
 using System.Diagnostics;
 using System.Globalization;
-using System.Net;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Core.Printing;
@@ -91,8 +89,8 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       {
          using AgentStore store = new(directory);
          Seed(directory, 10000, pending: true);
-         using CountingHandler handler = new();
-         using PrintApiClient api = new PrintApiClient("http://localhost", handler: handler).WithRealtime(channel, new RealtimeSettings());
+         using SessionFixture.FakeSession session = new();
+         using PrintApiClient api = PrintApiClient.ForSession(session).WithRealtime(channel, new RealtimeSettings());
          using SemaphoreSlim eventGate = new(1, 1);
          using SemaphoreSlim claimGate = new(1, 1);
          PrintWorker worker = new(api, new NoPrinter(), store, _ => { }, () => true, () => true, LaneOptions(directory, eventGate, claimGate));
@@ -102,7 +100,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
             Assert.Equal(200, store.Pending().Count);
             await worker.RunOnceAsync(limit.Token);
             Assert.Equal((batch + 1) * 200, server.Events);
-            Assert.Equal(batch == 49 ? 1 : 0, handler.Claims);
+            Assert.Equal(batch == 49 ? ["device/jobs/claim"] : [], session.Paths);
          }
          Assert.Empty(store.Pending());
          output.WriteLine($"10,000 durable event acknowledgements: {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms; 200 events maximum per pass.");
@@ -238,24 +236,6 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
             Interlocked.Increment(ref _events);
             await LoopbackWebSocketPeer.SendAsync(socket, "ACK", new { acknowledgedMessageId = message.RootElement.GetProperty("messageId").GetString() }, token);
          }
-      }
-   }
-
-
-
-   /// <summary>Fake server that counts claims and always answers with no job; anything but a claim fails the test, because the worker's events travel over the realtime connection.</summary>
-   private sealed class CountingHandler : HttpMessageHandler
-   {
-      public int Claims { get; private set; }
-
-
-
-      /// <summary>Counts the claim and returns an empty one.</summary>
-      protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-      {
-         Assert.EndsWith("/claim", request.RequestUri!.AbsolutePath, StringComparison.Ordinal);
-         Claims++;
-         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"job\":null}", Encoding.UTF8, "application/json") });
       }
    }
 

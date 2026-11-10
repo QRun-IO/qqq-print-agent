@@ -461,7 +461,7 @@ public sealed class ClaimedJobContractTests
 
       using var queue = new ScriptedServer();
       queue.Add("\uFEFF" + """{"jobs":[{"jobId":"queued-1","printerId":"printer1"}]}""");
-      using var queued = new PrintApiClient("https://synthetic.invalid", handler: queue);
+      using PrintApiClient queued = FakeSessionClient.ApiOver(queue);
       Assert.Equal("queued-1", Assert.Single(await queued.QueuedJobsAsync(CancellationToken.None)).JobId);
    }
 
@@ -674,7 +674,7 @@ public sealed class ClaimedJobContractTests
       server.Add("{}", HttpStatusCode.NotFound).Add("{}").Add("""{"jobs":null}""")
          .Add("""{"jobs":[{"jobId":"queued-1","printerId":"printer1"},{"jobId":"queued-2","printerId":"printer1","title":"Second","format":"PDF","contentSha256":"unused","contentLength":5,"options":{"copies":2},"createdAt":"2026-01-01T00:00:00Z","status":"QUEUED"}]}""")
          .Add("""{"nextCursor":null,"Jobs":"ignored","jobs":[{"jobId":"queued-3","printerId":"printer1","title":"Third","Title":"Third again","deviceId":"device-1","options":{"copies":1,"Copies":2,"finishing":{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":{"m":{"n":{}}}}}}}}}}}}}}}}}]}""");
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       Assert.Empty(await api.QueuedJobsAsync(CancellationToken.None));
       Assert.Empty(await api.QueuedJobsAsync(CancellationToken.None));
       Assert.Empty(await api.QueuedJobsAsync(CancellationToken.None));
@@ -685,7 +685,7 @@ public sealed class ClaimedJobContractTests
       PrintJob tolerated = Assert.Single(await api.QueuedJobsAsync(CancellationToken.None));
       Assert.Equal("queued-3", tolerated.JobId);
       Assert.Equal("printer1", tolerated.PrinterId);
-      Assert.All(server.Requests, request => Assert.Equal("/printing/v1/device/jobs/queued", request.Uri.AbsolutePath));
+      Assert.All(server.Requests, request => Assert.Equal("/qqq/v1/qbit/printing/device/jobs/queued", request.Uri.AbsolutePath));
    }
 
 
@@ -702,7 +702,7 @@ public sealed class ClaimedJobContractTests
       using var server = new ScriptedServer();
       server.Add("{\"jobs\":[" + string.Join(",", Enumerable.Range(0, 200).Select(index => $$"""{"jobId":"queued-{{index}}","printerId":"printer1"}""")) + "]}")
          .Add(QueuedWithNestedOption(65)).Add(QueuedWithNestedOption(1024));
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       IReadOnlyList<PrintJob> full = await api.QueuedJobsAsync(CancellationToken.None);
       Assert.Equal(200, full.Count);
       Assert.Equal("queued-199", full[^1].JobId);
@@ -735,7 +735,7 @@ public sealed class ClaimedJobContractTests
       { body = QueuedWithNestedOption(1025); }
       using var server = new ScriptedServer();
       server.Add(body).Add("{}", HttpStatusCode.InternalServerError);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       PrintingProtocolException violation = await Assert.ThrowsAsync<PrintingProtocolException>(() => api.QueuedJobsAsync(CancellationToken.None));
       Assert.Equal(message, violation.Message);
       Assert.Null(violation.RejectedJob);
@@ -894,5 +894,5 @@ public sealed class ClaimedJobContractTests
 
 
    /// <summary>An API client over the fake server; nothing leaves the process.</summary>
-   private static PrintApiClient Api(FakePrintServer server) => new("http://localhost", server);
+   private static PrintApiClient Api(FakePrintServer server) => FakeSessionClient.ApiOver(server);
 }

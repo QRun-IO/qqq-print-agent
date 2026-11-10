@@ -46,7 +46,7 @@ public sealed partial class PrintApiClient
 
 
    /// <summary>
-   /// Requests the document (through the signed-in session when there is one) under a total time limit and a shorter connect limit,
+   /// Requests the document through the signed-in session, under a total time limit and a shorter connect limit,
    /// refuses a response whose declared length differs from the manifest, and copies it into the file with verification. The file is
    /// created exclusively, so an existing file can never be overwritten.
    /// </summary>
@@ -55,9 +55,7 @@ public sealed partial class PrintApiClient
       using var total = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadTimeoutMillis), token);
       using var connect = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadConnectTimeoutMillis), total.Token);
       string route = $"device/jobs/{Uri.EscapeDataString(job.JobId)}/content";
-      using HttpResponseMessage response = _nativeSessionClient is null
-         ? await _http.GetAsync(route, HttpCompletionOption.ResponseHeadersRead, connect.Token).ConfigureAwait(false)
-         : await _nativeSessionClient.SendPrintingAsync(HttpMethod.Get, route, cancellationToken: connect.Token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _session.SendPrintingAsync(HttpMethod.Get, route, cancellationToken: connect.Token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
       if(response.Content.Headers.ContentLength is long declared && declared != job.ContentLength)
       {

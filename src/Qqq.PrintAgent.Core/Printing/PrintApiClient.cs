@@ -5,13 +5,15 @@
 
 using System.Net.Http.Json;
 using System.Text.Json;
+using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>
-/// The agent's client for the QQQ printing API. The base part holds the HTTP calls (enrollment, claim, queued jobs and
-/// operator actions) and sends inventory and job events over the realtime channel, which is the only way they travel.
-/// Other parts add the native session, downloads, the channel itself and control calls.
+/// The agent's client for the QQQ printing API. It is built from a signed-in session and sends every request through
+/// it. The base part holds the HTTP calls (enrollment, claim, queued jobs and operator actions) and sends inventory and
+/// job events over the realtime channel, which is the only way they travel. Other parts add the session, downloads,
+/// the channel itself and control calls.
 /// </summary>
 public sealed partial class PrintApiClient : IDisposable
 {
@@ -27,25 +29,24 @@ public sealed partial class PrintApiClient : IDisposable
 
 
    /// <summary>
-   /// Creates a client for one server. The address must be HTTPS, or HTTP only on loopback for local development. Responses
-   /// are limited to 2 MiB and requests to 60 seconds. The client holds no credential and attaches none to a request: the
-   /// product builds it only through <see cref="ForSession"/>, whose handler sends every request through the signed-in
-   /// session, and the session adds what authenticates it. The download limits are counted on the supplied clock, the
-   /// system clock by default. The 60 second request limit is not: it is <c>HttpClient.Timeout</c>, which the platform
-   /// enforces on the system clock whatever clock is supplied.
+   /// Creates a client whose every request goes through the given signed-in session, to the printing extension's path on
+   /// the session's server. There is no other way to build one, so the client cannot send anything outside a session,
+   /// and it holds no credential of its own: the session adds what authenticates a request. The server address is the
+   /// session's, which the session client has already required to be HTTPS or explicitly allowed loopback HTTP. Responses
+   /// are limited to 2 MiB and requests to 60 seconds. The download limits are counted on the supplied clock, the system
+   /// clock by default. The 60 second request limit is not: it is <c>HttpClient.Timeout</c>, which the platform enforces
+   /// on the system clock whatever clock is supplied.
    /// </summary>
-   public PrintApiClient(string serverUrl, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null)
+   private PrintApiClient(IQqqSessionClient session, TimeProvider? timeProvider)
    {
-      Uri uri = new(serverUrl.TrimEnd('/') + "/printing/v1/");
-      if(!string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && !(string.Equals(uri.Scheme, "http", StringComparison.Ordinal) && uri.IsLoopback))
-      {
-         throw new ArgumentException("Use HTTPS, or HTTP on loopback for local development.", nameof(serverUrl));
-      }
+      _session = session;
       _time = timeProvider ?? TimeProvider.System;
-      _http = handler is null ? new HttpClient() : new HttpClient(handler);
-      _http.BaseAddress = uri;
-      _http.Timeout = TimeSpan.FromSeconds(60);
-      _http.MaxResponseContentBufferSize = 2 * 1024 * 1024;
+      _http = new HttpClient(new PrintingSessionHandler(session))
+      {
+         BaseAddress = new Uri(session.Origin, PrintingSessionHandler.Prefix),
+         Timeout = TimeSpan.FromSeconds(60),
+         MaxResponseContentBufferSize = 2 * 1024 * 1024,
+      };
    }
 
 

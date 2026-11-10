@@ -112,7 +112,7 @@ public sealed class InjectedClockTests
       using var staging = new TempDirectory();
       using var server = new ScriptedServer();
       server.AddStalled(arrived);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server, time);
       Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), WorkerHarness.Unpaced, CancellationToken.None);
       await arrived.Task.WaitAsync(Patience);
       time.Advance(TimeSpan.FromSeconds(2) - Tick);
@@ -133,7 +133,7 @@ public sealed class InjectedClockTests
       using var body = new FeedStream();
       using var server = new ScriptedServer();
       server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server, time);
       Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), WorkerHarness.Unpaced, CancellationToken.None);
       await body.NextReadAsync();
       time.Advance(TimeSpan.FromSeconds(2));
@@ -157,7 +157,7 @@ public sealed class InjectedClockTests
       using var body = new FeedStream();
       using var server = new ScriptedServer();
       server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server, time);
       Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), WorkerHarness.Unpaced, CancellationToken.None);
       for(int chunk = 0; chunk < 3; chunk++)
       {

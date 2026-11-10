@@ -47,16 +47,6 @@ public sealed class OperatorPrinterCatalogTests
 
 
 
-   /// <summary>The catalog is user-scoped: a client without a signed-in session refuses before any request.</summary>
-   [Fact]
-   public async Task Catalog_RequiresTheSignedInSession()
-   {
-      using PrintApiClient api = new("https://synthetic.invalid");
-      await Assert.ThrowsAsync<InvalidOperationException>(() => api.OperatorPrintersAsync(CancellationToken.None));
-   }
-
-
-
    /// <summary>A server that keeps returning cursors is cut off after the page bound instead of being followed forever.</summary>
    [Fact]
    public async Task Catalog_StopsAfterThePageBound()

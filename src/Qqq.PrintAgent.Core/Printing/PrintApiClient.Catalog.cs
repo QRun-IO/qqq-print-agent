@@ -24,16 +24,12 @@ public sealed partial class PrintApiClient
 
 
    /// <summary>
-   /// Reads the whole operator printer catalog (every page until the server returns no cursor, at most ten pages). It needs the
-   /// signed-in session: the catalog is user-scoped, so a client built without a session cannot read it. A 404 means the server does not
-   /// offer the catalog, a 401 or 403 that the signed-in user may not read it; both are reported as such rather than hidden.
+   /// Reads the whole operator printer catalog (every page until the server returns no cursor, at most ten pages). The catalog is
+   /// user-scoped, and it is the signed-in session's user who reads it. A 404 means the server does not offer the catalog, a 401
+   /// or 403 that the signed-in user may not read it; both are reported as such rather than hidden.
    /// </summary>
    public async Task<IReadOnlyList<OperatorPrinter>> OperatorPrintersAsync(CancellationToken token)
    {
-      if(!_nativeSession)
-      {
-         throw new InvalidOperationException("The operator printer catalog needs a signed-in session.");
-      }
       List<OperatorPrinter> printers = [];
       string? cursor = null;
       for(int page = 0; page < CatalogPageLimit; page++)

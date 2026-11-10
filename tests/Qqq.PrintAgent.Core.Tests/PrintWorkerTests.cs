@@ -201,13 +201,4 @@ public sealed class PrintWorkerTests
       Assert.Empty(harness.Journal.Pending());
       Assert.Equal(0, harness.Printer.Submissions);
    }
-
-
-
-   /// <summary>The API client refuses a plain http address for a remote host, so nothing it sends can travel unencrypted.</summary>
-   [Fact]
-   public void Client_RejectsPlaintextRemoteServer()
-   {
-      Assert.Throws<ArgumentException>(() => new PrintApiClient("http://example.com"));
-   }
 }

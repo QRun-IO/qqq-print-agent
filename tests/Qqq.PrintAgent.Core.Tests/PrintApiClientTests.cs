@@ -63,7 +63,7 @@ public sealed class PrintApiClientTests
    {
       using var server = new ScriptedServer();
       server.Add(body, status);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       Exception thrown = await Assert.ThrowsAsync(failure, () => api.EnrollAsync(new EnrollmentRequest("SYNTHETIC-CODE", "Front desk", "2.0.0")));
       if(message is not null)
       { Assert.Equal(message, thrown.Message); }
@@ -84,7 +84,7 @@ public sealed class PrintApiClientTests
       using var stop = new CancellationTokenSource();
       Task run = channel.RunAsync(_ => { }, stop.Token);
       using var server = new ScriptedServer();
-      using PrintApiClient api = new PrintApiClient("https://synthetic.invalid", handler: server).WithRealtime(channel, new RealtimeSettings());
+      using PrintApiClient api = FakeSessionClient.ApiOver(server).WithRealtime(channel, new RealtimeSettings());
 
       Task inventory = api.InventoryAsync([new PrinterInfo("printer1", "Queue one", "Synthetic driver", "USB001", "READY", ["ZPL"])], CancellationToken.None);
       JsonElement frame = await socket.NextSentAsync();
@@ -130,7 +130,7 @@ public sealed class PrintApiClientTests
    public async Task WithoutAChannelNothingIsSentAndNothingFallsBackToHttp()
    {
       using var server = new ScriptedServer();
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       Func<Task>[] sends =
       [
          () => api.InventoryAsync([new PrinterInfo("printer1", "Queue one", "Synthetic driver", "USB001", "READY", ["ZPL"])], CancellationToken.None),
@@ -151,13 +151,14 @@ public sealed class PrintApiClientTests
    [Fact]
    public async Task ProviderSuppliesTheCurrentChannelAfterAReconnect()
    {
+      using var session = new FakeSessionClient();
       using var staleSocket = new ScriptedWebSocket();
       using var currentSocket = new ScriptedWebSocket();
       using var stale = new PrintingRealtimeChannel(staleSocket, new RealtimeSettings());
       using var current = new PrintingRealtimeChannel(currentSocket, new RealtimeSettings());
       using var stop = new CancellationTokenSource();
       Task run = current.RunAsync(_ => { }, stop.Token);
-      using PrintApiClient api = new PrintApiClient("https://synthetic.invalid").WithRealtime(stale, new RealtimeSettings(), () => current);
+      using PrintApiClient api = PrintApiClient.ForSession(session).WithRealtime(stale, new RealtimeSettings(), () => current);
       Task jobEvent = api.EventAsync("job-1", new PrintEvent("e1", "SPOOLED"), CancellationToken.None);
       Assert.Equal("JOB_EVENT", (await currentSocket.NextSentAsync()).GetProperty("type").GetString());
       currentSocket.Deliver("ACK", "ack-1", new { acknowledgedMessageId = "event-e1" });
@@ -171,22 +172,20 @@ public sealed class PrintApiClientTests
    /// <summary>
    /// An operator action goes to its own route with a fresh request identifier; only a test print carries a test profile,
    /// and a retry states that the operator accepted the duplicate risk. The new job identifier is returned when the server
-   /// gives one. The client itself attaches no credential to the request: what authenticates it is added by the session
-   /// it is sent through.
+   /// gives one.
    /// </summary>
    [Theory]
-   [InlineData("test-print", "/printing/v1/device/test-print", """{"jobId":"job-9"}""", "job-9")]
-   [InlineData("retry-job", "/printing/v1/device/jobs/job%2F1/retry", "{}", "")]
-   [InlineData("cancel-job", "/printing/v1/device/jobs/job%2F1/cancel", """{"jobId":null}""", "")]
+   [InlineData("test-print", "/qqq/v1/qbit/printing/device/test-print", """{"jobId":"job-9"}""", "job-9")]
+   [InlineData("retry-job", "/qqq/v1/qbit/printing/device/jobs/job%2F1/retry", "{}", "")]
+   [InlineData("cancel-job", "/qqq/v1/qbit/printing/device/jobs/job%2F1/cancel", """{"jobId":null}""", "")]
    public async Task OperatorActionGoesToItsRouteAndReturnsTheNewJob(string operation, string route, string body, string expected)
    {
       using var server = new ScriptedServer();
       server.Add(body);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       Assert.Equal(expected, await api.OperatorActionAsync(operation, "job/1", "printer1", "ZPL", confirmDuplicateRisk: true, "LABEL_4X6_203", CancellationToken.None));
       ScriptedRequest request = Assert.Single(server.Requests);
       Assert.Equal(route, request.Uri.AbsolutePath);
-      Assert.True(request.IsPublic);
       using var sent = JsonDocument.Parse(request.Body!);
       Assert.Equal("printer1", sent.RootElement.GetProperty("printerId").GetString());
       Assert.True(sent.RootElement.GetProperty("confirmDuplicateRisk").GetBoolean());
@@ -213,7 +212,7 @@ public sealed class PrintApiClientTests
    {
       using var server = new ScriptedServer();
       server.Add(body, status);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       Exception thrown = await Assert.ThrowsAsync(failure, () => api.OperatorActionAsync(operation, jobId, "printer1", "ZPL", confirmDuplicateRisk: false, CancellationToken.None));
       if(message is not null)
       { Assert.Equal(message, thrown.Message); }
@@ -249,7 +248,7 @@ public sealed class PrintApiClientTests
       using var server = new ScriptedServer();
       server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = string.Equals(fault, "overrun", StringComparison.Ordinal) ? new StreamContent(body) : new ByteArrayContent(document) });
       body.Feed(document);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      using PrintApiClient api = FakeSessionClient.ApiOver(server);
       InvalidDataException refused = await Assert.ThrowsAsync<InvalidDataException>(() => api.DownloadFileAsync(job, staging.Path, settings, WorkerHarness.Unpaced, CancellationToken.None));
       Assert.Equal(message, refused.Message);
       Assert.Equal(requests, server.Requests.Count);

@@ -43,11 +43,12 @@ public sealed class ProfileProtocolTests
    [Fact]
    public async Task InventoryKeepsPhysicalQueueIdentitySeparateFromFriendlyMetadata()
    {
+      using var session = new FakeSessionClient();
       using var socket = new ScriptedWebSocket();
       using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
       using var stop = new CancellationTokenSource();
       Task run = channel.RunAsync(_ => { }, stop.Token);
-      using PrintApiClient api = new PrintApiClient("https://synthetic.invalid").WithRealtime(channel, new RealtimeSettings());
+      using PrintApiClient api = PrintApiClient.ForSession(session).WithRealtime(channel, new RealtimeSettings());
       PrinterInfo printer = new("stable-id", new string('q', 1024), "driver", "port", "READY", ["ZPL"], new string('n', 512), new string('d', 4096), "Dock 2");
       Task inventory = api.InventoryAsync([printer], CancellationToken.None);
       JsonElement frame = await socket.NextSentAsync();

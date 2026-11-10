@@ -49,7 +49,7 @@ public sealed class RealtimeTransportTests
       byte[] bytes = new byte[25 * 1024 * 1024];
       Random.Shared.NextBytes(bytes);
       using var handler = new DocumentHandler(bytes);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: handler);
+      using PrintApiClient api = FakeSessionClient.ApiOver(handler);
       string staging = Path.Combine(Path.GetTempPath(), "qqq-large-stream-" + Guid.NewGuid().ToString("N"));
       PrintJob job = Job(bytes.Length) with { ContentSha256 = Convert.ToHexString(SHA256.HashData(bytes)) };
       try
@@ -124,7 +124,7 @@ public sealed class RealtimeTransportTests
    {
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-content");
       using var handler = new DocumentHandler(bytes);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: handler);
+      using PrintApiClient api = FakeSessionClient.ApiOver(handler);
       string staging = Path.Combine(Path.GetTempPath(), "qqq-download-test-" + Guid.NewGuid().ToString("N"));
       PrintJob job = Job(bytes.Length) with { ContentSha256 = Convert.ToHexString(SHA256.HashData(corrupt ? [1] : bytes)) };
       try
