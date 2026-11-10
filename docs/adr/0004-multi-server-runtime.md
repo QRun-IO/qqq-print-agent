@@ -204,6 +204,22 @@ One LocalSystem service now holds credentials for several servers, so the bounda
 
 `docs/security/threat-model.md` gets these as boundary rows before the multi-server service merges.
 
+## Resolved while planning the build
+
+A planning pass over the code on 2026-11-10 found places where this record was silent or disagreed with the code. Each was settled as follows, under the owner's direction to take the recommended option and record it.
+
+- **Where the pipe contract lives.** The envelope, error codes, operation names, arguments and results are one set of types in a `Management` folder of the Windows assembly, which the service, the command line and the presentation assembly already reference. A separate assembly would add a project and installer payload for no new boundary.
+- **The companion between now and the tree.** The wizard and tree are a later stage, and until then the companion in this branch speaks version 1 of the pipe and knows one server. While the service can hold only one server, that server follows the stored files after each version 1 sign-in, enrollment and sign-out. Once it can hold several, an interim adapter serves version 1 requests against the first server in the list: a version 1 sign-in to a new address adds that server and moves it first, and signs the others out, because the old window cannot show a second live connection. The adapter is deleted when the companion speaks version 2. Only then does a request without `v` get the legacy error described above.
+- **An unpaired server has no scope.** In 1.x an unpaired store uses one fixed scope name, which two signed-in, unpaired servers would share. An unpaired server reads defaults and cannot write to the journal. Rows the migration finds under that name, under an "unreadable" name or under no scope belong to no server.
+- **When a scope becomes current.** The scope's row is inserted, not current, before any file is written. It becomes current in one transaction after the pairing file is in place. On open, a readable pairing whose row is not current is made current, which covers a stop between the two; an unreadable pairing never changes it.
+- **A server's own print limit and the shared printer queue.** The queue skips a server whose head job is not yet staged, and also one that cannot take another print at that moment under its own policy. Both are decided together under the queue's lock, so a server busy on one printer neither holds another printer against everyone nor has its job for an idle printer held by someone else's long print.
+- **The staging ceiling.** 8 GiB for the computer, so each server's guaranteed eighth is 1 GiB, above the default policy of 512 MiB. A server's own limit still applies to its own total. A document larger than a server could ever be given is refused before download and recorded FAILED, instead of waiting forever.
+- **Removal is restartable.** The print deadline can be far longer than a pipe request may take, and removal spans files and rows with no transaction. `servers.remove` marks the server as being removed, stops its claims and answers that removal has started or has finished. The host finishes when a submission in progress ends, and at the next start if it was stopped first. The snapshot shows a server that is being removed.
+- **Jobs waiting behind another printer's job** (audit finding W23) are fixed in the claim path, not by the printer queues: lanes claim while there is demand and a free slot, instead of in waves that must all finish.
+- **Who names the sign-in provider.** `servers.check` returns the provider's origin whenever it could read the sign-in description, so the re-check after the operator accepts the exception can name both addresses. `servers.add` carries only that the operator accepted. The service derives and stores the provider's origin from its own read and never takes it from a client.
+- **The snapshot carries no recent jobs and no log lines.** Jobs come from `jobs.query`; the service's in-memory log ring is removed. The command line's `snapshot` prints the aggregated document.
+- **Ambiguous names are the command line's business.** The service takes a full server identifier only. The command line resolves a prefix or a name after listing the servers, and reports an ambiguous one itself.
+
 ## Decisions taken while working, per the owner's direction
 
 About the runtime:
