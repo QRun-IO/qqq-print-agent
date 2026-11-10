@@ -1,0 +1,15 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "authentication": {
+         "signedIn": true,
+         "principalId": "principal-4",
+         "tenantId": "tenant-2",
+         "message": "Signed in. Printing is enabled.",
+         "authorized": true
+      },
+      "paired": true,
+      "printingEnabled": true
+   }
+}

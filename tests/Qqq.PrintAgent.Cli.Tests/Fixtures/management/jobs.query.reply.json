@@ -1,0 +1,39 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "jobs": [
+         {
+            "jobId": "job-204",
+            "status": "FAILED",
+            "updatedAt": "2026-11-10T15:04:05.0000000Z",
+            "message": "The printer is offline.",
+            "spoolerJobId": "42",
+            "printerId": "printer-a1",
+            "printerName": "Shipping labels",
+            "title": "Invoice 5512",
+            "format": "PDF",
+            "failureAcknowledged": true,
+            "createdAt": "2026-11-10T15:00:00.0000000Z"
+         },
+         {
+            "jobId": "job-090",
+            "status": "FAILED",
+            "updatedAt": "2026-11-10T15:04:05.0000000Z",
+            "message": "The printer is offline.",
+            "spoolerJobId": "42",
+            "printerId": "printer-a1",
+            "printerName": "Shipping labels",
+            "title": "Invoice 5512",
+            "format": "PDF",
+            "failureAcknowledged": true,
+            "createdAt": "2026-11-10T15:00:00.0000000Z",
+            "earlierPairing": true
+         }
+      ],
+      "totalCount": 77,
+      "offset": 50,
+      "pageSize": 25,
+      "serverQueueLimited": true
+   }
+}

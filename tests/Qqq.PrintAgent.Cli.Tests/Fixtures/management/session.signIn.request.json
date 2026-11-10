@@ -1,0 +1,12 @@
+{
+   "v": 2,
+   "op": "session.signIn",
+   "server": "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f",
+   "args": {
+      "sessionCredential": {
+         "origin": "https://qqq.example.test",
+         "sessionToken": "CANARY-SESSION-COOKIE-7f3a"
+      },
+      "repair": "associatePairing"
+   }
+}

@@ -1,0 +1,12 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "unreadableSessionSetAside": true,
+      "providerLogout": {
+         "endSessionUri": "https://sign-in.example.test/logout?id_token_hint=CANARY-ID-TOKEN-HINT-08be",
+         "redirectUri": "io.qrun.qqq-print-agent:/oauth/callback",
+         "state": "state-31"
+      }
+   }
+}

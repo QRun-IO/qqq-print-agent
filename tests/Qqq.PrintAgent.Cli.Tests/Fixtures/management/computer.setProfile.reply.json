@@ -1,0 +1,9 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "name": "Packing station 7",
+      "description": "Label printing for outbound orders",
+      "location": "West warehouse"
+   }
+}

@@ -1,0 +1,9 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "ready": false,
+      "jobsInHand": 2,
+      "claimPending": true
+   }
+}

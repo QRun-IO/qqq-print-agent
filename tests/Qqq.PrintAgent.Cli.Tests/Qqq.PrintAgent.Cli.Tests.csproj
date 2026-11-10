@@ -20,6 +20,10 @@
       <Using Include="Xunit" />
       <Compile Include="../Qqq.PrintAgent.Core.Tests/LoopbackWebSocketPeer.cs" Link="LoopbackWebSocketPeer.cs" />
       <Content Include="..\..\installer\Package.wxs" Link="Fixtures\Package.wxs" CopyToOutputDirectory="PreserveNewest" />
+      <!-- The golden wire documents of the management contract: one request and one reply per operation, and one
+           failure reply per error code that carries details. -->
+      <None Remove="Fixtures\management\*.json" />
+      <Content Include="Fixtures\management\*.json" CopyToOutputDirectory="PreserveNewest" />
    </ItemGroup>
 
    <ItemGroup>

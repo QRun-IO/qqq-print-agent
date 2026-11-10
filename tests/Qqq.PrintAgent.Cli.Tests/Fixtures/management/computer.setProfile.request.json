@@ -1,0 +1,11 @@
+{
+   "v": 2,
+   "op": "computer.setProfile",
+   "args": {
+      "profile": {
+         "name": "Packing station 7",
+         "description": "Label printing for outbound orders",
+         "location": "West warehouse"
+      }
+   }
+}

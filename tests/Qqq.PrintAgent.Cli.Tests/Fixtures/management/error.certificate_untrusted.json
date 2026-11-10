@@ -1,0 +1,53 @@
+{
+   "v": 2,
+   "ok": false,
+   "error": {
+      "code": "certificate_untrusted",
+      "message": "Synthetic message for people.",
+      "details": {
+         "stages": [
+            {
+               "stage": "connection",
+               "outcome": "passed",
+               "problems": []
+            },
+            {
+               "stage": "security",
+               "outcome": "failed",
+               "problems": [
+                  "Windows does not trust the authority that issued the server\u0027s certificate"
+               ]
+            },
+            {
+               "stage": "server",
+               "outcome": "notReached",
+               "problems": []
+            },
+            {
+               "stage": "printing",
+               "outcome": "notReached",
+               "problems": []
+            },
+            {
+               "stage": "signIn",
+               "outcome": "notReached",
+               "problems": []
+            }
+         ],
+         "signInMethods": [],
+         "providerOrigin": "https://sign-in.example.test",
+         "certificate": {
+            "refusals": [
+               "untrustedAuthority",
+               "nameMismatch"
+            ],
+            "subject": "CN=qqq.example.test",
+            "issuer": "CN=Example Development Root",
+            "notBefore": "2026-01-01T00:00:00.0000000Z",
+            "notAfter": "2027-01-01T00:00:00.0000000Z",
+            "fingerprint": "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334"
+         },
+         "existingServerId": "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f"
+      }
+   }
+}

@@ -1,0 +1,8 @@
+{
+   "v": 2,
+   "op": "jobs.cancel",
+   "server": "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f",
+   "args": {
+      "jobId": "job-204"
+   }
+}
