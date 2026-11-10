@@ -126,6 +126,41 @@ public sealed class AgentPrinterCatalogTests
 
 
 
+   /// <summary>
+   /// The reason logged for a connection the reader ended is the frame it rejected, even while a send is waiting for an
+   /// acknowledgement. The server holds back the inventory acknowledgement and then sends the malformed frame, so the channel
+   /// fails that pending send at the same moment; the log must still name the frame, not the secondary "closed before
+   /// acknowledgement" failure. The failure is logged before the service reconnects, so the test waits for that line.
+   /// </summary>
+   [Fact]
+   public async Task MalformedPrintersFrame_IsTheLoggedReasonEvenWhileASendAwaitsAcknowledgement()
+   {
+      await using RealtimeRuntimeFixture fixture = new(printingVersion: "2.4.0");
+      var inventoryPending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      fixture.BeforeAcknowledgement = async message =>
+      {
+         if(message.Type is "INVENTORY")
+         {
+            inventoryPending.TrySetResult();
+            await release.Task;
+         }
+      };
+      try
+      {
+         RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+         await fixture.WaitAsync(() => inventoryPending.Task.IsCompleted);
+         await first.SendAsync("PRINTERS", new { nothing = true });
+         await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("Realtime connection stopped", StringComparison.Ordinal)));
+         string stopped = fixture.Logs.First(line => line.Contains("Realtime connection stopped", StringComparison.Ordinal));
+         Assert.Contains("PRINTERS frame has no printers list", stopped, StringComparison.Ordinal);
+         Assert.DoesNotContain("before acknowledgement", stopped, StringComparison.Ordinal);
+      }
+      finally { release.TrySetResult(); }
+   }
+
+
+
    /// <summary>Losing the connection resets the reading to "not checked", and the next connection asks the server again.</summary>
    [Fact]
    public async Task Reconnect_StartsFromNotCheckedAndAsksAgain()

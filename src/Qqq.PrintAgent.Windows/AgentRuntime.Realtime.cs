@@ -218,8 +218,24 @@ public sealed partial class AgentRuntime
          }
          SignalPipeline();
          await lifetime.CancelAsync().ConfigureAwait(false);
-         await Task.WhenAll(reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
+         await CompleteConnectionAsync(reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
       }
+   }
+
+
+
+   /// <summary>
+   /// Waits for every task of a finished connection and reports why it ended. When the reader itself failed (a frame it
+   /// rejected, a socket the server closed), that is the cause: the channel then fails every send still waiting for an
+   /// acknowledgement, and one of those secondary failures can complete before the reader's own task does. Waiting for all of
+   /// them reports whichever failed first in time, so the reader's failure is rethrown in preference and the log names the
+   /// frame or closure instead of "closed before acknowledgement".
+   /// </summary>
+   internal static async Task CompleteConnectionAsync(Task reader, params Task[] workers)
+   {
+      var all = Task.WhenAll([reader, .. workers]);
+      await all.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+      await (reader.IsFaulted ? reader : all).ConfigureAwait(false);
    }
 
 
