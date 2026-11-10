@@ -65,6 +65,8 @@ internal sealed class SessionFixture : IDisposable
       internal QqqSessionException.FailureKind? ResumeFailure { get; set; }
       internal bool ClaimedLegacy;
       internal bool DenyBinding;
+
+      /// <summary>When set, binding a device fails as a lost connection before the server has bound anything.</summary>
       internal bool FailBindingTransport;
       /// <summary>When set, a successful bind reports a different principal, as if the device had been bound for another user.</summary>
       internal bool BindAsAnotherPrincipal;
