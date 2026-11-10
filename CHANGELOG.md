@@ -129,8 +129,10 @@ What the operator sees is the same except for the following, each of them delibe
 - **An update the service is not ready for says why.** When jobs claimed before the update's pause are still
   running after the preparation limit, the in-app update shows the service's own sentence ("Not ready for update:
   1 job(s) were still in progress after 25 seconds. They will finish; try the update again afterwards.") after "The
-  update was not started, and the current version remains installed." Any other answer is shown as an answer the
-  update could not use. Both used to follow "Let active printing finish and try again", whatever the service said.
+  update was not started, and the current version remains installed." A preparation that was interrupted (printing
+  was resumed, or a sign-in began, while it waited) is shown the same way, in the service's words. Any other answer
+  is shown as an answer the update could not use. All of these used to follow "Let active printing finish and try
+  again", whatever the service said.
 - **Full details** no longer opens a dialog for a details reply that names another job or has no job or events;
   the message was already shown, and the dialog used to open anyway.
 - A service error shown as **Action could not be completed** no longer starts with a space. A sign-out reply

@@ -202,13 +202,14 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
 
    /// <summary>
    /// Words an update preparation the service did not complete. "Not ready for update: ..." is the service saying that work
-   /// it claimed before the pause is still running; its sentence already says what is running and what to do, so it is
+   /// it claimed before the pause is still running, and "Update preparation was interrupted: ..." that printing was resumed
+   /// or a sign-in began while it waited. Each of those sentences already says what happened and what to do, so it is
    /// shown as it is, after one sentence saying that nothing was installed. Any other answer is an error, or something this
    /// build does not know, and is shown as that: it is not an invitation to wait for printing that may have nothing to do
    /// with it.
    /// </summary>
    internal static string PreparationNotCompleted(string response)
-      => response.StartsWith("Not ready for update:", StringComparison.Ordinal)
+      => response.StartsWith("Not ready for update:", StringComparison.Ordinal) || response.StartsWith("Update preparation was interrupted:", StringComparison.Ordinal)
          ? "The update was not started, and the current version remains installed. " + response
          : "The service could not prepare for an update, and the current version remains installed. The service answered: " + response;
 

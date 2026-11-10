@@ -290,6 +290,7 @@ public sealed class AgentRuntimeUpdateTests
          await fixture.WaitAsync(preparation);
          string reply = await preparation;
          Assert.StartsWith("Update preparation was interrupted: printing was resumed", reply, StringComparison.Ordinal);
+         Assert.Equal("The update was not started, and the current version remains installed. " + reply, MsiUpdateService.PreparationNotCompleted(reply));
          Assert.EndsWith("Try the update again.", reply, StringComparison.Ordinal);
          Assert.Contains(fixture.Logs, line => line.StartsWith("Update preparation was interrupted", StringComparison.Ordinal));
          Assert.DoesNotContain(Quiesced, fixture.Logs, StringComparer.Ordinal);
