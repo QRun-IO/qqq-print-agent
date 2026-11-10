@@ -156,7 +156,7 @@ public sealed partial class AgentRuntime
          BlockAuthorization();
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
          AgentAuthentication? saved = LoadSavedSession(store, forRecovery: true);
-         bool unreadableSession = store.QuarantineUnreadableAuthentication() || store.StagedPairing is StagedPairingOutcome.CompletedAfterQuarantine;
+         bool unreadableSession = store.QuarantineUnreadableAuthentication() || store.StagedPairing is StagedPairingOutcome.CompletedAfterQuarantine or StagedPairingOutcome.SetAside;
          if(unreadableSession)
          { WriteLog("WARN", $"The saved session data could not be read and was moved aside for recovery; revoke the previous session in {AppIdentity.ServerName}."); }
          if(saved is not null)

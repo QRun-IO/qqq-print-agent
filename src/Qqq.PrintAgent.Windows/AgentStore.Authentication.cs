@@ -29,6 +29,11 @@ public sealed partial class AgentStore
 
 
 
+   /// <summary>Why the staged session could not be moved into place when the outcome is <see cref="StagedPairingOutcome.Deferred"/>; otherwise null.</summary>
+   internal Exception? StagedPairingFailure { get; private set; }
+
+
+
    /// <summary>Loads the saved session for explicit recovery: a file that cannot be decrypted or parsed is flagged for quarantine and reported as absent, so setup can proceed instead of failing on a damaged file.</summary>
    internal AgentAuthentication? LoadAuthenticationForRecovery()
    {
@@ -178,6 +183,7 @@ public sealed partial class AgentStore
       string staged = Path.Combine(_directory, StagedSessionFile);
       DeleteQuietly(staged + ".tmp");
       StagedPairing = StagedPairingOutcome.None;
+      StagedPairingFailure = null;
       AgentAuthentication? session = File.Exists(staged) ? ReadStagedOrSetAside(staged) : null;
       if(session is null)
       {
@@ -188,7 +194,8 @@ public sealed partial class AgentStore
       AgentAuthentication? stored = ReadStoredOrFlag(path);
       if(!BelongsToPairing(session, pairing) || (stored is not null && BelongsToPairing(stored, pairing)))
       {
-         File.Delete(staged);
+         // The stored session is already the right answer, so a leftover that cannot be deleted now must not fail the read.
+         DeleteQuietly(staged);
          StagedPairing = StagedPairingOutcome.Discarded;
          return null;
       }
@@ -200,8 +207,9 @@ public sealed partial class AgentStore
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
       {
-         // Something holds the stored session open. The staged one is still the right session to act on, and the next reader moves it.
+         // Something holds one of the two files open. The staged session is still the right one to act on, and the next reader moves it.
          StagedPairing = StagedPairingOutcome.Deferred;
+         StagedPairingFailure = exception;
       }
       return session;
    }
@@ -217,8 +225,15 @@ public sealed partial class AgentStore
       }
       catch(Exception exception) when(exception is CryptographicException or JsonException or InvalidDataException or ArgumentException)
       {
-         File.Move(staged, Path.Combine(_directory, "qqq-session.recovery-" + Guid.NewGuid().ToString("N") + ".dpapi"));
-         StagedPairing = StagedPairingOutcome.SetAside;
+         try
+         {
+            File.Move(staged, Path.Combine(_directory, "qqq-session.recovery-" + Guid.NewGuid().ToString("N") + ".dpapi"));
+            StagedPairing = StagedPairingOutcome.SetAside;
+         }
+         catch(Exception moveFailure) when(moveFailure is IOException or UnauthorizedAccessException)
+         {
+            // It stays where it is and the next reader sets it aside; the stored session is still the answer to this read.
+         }
          return null;
       }
    }
