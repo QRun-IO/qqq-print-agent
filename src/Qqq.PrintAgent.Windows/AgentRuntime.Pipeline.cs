@@ -123,7 +123,7 @@ public sealed partial class AgentRuntime
             AgentConfiguration? configuration = store.LoadConfiguration();
             if(configuration is null)
             { return; }
-            using PrintApiClient api = CreateApi(configuration);
+            using PrintApiClient api = CreateApi();
             using var jobCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
             PrintJob? active = null;
             var options = new PrintWorkerOptions

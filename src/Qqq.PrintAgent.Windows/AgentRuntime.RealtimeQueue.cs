@@ -31,7 +31,7 @@ public sealed partial class AgentRuntime
             long generation;
             lock(_stateLock)
             { connection = _connectionGeneration; generation = _queueGeneration; }
-            using PrintApiClient api = CreateApi(configuration);
+            using PrintApiClient api = CreateApi();
             IReadOnlyList<PrintJob> jobs = await api.QueuedJobsAsync(token).ConfigureAwait(false);
             lock(_stateLock)
             {

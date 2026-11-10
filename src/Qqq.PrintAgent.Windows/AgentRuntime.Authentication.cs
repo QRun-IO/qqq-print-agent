@@ -71,10 +71,6 @@ public sealed partial class AgentRuntime
    /// </summary>
    internal async Task<bool> EnsureAuthorizationAsync(CancellationToken token)
    {
-      if(apiFactory is not null)
-      {
-         return true;
-      }
       if(_authorizationBlocked)
       {
          return false;

@@ -14,7 +14,7 @@ public sealed partial class AgentRuntime
 {
    /// <summary>Runs enrollment as a connection transition, so it cannot overlap a claim or a printing job.</summary>
    internal async Task<string> EnrollWithGatesAsync(PipeRequest request, CancellationToken token)
-      => await ConnectionTransitionAsync(() => EnrollAsync(request, token), token).ConfigureAwait(false);
+      => await ConnectionTransitionAsync(() => EnrollNativeAsync(request, token), token).ConfigureAwait(false);
 
 
 
@@ -96,8 +96,8 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// Overrides the health color and text when the server's controls restrict the device: authorization required is red;
-   /// disconnected or paused is orange, or red when a job needs review; a control synchronization failure is orange. Otherwise
-   /// the normal status gets a short note about remote-control support.
+   /// disconnected or paused is orange, or red when a job needs review. Otherwise the normal status gets a short note about
+   /// remote-control support.
    /// </summary>
    private (string Health, string Status) ControlStatus(string health, string status, bool jobFailure)
    {
@@ -112,10 +112,6 @@ public sealed partial class AgentRuntime
       if(_controlState.DesiredState.DispatchPaused)
       {
          return (jobFailure ? "RED" : "ORANGE", "Dispatch paused by the administrator. No new jobs will be claimed; in-flight printing continues." + ControlSuffix());
-      }
-      if(_controlFailure is not null)
-      {
-         return ("ORANGE", status + " " + _controlFailure);
       }
       return (health, status + ControlSuffix());
    }

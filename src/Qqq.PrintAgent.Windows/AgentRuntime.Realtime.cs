@@ -269,8 +269,6 @@ public sealed partial class AgentRuntime
          _realtimeReady = true;
          _transportConnectedBefore = true;
          _controlReady = true;
-         _controlFailure = null;
-         _failure = null;
          _reconnectAttempts = 0;
          return becameReady;
       }

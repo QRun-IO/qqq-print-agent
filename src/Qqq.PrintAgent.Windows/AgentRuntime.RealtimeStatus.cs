@@ -60,7 +60,7 @@ public sealed partial class AgentRuntime
          AgentConfiguration? configuration = store.LoadConfiguration();
          if(configuration is null)
          { continue; }
-         using PrintApiClient api = CreateApi(configuration);
+         using PrintApiClient api = CreateApi();
          if(NormalTrafficAllowed)
          {
             ExposedPrinterBackend backend = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
@@ -101,7 +101,7 @@ public sealed partial class AgentRuntime
       AgentConfiguration? configuration = store.LoadConfiguration();
       if(configuration is null)
       { return; }
-      using PrintApiClient api = CreateApi(configuration);
+      using PrintApiClient api = CreateApi();
       await _eventDeliveryGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
@@ -149,7 +149,7 @@ public sealed partial class AgentRuntime
             AgentConfiguration? configuration = store.LoadConfiguration();
             if(configuration is null)
             { throw new InvalidOperationException("Device configuration is unavailable."); }
-            using PrintApiClient api = CreateApi(configuration);
+            using PrintApiClient api = CreateApi();
             await ApplyControlCommandAsync(store, api, command, DateTimeOffset.UtcNow + _serverTimeOffset, token).ConfigureAwait(false);
             await FlushControlReceiptsAsync(store, api, token).ConfigureAwait(false);
          }

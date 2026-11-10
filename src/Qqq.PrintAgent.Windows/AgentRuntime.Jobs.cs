@@ -83,7 +83,7 @@ public sealed partial class AgentRuntime
             throw new InvalidOperationException("Share the printer and select a supported format first. The server must also approve the printer.");
          }
       }
-      using PrintApiClient api = CreateApi(configuration);
+      using PrintApiClient api = CreateApi();
       string? testProfile = string.Equals(request.Operation, "test-print", StringComparison.Ordinal) ? request.TestProfile : null;
       string queuedJob = await api.OperatorActionAsync(request.Operation, request.JobId, request.PrinterId, request.Format, request.ConfirmDuplicateRisk, testProfile, token).ConfigureAwait(false);
       if(string.Equals(request.Operation, "cancel-job", StringComparison.Ordinal))
