@@ -13,25 +13,66 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>Client side of the local administrator pipe: one command per connection to the installed service, after the service has proved who it is.</summary>
 public static class AgentPipeClient
 {
+   private const string PipeName = "QqqPrintAgent";
+   private static readonly TimeSpan s_connectLimit = TimeSpan.FromSeconds(3);
+
+
+
    /// <summary>Sends one command to the installed service's pipe and returns its reply.</summary>
    public static async Task<string> SendAsync(PipeRequest request)
-      => await SendAsync(request, "QqqPrintAgent").ConfigureAwait(false);
+      => await SendAsync(request, PipeName).ConfigureAwait(false);
+
+
+
+   /// <summary>
+   /// Sends one command like <see cref="SendAsync(PipeRequest)"/> and also tells the caller whether the request ever left: a
+   /// failure before any request byte was written is thrown as <see cref="AgentPipeNotSentException"/>, and every other
+   /// failure is thrown as it is. The companion uses this to say "the service is not reachable" only when nothing was sent,
+   /// and "the result could not be confirmed" when the service may have acted.
+   /// </summary>
+   public static async Task<string> SendReportingPhaseAsync(PipeRequest request)
+      => await SendReportingPhaseAsync(request, PipeName, s_connectLimit).ConfigureAwait(false);
+
+
+
+   /// <summary>The phase-reporting send against a named pipe with a chosen connect limit, so a test can reach the connect limit quickly.</summary>
+   internal static async Task<string> SendReportingPhaseAsync(PipeRequest request, string pipeName, TimeSpan connectLimit)
+   {
+      bool writing = false;
+      try
+      {
+         return await SendAsync(request, pipeName, connectLimit, () => writing = true).ConfigureAwait(false);
+      }
+      catch(Exception exception) when(!writing && exception is OperationCanceledException or IOException or UnauthorizedAccessException or InvalidDataException)
+      {
+         throw new AgentPipeNotSentException(exception);
+      }
+   }
 
 
 
    /// <summary>
    /// Sends one command to the named pipe. Nothing is written until the process at the other end has been verified as the installed
-   /// service. Enrollment and sign-in get 150 seconds because they call QQQ; everything else gets 35, and connecting is limited to 3.
+   /// service. Enrollment and sign-in get 150 seconds because they call QQQ; everything else gets 35, and connecting is limited to 3
+   /// unless another limit is given. A request too large for the pipe is refused before a connection is even opened, and
+   /// <paramref name="writing"/> is called at the last moment before the first byte is written, which is how the phase-reporting
+   /// send knows the request may have left.
    /// </summary>
-   internal static async Task<string> SendAsync(PipeRequest request, string pipeName)
+   internal static async Task<string> SendAsync(PipeRequest request, string pipeName, TimeSpan? connectLimit = null, Action? writing = null)
    {
+      string command = JsonSerializer.Serialize(request, PrintApiClient.JsonOptions);
+      if(command.Length > AgentPipeFraming.MaximumCommandCharacters)
+      {
+         throw new InvalidDataException("Local pipe message exceeds the permitted size.");
+      }
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(request.Operation is "enroll" or "sign-in" or "sign-out" ? 150 : 35));
       await using NamedPipeClientStream pipe = CreateClient(pipeName);
       using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
-      connectTimeout.CancelAfter(TimeSpan.FromSeconds(3));
+      connectTimeout.CancelAfter(connectLimit ?? s_connectLimit);
       await pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
       using var peer = AgentPipePeer.Authenticate(pipe.SafePipeHandle);
-      await AgentPipeFraming.WriteAsync(pipe, JsonSerializer.Serialize(request, PrintApiClient.JsonOptions), AgentPipeFraming.MaximumCommandCharacters, timeout.Token).ConfigureAwait(false);
+      writing?.Invoke();
+      await AgentPipeFraming.WriteAsync(pipe, command, AgentPipeFraming.MaximumCommandCharacters, timeout.Token).ConfigureAwait(false);
       return await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, timeout.Token).ConfigureAwait(false);
    }
 

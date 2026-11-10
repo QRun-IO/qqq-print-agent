@@ -35,7 +35,9 @@ internal sealed class AgentPipePeer : IDisposable
    /// Proves the process at the far end of the pipe really is the installed print service before the client sends anything.
    /// The Windows service must be running with exactly the pipe server's process id, the process must run as SYSTEM from the
    /// installed service executable, and the id is read again afterwards so a swap during the checks is detected. Holding the
-   /// process handle open blocks id reuse. Any doubt throws, and everything acquired is released on failure.
+   /// process handle open blocks id reuse. Any doubt throws, and everything acquired is released on failure. A check that
+   /// could not be carried out at all (the service is not installed, or its process ended between the connection and the
+   /// check) is the same refusal as a check that failed, so every caller sees one exception type for "not verified".
    /// </summary>
    internal static AgentPipePeer Authenticate(SafePipeHandle pipe)
    {
@@ -68,19 +70,29 @@ internal sealed class AgentPipePeer : IDisposable
          }
          return new AgentPipePeer(service, process, identity);
       }
-      catch
+      catch(Exception exception)
       {
          identity?.Dispose();
          process?.Dispose();
          service.Dispose();
-         throw;
+         if(exception is UnauthorizedAccessException)
+         {
+            throw;
+         }
+         ////////////////////////////////////////////////////////////////////////////////////
+         // the service controller, the process lookup and the module path each fail in    //
+         // their own way when the service is missing or its process has just ended. None //
+         // of those proves the endpoint is the service, so each becomes the one refusal   //
+         // and keeps its cause for the log                                                //
+         ////////////////////////////////////////////////////////////////////////////////////
+         throw Untrusted(exception);
       }
    }
 
 
 
-   /// <summary>The single refusal shown for any failed check; it says no request was sent and how to repair, and reveals nothing about which check failed.</summary>
-   private static UnauthorizedAccessException Untrusted() => new("The local endpoint is not the installed Windows print service. No request was sent. Check Windows Services and repair the machine installation if needed.");
+   /// <summary>The single refusal shown for any failed check; it says no request was sent and how to repair, and reveals nothing about which check failed. A check that could not be carried out keeps what stopped it as the inner exception.</summary>
+   private static UnauthorizedAccessException Untrusted(Exception? cause = null) => new("The local endpoint is not the installed Windows print service. No request was sent. Check Windows Services and repair the machine installation if needed.", cause);
 
 
 

@@ -69,6 +69,71 @@ public sealed class AgentPipeSecurityTests
 
 
 
+   /// <summary>
+   /// A substitute server is refused with the one "not the installed service" exception whether the real service is installed,
+   /// stopped or absent on the machine running the test, because a check that cannot be carried out is the same refusal as a
+   /// check that fails. The phase-reporting send wraps that refusal as "not sent", and the substitute reads zero bytes.
+   /// </summary>
+   [Fact]
+   public async Task SubstituteServerIsRefusedAsUntrustedAndReportedAsNotSent()
+   {
+      string name = "QqqPrintAgent-untrusted-phase-test-" + Guid.NewGuid().ToString("N");
+      await using NamedPipeServerStream fake = new(name, PipeDirection.InOut, 2, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+
+      Task connected = fake.WaitForConnectionAsync(timeout.Token);
+      Task<string> plain = AgentPipeClient.SendAsync(new PipeRequest("snapshot"), name);
+      await connected;
+      UnauthorizedAccessException refusal = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => plain);
+      fake.Disconnect();
+      connected = fake.WaitForConnectionAsync(timeout.Token);
+      Task<string> reporting = AgentPipeClient.SendReportingPhaseAsync(new PipeRequest("enroll", "https://print.example.com", "synthetic-enrollment-never-send"), name, TimeSpan.FromSeconds(3));
+      await connected;
+      AgentPipeNotSentException notSent = await Assert.ThrowsAsync<AgentPipeNotSentException>(() => reporting);
+
+      Assert.StartsWith("The local endpoint is not the installed Windows print service. No request was sent.", refusal.Message, StringComparison.Ordinal);
+      Assert.IsType<UnauthorizedAccessException>(notSent.InnerException);
+      Assert.Equal(refusal.Message, notSent.Message);
+      Assert.Equal(0, await fake.ReadAsync(new byte[1], timeout.Token));
+   }
+
+
+
+   /// <summary>
+   /// When nothing is listening on the pipe, the connect limit ends the attempt. The ordinary send still raises the cancellation
+   /// its callers already handle, and the phase-reporting send says the request was not sent, so a stopped service is never
+   /// reported as "the request may have been carried out".
+   /// </summary>
+   [Fact]
+   public async Task NoListeningServiceIsACancellationAndReportedAsNotSent()
+   {
+      string name = "QqqPrintAgent-absent-test-" + Guid.NewGuid().ToString("N");
+      var limit = TimeSpan.FromMilliseconds(50);
+
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => AgentPipeClient.SendAsync(new PipeRequest("snapshot"), name, limit));
+      AgentPipeNotSentException notSent = await Assert.ThrowsAsync<AgentPipeNotSentException>(() => AgentPipeClient.SendReportingPhaseAsync(new PipeRequest("snapshot"), name, limit));
+
+      Assert.IsAssignableFrom<OperationCanceledException>(notSent.InnerException);
+   }
+
+
+
+   /// <summary>A request too large for the pipe is refused before any connection is opened, with the same exception as before, and the phase-reporting send says it was not sent.</summary>
+   [Fact]
+   public async Task OversizeRequestIsRefusedBeforeConnectingAndReportedAsNotSent()
+   {
+      string name = "QqqPrintAgent-oversize-test-" + Guid.NewGuid().ToString("N");
+      PipeRequest oversize = new("enroll", "https://print.example.com", new string('x', AgentPipeFraming.MaximumCommandCharacters));
+
+      await Assert.ThrowsAsync<InvalidDataException>(() => AgentPipeClient.SendAsync(oversize, name));
+      AgentPipeNotSentException notSent = await Assert.ThrowsAsync<AgentPipeNotSentException>(() => AgentPipeClient.SendReportingPhaseAsync(oversize, name, TimeSpan.FromSeconds(3)));
+
+      Assert.IsType<InvalidDataException>(notSent.InnerException);
+      Assert.Throws<ArgumentNullException>(() => new AgentPipeNotSentException(null!));
+   }
+
+
+
    /// <summary>While the startup task definition is held open for the scheduler, it can still be read but not rewritten, deleted or moved, so the definition that was validated is the one Windows registers; once released the file is unchanged.</summary>
    [Fact]
    public void StartupDefinitionCannotBeReplacedWhileSchedulerReadsIt()
