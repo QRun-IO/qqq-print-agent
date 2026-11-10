@@ -6,6 +6,7 @@
 using System.IO.Pipes;
 using System.Security.Principal;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
@@ -35,13 +36,17 @@ public static class AgentPipeClient
 
 
 
-   /// <summary>The phase-reporting send against a named pipe with a chosen connect limit, so a test can reach the connect limit quickly.</summary>
-   internal static async Task<string> SendReportingPhaseAsync(PipeRequest request, string pipeName, TimeSpan connectLimit)
+   /// <summary>
+   /// The phase-reporting send against a named pipe. A test supplies short limits and its own check of the other end, so it
+   /// can play a service that accepts the connection, reads the request and then closes, stalls or answers nonsense, and
+   /// prove that none of those is reported as "not sent".
+   /// </summary>
+   internal static async Task<string> SendReportingPhaseAsync(PipeRequest request, string pipeName, TimeSpan connectLimit, TimeSpan? requestLimit = null, Func<SafePipeHandle, IDisposable>? verify = null)
    {
       bool writing = false;
       try
       {
-         return await SendAsync(request, pipeName, connectLimit, () => writing = true).ConfigureAwait(false);
+         return await SendAsync(request, pipeName, connectLimit, () => writing = true, requestLimit, verify).ConfigureAwait(false);
       }
       catch(Exception exception) when(!writing && exception is OperationCanceledException or IOException or UnauthorizedAccessException or InvalidDataException)
       {
@@ -54,23 +59,23 @@ public static class AgentPipeClient
    /// <summary>
    /// Sends one command to the named pipe. Nothing is written until the process at the other end has been verified as the installed
    /// service. Enrollment and sign-in get 150 seconds because they call QQQ; everything else gets 35, and connecting is limited to 3
-   /// unless another limit is given. A request too large for the pipe is refused before a connection is even opened, and
+   /// unless other limits are given. A request too large for the pipe is refused before a connection is even opened, and
    /// <paramref name="writing"/> is called at the last moment before the first byte is written, which is how the phase-reporting
-   /// send knows the request may have left.
+   /// send knows the request may have left. <paramref name="verify"/> replaces the check of the other end, for tests only.
    /// </summary>
-   internal static async Task<string> SendAsync(PipeRequest request, string pipeName, TimeSpan? connectLimit = null, Action? writing = null)
+   internal static async Task<string> SendAsync(PipeRequest request, string pipeName, TimeSpan? connectLimit = null, Action? writing = null, TimeSpan? requestLimit = null, Func<SafePipeHandle, IDisposable>? verify = null)
    {
       string command = JsonSerializer.Serialize(request, PrintApiClient.JsonOptions);
       if(command.Length > AgentPipeFraming.MaximumCommandCharacters)
       {
          throw new InvalidDataException("Local pipe message exceeds the permitted size.");
       }
-      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(request.Operation is "enroll" or "sign-in" or "sign-out" ? 150 : 35));
+      using CancellationTokenSource timeout = new(requestLimit ?? TimeSpan.FromSeconds(request.Operation is "enroll" or "sign-in" or "sign-out" ? 150 : 35));
       await using NamedPipeClientStream pipe = CreateClient(pipeName);
       using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
       connectTimeout.CancelAfter(connectLimit ?? s_connectLimit);
       await pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
-      using var peer = AgentPipePeer.Authenticate(pipe.SafePipeHandle);
+      using IDisposable peer = (verify ?? AgentPipePeer.Authenticate)(pipe.SafePipeHandle);
       writing?.Invoke();
       await AgentPipeFraming.WriteAsync(pipe, command, AgentPipeFraming.MaximumCommandCharacters, timeout.Token).ConfigureAwait(false);
       return await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, timeout.Token).ConfigureAwait(false);
@@ -82,6 +87,4 @@ public static class AgentPipeClient
    internal static NamedPipeClientStream CreateClient(string pipeName)
       => new(".", pipeName, PipeAccessRights.ReadWrite, PipeOptions.Asynchronous, TokenImpersonationLevel.Anonymous, HandleInheritability.None);
 }
-
-
 

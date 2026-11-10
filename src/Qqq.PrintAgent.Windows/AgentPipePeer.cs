@@ -35,18 +35,19 @@ internal sealed class AgentPipePeer : IDisposable
    /// Proves the process at the far end of the pipe really is the installed print service before the client sends anything.
    /// The Windows service must be running with exactly the pipe server's process id, the process must run as SYSTEM from the
    /// installed service executable, and the id is read again afterwards so a swap during the checks is detected. Holding the
-   /// process handle open blocks id reuse. Any doubt throws, and everything acquired is released on failure. A check that
-   /// could not be carried out at all (the service is not installed, or its process ended between the connection and the
-   /// check) is the same refusal as a check that failed, so every caller sees one exception type for "not verified".
+   /// process handle open blocks id reuse. Any doubt throws one exception type and everything acquired is released, so every
+   /// caller sees "not verified, nothing sent" the same way; <see cref="Refusal"/> chooses what the operator is told.
    /// </summary>
    internal static AgentPipePeer Authenticate(SafePipeHandle pipe)
    {
       ServiceController service = new("QqqPrintAgent");
       Process? process = null;
       WindowsIdentity? identity = null;
+      uint? server = null;
       try
       {
          uint pid = ServerProcessId(pipe);
+         server = pid;
          ServiceStatus status = ReadStatus(service);
          if(status.State != 4 || status.ProcessId != pid || pid == 0)
          {
@@ -75,24 +76,61 @@ internal sealed class AgentPipePeer : IDisposable
          identity?.Dispose();
          process?.Dispose();
          service.Dispose();
-         if(exception is UnauthorizedAccessException)
-         {
-            throw;
-         }
-         ////////////////////////////////////////////////////////////////////////////////////
-         // the service controller, the process lookup and the module path each fail in    //
-         // their own way when the service is missing or its process has just ended. None //
-         // of those proves the endpoint is the service, so each becomes the one refusal   //
-         // and keeps its cause for the log                                                //
-         ////////////////////////////////////////////////////////////////////////////////////
-         throw Untrusted(exception);
+         throw Refusal(server, exception);
       }
    }
 
 
 
-   /// <summary>The single refusal shown for any failed check; it says no request was sent and how to repair, and reveals nothing about which check failed. A check that could not be carried out keeps what stopped it as the inner exception.</summary>
+   /// <summary>
+   /// Chooses what a failed check tells the operator. When the process that was serving the pipe has ended (or the pipe could
+   /// no longer say who serves it), the service stopped or restarted between the connection and the check: nothing is wrong
+   /// with the installation, so the answer is to try again. When that process is still running and did not pass, it is not the
+   /// installed service, and the answer is the one refusal that reveals nothing about which check failed. A check that threw
+   /// keeps what it threw as the inner exception, for the log.
+   /// </summary>
+   internal static UnauthorizedAccessException Refusal(uint? server, Exception found)
+   {
+      if(server is not { } pid || Ended(pid))
+      {
+         return Stopped(found);
+      }
+      return found as UnauthorizedAccessException ?? Untrusted(found);
+   }
+
+
+
+   /// <summary>Whether no running process has this id any more. A process that cannot be looked at is treated as still running, so doubt never softens the refusal.</summary>
+   private static bool Ended(uint pid)
+   {
+      try
+      {
+         using var process = Process.GetProcessById(checked((int)pid));
+         return process.HasExited;
+      }
+      catch(Exception exception) when(exception is ArgumentException or InvalidOperationException or Win32Exception or OverflowException)
+      {
+         ////////////////////////////////////////////////////////////////////////////////
+         // the lookup throws an argument exception when no process has the id, which  //
+         // is the one certain sign that it ended; every other failure is only doubt   //
+         ////////////////////////////////////////////////////////////////////////////////
+         return exception is ArgumentException;
+      }
+   }
+
+
+
+   /// <summary>The refusal for an endpoint that was checked and is not the installed service; it says no request was sent and how to repair, and reveals nothing about which check failed.</summary>
    private static UnauthorizedAccessException Untrusted(Exception? cause = null) => new("The local endpoint is not the installed Windows print service. No request was sent. Check Windows Services and repair the machine installation if needed.", cause);
+
+
+
+   /// <summary>
+   /// The refusal for a service that went away during the check. It is the same exception type as the other refusal, because
+   /// either way nothing was sent, but it tells the operator to wait and try again instead of repairing an installation that
+   /// is fine.
+   /// </summary>
+   private static UnauthorizedAccessException Stopped(Exception cause) => new("The Windows print service stopped or restarted before it could be verified. No request was sent. Wait a moment and try again; check Windows Services if this continues.", cause);
 
 
 

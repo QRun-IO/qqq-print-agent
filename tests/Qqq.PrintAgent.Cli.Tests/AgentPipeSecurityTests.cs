@@ -71,8 +71,9 @@ public sealed class AgentPipeSecurityTests
 
    /// <summary>
    /// A substitute server is refused with the one "not the installed service" exception whether the real service is installed,
-   /// stopped or absent on the machine running the test, because a check that cannot be carried out is the same refusal as a
-   /// check that fails. The phase-reporting send wraps that refusal as "not sent", and the substitute reads zero bytes.
+   /// stopped or absent on the machine running the test, because the substitute is still running: a check that cannot be
+   /// carried out against a live process is the same refusal as a check that fails. The phase-reporting send wraps that
+   /// refusal as "not sent", and the substitute reads zero bytes.
    /// </summary>
    [Fact]
    public async Task SubstituteServerIsRefusedAsUntrustedAndReportedAsNotSent()
@@ -91,7 +92,7 @@ public sealed class AgentPipeSecurityTests
       await connected;
       AgentPipeNotSentException notSent = await Assert.ThrowsAsync<AgentPipeNotSentException>(() => reporting);
 
-      Assert.StartsWith("The local endpoint is not the installed Windows print service. No request was sent.", refusal.Message, StringComparison.Ordinal);
+      Assert.Equal("The local endpoint is not the installed Windows print service. No request was sent. Check Windows Services and repair the machine installation if needed.", refusal.Message);
       Assert.IsType<UnauthorizedAccessException>(notSent.InnerException);
       Assert.Equal(refusal.Message, notSent.Message);
       Assert.Equal(0, await fake.ReadAsync(new byte[1], timeout.Token));
