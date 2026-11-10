@@ -163,17 +163,23 @@ public sealed class AgentNewPairingTests
 
    /// <summary>
    /// The server can accept the enrollment code and then fail the next step, which binds the new device to the session: either it
-   /// refuses, or the connection is lost. Neither may replace the stored pairing or session, because the operator is told the
-   /// existing pairing is unchanged. A later attempt with a fresh code still completes.
+   /// refuses, or the connection is lost. Neither may rewrite the stored pairing or the stored session, whether or not the old
+   /// pairing could still be read, because the operator is told both are unchanged. The operator stays signed in, and a later
+   /// attempt with a fresh code completes on a new journal scope.
    /// </summary>
    [Theory]
-   [InlineData(false)]
-   [InlineData(true)]
-   public async Task BindFailureAfterAcceptedEnrollmentKeepsThePreviousPairing(bool connectionLost)
+   [InlineData(false, false)]
+   [InlineData(true, false)]
+   [InlineData(false, true)]
+   [InlineData(true, true)]
+   public async Task BindFailureAfterAcceptedEnrollmentKeepsTheStoredPairingAndSession(bool connectionLost, bool unreadable)
    {
       using SessionFixture fixture = new();
       fixture.Local.SeedSpooledJob();
-      fixture.SaveSession();
+      if(unreadable)
+      { ChangeOldConfiguration(fixture, unreadable: true); }
+      else
+      { fixture.SaveSession(); }
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       byte[] original = File.ReadAllBytes(path);
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
@@ -185,29 +191,88 @@ public sealed class AgentNewPairingTests
          byte[] signedIn = File.ReadAllBytes(authPath);
          fixture.NextSession.FailBindingTransport = connectionLost;
          fixture.NextSession.DenyBinding = !connectionLost;
-
          _ = await Assert.ThrowsAnyAsync<IOException>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
-
          Assert.Equal(new[] { "devices/enroll" }, fixture.NextSession.Paths, StringComparer.Ordinal);
          Assert.Equal(original, File.ReadAllBytes(path));
          Assert.Equal(signedIn, File.ReadAllBytes(authPath));
+         Assert.Empty(Directory.GetFiles(fixture.Local.DirectoryPath, "connection.recovery-*.dpapi"));
          AgentSnapshot failed = runtime.GetSnapshot();
-         Assert.False(failed.Authentication!.Authorized);
-         Assert.Equal("device", failed.DeviceId);
-         Assert.Contains(failed.Logs, entry => entry.Message.Contains("any existing pairing is unchanged", StringComparison.Ordinal));
-
+         Assert.True(failed.Authentication!.SignedIn);
+         Assert.Equal(unreadable ? null : "device", failed.DeviceId);
+         Assert.Contains(failed.Logs, entry => entry.Message.Contains("the stored pairing and session are unchanged", StringComparison.Ordinal));
          fixture.NextSession.FailBindingTransport = false;
          fixture.NextSession.DenyBinding = false;
          _ = await runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-second-code"), timeout.Token);
          Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
       }
-      using(AgentStore store = new(fixture.Local.DirectoryPath))
+      Assert.Equal(unreadable ? 1 : 0, Directory.GetFiles(fixture.Local.DirectoryPath, "connection.recovery-*.dpapi").Length);
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
+      Assert.Null(store.GetState("job"));
+   }
+
+
+
+   /// <summary>
+   /// A pairing that is working keeps working when a second enrollment is accepted but the connection drops before the new
+   /// device is bound: neither file is rewritten and printing stays authorized.
+   /// </summary>
+   [Fact]
+   public async Task BindFailureLeavesAWorkingPairingAuthorized()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
+      byte[] original = File.ReadAllBytes(path);
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
+      using AgentRuntime runtime = fixture.Runtime();
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
+      byte[] session = File.ReadAllBytes(authPath);
+      fixture.Session.FailBindingTransport = true;
+      _ = await Assert.ThrowsAsync<IOException>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
+      Assert.Equal(original, File.ReadAllBytes(path));
+      Assert.Equal(session, File.ReadAllBytes(authPath));
+      Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
+   }
+
+
+
+   /// <summary>
+   /// Once the server has bound the new device, the live session no longer matches what this computer has stored or holds in
+   /// memory. If the bound identity then turns out to be someone else's, or the pairing or the session cannot be saved, printing
+   /// is blocked until a sign-in instead of running on the mismatch, and the log says what was and was not saved.
+   /// </summary>
+   [Theory]
+   [InlineData("identity")]
+   [InlineData("pairing")]
+   [InlineData("session")]
+   public async Task FailureAfterTheServerBoundTheDeviceBlocksPrinting(string failingStep)
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
+      byte[] original = File.ReadAllBytes(path);
+      using AgentRuntime runtime = fixture.Runtime();
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
+      fixture.Session.BindAsAnotherPrincipal = failingStep is "identity";
+      fixture.Session.FailExport = failingStep is "session";
+      if(failingStep is "pairing")
       {
-         Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
+         // SaveConfiguration writes this temporary name first; a directory in its place makes that write fail.
+         _ = Directory.CreateDirectory(path + ".tmp");
       }
-      File.WriteAllBytes(path, original);
-      using AgentStore originalStore = new(fixture.Local.DirectoryPath);
-      Assert.Equal("SPOOLED", originalStore.GetState("job"));
+      Exception thrown = await Assert.ThrowsAnyAsync<Exception>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
+      Assert.IsAssignableFrom(failingStep is "pairing" ? typeof(UnauthorizedAccessException) : typeof(IOException), thrown);
+      bool pairingSaved = failingStep is "session";
+      Assert.Equal(pairingSaved, !original.AsSpan().SequenceEqual(File.ReadAllBytes(path)));
+      AgentSnapshot failed = runtime.GetSnapshot();
+      Assert.False(failed.Authentication!.Authorized);
+      Assert.Contains("authorization is required", failed.Authentication.Message, StringComparison.Ordinal);
+      Assert.Contains(failed.Logs, entry => entry.Message.Contains(pairingSaved ? "after the new pairing was saved" : "after the server bound the new device", StringComparison.Ordinal));
    }
 
 
