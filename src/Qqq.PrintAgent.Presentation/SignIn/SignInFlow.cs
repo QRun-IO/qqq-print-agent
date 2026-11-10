@@ -151,10 +151,7 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
          DropSession();
          Readiness = null;
          Uri origin = ReadOrigin(address);
-         _session = _sessions.Create(origin, _trust.AppliesTo(origin));
-         OnPropertyChanged(nameof(HasSession));
-         _metadata = await _session.DiscoverAsync(token);
-         token.ThrowIfCancellationRequested();
+         _metadata = await OpenSessionAsync(origin, token);
          PasswordOffered = string.Equals(_metadata.Type, "TABLE_BASED", StringComparison.Ordinal);
          BrowserOffered = _metadata.Values?.NativeSessionLogin is not null;
          _log.Info("Sign-in options for " + origin.Authority + ": password sign-in " + (PasswordOffered ? "offered" : "not offered") + ", browser sign-in " + (BrowserOffered ? "offered" : "not offered") + ".");
@@ -174,6 +171,47 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
          }
       }
       return discovered;
+   }
+
+
+
+   /// <summary>
+   /// Creates the session for a server and reads its sign-in description. Without a saved certificate exception for
+   /// this server the session accepts no untrusted certificate. With one, the first session accepts an untrusted
+   /// certificate from the server's own origin only, and the description is read under that. When the description
+   /// names a sign-in provider on another origin, that session is discarded and the attempt continues on a second one
+   /// whose exception also covers the provider, because the browser sign-in has to read the provider's own discovery
+   /// document; the description is read again on it, and the log names both origins. Until the service records the
+   /// provider's origin with the server, this is where the second origin comes from.
+   /// </summary>
+   private async Task<QqqAuthenticationMetadata> OpenSessionAsync(Uri origin, CancellationToken token)
+   {
+      QqqCertificateExceptionOrigins exception = _trust.AppliesTo(origin) ? QqqCertificateExceptionOrigins.ForServer(origin) : QqqCertificateExceptionOrigins.None;
+      QqqAuthenticationMetadata metadata = await DescribeAsync(origin, exception, token);
+      if(!_trust.AppliesTo(origin) || metadata.ProviderOrigin is not { } provider)
+      {
+         return metadata;
+      }
+      var withProvider = QqqCertificateExceptionOrigins.ForServer(origin, provider);
+      if(withProvider.Origins.Count == exception.Origins.Count)
+      {
+         return metadata;
+      }
+      _log.Warning("The certificate exception saved for " + origin.Authority + " is also applied to the sign-in provider this server names, " + provider.Authority + ": an untrusted certificate is accepted from " + withProvider + " and from no other host.");
+      DropSession();
+      return await DescribeAsync(origin, withProvider, token);
+   }
+
+
+
+   /// <summary>Creates a session under the given certificate exception, makes it the flow's session and returns the server's sign-in description; the caller's cancellation is honored after the answer arrives.</summary>
+   private async Task<QqqAuthenticationMetadata> DescribeAsync(Uri origin, QqqCertificateExceptionOrigins exception, CancellationToken token)
+   {
+      _session = _sessions.Create(origin, exception);
+      OnPropertyChanged(nameof(HasSession));
+      QqqAuthenticationMetadata metadata = await _session.DiscoverAsync(token);
+      token.ThrowIfCancellationRequested();
+      return metadata;
    }
 
 

@@ -201,7 +201,7 @@ public sealed class QqqSessionLogHygieneTests
             { connector.Connecting = _ => throw new WebSocketException(WebSocketError.NotAWebSocket, hostile); }
          },
       };
-      using var client = new QqqSessionClient(ScriptedServer.Origin, null, null, false, null, Diagnostics(lines), false, transport);
+      using var client = new QqqSessionClient(ScriptedServer.Origin, null, null, false, null, Diagnostics(lines), QqqCertificateExceptionOrigins.None, transport);
       await client.SignInWithPasswordAsync("synthetic-user", "synthetic-password");
       await client.BindDeviceAsync(new QqqDeviceCredential("device-1", "synthetic-proof"));
       await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectPrintingAsync(Heartbeat, HeartbeatLimit));
@@ -226,7 +226,7 @@ public sealed class QqqSessionLogHygieneTests
       QqqSessionClient? client = null;
       server.AddAsync(_ =>
       {
-         Assert.False(client!.EvaluateCertificate("printing.example.invalid", certificate, SslPolicyErrors.RemoteCertificateChainErrors));
+         Assert.False(client!.EvaluateCertificate(new Uri("https://printing.example.invalid"), certificate, SslPolicyErrors.RemoteCertificateChainErrors));
          return Task.FromException<HttpResponseMessage>(new HttpRequestException(HttpRequestError.SecureConnectionError, "The SSL connection could not be established."));
       });
       using(client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: Diagnostics(lines)))

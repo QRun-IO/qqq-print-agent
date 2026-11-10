@@ -407,7 +407,7 @@ public sealed class SignInFlowEnrollmentTests
 
       fixture.AnswerAsTheRealService();
       await fixture.Flow.DiscoverAsync("https://dev.example.com");
-      Assert.False(fixture.Sessions[0].AllowUntrustedCertificate);
+      Assert.True(fixture.Sessions[0].CertificateException.IsEmpty);
    }
 
 

@@ -33,7 +33,7 @@ public sealed class SignInFlowDiscoveryTests
       Assert.Null(fixture.Flow.Readiness);
       Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
       Assert.Equal(new Uri(SignInFixture.Server), Assert.Single(fixture.Sessions).Origin);
-      Assert.False(fixture.Sessions[0].AllowUntrustedCertificate);
+      Assert.True(fixture.Sessions[0].CertificateException.IsEmpty);
       Assert.Equal(new FeedbackMessage("Sign-in options ready", "Use the sign-in method configured by this server.", FeedbackSeverity.Informational), Assert.Single(fixture.Shown));
       Assert.Equal(["INFO Discover sign-in options requested for https://print.example.com/.", "INFO Sign-in options for print.example.com: password sign-in offered, browser sign-in not offered."], fixture.Log.Entries);
       Assert.Equal([SignInStage.Discovering, SignInStage.Ready], fixture.Stages);
@@ -262,7 +262,7 @@ public sealed class SignInFlowDiscoveryTests
 
 
 
-   /// <summary>The saved certificate exception is applied only to the server it was saved for: discovery of that server asks for it, discovery of another does not.</summary>
+   /// <summary>The saved certificate exception is applied only to the server it was saved for: the session for that server accepts an untrusted certificate from that server's origin and no other, and the session for another server accepts none.</summary>
    [Fact]
    public async Task CertificateException_AppliesOnlyToItsOwnServer()
    {
@@ -272,9 +272,74 @@ public sealed class SignInFlowDiscoveryTests
       await fixture.Flow.DiscoverAsync("https://dev.example.com:8443");
       await fixture.Flow.DiscoverAsync("https://print.example.com");
 
-      Assert.True(fixture.Sessions[0].AllowUntrustedCertificate);
-      Assert.False(fixture.Sessions[1].AllowUntrustedCertificate);
+      Assert.Equal(2, fixture.Sessions.Count);
+      Assert.Equal(["https://dev.example.com:8443/"], fixture.Sessions[0].CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
+      Assert.True(fixture.Sessions[1].CertificateException.IsEmpty);
    }
+
+
+
+   /// <summary>
+   /// A server with a saved certificate exception that names a sign-in provider on another origin. The description is
+   /// read on a session that accepts an untrusted certificate from the server only; that session is then discarded and
+   /// the attempt continues on a second one whose exception covers the server and the provider it named, and nothing
+   /// else, so the browser sign-in can read the provider's discovery document. The log names both origins, and the
+   /// operator sees one result.
+   /// </summary>
+   [Fact]
+   public async Task CertificateException_AlsoCoversTheSeparateProviderItsServerNames()
+   {
+      SignInFixture fixture = new() { ConfigureSession = session => session.Metadata = OffersThrough("https://login.example.com:9443/realms/dev") };
+      Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com:8443/"));
+      fixture.Shown.Clear();
+
+      await fixture.Flow.DiscoverAsync("https://dev.example.com:8443");
+
+      Assert.Equal(2, fixture.Sessions.Count);
+      Assert.Equal(["https://dev.example.com:8443/"], fixture.Sessions[0].CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.Equal(["https://dev.example.com:8443/", "https://login.example.com:9443/"], fixture.Sessions[1].CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
+      Assert.False(fixture.Sessions[1].Disposed);
+      Assert.True(fixture.Flow.HasSession);
+      Assert.True(fixture.Flow.BrowserOffered);
+      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
+      Assert.Equal("Sign-in options ready", Assert.Single(fixture.Shown).Title);
+      Assert.Contains("WARN The certificate exception saved for dev.example.com:8443 is also applied to the sign-in provider this server names, login.example.com:9443: an untrusted certificate is accepted from https://dev.example.com:8443, https://login.example.com:9443 and from no other host.", fixture.Log.Entries, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The second session is created only when it would cover more. A provider on the server's own origin is already
+   /// covered, so the attempt stays on the first session; and a server without a saved exception gets no exception at
+   /// all, whatever provider it names.
+   /// </summary>
+   [Theory]
+   [InlineData(true, "https://dev.example.com:8443/realms/dev", "https://dev.example.com:8443/")]
+   [InlineData(false, "https://login.example.com:9443/realms/dev", null)]
+   public async Task CertificateException_IsNotWidenedWithoutNeedOrWithoutBeingSaved(bool saved, string issuer, string? covered)
+   {
+      SignInFixture fixture = new() { ConfigureSession = session => session.Metadata = OffersThrough(issuer) };
+      if(saved)
+      { Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com:8443/")); }
+
+      await fixture.Flow.DiscoverAsync("https://dev.example.com:8443");
+
+      FakeSession session = Assert.Single(fixture.Sessions);
+      Assert.False(session.Disposed);
+      Assert.Equal(covered is null ? [] : new[] { covered }, session.CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
+      Assert.True(fixture.Flow.BrowserOffered);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("is also applied to the sign-in provider", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>A server description offering the native browser grant through the given issuer.</summary>
+   private static QqqAuthenticationMetadata OffersThrough(string issuer) => new()
+   {
+      Type = "OAUTH2",
+      Values = new QqqAuthenticationMetadata.ProviderValues { NativeSessionLogin = new QqqAuthenticationMetadata.NativeGrant { Issuer = issuer, RedirectUris = [SignInFixture.Callback] } },
+   };
 
 
 

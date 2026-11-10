@@ -46,8 +46,8 @@ public sealed partial class QqqSessionClient
          if(problems.Count != 0)
          { return Report(new QqqServerCompatibility(problems, discovery, QqqSignInMethods.None)); }
          _discovery = discovery;
-         (QqqSignInMethods methods, QqqCompatibilityProblem? signIn) = await SignInMethodsAsync(discovery, browserRedirect, cancellationToken).ConfigureAwait(false);
-         return Report(new QqqServerCompatibility(signIn is null ? [] : [signIn], discovery, methods, RefusedCertificate(signIn)));
+         (QqqSignInMethods methods, QqqCompatibilityProblem? signIn, Uri? provider) = await SignInMethodsAsync(discovery, browserRedirect, cancellationToken).ConfigureAwait(false);
+         return Report(new QqqServerCompatibility(signIn is null ? [] : [signIn], discovery, methods, RefusedCertificate(signIn), provider));
       }
       finally { _gate.Release(); }
    }
@@ -78,9 +78,10 @@ public sealed partial class QqqSessionClient
    /// Reads the authentication metadata of a server that passed discovery and names the sign-in methods it offers, or the
    /// problem that leaves none. Table-based servers offer a password; OAuth2 servers offer the browser when their native
    /// grant passes the same checks sign-in applies and lists the host's callback. Metadata that passed is cached, as
-   /// sign-in would.
+   /// sign-in would. The origin of the provider the description names is returned whenever the description was read,
+   /// usable or not.
    /// </summary>
-   private async Task<(QqqSignInMethods Methods, QqqCompatibilityProblem? Problem)> SignInMethodsAsync(QqqApiDiscovery discovery, Uri? browserRedirect, CancellationToken cancellationToken)
+   private async Task<(QqqSignInMethods Methods, QqqCompatibilityProblem? Problem, Uri? ProviderOrigin)> SignInMethodsAsync(QqqApiDiscovery discovery, Uri? browserRedirect, CancellationToken cancellationToken)
    {
       QqqAuthenticationMetadata metadata;
       try
@@ -89,18 +90,18 @@ public sealed partial class QqqSessionClient
       {
          if(Unreadable(exception, QqqCompatibilityIssue.SignInUnavailable, "sign-in description", cancellationToken) is not { } unreadable)
          { throw; }
-         return (QqqSignInMethods.None, unreadable);
+         return (QqqSignInMethods.None, unreadable, null);
       }
       if(string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal))
       {
          _authentication = metadata;
-         return (QqqSignInMethods.Password, null);
+         return (QqqSignInMethods.Password, null, null);
       }
       List<string> problems = BrowserSignInProblems(discovery, metadata, browserRedirect);
       if(problems.Count != 0)
-      { return (QqqSignInMethods.None, new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, string.Join("; ", problems))); }
+      { return (QqqSignInMethods.None, new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, string.Join("; ", problems)), metadata.ProviderOrigin); }
       _authentication = metadata;
-      return (QqqSignInMethods.Browser, null);
+      return (QqqSignInMethods.Browser, null, metadata.ProviderOrigin);
    }
 
 

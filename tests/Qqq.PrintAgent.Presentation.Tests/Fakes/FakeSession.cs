@@ -16,7 +16,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// it finishes, whatever else happened to it, and every later call is refused. A held call resumes on another thread, as
 /// the real client's network calls do. It never touches a network.
 /// </summary>
-internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : ISignInSession
+internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins certificateException) : ISignInSession
 {
    private readonly TaskCompletionSource _completeEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
    private int _attempts;
@@ -30,8 +30,8 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
 
 
 
-   /// <summary>Whether the flow asked for the certificate exception when it created this session.</summary>
-   internal bool AllowUntrustedCertificate { get; } = allowUntrustedCertificate;
+   /// <summary>The certificate exception the flow created this session under; empty when it asked for none.</summary>
+   internal QqqCertificateExceptionOrigins CertificateException { get; } = certificateException;
 
 
 

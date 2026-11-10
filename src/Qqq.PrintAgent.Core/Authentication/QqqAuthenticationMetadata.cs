@@ -15,6 +15,19 @@ public sealed class QqqAuthenticationMetadata
 
 
 
+   /// <summary>
+   /// The origin of the sign-in provider this description names: scheme, host and port of the issuer in the native
+   /// browser grant. Null when the server signs in with a password, publishes no such grant, or names an issuer that
+   /// is not a plain HTTPS address. It is derived from what the server sent and is never part of the document.
+   /// </summary>
+   [System.Text.Json.Serialization.JsonIgnore]
+   public Uri? ProviderOrigin => Uri.TryCreate(Values?.NativeSessionLogin?.Issuer, UriKind.Absolute, out Uri? issuer)
+      && string.Equals(issuer.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) && issuer.UserInfo.Length == 0
+      ? new Uri(issuer.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute)
+      : null;
+
+
+
    /// <summary>The provider settings the server publishes: client identifier, scopes, base address and, when the server supports it, the native browser sign-in grant.</summary>
    public sealed class ProviderValues
    {

@@ -48,7 +48,7 @@ public sealed partial class AgentRuntime
       { _log.Write("WARN", $"Creating a session for {origin.Authority} with untrusted server certificates ALLOWED for this server (administrator setting; development only)."); }
       else if(trust.AllowUntrustedCertificate)
       { _log.Write("INFO", $"The untrusted-certificate exception is saved for {trust.Origin}, not {ServerTrust.Normalize(origin)}; normal certificate validation applies to this session."); }
-      return new QqqSessionClient(origin, allowLoopbackHttp: origin.IsLoopback, traffic: _traffic, diagnostics: _log.SessionDiagnostics(), allowUntrustedCertificate: allowUntrusted);
+      return new QqqSessionClient(origin, allowLoopbackHttp: origin.IsLoopback, traffic: _traffic, diagnostics: _log.SessionDiagnostics(), certificateException: allowUntrusted ? QqqCertificateExceptionOrigins.ForServer(origin) : QqqCertificateExceptionOrigins.None);
    }
 
 

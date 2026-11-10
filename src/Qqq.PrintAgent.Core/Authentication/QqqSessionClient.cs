@@ -46,11 +46,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// Creates a client bound to one server origin. The origin must be an absolute https URL with no credentials, path,
    /// query or fragment (plain http only when explicitly allowed and loopback). The handler never follows redirects or
    /// manages cookies, because redirects are refused and the session cookie is attached by hand to each request, and the
-   /// HTTP client has no overall timeout because every request sets its own bound.
+   /// HTTP client has no overall timeout because every request sets its own bound. A certificate Windows does not trust
+   /// is accepted only from the origins the certificate exception names; without one, from nowhere.
    /// </summary>
    public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null,
-      QqqSessionDiagnostics? diagnostics = null, bool allowUntrustedCertificate = false)
-      : this(origin, handler, timeProvider, allowLoopbackHttp, traffic, diagnostics, allowUntrustedCertificate, QqqPlatformTransport.Instance)
+      QqqSessionDiagnostics? diagnostics = null, QqqCertificateExceptionOrigins? certificateException = null)
+      : this(origin, handler, timeProvider, allowLoopbackHttp, traffic, diagnostics, certificateException ?? QqqCertificateExceptionOrigins.None, QqqPlatformTransport.Instance)
    {
    }
 
@@ -62,12 +63,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// of an upgrade back to it.
    /// </summary>
    internal QqqSessionClient(Uri origin, HttpMessageHandler? handler, TimeProvider? timeProvider, bool allowLoopbackHttp, ApplicationTrafficMeter? traffic,
-      QqqSessionDiagnostics? diagnostics, bool allowUntrustedCertificate, IQqqTransport transport)
+      QqqSessionDiagnostics? diagnostics, QqqCertificateExceptionOrigins certificateException, IQqqTransport transport)
    {
       ArgumentNullException.ThrowIfNull(origin);
       _transport = transport;
       _diagnostics = diagnostics ?? QqqSessionDiagnostics.None;
-      AllowsUntrustedCertificate = allowUntrustedCertificate;
+      CertificateException = certificateException;
       if(!origin.IsAbsoluteUri || origin.UserInfo.Length != 0 || origin.Query.Length != 0 || origin.Fragment.Length != 0
          || !string.Equals(origin.AbsolutePath, "/", StringComparison.Ordinal)
          || (!string.Equals(origin.Scheme, "https", StringComparison.Ordinal)
@@ -82,9 +83,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       {
          Timeout = Timeout.InfiniteTimeSpan,
       };
-      _diagnostics.Info($"Session client created for {Origin.Scheme}://{Origin.Authority} (plain HTTP {(string.Equals(Origin.Scheme, "http", StringComparison.Ordinal) ? "allowed for loopback" : "not allowed")}; untrusted server certificates {(allowUntrustedCertificate ? "ALLOWED" : "refused")}).");
-      if(allowUntrustedCertificate)
-      { _diagnostics.Info($"WARNING: certificate validation is relaxed for {Origin.Authority}. Any certificate, including a forged one, will be accepted. Use this only for development servers."); }
+      _diagnostics.Info($"Session client created for {Origin.Scheme}://{Origin.Authority} (plain HTTP {(string.Equals(Origin.Scheme, "http", StringComparison.Ordinal) ? "allowed for loopback" : "not allowed")}; untrusted server certificates {(certificateException.IsEmpty ? "refused" : "ALLOWED from " + certificateException)}).");
+      if(!certificateException.IsEmpty)
+      { _diagnostics.Info($"WARNING: certificate validation is relaxed for {certificateException} and for no other host. Any certificate presented from there, including a forged one, will be accepted. Use this only for development servers."); }
    }
 
 
@@ -92,19 +93,22 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    public Uri Origin { get; }
    public bool IsAuthenticated => _sessionToken is not null;
 
-   /// <summary>True when this client was told to accept a server certificate that Windows does not trust (self-signed or private authority), for development servers only.</summary>
-   public bool AllowsUntrustedCertificate { get; }
+   /// <summary>The origins from which this client accepts a certificate that Windows does not trust (self-signed or private authority), for development servers only; empty for none. It is fixed when the client is built.</summary>
+   public QqqCertificateExceptionOrigins CertificateException { get; }
 
 
 
    /// <summary>
    /// Decides whether a TLS server certificate is accepted and, either way, says why in the log. A certificate Windows trusts
-   /// is accepted silently (details at debug level). One it does not trust is rejected with the exact policy errors, the
-   /// subject, issuer and validity, and the remedy, unless untrusted certificates were explicitly allowed for this client,
-   /// in which case it is accepted with a warning naming the certificate so the exception is never silent.
+   /// is accepted silently (details at debug level). One it does not trust is accepted only when the address the request
+   /// or the socket upgrade is going to is on an origin the certificate exception names, and then with a warning naming
+   /// the certificate so the exception is never silent. From any other host it is rejected, whatever exception the
+   /// client holds, with the exact policy errors, the subject, issuer and validity, and the remedy; the rejection is
+   /// kept for the compatibility check to report.
    /// </summary>
-   internal bool EvaluateCertificate(string host, X509Certificate2? certificate, SslPolicyErrors errors)
+   internal bool EvaluateCertificate(Uri address, X509Certificate2? certificate, SslPolicyErrors errors)
    {
+      string host = address.Authority;
       string summary = certificate is null ? "no certificate presented"
          : $"subject '{ShownText(certificate.Subject)}', issuer '{ShownText(certificate.Issuer)}', valid {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd} to {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}, thumbprint {certificate.Thumbprint}";
       if(errors == SslPolicyErrors.None)
@@ -112,9 +116,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _diagnostics.Debug(() => $"TLS certificate for {host} accepted by Windows: {summary}.");
          return true;
       }
-      if(AllowsUntrustedCertificate)
+      if(CertificateException.Covers(address))
       {
-         _diagnostics.Info($"TLS certificate for {host} is NOT trusted by Windows ({errors}) but was accepted because untrusted certificates are allowed for this server: {summary}.");
+         _diagnostics.Info($"TLS certificate for {host} is NOT trusted by Windows ({errors}) but was accepted because the certificate exception covers this origin: {summary}.");
          return true;
       }
       Volatile.Write(ref _certificateRejection, new QqqCertificateRejection(errors, certificate is null ? null : ShownText(certificate.Subject), certificate is null ? null : ShownText(certificate.Issuer),
@@ -124,7 +128,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
             ? "Windows does not trust the issuing authority for the account this process runs as (the service runs as LocalSystem and reads the machine store, not your user store). Install the issuer's root certificate in the Local Machine Trusted Root store, or enable 'Allow untrusted server certificate' in Connection settings for a development server."
             : errors.HasFlag(SslPolicyErrors.RemoteCertificateNameMismatch)
                ? "The certificate is not issued for this host name or address; use the address the certificate names, or reissue it."
-               : "The server presented no usable certificate."));
+               : "The server presented no usable certificate.")
+         + (CertificateException.IsEmpty ? "" : $" The certificate exception in force covers {CertificateException} and not this host."));
       return false;
    }
 
