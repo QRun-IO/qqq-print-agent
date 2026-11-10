@@ -171,7 +171,6 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
 
-
    /// <summary>The result of one claim: the job to process, or none, and whether a malformed job was refused and reported instead.</summary>
    private readonly record struct Claim(PrintJob? Job, bool Refused);
 
@@ -180,9 +179,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// <summary>
    /// Runs one claimed job and reports its outcome. The submission steps live in <see cref="SubmitJobAsync"/> so their
    /// disposal scope stays inside this method's try block, which keeps every failure, including one raised while
-   /// releasing a reservation, recorded through the same FAILED or OUTCOME_UNKNOWN decision. One timing line per job is
-   /// logged afterwards so a slow print can be attributed to a phase from the service's own log without any extra
-   /// request, payload or printer access.
+   /// releasing a reservation, inside the same decision: FAILED when Windows was never asked, OUTCOME_UNKNOWN when
+   /// submission had begun, and nothing at all when the job is already recorded as SPOOLED, because a release that
+   /// fails after Windows accepted the document says nothing about the print and must not be written over it. One
+   /// timing line per job is logged afterwards so a slow print can be attributed to a phase from the service's own log
+   /// without any extra request, payload or printer access.
    /// </summary>
    private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, JobAttempt attempt, CancellationToken token)
    {
@@ -197,7 +198,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       { await SubmitJobAsync(job, attempt, token).ConfigureAwait(false); }
       catch(Exception exception)
       {
-         Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? PrintJobState.OutcomeUnknown : PrintJobState.Failed, exception.Message);
+         if(attempt.Spooled)
+         { log?.Invoke($"{job.JobId}: spooled, and stays recorded as spooled; releasing what the job held failed afterwards: {exception.Message}"); }
+         else
+         { Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? PrintJobState.OutcomeUnknown : PrintJobState.Failed, exception.Message); }
       }
       log?.Invoke(attempt.TimingMessage(job.JobId));
       if(!token.IsCancellationRequested)
@@ -211,6 +215,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// Downloads, revalidates and submits one job. The reservation, staged file and submission lease are declared here and
    /// released when this method returns, after SPOOLED is recorded, exactly as when the same steps ran inline. The
    /// attempt records how far the job got so the caller can tell a refusal before any bytes from an uncertain submission.
+   /// Between recording SUBMITTING and calling Windows nothing has been sent, so the two things that can stop the job
+   /// there (the receipt not being delivered, and cancellation) say in their own words that no bytes were submitted.
    /// </summary>
    private async Task SubmitJobAsync(PrintJob job, JobAttempt attempt, CancellationToken token)
    {
@@ -228,13 +234,25 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       await using IAsyncDisposable? submission = options?.AcquireSubmissionAsync is null ? null : await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
       RequireSubmitAllowed("Dispatch is paused before native submission.");
       Record(job, PrintJobState.Submitting);
-      await FlushAsync(token).ConfigureAwait(false);
+      try
+      { await FlushAsync(token).ConfigureAwait(false); }
+      catch(Exception exception)
+      {
+         ///////////////////////////////////////////////////////////////////////////
+         // SUBMITTING is on record but Windows has not been asked, so this is a  //
+         // plain refusal. the transport's own message ("connection reset") would //
+         // leave an operator who reads SUBMITTING then FAILED unsure whether     //
+         // anything printed, so the refusal states it                            //
+         ///////////////////////////////////////////////////////////////////////////
+         throw new IOException("The submitting receipt could not be delivered, so the document was not sent to the printer; no bytes were submitted.", exception);
+      }
       attempt.Gate = attempt.Lap();
       RequireSubmitAllowed("Dispatch stopped before native submission; no bytes were submitted.");
       RealtimeSettings submissionSettings = EffectiveSettings;
       if(job.Options.Copies > submissionSettings.MaxCopies || job.ContentLength > submissionSettings.MaximumDocumentBytes(job.Format))
       { throw new InvalidDataException("Document or copies exceed the current submission policy."); }
-      token.ThrowIfCancellationRequested();
+      if(token.IsCancellationRequested)
+      { throw new OperationCanceledException("Stopped before native submission; no bytes were submitted.", token); }
       attempt.Submitting = true;
       attempt.Restart();
       string spoolId = await SubmitNativeAsync(job, file, content, submissionSettings, token).ConfigureAwait(false);

@@ -153,6 +153,11 @@ internal sealed class RecordingJournal : IJobJournal
 
 
 
+   /// <summary>The identifier of every event recorded for a job, in order, so a test can require that a delivery carried the identity that was recorded.</summary>
+   internal string[] EventIdsOf(string jobId) => [.. _events.Where(entry => string.Equals(entry.JobId, jobId, StringComparison.Ordinal)).Select(entry => entry.Event.EventId)];
+
+
+
    /// <summary>The most recent event recorded for a job.</summary>
    internal PrintEvent Last(string jobId) => _events.Last(entry => string.Equals(entry.JobId, jobId, StringComparison.Ordinal)).Event;
 
