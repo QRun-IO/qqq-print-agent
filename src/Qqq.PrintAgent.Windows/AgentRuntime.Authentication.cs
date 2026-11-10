@@ -69,7 +69,7 @@ public sealed partial class AgentRuntime
    /// session on the resume interval without querying jobs. A saved session for a different server than the paired one,
    /// or one the server no longer accepts, leaves printing blocked and keeps pairing and history intact.
    /// </summary>
-   private async Task<bool> EnsureAuthorizationAsync(CancellationToken token)
+   internal async Task<bool> EnsureAuthorizationAsync(CancellationToken token)
    {
       if(apiFactory is not null)
       {

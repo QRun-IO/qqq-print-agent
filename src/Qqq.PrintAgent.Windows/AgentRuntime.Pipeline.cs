@@ -14,6 +14,12 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>
+   /// How many lanes one wake-up starts. It equals the largest download concurrency the client advertises, so a wave can use
+   /// every slot the server may grant; lanes beyond the granted slots wait for one, or stop once the queue is drained.
+   /// </summary>
+   internal const int DrainLanes = 16;
+
    private TaskCompletionSource _pipelineChanged = NewSignal();
    private readonly Dictionary<string, CancellationTokenSource> _activeTransfers = new(StringComparer.Ordinal);
    private readonly HashSet<string> _printingQueues = new(StringComparer.Ordinal);
@@ -55,7 +61,7 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// Long-running claim loop. At start it removes staging files a crash left behind, refusing reparse points. Each
-   /// wake-up then starts a wave of 16 drain lanes that share the work until the queue is empty or capacity is full. The
+   /// wake-up then starts a wave of drain lanes that share the work until the queue is empty or capacity is full. The
    /// wave is cancelled when the connection is replaced, after which the loop waits for the next wake-up.
    /// </summary>
    private async Task RealtimeDrainAsync(CancellationToken token)
@@ -81,7 +87,7 @@ public sealed partial class AgentRuntime
             { continue; }
             _pipelineLifetime = wave;
             var state = new PipelineWave();
-            work = Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => DrainLaneAsync(staging, state, wave.Token), wave.Token)));
+            work = Task.WhenAll(Enumerable.Range(0, DrainLanes).Select(_ => Task.Run(() => DrainLaneAsync(staging, state, wave.Token), wave.Token)));
             _pipelineTask = work;
          }
          try

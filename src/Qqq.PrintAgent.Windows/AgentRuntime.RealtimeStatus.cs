@@ -18,7 +18,8 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Keeps the connection visibly alive while it is ready: a transport ping every interval, a heartbeat with the computer
    /// profile only when ordinary traffic is allowed (a paused or disconnected device pings but does not claim to be working),
-   /// session renewal when it is due, and a status refresh request so the footer stays current.
+   /// session renewal when it is due, and a status refresh request so the footer stays current. The wait between rounds is
+   /// measured on the runtime's time provider, so a test can let an interval pass without waiting for it.
    /// </summary>
    private async Task RealtimeHeartbeatAsync(PrintingRealtimeChannel channel, CancellationToken token)
    {
@@ -36,7 +37,7 @@ public sealed partial class AgentRuntime
             { await EnsureAuthorizationAsync(token).ConfigureAwait(false); }
             RequestStatusSynchronization();
          }
-         await Task.Delay(TimeSpan.FromSeconds(_realtimeSettings.HeartbeatIntervalSeconds), token).ConfigureAwait(false);
+         await Task.Delay(TimeSpan.FromSeconds(_realtimeSettings.HeartbeatIntervalSeconds), timeProvider ?? TimeProvider.System, token).ConfigureAwait(false);
       }
    }
 
