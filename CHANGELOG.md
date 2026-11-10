@@ -13,19 +13,35 @@ capability gets the ordinary logout, and the log says the provider session was n
 `sign-out` cannot open the companion's callback inbox, so it still ends only the QQQ session and says so.
 No change to pairing, history or the printing protocol.
 
-Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the installed service over its pipe. The
-`--legacy-compat` mode is removed with everything that existed for it: the separate per-user data directory
-(`--data-dir`), the command line's worker lock, the run-once claim pass (`run --once`), the isolated enroll and
-expose paths, and the `--service` flag. It was the last code that sent a device token outside a QQQ session.
-`--help`, `-h`, `help` and no arguments print the usage on standard output and exit 0 (`--help` and `-h` used to
-exit 1); an unknown command prints it on standard error and exits 1. Arguments are checked strictly: a command
-accepts exactly its own options, each once, and anything else is refused without contacting the service and
-without repeating what was typed. `service-status` and `snapshot` now exit 1 when the service replies with an
-error, as the other commands already did. State left in `%LOCALAPPDATA%\QqqPrintAgent` by the removed mode is no
-longer read; see [Administrator operations](docs/ADMINISTRATION.md#command-line). The executable is
-no longer a printer worker: `--printer-worker` is an unknown command. Only the removed mode ever started it that
-way; the service starts its own executable as the worker, in 1.x as now. Its two remaining internal roles (MSI
-update helper, browser sign-in callback) are unchanged.
+Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the installed service over its pipe.
+
+- The `--legacy-compat` mode is removed with everything that existed for it: the separate per-user data directory
+  (`--data-dir`), the command line's worker lock, the run-once claim pass (`run --once`), the isolated enroll and
+  expose paths, and the `--service` flag. It was the last path the shipped programs could reach that sent a device
+  token outside a QQQ session. A command line that uses one of the four options is refused with a sentence saying
+  they were removed in 2.0. State the mode left in `%LOCALAPPDATA%\QqqPrintAgent` is no longer read; see
+  [Administrator operations](docs/ADMINISTRATION.md#command-line).
+- The executable is no longer a printer worker: `--printer-worker` is an unknown command. Only the removed mode
+  ever started it that way; the service starts its own executable as the worker, in 1.x as now. Its two remaining
+  internal roles (MSI update helper, browser sign-in callback) are unchanged.
+- Help: `--help` and `-h` print the usage on standard output and exit 0 (they used to exit 1), as `help` and no
+  arguments already did, and so does `--help` or `-h` after a command (`printers --help`). The usage text is new:
+  one line per command, where the enrollment code comes from, and the exit codes. It is written with the
+  platform's line ends.
+- Refusals: an unknown command, and any command line a command does not accept, exits 1 with one line saying what
+  is wrong followed by the usage, on standard error (an unknown command used to print the old usage on standard
+  output). The reasons are new and fixed: for example `--server is required.`, `--printer needs a value.`,
+  `--exposed may be given only once.`, `'run' takes no arguments.`. A refusal never repeats what was typed.
+- Arguments are strict. A command accepts exactly its own options, each once, each with a value that is not blank
+  and does not begin with `--`; extra words used to be ignored. `--exposed` takes `true` or `false` in any letter
+  case and nothing else (padded values used to be accepted). Nothing is sent, and no enrollment code is asked
+  for, when a command line is refused.
+- Enrollment code: the prompt `Enrollment code: ` is written to standard error, not standard output, and its line
+  is ended there, so a script that pipes the code in captures only the service's reply. At a console the code is
+  typed without being shown. White space around the code is dropped, whether it comes from
+  `QQQ_PRINT_ENROLLMENT_CODE` or standard input.
+- `service-status` and `snapshot` exit 1 when the service replies with `Error:`, as the other commands already
+  did. The reply itself is still printed on standard output.
 
 ## 1.2.1
 
