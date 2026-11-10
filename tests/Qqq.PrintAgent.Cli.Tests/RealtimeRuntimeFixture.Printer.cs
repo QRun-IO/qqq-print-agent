@@ -51,6 +51,11 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
+      /// <summary>When set, cancellation is attempted and then fails with this exception, for failures the command code does not expect.</summary>
+      internal Exception? CancellationFailure { get; set; }
+
+
+
       /// <summary>Reports two ready queues, "printer" and "other", each accepting PDF and ZPL.</summary>
       public IReadOnlyList<PrinterInfo> Discover() => [new("printer", "Synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"]), new("other", "Other synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"])];
 
@@ -90,6 +95,8 @@ internal sealed partial class RealtimeRuntimeFixture
          Assert.Equal("Synthetic", printerName);
          Assert.Equal("123", spoolerJobId);
          Interlocked.Increment(ref Cancellations);
+         if(CancellationFailure is not null)
+         { throw CancellationFailure; }
          if(LoseCancellationResult)
          {
             throw new IOException("Synthetic isolated worker reply lost after action.");

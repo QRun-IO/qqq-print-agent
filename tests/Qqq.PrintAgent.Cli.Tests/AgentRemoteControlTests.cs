@@ -244,6 +244,39 @@ public sealed class AgentRemoteControlTests
 
 
 
+   /// <summary>
+   /// The spooler cancel fails in a way the command code has no outcome for. The failure ends the connection after the
+   /// execution intent was recorded and before any receipt, and the service keeps running. When the server delivers the same
+   /// command on the next connection it is not run a second time: the recorded intent without a receipt is answered once with
+   /// OUTCOME_UNKNOWN, because the agent cannot tell what the first attempt did to the spooler.
+   /// </summary>
+   [Fact]
+   public async Task CommandThatFailedUnexpectedlyIsAnsweredUnknownAndNeverRunAgainWhenRedelivered()
+   {
+      DeviceControlCommand command = RealtimeRuntimeFixture.Command();
+      await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
+      fixture.Printer.CancellationFailure = new NotSupportedException("Synthetic unexpected spooler failure.");
+      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      await first.SendAsync("COMMAND", command);
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal) && line.Contains("Synthetic unexpected spooler failure", StringComparison.Ordinal)));
+      Assert.Equal(1, fixture.Printer.Cancellations);
+      Assert.Equal(0, fixture.Count("COMMAND_RECEIPT"));
+      using(AgentStore interrupted = new(fixture.DirectoryPath))
+      { Assert.Null(interrupted.GetControlReceipt("command")); }
+      fixture.Printer.CancellationFailure = null;
+      RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
+      await second.SendAsync("COMMAND", command);
+      await fixture.WaitAsync(() => HasReceipt(fixture, "command", "OUTCOME_UNKNOWN") && PendingReceipts(fixture) == 0);
+      Assert.Equal(1, fixture.Printer.Cancellations);
+      Assert.Equal(1, fixture.Count("COMMAND_RECEIPT"));
+      using AgentStore store = new(fixture.DirectoryPath);
+      Assert.Contains("No command was automatically repeated", store.GetControlReceipt("command")!.Message, StringComparison.Ordinal);
+      Assert.Equal("SPOOLED", store.GetState("job"));
+      Assert.False(fixture.Running.IsCompleted);
+   }
+
+
+
    /// <summary>An expired command, or one for a job this device does not hold, is answered with EXPIRED or OWNERSHIP_MISMATCH and never reaches Windows, so a late or misdirected cancel cannot affect a printer.</summary>
    [Theory]
    [InlineData(true, "EXPIRED")]
