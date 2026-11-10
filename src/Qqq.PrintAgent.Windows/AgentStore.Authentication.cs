@@ -11,14 +11,21 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// Saved QQQ session part of the store. The session identity and credential are kept in one DPAPI-protected file; an
-/// unreadable file is quarantined (moved aside, never deleted) so a user can sign in again without losing evidence.
+/// Saved QQQ session part of the store. The session identity and credential are kept in one DPAPI-protected file. While a
+/// pairing change is in progress, the session that belongs to the new pairing waits beside it under a staged name until
+/// it is moved into place. An unreadable session file, stored or staged, is moved aside under a recovery name and never
+/// deleted, so a user can sign in again without losing evidence.
 /// </summary>
 public sealed partial class AgentStore
 {
    private const string SessionFile = "qqq-session.dpapi";
    private const string StagedSessionFile = "qqq-session.staged.dpapi";
    private bool _authenticationRecoveryRequired;
+
+
+
+   /// <summary>What the last read of the session did about a staged pairing change, for the caller to log.</summary>
+   internal StagedPairingOutcome StagedPairing { get; private set; }
 
 
 
@@ -53,23 +60,12 @@ public sealed partial class AgentStore
 
 
    /// <summary>
-   /// Reads and decrypts the saved session, or returns null when none exists. A pairing change that was staged and not
-   /// finished is finished first, so the session returned always belongs to the stored pairing. The file is size-bounded,
-   /// decrypted for the current service account, parsed and validated, and the decrypted bytes are zeroed afterwards. A
-   /// damaged or invalid file throws.
+   /// Returns the saved session to act on, or null when there is none. A pairing change that was staged and not finished
+   /// is dealt with first: a staged session that belongs to the stored pairing is the one returned, whether or not it
+   /// could be moved into place yet, so a caller never acts on a session left over from the previous pairing. Files are
+   /// size-bounded, decrypted for the current service account, parsed and validated. A damaged stored file throws.
    /// </summary>
-   public AgentAuthentication? LoadAuthentication()
-   {
-      try
-      {
-         CompleteStagedPairing();
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
-      {
-         // The staged session could not be moved into place now; the next reader tries again, and until then the stored session is the earlier one.
-      }
-      return ReadAuthentication(Path.Combine(_directory, SessionFile));
-   }
+   public AgentAuthentication? LoadAuthentication() => ResolveStagedPairing() ?? ReadAuthentication(Path.Combine(_directory, SessionFile));
 
 
 
@@ -132,19 +128,19 @@ public sealed partial class AgentStore
       WriteProtected(path + ".tmp", authentication);
       _ = QuarantineUnreadableAuthentication();
       File.Move(path + ".tmp", path, overwrite: true);
-      File.Delete(Path.Combine(_directory, StagedSessionFile));
+      DeleteQuietly(Path.Combine(_directory, StagedSessionFile));
    }
 
 
 
    /// <summary>
-   /// Starts replacing the pairing and its session as one step. The session is written first under a staged name and the
-   /// pairing is replaced second. From then on the change is decided: this caller, a sign-in or the next service start
-   /// finishes it with <see cref="CompleteStagedPairing"/>, because the staged session names the stored pairing's device. If
-   /// the pairing cannot be written the staged session is removed and nothing has changed; a staged session left by a crash
-   /// before the pairing was replaced names a different device and is discarded by the next reader.
+   /// Starts replacing the pairing and its session as one step. The session is written first, flushed to disk, under a
+   /// staged name, and the pairing is replaced second. From then on the change is decided: every reader of the session
+   /// uses the staged one and moves it into place, because it names the stored pairing's server and device. If the pairing
+   /// cannot be written the staged session is removed and nothing has changed; a staged session left by a crash before the
+   /// pairing was replaced names a different device and is discarded by the next reader.
    /// </summary>
-   public void StagePairing(AgentConfiguration configuration, AgentAuthentication authentication)
+   internal void StagePairing(AgentConfiguration configuration, AgentAuthentication authentication)
    {
       string staged = Path.Combine(_directory, StagedSessionFile);
       WriteProtected(staged + ".tmp", authentication);
@@ -155,73 +151,145 @@ public sealed partial class AgentStore
       }
       catch
       {
-         File.Delete(staged);
+         DeleteQuietly(staged);
          throw;
       }
    }
 
 
 
+   /// <summary>Deals with a staged pairing change now, as every read of the session does, and reports what was done.</summary>
+   internal StagedPairingOutcome CompleteStagedPairing()
+   {
+      _ = ResolveStagedPairing();
+      return StagedPairing;
+   }
+
+
+
    /// <summary>
-   /// Finishes a staged pairing change, or discards what is left of one that never replaced the pairing. A staged session
-   /// that names the stored pairing's server and device is moved into place as the session; any other (a different device,
-   /// an unreadable file, or no readable pairing) is deleted. An unreadable earlier session is quarantined, not overwritten.
+   /// Decides what a staged session is and acts on it. One that belongs to the stored pairing, while the stored session
+   /// does not, is the session of a pairing change in progress: it is moved into place when that is possible, an unreadable
+   /// earlier session being moved aside first, and returned either way. One that names another server or device, or that
+   /// the stored session has already superseded, is a leftover and is deleted. One that cannot be read is moved aside.
    /// </summary>
-   public void CompleteStagedPairing()
+   private AgentAuthentication? ResolveStagedPairing()
    {
       string staged = Path.Combine(_directory, StagedSessionFile);
-      if(!File.Exists(staged))
+      DeleteQuietly(staged + ".tmp");
+      StagedPairing = StagedPairingOutcome.None;
+      AgentAuthentication? session = File.Exists(staged) ? ReadStagedOrSetAside(staged) : null;
+      if(session is null)
       {
-         return;
-      }
-      if(!StagedSessionBelongsToPairing(staged))
-      {
-         File.Delete(staged);
-         return;
+         return null;
       }
       string path = Path.Combine(_directory, SessionFile);
+      AgentConfiguration? pairing = LoadPairingOrNull();
+      AgentAuthentication? stored = ReadStoredOrFlag(path);
+      if(!BelongsToPairing(session, pairing) || (stored is not null && BelongsToPairing(stored, pairing)))
+      {
+         File.Delete(staged);
+         StagedPairing = StagedPairingOutcome.Discarded;
+         return null;
+      }
       try
       {
-         _ = ReadAuthentication(path);
+         bool quarantined = QuarantineUnreadableAuthentication();
+         File.Move(staged, path, overwrite: true);
+         StagedPairing = quarantined ? StagedPairingOutcome.CompletedAfterQuarantine : StagedPairingOutcome.Completed;
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         // Something holds the stored session open. The staged one is still the right session to act on, and the next reader moves it.
+         StagedPairing = StagedPairingOutcome.Deferred;
+      }
+      return session;
+   }
+
+
+
+   /// <summary>Reads the staged session; one that cannot be decrypted or parsed is moved aside under a recovery name, because after the pairing was replaced it may be the only copy.</summary>
+   private AgentAuthentication? ReadStagedOrSetAside(string staged)
+   {
+      try
+      {
+         return ReadAuthentication(staged);
+      }
+      catch(Exception exception) when(exception is CryptographicException or JsonException or InvalidDataException or ArgumentException)
+      {
+         File.Move(staged, Path.Combine(_directory, "qqq-session.recovery-" + Guid.NewGuid().ToString("N") + ".dpapi"));
+         StagedPairing = StagedPairingOutcome.SetAside;
+         return null;
+      }
+   }
+
+
+
+   /// <summary>Reads the stored session for comparison; an unreadable one is flagged for quarantine and treated as absent.</summary>
+   private AgentAuthentication? ReadStoredOrFlag(string path)
+   {
+      try
+      {
+         return ReadAuthentication(path);
       }
       catch(Exception exception) when(exception is CryptographicException or JsonException or InvalidDataException or ArgumentException)
       {
          _authenticationRecoveryRequired = true;
+         return null;
       }
-      _ = QuarantineUnreadableAuthentication();
-      File.Move(staged, path, overwrite: true);
    }
 
 
 
-   /// <summary>True when the staged session can be read and names the same server and device as the stored pairing.</summary>
-   private bool StagedSessionBelongsToPairing(string staged)
+   /// <summary>Reads the stored pairing, treating one that cannot be read as absent: a pairing change only ever leaves a readable pairing behind.</summary>
+   private AgentConfiguration? LoadPairingOrNull()
    {
       try
       {
-         AgentAuthentication? session = ReadAuthentication(staged);
-         AgentConfiguration? pairing = LoadConfiguration();
-         return session is not null && pairing is not null
-            && string.Equals(session.Binding.DeviceId, pairing.DeviceId, StringComparison.Ordinal)
-            && Uri.TryCreate(pairing.ServerUrl, UriKind.Absolute, out Uri? server)
-            && string.Equals(server.GetLeftPart(UriPartial.Authority), session.Binding.Origin.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
+         return LoadConfiguration();
       }
-      catch(Exception exception) when(exception is CryptographicException or JsonException or InvalidDataException or ArgumentException or UriFormatException)
+      catch(Exception exception) when(exception is CryptographicException or JsonException or ArgumentException or UriFormatException)
       {
-         return false;
+         return null;
       }
    }
 
 
 
-   /// <summary>Writes one session to a file protected for the service account, zeroing the plaintext buffer on every path.</summary>
+   /// <summary>True when a session names the same server and device as the pairing.</summary>
+   private static bool BelongsToPairing(AgentAuthentication session, AgentConfiguration? pairing)
+      => pairing is not null
+         && string.Equals(session.Binding.DeviceId, pairing.DeviceId, StringComparison.Ordinal)
+         && Uri.TryCreate(pairing.ServerUrl, UriKind.Absolute, out Uri? server)
+         && string.Equals(server.GetLeftPart(UriPartial.Authority), session.Binding.Origin.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase);
+
+
+
+   /// <summary>Writes one session to a file protected for the service account and flushes it to disk, zeroing the plaintext buffer on every path.</summary>
    private static void WriteProtected(string path, AgentAuthentication authentication)
    {
       byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(authentication, PrintApiClient.JsonOptions);
       try
       {
-         File.WriteAllBytes(path, ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+         using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
+         stream.Write(ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+         stream.Flush(flushToDisk: true);
       }
       finally { CryptographicOperations.ZeroMemory(bytes); }
+   }
+
+
+
+   /// <summary>Deletes a leftover file without failing the operation that noticed it.</summary>
+   private static void DeleteQuietly(string path)
+   {
+      try
+      {
+         File.Delete(path);
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         // A leftover is harmless: a staged session is examined again by the next reader, and a temporary file is overwritten by the next write.
+      }
    }
 }

@@ -328,6 +328,7 @@ public sealed class AgentNewPairingTests
          Assert.True(File.Exists(StagedSession(fixture)));
          AgentSnapshot failed = runtime.GetSnapshot();
          Assert.False(failed.Authentication!.Authorized);
+         Assert.Contains("Sign in again", failed.Authentication.Message, StringComparison.Ordinal);
          Assert.Contains(failed.Logs, entry => entry.Message.Contains("after the new pairing and its session were saved", StringComparison.Ordinal));
          if(restart)
          {
@@ -385,50 +386,166 @@ public sealed class AgentNewPairingTests
 
 
    /// <summary>
-   /// A staged session that does not belong to the stored pairing is what a crash leaves when the session was staged and the
-   /// pairing was never replaced. The next read discards it and returns the session that was already stored, unchanged.
+   /// "Sign in again" is read by some operators as sign out, then sign in. After an interrupted save that must work too:
+   /// the sign-out acts on the session that belongs to the new pairing, so the sign-in that follows is accepted.
    /// </summary>
    [Fact]
-   public void StagedSessionForAnotherDeviceIsDiscardedOnRead()
+   public async Task InterruptedSaveFollowedBySignOutStillRecoversBySignIn()
    {
       using SessionFixture fixture = new();
       fixture.SaveSession();
       string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
-      byte[] stored = File.ReadAllBytes(authPath);
-      QqqSessionBinding other = fixture.Session.Binding with { DeviceId = "interrupted-device" };
-      using(AgentStore staging = new(fixture.Local.DirectoryPath))
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using AgentRuntime runtime = fixture.Runtime();
+      _ = await runtime.PollControlsOnceAsync(timeout.Token);
+      using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
       {
-         staging.StagePairing(new AgentConfiguration("https://synthetic.invalid", "interrupted-device", "synthetic-interrupted"), new AgentAuthentication(other, fixture.Session.ExportCredential()));
-         staging.SaveConfiguration(new AgentConfiguration("https://synthetic.invalid", "device", "synthetic-token"));
+         _ = await Assert.ThrowsAnyAsync<Exception>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
       }
       Assert.True(File.Exists(StagedSession(fixture)));
+      _ = await runtime.SignOutAsync(timeout.Token);
+      Assert.False(File.Exists(StagedSession(fixture)));
+      Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
+      _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token);
+      AgentSnapshot recovered = runtime.GetSnapshot();
+      Assert.True(recovered.Authentication!.Authorized);
+      Assert.Equal("replacement-device", recovered.DeviceId);
+      Assert.Contains(recovered.Logs, entry => entry.Message.Contains("Finished a pairing change that was interrupted", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// While something holds the stored session open, a staged session that belongs to the stored pairing cannot be moved
+   /// into place. It is still the one a reader gets, so nothing acts on the session of the previous pairing, and the move
+   /// happens on the first read after the file is released.
+   /// </summary>
+   [Fact]
+   public void StagedSessionIsUsedBeforeItCanBeMovedIntoPlace()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
+      Stage(fixture, "replacement-device", "https://synthetic.invalid/");
+      using(FileStream held = new(authPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+      {
+         using AgentStore blocked = new(fixture.Local.DirectoryPath);
+         Assert.Equal("replacement-device", blocked.LoadAuthentication()!.Binding.DeviceId);
+         Assert.Equal(StagedPairingOutcome.Deferred, blocked.StagedPairing);
+         Assert.True(File.Exists(StagedSession(fixture)));
+      }
       using AgentStore store = new(fixture.Local.DirectoryPath);
-      AgentAuthentication? loaded = store.LoadAuthentication();
-      Assert.Equal("device", loaded!.Binding.DeviceId);
-      Assert.Equal(stored, File.ReadAllBytes(authPath));
+      Assert.Equal("replacement-device", store.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(StagedPairingOutcome.Completed, store.StagedPairing);
+      Assert.False(File.Exists(StagedSession(fixture)));
+      Assert.Equal("replacement-device", store.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(StagedPairingOutcome.None, store.StagedPairing);
+   }
+
+
+
+   /// <summary>Moving a staged session into place over a stored session that cannot be read preserves the unreadable bytes under a recovery name.</summary>
+   [Fact]
+   public void StagedSessionReplacesAnUnreadableStoredSessionWithoutLosingIt()
+   {
+      using SessionFixture fixture = new();
+      byte[] unreadable = [9, 8, 7];
+      File.WriteAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), unreadable);
+      Stage(fixture, "replacement-device", "https://synthetic.invalid/");
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      Assert.Equal("replacement-device", store.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(StagedPairingOutcome.CompletedAfterQuarantine, store.StagedPairing);
+      Assert.Equal(unreadable, File.ReadAllBytes(Assert.Single(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"))));
       Assert.False(File.Exists(StagedSession(fixture)));
    }
 
 
 
    /// <summary>
-   /// An unreadable staged session is discarded rather than trusted, and saving a session normally removes a staged one,
-   /// because what is saved is newer than what was staged.
+   /// A staged session is a leftover, and is deleted on the next read, when it names another device (a crash before the
+   /// pairing was replaced), another server, when no pairing is stored, or when the stored session already belongs to
+   /// the pairing. The stored session is returned as it was.
    /// </summary>
-   [Fact]
-   public void UnreadableOrSupersededStagedSessionIsRemoved()
+   [Theory]
+   [InlineData("another-device")]
+   [InlineData("another-server")]
+   [InlineData("no-pairing")]
+   [InlineData("already-stored")]
+   public void LeftoverStagedSessionIsDiscardedOnRead(string leftover)
    {
       using SessionFixture fixture = new();
       fixture.SaveSession();
-      File.WriteAllBytes(StagedSession(fixture), [2, 4, 6]);
+      string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
+      Stage(fixture, leftover is "another-device" ? "interrupted-device" : "device", leftover is "another-server" ? "https://elsewhere.invalid/" : "https://synthetic.invalid/");
+      using(AgentStore setup = new(fixture.Local.DirectoryPath))
+      {
+         setup.SaveConfiguration(new AgentConfiguration("https://synthetic.invalid", "device", "synthetic-token"));
+      }
+      if(leftover is "no-pairing")
+      { File.Delete(path); }
+      if(leftover is "another-server")
+      { File.Delete(authPath); }
+      byte[]? stored = File.Exists(authPath) ? File.ReadAllBytes(authPath) : null;
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      AgentAuthentication? loaded = store.LoadAuthentication();
+      Assert.Equal(StagedPairingOutcome.Discarded, store.StagedPairing);
+      Assert.False(File.Exists(StagedSession(fixture)));
+      Assert.Equal(stored is null ? null : "device", loaded?.Binding.DeviceId);
+      Assert.Equal(stored, File.Exists(authPath) ? File.ReadAllBytes(authPath) : null);
+   }
+
+
+
+   /// <summary>A staged session that cannot be read is preserved under a recovery name, not deleted and not trusted; the stored session is returned.</summary>
+   [Fact]
+   public void UnreadableStagedSessionIsSetAside()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      byte[] unreadable = [2, 4, 6];
+      File.WriteAllBytes(StagedSession(fixture), unreadable);
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      Assert.Equal("device", store.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(StagedPairingOutcome.SetAside, store.StagedPairing);
+      Assert.False(File.Exists(StagedSession(fixture)));
+      Assert.Equal(unreadable, File.ReadAllBytes(Assert.Single(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"))));
+   }
+
+
+
+   /// <summary>
+   /// Saving a session normally removes a readable staged session, because what is saved is newer; and staging again
+   /// replaces what was staged before, so the last pairing change is the one that is finished.
+   /// </summary>
+   [Fact]
+   public void SavingOrStagingAgainSupersedesAStagedSession()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      Stage(fixture, "first-device", "https://synthetic.invalid/");
       using(AgentStore store = new(fixture.Local.DirectoryPath))
       {
-         Assert.Equal("device", store.LoadAuthentication()!.Binding.DeviceId);
-         Assert.False(File.Exists(StagedSession(fixture)));
-         File.WriteAllBytes(StagedSession(fixture), [2, 4, 6]);
-         store.SaveAuthentication(new AgentAuthentication(fixture.Session.Binding, fixture.Session.ExportCredential()));
+         store.SaveAuthentication(new AgentAuthentication(fixture.Session.Binding with { DeviceId = "first-device" }, fixture.Session.ExportCredential()));
       }
       Assert.False(File.Exists(StagedSession(fixture)));
+      Stage(fixture, "second-device", "https://synthetic.invalid/");
+      Stage(fixture, "third-device", "https://synthetic.invalid/");
+      using AgentStore reader = new(fixture.Local.DirectoryPath);
+      Assert.Equal("third-device", reader.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(StagedPairingOutcome.Completed, reader.StagedPairing);
+      Assert.Equal("third-device", reader.LoadConfiguration()!.DeviceId);
+   }
+
+
+
+   /// <summary>Stages a pairing for the given device together with a session that names the given device on the given server, without finishing the change.</summary>
+   private static void Stage(SessionFixture fixture, string deviceId, string sessionOrigin)
+   {
+      Uri origin = new(sessionOrigin);
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      store.StagePairing(new AgentConfiguration("https://synthetic.invalid", deviceId, "synthetic-" + deviceId),
+         new AgentAuthentication(new QqqSessionBinding(origin, "principal", "tenant", deviceId), new QqqSessionCredential(origin, "synthetic-qqq-cookie")));
    }
 
 

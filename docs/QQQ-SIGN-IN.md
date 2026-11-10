@@ -20,6 +20,8 @@ The server and its identity provider govern session lifetime, renewal and curren
 
 Explicit sign-in can replace unreadable saved QQQ session data only after fresh server authentication and, when device proof survives, authoritative device binding. Rejected binding leaves the unreadable file untouched. Successful recovery preserves its ciphertext in a uniquely named `qqq-session.recovery-*.dpapi` file in the protected data directory.
 
+Enrollment replaces the pairing and its session as one staged step. The session for the new pairing is first written as `qqq-session.staged.dpapi`; once the pairing is replaced, the next read of the session (enrollment itself, a sign-in or a service start) moves it into place, preserving an unreadable earlier session as `qqq-session.recovery-*.dpapi`. A staged session that does not belong to the stored pairing is discarded, and one that cannot be read is preserved under a recovery name. The activity log records each of these.
+
 If device proof itself is unreadable, sign-in does not enable printing or reconstruct that proof. Explicit enrollment is required; it preserves the old ciphertext as `connection.recovery-*.dpapi`, printer choices and the old connection's journal without attaching those receipts to the new device. Read-only status remains available. Explicit sign-out can quarantine unreadable session data locally, but cannot revoke an unavailable server session; revoke that previous session in QQQ. Automatic connection recovery does not perform this explicit credential replacement.
 
 ## Replace a revoked or expired pairing

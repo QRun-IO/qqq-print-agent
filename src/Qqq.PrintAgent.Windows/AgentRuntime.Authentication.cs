@@ -88,7 +88,7 @@ public sealed partial class AgentRuntime
             return false;
          }
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
-         AgentAuthentication? saved = store.LoadAuthentication();
+         AgentAuthentication? saved = LoadSavedSession(store, forRecovery: false);
          AgentConfiguration? configuration = store.LoadConfiguration();
          if(saved?.Credential is null || (saved.Binding.HasApprovedDevice
             && (configuration is null || !SameOrigin(saved.Binding.Origin, configuration.ServerUrl))))
@@ -121,6 +121,38 @@ public sealed partial class AgentRuntime
          return false;
       }
       finally { _authenticationGate.Release(); }
+   }
+
+
+
+   /// <summary>
+   /// Reads the saved session and logs what that read did about a pairing change that was staged and not finished. The
+   /// store has no log, and moving, discarding or setting aside a credential file must leave a line behind.
+   /// </summary>
+   private AgentAuthentication? LoadSavedSession(AgentStore store, bool forRecovery)
+   {
+      AgentAuthentication? saved = forRecovery ? store.LoadAuthenticationForRecovery() : store.LoadAuthentication();
+      switch(store.StagedPairing)
+      {
+         case StagedPairingOutcome.Completed:
+            WriteLog("INFO", "Finished a pairing change that was interrupted: the session saved with the new pairing is now in place.");
+            break;
+         case StagedPairingOutcome.CompletedAfterQuarantine:
+            WriteLog("WARN", "Finished a pairing change that was interrupted: the session saved with the new pairing is now in place, and the earlier session data, which could not be read, was moved aside for recovery.");
+            break;
+         case StagedPairingOutcome.Deferred:
+            WriteLog("WARN", "A pairing change is waiting to finish: the session saved with the new pairing is in use but could not be moved into place yet, and will be tried again.");
+            break;
+         case StagedPairingOutcome.Discarded:
+            WriteLog("INFO", "Discarded a session left over from a pairing change that did not replace the pairing.");
+            break;
+         case StagedPairingOutcome.SetAside:
+            WriteLog("WARN", "A session staged for a pairing change could not be read and was moved aside for recovery.");
+            break;
+         default:
+            break;
+      }
+      return saved;
    }
 
 
