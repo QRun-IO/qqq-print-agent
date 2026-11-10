@@ -30,6 +30,7 @@ public sealed partial class AgentRuntime
    private long _stagedBytes;
    private int _activePrints;
    private int _activeDownloads;
+   private readonly long _bandwidthOrigin = (timeProvider ?? TimeProvider.System).GetTimestamp();
    private double _bandwidthDue;
    private bool _transitioning;
    private CancellationTokenSource? _pipelineLifetime;
@@ -232,20 +233,23 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Shares one bandwidth limit across every download. Each chunk reserves the time it should take at the configured
    /// rate on a single schedule, so the aggregate rate holds however many lanes download at once. A rate of zero means unlimited.
+   /// Both the schedule and the wait are measured on the runtime's clock, in seconds since the runtime was created, and
+   /// the wait is rounded to the clock's own unit instead of being cut short of it, so the pacing is exact on any clock
+   /// and a test can let it pass without waiting.
    /// </summary>
-   private Task ThrottleDownloadAsync(int bytes, CancellationToken token)
+   internal Task ThrottleDownloadAsync(int bytes, CancellationToken token)
    {
       double delay;
       lock(_stateLock)
       {
          long rate = _realtimeSettings.MaxDownloadBytesPerSecond;
-         double now = (double)System.Diagnostics.Stopwatch.GetTimestamp() / System.Diagnostics.Stopwatch.Frequency;
+         double now = Clock.GetElapsedTime(_bandwidthOrigin).TotalSeconds;
          if(rate == 0)
          { _bandwidthDue = now; return Task.CompletedTask; }
          _bandwidthDue = Math.Max(now, _bandwidthDue) + (double)bytes / rate;
          delay = _bandwidthDue - now;
       }
-      return Task.Delay(TimeSpan.FromSeconds(delay), token);
+      return Task.Delay(TimeSpan.FromTicks((long)Math.Round(delay * TimeSpan.TicksPerSecond)), Clock, token);
    }
 
 
