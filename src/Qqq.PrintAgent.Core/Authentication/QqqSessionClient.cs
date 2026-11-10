@@ -20,6 +20,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    public const string PrintingPath = "/qqq/v1/qbit/printing/";
    private const int MetadataLimit = 65_536;
    private const int PrintingLimit = 22 * 1024 * 1024;
+   private static readonly TimeSpan RequestLimit = TimeSpan.FromSeconds(20);
    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = false };
    private readonly HttpClient _http;
    private readonly TimeProvider _timeProvider;
@@ -523,11 +524,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          throw new ArgumentException("Cross-origin QQQ requests are forbidden.", nameof(uri));
       }
       string route = QqqSessionDiagnostics.Describe(uri);
-      long started = System.Diagnostics.Stopwatch.GetTimestamp();
+      long started = _timeProvider.GetTimestamp();
       _diagnostics.Debug(() => $"HTTP {method} {route}: session cookie {(cookie is not null ? "yes" : "no")}, device proof {(device is not null ? "yes" : "no")}, basic credential {(basic is not null ? "yes" : "no")}, body {(content is null ? "none" : content.Headers.ContentType?.MediaType ?? "present")}, limit {(boundedByCaller ? "caller" : "20 s")}, response bound {maximumBytes} bytes.");
-      using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-      if(!boundedByCaller)
-      { timeout.CancelAfter(TimeSpan.FromSeconds(20)); }
+      using var timeout = new Deadline(_timeProvider, boundedByCaller ? Timeout.InfiniteTimeSpan : RequestLimit, cancellationToken);
       using HttpRequestMessage request = BuildRequest(uri, method, content, cookie, device, basic, providerDiscovery);
       HttpResponseMessage response;
       try
@@ -933,8 +932,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>Milliseconds since a Stopwatch timestamp, for request timing in the log.</summary>
-   private static string Elapsed(long started) => System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms";
+   /// <summary>Milliseconds since a timestamp taken from the client's clock, for request timing in the log.</summary>
+   private string Elapsed(long started) => _timeProvider.GetElapsedTime(started).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms";
 
 
 

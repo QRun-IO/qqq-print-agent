@@ -37,9 +37,9 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          // Drain a bounded outbox batch before claiming more work after an outage.
          return false;
       }
-      long inventoryStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+      long inventoryStarted = Time.GetTimestamp();
       IReadOnlyList<PrinterInfo> inventory = printers.Discover();
-      TimeSpan inventoryElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(inventoryStarted);
+      TimeSpan inventoryElapsed = Time.GetElapsedTime(inventoryStarted);
       if(canSynchronize?.Invoke() == false)
       {
          return false;
@@ -50,15 +50,15 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       {
          return false;
       }
-      long claimStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+      long claimStarted = Time.GetTimestamp();
       PrintJob? job = await ClaimAndRegisterAsync(inventory, token).ConfigureAwait(false);
-      TimeSpan claimElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(claimStarted);
+      TimeSpan claimElapsed = Time.GetElapsedTime(claimStarted);
       if(job is null)
       {
          return false;
       }
       try
-      { return await ProcessJobAsync(job, inventory, new JobAttempt(inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
+      { return await ProcessJobAsync(job, inventory, new JobAttempt(Time, inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
       finally { options?.ActiveJobChanged?.Invoke(null); }
    }
 
@@ -227,6 +227,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
 
+   /// <summary>The clock the phase timings are measured on: the one supplied in the options, otherwise the system clock.</summary>
+   private TimeProvider Time => options?.TimeProvider ?? TimeProvider.System;
+
+
+
    /// <summary>Records a state transition for a claimed job, delegating to the identifier overload.</summary>
    private void Record(PrintJob job, string state, string? message = null, string? spoolerJobId = null)
    {
@@ -271,12 +276,12 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
    /// <summary>
    /// Progress and phase timing of one claimed job. Progress tells the caller whether native submission began, which
-   /// decides between a known refusal and an uncertain outcome; the durations come from the monotonic clock and feed the
-   /// single timing line, so they carry no document content.
+   /// decides between a known refusal and an uncertain outcome; the durations come from the worker's monotonic clock and
+   /// feed the single timing line, so they carry no document content.
    /// </summary>
-   private sealed class JobAttempt(TimeSpan inventory, TimeSpan claim)
+   private sealed class JobAttempt(TimeProvider time, TimeSpan inventory, TimeSpan claim)
    {
-      private long _mark = System.Diagnostics.Stopwatch.GetTimestamp();
+      private long _mark = time.GetTimestamp();
 
       public bool Submitting { get; set; }
 
@@ -295,7 +300,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       /// <summary>Starts the next phase now, discarding the time since the previous mark.</summary>
       public void Restart()
       {
-         _mark = System.Diagnostics.Stopwatch.GetTimestamp();
+         _mark = time.GetTimestamp();
       }
 
 
@@ -303,8 +308,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       /// <summary>Returns the time since the previous mark and starts the next phase at the same instant, so phases never overlap or leave a gap.</summary>
       public TimeSpan Lap()
       {
-         long now = System.Diagnostics.Stopwatch.GetTimestamp();
-         TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(_mark, now);
+         long now = time.GetTimestamp();
+         TimeSpan elapsed = time.GetElapsedTime(_mark, now);
          _mark = now;
          return elapsed;
       }

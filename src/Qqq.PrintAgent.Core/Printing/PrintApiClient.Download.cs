@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Diagnostics;
 using System.Security.Cryptography;
+using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
@@ -50,10 +50,8 @@ public sealed partial class PrintApiClient
    /// </summary>
    private async Task DownloadIntoFileAsync(PrintJob job, string path, RealtimeSettings settings, Func<int, CancellationToken, Task>? throttle, CancellationToken token)
    {
-      using var total = CancellationTokenSource.CreateLinkedTokenSource(token);
-      total.CancelAfter(settings.DownloadTimeoutMillis);
-      using var connect = CancellationTokenSource.CreateLinkedTokenSource(total.Token);
-      connect.CancelAfter(settings.DownloadConnectTimeoutMillis);
+      using var total = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadTimeoutMillis), token);
+      using var connect = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadConnectTimeoutMillis), total.Token);
       string route = $"device/jobs/{Uri.EscapeDataString(job.JobId)}/content";
       using HttpResponseMessage response = _nativeSessionClient is null
          ? await _http.GetAsync(route, HttpCompletionOption.ResponseHeadersRead, connect.Token).ConfigureAwait(false)
@@ -76,16 +74,15 @@ public sealed partial class PrintApiClient
    /// data arrives within the idle limit, or when the final length or SHA-256 does not match. A shared throttle, or else the per-download
    /// rate limit, paces the copy so the aggregate bandwidth setting holds.
    /// </summary>
-   private static async Task CopyVerifiedAsync(Stream source, Stream output, PrintJob job, RealtimeSettings settings, Func<int, CancellationToken, Task>? throttle, CancellationToken token)
+   private async Task CopyVerifiedAsync(Stream source, Stream output, PrintJob job, RealtimeSettings settings, Func<int, CancellationToken, Task>? throttle, CancellationToken token)
    {
       using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
       byte[] buffer = new byte[81920];
       long received = 0;
-      long started = Stopwatch.GetTimestamp();
+      long started = _time.GetTimestamp();
       while(true)
       {
-         using var idle = CancellationTokenSource.CreateLinkedTokenSource(token);
-         idle.CancelAfter(settings.DownloadIdleTimeoutMillis);
+         using var idle = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadIdleTimeoutMillis), token);
          int count = await source.ReadAsync(buffer, idle.Token).ConfigureAwait(false);
          if(count == 0)
          { break; }
@@ -98,9 +95,9 @@ public sealed partial class PrintApiClient
          { await throttle(count, token).ConfigureAwait(false); }
          else if(settings.MaxDownloadBytesPerSecond > 0)
          {
-            TimeSpan remaining = TimeSpan.FromSeconds((double)received / settings.MaxDownloadBytesPerSecond) - Stopwatch.GetElapsedTime(started);
+            TimeSpan remaining = TimeSpan.FromSeconds((double)received / settings.MaxDownloadBytesPerSecond) - _time.GetElapsedTime(started);
             if(remaining > TimeSpan.Zero)
-            { await Task.Delay(remaining, token).ConfigureAwait(false); }
+            { await Task.Delay(remaining, _time, token).ConfigureAwait(false); }
          }
       }
       if(received != job.ContentLength || !string.Equals(Convert.ToHexString(digest.GetHashAndReset()), job.ContentSha256, StringComparison.OrdinalIgnoreCase))

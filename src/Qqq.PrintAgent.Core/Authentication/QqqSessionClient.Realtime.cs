@@ -38,7 +38,7 @@ public sealed partial class QqqSessionClient
          finally { _gate.Release(); }
          var uri = new UriBuilder(new Uri(Origin, PrintingPath + "device/realtime")) { Scheme = string.Equals(Origin.Scheme, "https", StringComparison.Ordinal) ? "wss" : "ws" };
          _diagnostics.Info($"Opening the realtime socket to {QqqSessionDiagnostics.Describe(uri.Uri)} with subprotocol qqq-printing.v1 (session cookie and device proof attached; heartbeat every {heartbeatInterval.TotalSeconds:0} s, timeout {heartbeatTimeout.TotalSeconds:0} s).");
-         long started = System.Diagnostics.Stopwatch.GetTimestamp();
+         long started = _timeProvider.GetTimestamp();
          await socket.ConnectAsync(uri.Uri, invoker, cancellationToken).ConfigureAwait(false);
          _diagnostics.Info($"Realtime socket upgraded in {Elapsed(started)}; server selected subprotocol {socket.SubProtocol ?? "(none)"}.");
          await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

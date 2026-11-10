@@ -6,6 +6,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
@@ -17,7 +18,9 @@ namespace Qqq.PrintAgent.Core.Printing;
 public sealed partial class PrintApiClient : IDisposable
 {
    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+   private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(20);
    private readonly HttpClient _http;
+   private readonly TimeProvider _time;
 
 
 
@@ -29,15 +32,17 @@ public sealed partial class PrintApiClient : IDisposable
    /// <summary>
    /// Creates a client for one server. The address must be HTTPS, or HTTP only on loopback for local development. Responses
    /// are limited to 2 MiB and requests to 60 seconds, and a bearer token is attached only when one is supplied (the legacy
-   /// diagnostic path); native sessions authenticate through the session client instead.
+   /// diagnostic path); native sessions authenticate through the session client instead. The control, download and
+   /// throttling limits are counted on the supplied clock, the system clock by default.
    /// </summary>
-   public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null)
+   public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null)
    {
       Uri uri = new(serverUrl.TrimEnd('/') + "/printing/v1/");
       if(!string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && !(string.Equals(uri.Scheme, "http", StringComparison.Ordinal) && uri.IsLoopback))
       {
          throw new ArgumentException("Use HTTPS, or HTTP on loopback for local development.", nameof(serverUrl));
       }
+      _time = timeProvider ?? TimeProvider.System;
       _http = handler is null ? new HttpClient() : new HttpClient(handler);
       _http.BaseAddress = uri;
       _http.Timeout = TimeSpan.FromSeconds(60);
@@ -122,8 +127,7 @@ public sealed partial class PrintApiClient : IDisposable
          throw new InvalidDataException("Document exceeds the 20 MiB limit or is empty.");
       }
 
-      using var downloadTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-      downloadTimeout.CancelAfter(_http.Timeout);
+      using var downloadTimeout = new Deadline(_time, _http.Timeout, token);
       token = downloadTimeout.Token;
       using HttpResponseMessage response = await _http.GetAsync($"device/jobs/{Uri.EscapeDataString(job.JobId)}/content", HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();

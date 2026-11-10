@@ -11,9 +11,14 @@ using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
-/// <summary>One continuously active reader and one bounded writer. Callbacks must only dispatch work, never await it.</summary>
-public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings limits, ApplicationTrafficMeter? traffic = null) : IDisposable
+/// <summary>
+/// One continuously active reader and one bounded writer. Callbacks must only dispatch work, never await it. The
+/// acknowledgement wait is counted on the supplied clock (the system clock by default), so a test reaches the timeout
+/// by moving a clock.
+/// </summary>
+public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings limits, ApplicationTrafficMeter? traffic = null, TimeProvider? timeProvider = null) : IDisposable
 {
+   private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
    private readonly Channel<byte[]> _outgoing = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
    private RealtimeSettings _limits = limits;
    private readonly ConcurrentDictionary<string, TaskCompletionSource> _pending = new(StringComparer.Ordinal);
@@ -94,7 +99,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
          Queue(bytes);
          if(completion is not null)
          {
-            await completion.Task.WaitAsync(TimeSpan.FromMilliseconds(_limits.AckTimeoutMillis), token).ConfigureAwait(false);
+            await completion.Task.WaitAsync(TimeSpan.FromMilliseconds(_limits.AckTimeoutMillis), _time, token).ConfigureAwait(false);
          }
       }
       finally

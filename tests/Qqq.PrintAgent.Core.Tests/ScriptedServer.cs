@@ -70,6 +70,16 @@ internal sealed class ScriptedServer : HttpMessageHandler
 
 
 
+   /// <summary>Queues a request the server never answers: it signals that the request arrived and then waits until the client gives up.</summary>
+   internal ScriptedServer AddStalled(TaskCompletionSource arrived) => AddAsync(async token =>
+   {
+      arrived.TrySetResult();
+      await Task.Delay(Timeout.InfiniteTimeSpan, token);
+      return Json("{}");
+   });
+
+
+
    /// <summary>Queues an asynchronous reply, for responses a test holds open and releases later.</summary>
    internal ScriptedServer AddAsync(Func<CancellationToken, Task<HttpResponseMessage>> response)
    {

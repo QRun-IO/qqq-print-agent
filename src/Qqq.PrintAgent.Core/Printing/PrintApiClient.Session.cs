@@ -18,10 +18,10 @@ public sealed partial class PrintApiClient
 
 
 
-   /// <summary>The session remains owned by the service; disposing an API request adapter does not sign it out.</summary>
-   public static PrintApiClient ForSession(IQqqSessionClient session)
+   /// <summary>The session remains owned by the service; disposing an API request adapter does not sign it out. The clock is the one the client counts its limits on, the system clock by default.</summary>
+   public static PrintApiClient ForSession(IQqqSessionClient session, TimeProvider? timeProvider = null)
    {
-      PrintApiClient client = new(session.Origin.AbsoluteUri, handler: new SessionHandler(session));
+      PrintApiClient client = new(session.Origin.AbsoluteUri, handler: new SessionHandler(session), timeProvider: timeProvider);
       client._nativeSession = true;
       client._nativeSessionClient = session;
       client._http.BaseAddress = new Uri(session.Origin, "/qqq/v1/qbit/printing/");
