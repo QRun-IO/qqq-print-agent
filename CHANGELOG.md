@@ -69,6 +69,18 @@ Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the install
 - `service-status` and `snapshot` exit 1 when the service replies with `Error:`, as the other commands already
   did. The reply itself is still printed on standard output.
 
+The companion's presentation logic moved out of the views into a new UI-free assembly,
+`Qqq.PrintAgent.Presentation`, gated at 100% line coverage ([ADR-0003](docs/adr/0003-version-2.md)): one typed
+client for the local service pipe, the texts and enablement rules of the printer, job, footer and settings
+views, the Jobs page's paging and sorting state, and the connection dialog's sign-in flow as a state machine.
+What the operator sees is the same, with three exceptions at the edges. A local pipe failure of a kind the
+window did not handle before (a failed Windows call while verifying the service, or an oversized pipe message)
+now shows the same "service unavailable" or "not completed" message as the other pipe failures instead of
+being lost. A service error shown as "Action could not be completed" no longer starts with a space. And the
+companion writes a line to the activity log when a request to the local service fails and when it answers
+again; a failure that repeats is debug detail, so the status polls do not fill the log. The pipe's wire
+format and the service are unchanged.
+
 ## 1.2.1
 
 Release-pipeline fix only; same source as 1.2.0 otherwise. The stable release workflow's per-edition

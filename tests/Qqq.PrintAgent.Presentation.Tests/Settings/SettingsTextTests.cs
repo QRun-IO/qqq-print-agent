@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Globalization;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Presentation.Settings;
 using Qqq.PrintAgent.Windows;
@@ -37,10 +38,24 @@ public sealed class SettingsTextTests
 
 
 
-   /// <summary>The usage line shows the current file size in MiB with one decimal and how often it rolled over today.</summary>
-   [Fact]
-   public void LogUsage_ShowsSizeAndRollovers()
-      => Assert.Equal("Current log file: 1.5 MiB; rolled over 2 time(s) today.", LogSettingsForm.Usage(new LogSettings(CurrentFileBytes: 1572864, SegmentsToday: 2)));
+   /// <summary>The usage line shows the current file size in MiB with one decimal, written the way the user's language writes decimals, and how often it rolled over today.</summary>
+   [Theory]
+   [InlineData("en-US", "Current log file: 1.5 MiB; rolled over 2 time(s) today.")]
+   [InlineData("de-DE", "Current log file: 1,5 MiB; rolled over 2 time(s) today.")]
+   public void LogUsage_ShowsSizeAndRollovers(string culture, string expected)
+   {
+      CultureInfo original = CultureInfo.CurrentCulture;
+      try
+      {
+         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
+
+         Assert.Equal(expected, LogSettingsForm.Usage(new LogSettings(CurrentFileBytes: 1572864, SegmentsToday: 2)));
+      }
+      finally
+      {
+         CultureInfo.CurrentCulture = original;
+      }
+   }
 
 
 
