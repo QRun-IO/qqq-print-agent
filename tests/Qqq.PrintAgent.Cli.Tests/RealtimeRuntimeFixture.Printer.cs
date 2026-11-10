@@ -13,11 +13,11 @@ namespace Qqq.PrintAgent.Cli.Tests;
 internal sealed partial class RealtimeRuntimeFixture
 {
    /// <summary>
-   /// A printer that accepts only the file-based submission the realtime path uses, counts and orders the jobs it receives, and
-   /// remembers the submission timeout it was given. The in-memory print method throws, so a regression to the older path
-   /// fails. A test can hold a submission open inside the printer, and can script how a spooler cancellation ends.
+   /// A printer that takes the staged file the service submits, counts and orders the jobs it receives, and remembers the
+   /// submission timeout it was given. A test can hold a submission open inside the printer, and can script how a spooler
+   /// cancellation ends.
    /// </summary>
-   internal sealed class SyntheticFilePrinter : IFilePrinterBackend, IPrinterJobControl
+   internal sealed class SyntheticFilePrinter : IPrinterBackend, IPrinterJobControl
    {
       internal int Prints;
       internal int Cancellations;
@@ -64,14 +64,10 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
-      /// <summary>Always throws: the native realtime path must submit a file, not a byte array.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new InvalidOperationException("The native realtime path must use a file.");
-
-
-
-      /// <summary>Checks the staged file's size matches the declared content length, optionally holds the submission, records the job in order, and returns spooler id 123.</summary>
-      public async Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
+      /// <summary>Captures the submission timeout the agent chose so tests can assert it, checks the staged file's size matches the declared content length, optionally holds the submission, records the job in order, and returns spooler id 123.</summary>
+      public async Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
       {
+         LastSubmissionTimeout = submissionTimeout;
          Assert.Equal(job.ContentLength, new FileInfo(path).Length);
          Interlocked.Increment(ref Submissions);
          Entered.TrySetResult();
@@ -80,15 +76,6 @@ internal sealed partial class RealtimeRuntimeFixture
          Interlocked.Increment(ref Prints);
          Order.Enqueue(job.JobId);
          return "123";
-      }
-
-
-
-      /// <summary>Captures the submission timeout the agent chose so tests can assert it, then submits normally.</summary>
-      public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
-      {
-         LastSubmissionTimeout = submissionTimeout;
-         return PrintFileAsync(job, path, cancellationToken);
       }
 
 

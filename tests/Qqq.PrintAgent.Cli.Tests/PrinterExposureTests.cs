@@ -52,7 +52,7 @@ public sealed class PrinterExposureTests
       selected.Clear();
       Assert.Empty(backend.Discover());
       PrintJob job = new("j1", "p1", "Test", "PDF", "", 1, new PrintOptions(), "", "CLAIMED");
-      await Assert.ThrowsAsync<InvalidOperationException>(() => backend.PrintAsync(job, [1], CancellationToken.None));
+      await Assert.ThrowsAsync<InvalidOperationException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-exposure.document"), TimeSpan.FromSeconds(1), CancellationToken.None));
       Assert.False(printer.Printed);
    }
 
@@ -101,7 +101,7 @@ public sealed class PrinterExposureTests
 
 
       /// <summary>Marks that a print arrived and returns a fixed receipt.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
+      public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
       {
          Printed = true;
          return Task.FromResult("123");

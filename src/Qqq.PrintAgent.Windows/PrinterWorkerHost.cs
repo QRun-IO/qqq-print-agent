@@ -11,15 +11,15 @@ using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
 
-/// <summary>One native printer operation in a disposable process, with documents confined to anonymous pipes and memory.</summary>
+/// <summary>One native printer operation in a disposable process. A document reaches it only as the path of a verified staged file, never as content.</summary>
 public static class PrinterWorkerHost
 {
    internal const string ParentEnvironmentVariable = "QQQ_PRINT_WORKER_PARENT";
 
 
 
-   /// <summary>One operation sent to the helper as a single JSON line: discover, print, print a staged file, or cancel a spool job, with only the fields that operation needs. A staged file travels by path, never by content.</summary>
-   internal sealed record Request(string Operation, PrintJob? Job = null, byte[]? Content = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null, string? ContentPath = null);
+   /// <summary>One operation sent to the helper as a single JSON line: discover, print a staged file, or cancel a spool job, with only the fields that operation needs. A staged file travels by path, never by content.</summary>
+   internal sealed record Request(string Operation, PrintJob? Job = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null, string? ContentPath = null);
 
 
 
@@ -28,7 +28,7 @@ public static class PrinterWorkerHost
 
 
 
-   /// <summary>Run before ordinary service or CLI hosting when invoked with --printer-worker.</summary>
+   /// <summary>Runs one operation against the Windows printers. The service's executable calls this, before it hosts anything, when the service started it with --printer-worker as its print helper.</summary>
    public static Task<int> RunAsync() => RunAsync(new WindowsPrinters());
 
 
@@ -61,23 +61,20 @@ public static class PrinterWorkerHost
             case "discover":
                response = new Response(true, printers.Discover());
                break;
-            case "print":
-               if(request.Job is null || request.Content is not { Length: > 0 and <= 20_971_520 })
-               {
-                  throw new InvalidDataException("The print worker requires a job and bounded document.");
-               }
-               response = new Response(true, SpoolerJobId: await printers.PrintAsync(request.Job, request.Content, lifetime.Token).ConfigureAwait(false));
-               break;
             case "cancel":
                WindowsSpoolerJobs.Cancel(request.PrinterName ?? "", request.JobId ?? "", request.SpoolerJobId ?? "");
                response = new Response(true);
                break;
             case "print-file":
-               if(request.Job is null || request.ContentPath is null || printers is not IFilePrinterBackend files)
+               if(request.Job is null || request.ContentPath is null)
                {
                   throw new InvalidDataException("The print worker requires a verified document file.");
                }
-               response = new Response(true, SpoolerJobId: await files.PrintFileAsync(request.Job, request.ContentPath, lifetime.Token).ConfigureAwait(false));
+               ////////////////////////////////////////////////////////////////////////
+               // no limit is passed on: the service that started this process holds //
+               // the submission limit and ends the process when it passes           //
+               ////////////////////////////////////////////////////////////////////////
+               response = new Response(true, SpoolerJobId: await printers.PrintFileAsync(request.Job, request.ContentPath, Timeout.InfiniteTimeSpan, lifetime.Token).ConfigureAwait(false));
                break;
             default:
                throw new InvalidDataException("Unknown printer worker operation.");

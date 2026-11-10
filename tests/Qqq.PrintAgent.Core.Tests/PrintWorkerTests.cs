@@ -33,7 +33,7 @@ public sealed class PrintWorkerTests
    {
       PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
       await using var harness = new WorkerHarness();
-      FakeFilePrinterBackend printer = harness.Printer;
+      FakePrinterBackend printer = harness.Printer;
       printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile] };
       printer.Discovering = () =>
       {
@@ -41,14 +41,14 @@ public sealed class PrintWorkerTests
          { printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile with { Revision = new string('b', 64) }] }; }
       };
       if(nativeDrift)
-      { printer.PrintingFile = (_, _, _) => throw new PrinterMediaMismatchException("Fixture default changed before native submission."); }
+      { printer.Printing = (_, _, _) => throw new PrinterMediaMismatchException("Fixture default changed before native submission."); }
       harness.Server.Offer(FakePrintServer.Job(Document, options: new PrintOptions(MediaProfile: new(profile.Id, profile.Revision))), Document);
 
       Assert.True(await harness.RunOnceAsync());
       Assert.Equal(reachedNative, printer.Submissions);
       Assert.Equal(expected, harness.Journal.GetState("job-1"));
       bool spooled = string.Equals(expected, "SPOOLED", StringComparison.Ordinal);
-      Assert.Equal(spooled ? "spool-file-1" : null, harness.Journal.Last("job-1").SpoolerJobId);
+      Assert.Equal(spooled ? "spool-1" : null, harness.Journal.Last("job-1").SpoolerJobId);
       Assert.Equal(discoveryDrift ? ["RECEIVED", "FAILED"] : new[] { "RECEIVED", "SUBMITTING", expected }, harness.Server.States, StringComparer.Ordinal);
    }
 

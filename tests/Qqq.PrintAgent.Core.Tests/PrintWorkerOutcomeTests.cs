@@ -31,9 +31,9 @@ public sealed class PrintWorkerOutcomeTests
    {
       PrintJob job = FakePrintServer.Job(Document);
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(job, Document).Offer(job, Document);
-      printer.PrintingFile = (_, _, _) => throw (timedOut ? new TimeoutException(reason) : new IOException(reason));
+      printer.Printing = (_, _, _) => throw (timedOut ? new TimeoutException(reason) : new IOException(reason));
 
       Assert.True(await harness.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "OUTCOME_UNKNOWN" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
@@ -63,9 +63,9 @@ public sealed class PrintWorkerOutcomeTests
       PrintJob job = FakePrintServer.Job(Document);
       using var stop = new CancellationTokenSource();
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(job, Document).Offer(job, Document);
-      printer.PrintingFile = async (_, _, token) =>
+      printer.Printing = async (_, _, token) =>
       {
          await stop.CancelAsync();
          token.ThrowIfCancellationRequested();
@@ -95,7 +95,7 @@ public sealed class PrintWorkerOutcomeTests
    public async Task LaneNeverResubmitsAJobAlreadyRecordedAsSubmitting()
    {
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(FakePrintServer.Job(Document), Document);
       journal.Record("job-1", new PrintEvent("received-before-crash", "RECEIVED"));
       journal.Record("job-1", new PrintEvent("submitting-before-crash", "SUBMITTING"));
@@ -127,7 +127,7 @@ public sealed class PrintWorkerOutcomeTests
    public async Task RefusalBeforeNativeSubmissionIsFailedNotUnknown(string fault, string reason, int downloads, bool submittingRecorded)
    {
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(FakePrintServer.Job(Document, options: new PrintOptions(Copies: 3)), Document);
       int settingsReads = 0;
       int submitChecks = 0;
@@ -175,9 +175,9 @@ public sealed class PrintWorkerOutcomeTests
    {
       var steps = new List<string>();
       int throttled = 0;
-      var printer = new FakeFilePrinterBackend
+      var printer = new FakePrinterBackend
       {
-         PrintingFile = (_, path, _) =>
+         Printing = (_, path, _) =>
          {
             steps.Add("print " + (File.Exists(path) ? "staged file" : "missing file"));
             return Task.FromResult("spool-42");
@@ -206,7 +206,6 @@ public sealed class PrintWorkerOutcomeTests
       (byte[] content, TimeSpan limit) = Assert.Single(printer.Files);
       Assert.Equal(Document, content);
       Assert.Equal(TimeSpan.FromSeconds(45), limit);
-      Assert.Empty(printer.Printed);
       Assert.Equal(Document.Length, throttled);
       Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
       Assert.Equal(1, harness.EventGate.CurrentCount);
@@ -227,7 +226,7 @@ public sealed class PrintWorkerOutcomeTests
    public async Task InterruptedReceiptFailsTheJobWithoutSubmittingAndReleasesTheGates()
    {
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Arriving = (kind, _) => string.Equals(kind, "events", StringComparison.Ordinal) ? throw new HttpRequestException("Synthetic refusal.") : Task.CompletedTask;
       server.Offer(FakePrintServer.Job(Document), Document);
       var active = new List<string?>();
@@ -303,7 +302,7 @@ public sealed class PrintWorkerOutcomeTests
       PrintJob job = FakePrintServer.Job(Document);
       using var stop = new CancellationTokenSource();
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(job, Document).Offer(job, Document);
       int submitChecks = 0;
       harness.Options = harness.Options with
@@ -349,7 +348,7 @@ public sealed class PrintWorkerOutcomeTests
       bool down = true;
       int eventFrames = 0;
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Arriving = (kind, _) => string.Equals(kind, "events", StringComparison.Ordinal) && ++eventFrames > 1 && down ? throw new HttpRequestException("Synthetic refusal.") : Task.CompletedTask;
       server.Offer(FakePrintServer.Job(Document), Document);
 
@@ -383,7 +382,7 @@ public sealed class PrintWorkerOutcomeTests
    {
       int eventFrames = 0;
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Arriving = (kind, _) =>
       {
          if(string.Equals(kind, "events", StringComparison.Ordinal) && ++eventFrames == 2)
@@ -458,7 +457,7 @@ public sealed class PrintWorkerOutcomeTests
    {
       PrintJob job = FakePrintServer.Job(Document, format: "PDF");
       using var stop = new CancellationTokenSource();
-      FakeFilePrinterBackend printer = FilePrinterFailingWith(fault, reason, stop);
+      FakePrinterBackend printer = FilePrinterFailingWith(fault, reason, stop);
       await using var harness = new WorkerHarness { Printer = printer };
       (FakePrintServer server, RecordingJournal journal) = (harness.Server, harness.Journal);
       server.Offer(job, Document).Offer(job, Document);
@@ -478,7 +477,6 @@ public sealed class PrintWorkerOutcomeTests
       Assert.Equal(reason, journal.Last("job-1").Message);
       Assert.Null(journal.Last("job-1").SpoolerJobId);
       Assert.Equal(submissions, printer.Submissions);
-      Assert.Empty(printer.Printed);
       Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
       string[] printerTurn = submittingRecorded || string.Equals(fault, "paused", StringComparison.Ordinal) ? ["take printer turn", "release printer turn"] : [];
       string[] expectedSteps = ["active job-1", "take reservation", .. printerTurn, "release reservation", "idle"];
@@ -509,9 +507,9 @@ public sealed class PrintWorkerOutcomeTests
    [InlineData("reservation", "document-altered", "FAILED")]
    public async Task LeaseThatFailsToReleaseNeverChangesWhatIsKnownAboutThePrint(string failingLease, string fault, string outcome)
    {
-      var printer = new FakeFilePrinterBackend
+      var printer = new FakePrinterBackend
       {
-         PrintingFile = (_, _, _) => string.Equals(fault, "spooler-failed", StringComparison.Ordinal) ? throw new IOException("The spooler connection was lost.") : Task.FromResult("spool-42"),
+         Printing = (_, _, _) => string.Equals(fault, "spooler-failed", StringComparison.Ordinal) ? throw new IOException("The spooler connection was lost.") : Task.FromResult("spool-42"),
       };
       await using var harness = new WorkerHarness { Printer = printer };
       (FakePrintServer server, RecordingJournal journal) = (harness.Server, harness.Journal);
@@ -544,11 +542,11 @@ public sealed class PrintWorkerOutcomeTests
    /// submission is refused for changed media, fails, times out or is cancelled part-way by stopping the worker. For
    /// the faults that happen before submission it is an ordinary printer that is never reached.
    /// </summary>
-   private static FakeFilePrinterBackend FilePrinterFailingWith(string fault, string reason, CancellationTokenSource stop)
+   private static FakePrinterBackend FilePrinterFailingWith(string fault, string reason, CancellationTokenSource stop)
    {
-      var printer = new FakeFilePrinterBackend
+      var printer = new FakePrinterBackend
       {
-         PrintingFile = async (_, _, token) =>
+         Printing = async (_, _, token) =>
          {
             switch(fault)
             {

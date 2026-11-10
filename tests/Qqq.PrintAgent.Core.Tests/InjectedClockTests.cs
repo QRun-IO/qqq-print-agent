@@ -185,10 +185,10 @@ public sealed class InjectedClockTests
    {
       var time = new ManualTimeProvider();
       byte[] document = [1, 2, 3];
-      var printer = new FakeFilePrinterBackend
+      var printer = new FakePrinterBackend
       {
          Discovering = () => time.Advance(TimeSpan.FromMilliseconds(5)),
-         PrintingFile = (_, _, _) =>
+         Printing = (_, _, _) =>
          {
             time.Advance(TimeSpan.FromMilliseconds(13));
             return Task.FromResult("spool-1");

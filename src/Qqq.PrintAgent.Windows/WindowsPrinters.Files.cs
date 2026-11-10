@@ -20,9 +20,12 @@ public sealed partial class WindowsPrinters
    /// <summary>
    /// Prints a staged file. The path must be an absolute, regular file (no link), and its length and SHA-256 are checked against the job
    /// again here, because it is the last step before the spooler. The queue and options are then validated (copies, no per-job paper
-   /// dimensions, a format the queue offers), and the document goes to the RAW ZPL or PDF path.
+   /// dimensions, a format the queue offers), and the document goes to the RAW ZPL or PDF path. Nothing is guessed or defaulted,
+   /// because a wrong guess prints on the wrong stock. The submission limit is not applied here: a driver call cannot be interrupted
+   /// from inside its own process, so the limit belongs to the service, which runs this adapter in a helper process and ends that
+   /// process when the limit passes.
    /// </summary>
-   public async Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
+   public async Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
    {
       if(!Path.IsPathFullyQualified(path) || File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
       {

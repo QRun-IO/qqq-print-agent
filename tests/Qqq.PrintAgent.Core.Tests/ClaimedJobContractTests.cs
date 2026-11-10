@@ -97,7 +97,7 @@ public sealed class ClaimedJobContractTests
       PrintJob capitals = lowercase with { ContentSha256 = lowercase.ContentSha256.ToUpperInvariant() };
       Assert.NotEqual(lowercase.ContentSha256, capitals.ContentSha256, StringComparer.Ordinal);
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(capitals, documentMatches ? document : [3, 2, 1]);
       Assert.True(await harness.RunOnceAsync());
       Assert.Equal(capitals.ContentSha256, journal.Jobs["job-1"].Job.ContentSha256);
@@ -368,7 +368,7 @@ public sealed class ClaimedJobContractTests
    {
       byte[] document = [1, 2, 3];
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(ClaimWithNestedOption(65)).Offer(FakePrintServer.Job(document, "job-2"), document).OfferRaw(ClaimWithNestedOption(1025).Replace("job-1", "job-3", StringComparison.Ordinal));
 
       Assert.True(await harness.RunOnceAsync());
@@ -493,7 +493,7 @@ public sealed class ClaimedJobContractTests
    {
       byte[] document = [1, 2, 3];
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(ValidJob()).Replace("\"copies\":1", "\"copies\":1,\"Copies\":2", StringComparison.Ordinal)).Offer(FakePrintServer.Job(document, "job-2"), document);
 
       Assert.True(await harness.RunOnceAsync());
@@ -527,7 +527,7 @@ public sealed class ClaimedJobContractTests
       JsonObject malformed = ValidJob();
       malformed.Remove("options");
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(malformed)).Offer(FakePrintServer.Job(document, "job-2"), document);
 
       Assert.True(await harness.RunOnceAsync());
@@ -582,7 +582,7 @@ public sealed class ClaimedJobContractTests
       malformed.Remove("options");
       malformed["title"] = "Replayed title";
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(malformed));
       journal.TrackJob(FakePrintServer.Job([1], "job-1") with { Title = "Original title" }, "Original printer");
       journal.Record("job-1", new PrintEvent("earlier", state));
@@ -608,7 +608,7 @@ public sealed class ClaimedJobContractTests
       JsonObject malformed = ValidJob();
       malformed["jobId"] = "not a safe identifier";
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.OfferRaw(Claim(malformed));
       await Assert.ThrowsAsync<PrintingProtocolException>(() => harness.RunOnceAsync());
       Assert.Empty(journal.Jobs);
@@ -627,7 +627,7 @@ public sealed class ClaimedJobContractTests
       malformed.Remove("options");
       bool down = true;
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Arriving = (kind, _) => down && string.Equals(kind, "events", StringComparison.Ordinal) ? throw new HttpRequestException("Synthetic refusal.") : Task.CompletedTask;
       server.OfferRaw(Claim(malformed));
       await Assert.ThrowsAsync<HttpRequestException>(() => harness.RunOnceAsync());
@@ -647,7 +647,7 @@ public sealed class ClaimedJobContractTests
    {
       byte[] document = [1, 2, 3];
       await using var harness = new WorkerHarness();
-      (FakePrintServer server, RecordingJournal journal, FakeFilePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(FakePrintServer.Job(document), document);
       journal.Recorded = (jobId, printEvent) =>
       {

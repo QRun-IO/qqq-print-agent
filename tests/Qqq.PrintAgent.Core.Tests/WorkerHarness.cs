@@ -66,7 +66,7 @@ internal sealed class WorkerHarness : IAsyncDisposable
 
 
    /// <summary>The printing platform the worker submits staged files to.</summary>
-   internal FakeFilePrinterBackend Printer { get; init; } = new();
+   internal FakePrinterBackend Printer { get; init; } = new();
 
 
 

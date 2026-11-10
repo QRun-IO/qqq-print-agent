@@ -18,7 +18,7 @@ using Windows.Storage.Streams;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Windows spooler discovery, RAW ZPL, and Windows PDF renderer to native GDI.</summary>
-public sealed partial class WindowsPrinters : IFilePrinterBackend
+public sealed partial class WindowsPrinters : IPrinterBackend
 {
    /// <summary>
    /// Enumerates the queues visible to this Windows identity (for the service, the machine-wide ones). A queue whose port
@@ -120,100 +120,6 @@ public sealed partial class WindowsPrinters : IFilePrinterBackend
       }
       // Busy, printing, I/O, waiting, warming, power-save and low toner are nonblocking.
       return "READY";
-   }
-
-
-
-   /// <summary>
-   /// Submits exactly one server job to the queue and format the job names, after refusing anything the Windows queue
-   /// cannot honor: a copy count outside 1 to 32767, paper dimensions (configured in the queue in this version) or a
-   /// format the queue does not offer. Nothing is guessed or defaulted, because a wrong guess prints on the wrong stock.
-   /// </summary>
-   public async Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
-   {
-      PrinterInfo printer = Discover().Single(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal));
-      if(job.Options.Copies is < 1 or > 32767)
-      {
-         throw new InvalidDataException("Copies must be between 1 and 32767.");
-      }
-      RequireJobPaperSupport(job);
-      if(!printer.Formats.Contains(job.Format, StringComparer.Ordinal))
-      {
-         throw new InvalidDataException("The queue does not support this document format.");
-      }
-
-      cancellationToken.ThrowIfCancellationRequested();
-      return job.Format switch
-      {
-         "ZPL" => PrintRaw(printer, job, content),
-         "PDF" => await PrintPdfAsync(printer, job, content, cancellationToken).ConfigureAwait(false),
-         _ => throw new InvalidDataException("Unsupported document format."),
-      };
-   }
-
-
-
-   /// <summary>
-   /// Sends printer-ready ZPL as one RAW spool document, repeating the bytes per copy and continuing after partial writes
-   /// until the spooler has taken them all. The queue's media is rechecked immediately before the document starts, and any
-   /// failure after it starts aborts the document so half a label is not left queued.
-   /// </summary>
-   private static string PrintRaw(PrinterInfo selectedPrinter, PrintJob job, byte[] content)
-   {
-      Check(Native.OpenPrinter(selectedPrinter.Name, out IntPtr printer, IntPtr.Zero));
-      try
-      {
-         _ = RequireCurrentMedia(selectedPrinter, job);
-         Native.DocInfo1 info = new() { DocumentName = $"QQQ {job.JobId}", DataType = "RAW" };
-         uint id = Native.StartDocPrinter(printer, 1, ref info);
-         if(id == 0)
-         {
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-         }
-
-         try
-         {
-            for(int copy = 0; copy < job.Options.Copies; copy++)
-            {
-               int offset = 0;
-               while(offset < content.Length)
-               {
-                  byte[] remaining = content[offset..];
-                  Check(Native.WritePrinter(printer, remaining, remaining.Length, out int written));
-                  if(written == 0)
-                  {
-                     throw new IOException("Printer accepted zero bytes.");
-                  }
-
-                  offset += written;
-               }
-            }
-            Check(Native.EndDocPrinter(printer));
-            return id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-         }
-         catch { Native.AbortPrinter(printer); throw; }
-      }
-      finally { Native.ClosePrinter(printer); }
-   }
-
-
-
-   /// <summary>
-   /// Loads PDF bytes into the Windows PDF renderer through an in-memory stream, so the document never touches disk, and
-   /// hands the loaded document to the shared page printer.
-   /// </summary>
-   private static async Task<string> PrintPdfAsync(PrinterInfo printer, PrintJob job, byte[] content, CancellationToken cancellationToken)
-   {
-      using InMemoryRandomAccessStream pdfStream = new();
-      using(DataWriter writer = new(pdfStream))
-      {
-         writer.WriteBytes(content);
-         await writer.StoreAsync();
-         writer.DetachStream();
-      }
-      pdfStream.Seek(0);
-      PdfDocument document = await PdfDocument.LoadFromStreamAsync(pdfStream);
-      return await PrintPdfDocumentAsync(printer, job, document, cancellationToken).ConfigureAwait(false);
    }
 
 

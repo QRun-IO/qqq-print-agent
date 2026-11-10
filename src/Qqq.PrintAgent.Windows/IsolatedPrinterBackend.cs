@@ -12,23 +12,18 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Bounds blocking printer drivers inside a disposable helper rather than the service process.</summary>
-public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrinterBackend, IPrinterJobControl
+public sealed class IsolatedPrinterBackend(string helperExecutable) : IPrinterBackend, IPrinterJobControl
 {
    internal TimeSpan? OperationTimeoutOverride { get; init; }
    internal Func<ProcessStartInfo, Process>? StartProcess { get; init; }
 
 
 
-   /// <summary>Prints a staged document with the default two minute limit on the native submission.</summary>
-   public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
-      => PrintFileAsync(job, path, TimeSpan.FromMinutes(2), cancellationToken);
-
-
-
    /// <summary>
    /// Asks a disposable helper process to print the staged file at the given absolute path and returns the spooler receipt.
-   /// Only the path travels to the helper, never the document bytes. A timeout or helper failure after submission began
-   /// means the outcome is uncertain and is reported as such by the caller, never retried here.
+   /// Only the path travels to the helper, never the document bytes. The helper is ended, with its process tree, when it
+   /// outlives the submission limit. A timeout or helper failure after submission began means the outcome is uncertain
+   /// and is reported as such by the caller, never retried here.
    /// </summary>
    public async Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
    {
@@ -42,15 +37,6 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IFilePrint
    public IReadOnlyList<PrinterInfo> Discover()
       => InvokeAsync(new PrinterWorkerHost.Request("discover"), TimeSpan.FromSeconds(20), CancellationToken.None).GetAwaiter().GetResult().Printers
          ?? throw new InvalidDataException("Printer worker returned no inventory.");
-
-
-
-   /// <summary>Once invoked by the journaled worker, timeout or process failure means uncertain physical outcome.</summary>
-   public async Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
-   {
-      PrinterWorkerHost.Response response = await InvokeAsync(new PrinterWorkerHost.Request("print", job, content), TimeSpan.FromSeconds(120), cancellationToken).ConfigureAwait(false);
-      return response.SpoolerJobId ?? throw new InvalidDataException("Printer worker returned no spooler receipt.");
-   }
 
 
 

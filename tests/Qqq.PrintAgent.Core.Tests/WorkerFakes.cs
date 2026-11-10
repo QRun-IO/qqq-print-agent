@@ -198,11 +198,11 @@ internal sealed class RecordingJournal : IJobJournal
 
 
 /// <summary>
-/// A printing platform that prints nothing: it lists the printers a test gives it and counts every submission that
-/// reached the native step, with hooks at discovery and at submission so a test can change the queue or fail the print
-/// at that exact point.
+/// A printing platform that prints nothing: it lists the printers a test gives it, reads each staged file as the spooler
+/// would, and counts every submission that reached the native step, with hooks at discovery and at submission so a test
+/// can change the queue or fail the print at that exact point.
 /// </summary>
-internal class FakePrinterBackend : IPrinterBackend
+internal sealed class FakePrinterBackend : IPrinterBackend
 {
    /// <summary>The printers reported by discovery; one ready ZPL and PDF queue named printer1 by default.</summary>
    internal List<PrinterInfo> Printers { get; } = [new("printer1", "Queue one", "Synthetic driver", "USB001", "READY", ["ZPL", "PDF"])];
@@ -215,12 +215,12 @@ internal class FakePrinterBackend : IPrinterBackend
 
 
    /// <summary>How many submissions reached the native step, whether they then succeeded or failed.</summary>
-   internal int Submissions { get; private protected set; }
+   internal int Submissions { get; private set; }
 
 
 
-   /// <summary>The content of every in-memory submission.</summary>
-   internal List<byte[]> Printed { get; } = [];
+   /// <summary>The content and submission limit of every submission.</summary>
+   internal List<(byte[] Content, TimeSpan Limit)> Files { get; } = [];
 
 
 
@@ -229,8 +229,8 @@ internal class FakePrinterBackend : IPrinterBackend
 
 
 
-   /// <summary>Replaces the in-memory submission; returns the spooler receipt or throws.</summary>
-   internal Func<PrintJob, CancellationToken, Task<string>>? Printing { get; set; }
+   /// <summary>Replaces the submission, given the job and the staged file's path; returns the spooler receipt or throws.</summary>
+   internal Func<PrintJob, string, CancellationToken, Task<string>>? Printing { get; set; }
 
 
 
@@ -244,40 +244,11 @@ internal class FakePrinterBackend : IPrinterBackend
 
 
 
-   /// <summary>Counts the submission and keeps its content, then defers to the hook or returns a fixed spooler receipt.</summary>
-   public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
-   {
-      Submissions++;
-      Printed.Add(content);
-      return Printing is null ? Task.FromResult("spool-1") : Printing(job, cancellationToken);
-   }
-}
-
-
-
-/// <summary>A printing platform that also takes staged files, recording the file's content and the submission limit it was given.</summary>
-internal sealed class FakeFilePrinterBackend : FakePrinterBackend, IFilePrinterBackend
-{
-   /// <summary>The content and submission limit of every file submission.</summary>
-   internal List<(byte[] Content, TimeSpan Limit)> Files { get; } = [];
-
-
-
-   /// <summary>Replaces the file submission; returns the spooler receipt or throws.</summary>
-   internal Func<PrintJob, string, CancellationToken, Task<string>>? PrintingFile { get; set; }
-
-
-
-   /// <summary>The overload without a limit is never the one the worker should use.</summary>
-   public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken) => throw new InvalidOperationException("The worker must pass the submission limit.");
-
-
-
    /// <summary>Counts the submission and reads the staged file as the spooler would, then defers to the hook or returns a fixed receipt.</summary>
    public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
    {
       Submissions++;
       Files.Add((File.ReadAllBytes(path), submissionTimeout));
-      return PrintingFile is null ? Task.FromResult("spool-file-1") : PrintingFile(job, path, cancellationToken);
+      return Printing is null ? Task.FromResult("spool-1") : Printing(job, path, cancellationToken);
    }
 }

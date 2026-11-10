@@ -35,7 +35,7 @@ public sealed class PrinterWorkerIsolationTests
          },
       };
       PrintJob job = new("fixture", "fixture", "Not printed", "PDF", new string('0', 64), 1, new PrintOptions(), "", "RECEIVED");
-      await Assert.ThrowsAsync<PrinterMediaMismatchException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-media-fixture.pdf"), CancellationToken.None));
+      await Assert.ThrowsAsync<PrinterMediaMismatchException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-media-fixture.pdf"), TimeSpan.FromMinutes(2), CancellationToken.None));
    }
 
 

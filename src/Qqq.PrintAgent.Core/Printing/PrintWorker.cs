@@ -13,7 +13,7 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// run left unfinished are reported by the runtime once, at start, and inventory and heartbeats are the runtime's to
 /// send, so a pass does none of that.
 /// </summary>
-public sealed class PrintWorker(PrintApiClient api, IFilePrinterBackend printers, IJobJournal journal, Action<string> log,
+public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string> log,
    Func<bool> canDispatch, Func<bool> canSynchronize, PrintWorkerOptions options)
 {
    /// <summary>
