@@ -220,9 +220,10 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// Stops all new work after authorization is lost: clears readiness, cancels the realtime socket and tells the operator
-   /// to sign in again. Pairing, history and receipts are untouched; retrying a connection cannot restore a withdrawn permission.
+   /// how to recover. That is signing in again unless the caller knows a sign-in would be refused and names what works
+   /// instead. Pairing, history and receipts are untouched; retrying a connection cannot restore a withdrawn permission.
    /// </summary>
-   private void BlockAuthorization()
+   private void BlockAuthorization(string? recovery = null)
    {
       bool changed;
       lock(_stateLock)
@@ -233,10 +234,10 @@ public sealed partial class AgentRuntime
          _controlReady = false;
          _realtimeReady = false;
          _realtimeLifetime?.Cancel();
-         _authenticationMessage = $"{AppIdentity.ServerName} authorization is required. Sign in again; pairing and history are preserved.";
+         _authenticationMessage = $"{AppIdentity.ServerName} authorization is required. {recovery ?? "Sign in again; pairing and history are preserved."}";
       }
       if(changed)
-      { WriteLog("WARN", $"Printing blocked: {AppIdentity.ServerName} authorization is required. Sign in again from the companion; pairing and history are preserved."); }
+      { WriteLog("WARN", $"Printing blocked: {AppIdentity.ServerName} authorization is required. {recovery ?? "Sign in again from the companion; pairing and history are preserved."}"); }
       SignalPipeline();
    }
 

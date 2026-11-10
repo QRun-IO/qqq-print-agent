@@ -265,10 +265,12 @@ public sealed class AgentNewPairingTests
       fixture.SaveSession();
       string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
       byte[] original = File.ReadAllBytes(path);
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       using AgentRuntime runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
       _ = await runtime.PollControlsOnceAsync(timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
+      byte[] session = File.ReadAllBytes(authPath);
       fixture.Session.BindAsAnotherPrincipal = failingStep is "identity";
       fixture.Session.ExportsBeforeFailure = failingStep is "export" ? 0 : null;
       if(failingStep is "pairing-file")
@@ -279,9 +281,10 @@ public sealed class AgentNewPairingTests
       Exception thrown = await Assert.ThrowsAnyAsync<Exception>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
       Assert.IsAssignableFrom(failingStep is "pairing-file" ? typeof(UnauthorizedAccessException) : typeof(IOException), thrown);
       Assert.Equal(original, File.ReadAllBytes(path));
+      Assert.Equal(session, File.ReadAllBytes(authPath));
       AgentSnapshot failed = runtime.GetSnapshot();
       Assert.False(failed.Authentication!.Authorized);
-      Assert.Contains("authorization is required", failed.Authentication.Message, StringComparison.Ordinal);
+      Assert.Contains("Sign in again", failed.Authentication.Message, StringComparison.Ordinal);
       Assert.Contains(failed.Logs, entry => entry.Message.Contains("after the server bound the new device", StringComparison.Ordinal));
       fixture.Session.BindAsAnotherPrincipal = false;
       fixture.Session.ExportsBeforeFailure = null;
@@ -294,8 +297,9 @@ public sealed class AgentNewPairingTests
 
 
    /// <summary>
-   /// If the new pairing is saved and its session then cannot be written, the two files disagree and an ordinary sign-in would be
-   /// refused. Printing is blocked, the log names the recovery that works, and enrolling again with a fresh code completes.
+   /// If the new pairing is saved and its session then cannot be written, the two files disagree and an ordinary sign-in is
+   /// refused. Printing is blocked, the status and the log name the recovery that works instead of a sign-in, and enrolling
+   /// again with a fresh code completes.
    /// </summary>
    [Fact]
    public async Task FailureBetweenSavingThePairingAndItsSessionBlocksPrintingUntilEnrolledAgain()
@@ -315,9 +319,13 @@ public sealed class AgentNewPairingTests
       Assert.NotEqual(original, File.ReadAllBytes(path));
       AgentSnapshot failed = runtime.GetSnapshot();
       Assert.False(failed.Authentication!.Authorized);
-      Assert.Contains("authorization is required", failed.Authentication.Message, StringComparison.Ordinal);
+      Assert.Contains("Enroll this computer again", failed.Authentication.Message, StringComparison.Ordinal);
+      Assert.DoesNotContain("Sign in again", failed.Authentication.Message, StringComparison.Ordinal);
+      Assert.DoesNotContain(failed.Logs, entry => entry.Message.Contains("Sign in again", StringComparison.Ordinal));
       Assert.Contains(failed.Logs, entry => entry.Message.Contains("after the new pairing was saved but before its session was", StringComparison.Ordinal));
       Directory.Delete(blocker);
+      _ = await Assert.ThrowsAsync<QqqSessionException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token));
+      Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
       _ = await runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-second-code"), timeout.Token);
       AgentSnapshot recovered = runtime.GetSnapshot();
       Assert.True(recovered.Authentication!.Authorized);
