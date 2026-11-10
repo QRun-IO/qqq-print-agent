@@ -68,7 +68,7 @@ internal sealed class FakePrintServer : HttpMessageHandler
    internal FakePrintServer Offer(PrintJob job, byte[] document)
    {
       Document = document;
-      return OfferRaw(JsonSerializer.Serialize(new JobClaim(job), PrintApiClient.JsonOptions));
+      return OfferRaw(JsonSerializer.Serialize(new { job }, PrintApiClient.JsonOptions));
    }
 
 
