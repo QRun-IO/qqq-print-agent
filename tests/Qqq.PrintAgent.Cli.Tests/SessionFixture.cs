@@ -65,6 +65,7 @@ internal sealed class SessionFixture : IDisposable
       internal QqqSessionException.FailureKind? ResumeFailure { get; set; }
       internal bool ClaimedLegacy;
       internal bool DenyBinding;
+      internal bool FailBindingTransport;
       internal string? RevokedDeviceId;
       internal HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
       internal bool DelayUnauthorizedPoll { get; set; }
@@ -145,9 +146,13 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-      /// <summary>Refuses with permission-denied when binding is denied or the device was revoked; otherwise checks the device id matches and records whether a legacy device was claimed.</summary>
+      /// <summary>Fails as a lost connection when scripted to, refuses with permission-denied when binding is denied or the device was revoked; otherwise checks the device id matches and records whether a legacy device was claimed.</summary>
       public Task<QqqSessionBinding> BindDeviceAsync(QqqDeviceCredential credential, bool claimLegacyDevice = false, CancellationToken cancellationToken = default)
       {
+         if(FailBindingTransport)
+         {
+            throw new IOException("Synthetic connection loss while binding the device.");
+         }
          if(DenyBinding || string.Equals(RevokedDeviceId, credential.DeviceId, StringComparison.Ordinal))
          {
             throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "Synthetic binding denied.");
