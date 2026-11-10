@@ -23,7 +23,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// and will act on the one server's connection; <see cref="PrepareUpdateAsync"/>, <see cref="ResumeAfterUpdate"/> and
 /// <see cref="RunAsync"/> stay with the computer. <see cref="PipeAsync(PipeRequest, CancellationToken)"/> speaks the pipe's
 /// first protocol, which has no server in it; when the pipe gains its versioned envelope, this is where a request is wrapped.
-/// The constants and pure functions at the end are the runtime's today and move to the types that will own them.
+/// The constants at the top and the pure functions at the bottom are the runtime's today and move to the types that will own them.
 /// </para>
 /// </summary>
 internal sealed class SingleServerHarness : IDisposable
