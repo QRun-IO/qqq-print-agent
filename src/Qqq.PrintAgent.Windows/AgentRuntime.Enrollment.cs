@@ -15,10 +15,16 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public sealed partial class AgentRuntime
 {
-   /// <summary>Exchanges the enrollment code for a device credential using the live user session on the selected server. Authentication changes are serialized by a gate, the identity is checked again after binding, and the old connection state is reset first so nothing from the previous pairing survives.</summary>
+   /// <summary>
+   /// Exchanges the enrollment code for a device credential using the live user session on the selected server, binds the
+   /// new device to that session and checks the identity again. Only then is the stored pairing replaced and the connection
+   /// state reset, so a refused or interrupted bind leaves the previous pairing and session exactly as they were.
+   /// Authentication changes are serialized by a gate.
+   /// </summary>
    private async Task<string> EnrollNativeAsync(PipeRequest request, CancellationToken token)
    {
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);
+      bool pairingSaved = false;
       try
       {
          WriteLog("INFO", $"Enrollment requested on {request.ServerUrl ?? "(no server)"} with a {(request.EnrollmentCode ?? "").Length}-character enrollment code (never logged), computer name {Environment.MachineName}, agent {PrintApiClient.AgentVersion}.");
@@ -33,16 +39,21 @@ public sealed partial class AgentRuntime
          using var api = PrintApiClient.ForSession(session);
          WriteLog("INFO", "Step 2 of 4: exchanging the enrollment code for a device credential.");
          EnrollmentResponse response = await api.EnrollAsync(new EnrollmentRequest(request.EnrollmentCode ?? "", Environment.MachineName, PrintApiClient.AgentVersion), token).ConfigureAwait(false);
-         WriteLog("INFO", $"Enrollment accepted: device {response.DeviceId}, poll interval {response.PollIntervalSeconds} s. Saving the pairing to protected storage.");
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
-         store.SaveConfiguration(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds));
+         WriteLog("INFO", $"Enrollment accepted: device {response.DeviceId}, poll interval {response.PollIntervalSeconds} s.");
          QqqSessionBinding expected = identity with { DeviceId = response.DeviceId };
-         store.SaveAuthentication(new AgentAuthentication(expected, session.ExportCredential()));
-         ResetConnectionState();
          WriteLog("INFO", "Step 3 of 4: binding the new device to the session and confirming the identity.");
          QqqSessionBinding actual = await session.BindDeviceAsync(new QqqDeviceCredential(response.DeviceId, response.DeviceToken), cancellationToken: token).ConfigureAwait(false);
          RequireSameIdentity(expected, actual);
-         WriteLog("INFO", "Step 4 of 4: activating the session for printing.");
+         ////////////////////////////////////////////////////////////////////////////
+         // the stored pairing is replaced only after the server bound the device //
+         // and the identity matched: until here a failure costs the operator one //
+         // enrollment code, never the pairing that was already working           //
+         ////////////////////////////////////////////////////////////////////////////
+         WriteLog("INFO", "Step 4 of 4: saving the pairing to protected storage and activating the session for printing.");
+         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         store.SaveConfiguration(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds));
+         pairingSaved = true;
+         ResetConnectionState();
          ActivateSession(session, actual, store);
          lock(_stateLock)
          {
@@ -54,7 +65,8 @@ public sealed partial class AgentRuntime
       }
       catch(Exception exception) when(exception is not InvalidOperationException)
       {
-         WriteFailure("Enrollment failed; any existing pairing is unchanged", exception);
+         WriteFailure(pairingSaved ? "Enrollment failed after the new pairing was saved; sign in again to finish activating it"
+            : "Enrollment failed; any existing pairing is unchanged", exception);
          throw;
       }
       finally { _authenticationGate.Release(); }

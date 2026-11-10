@@ -161,6 +161,57 @@ public sealed class AgentNewPairingTests
 
 
 
+   /// <summary>
+   /// The server can accept the enrollment code and then fail the next step, which binds the new device to the session: either it
+   /// refuses, or the connection is lost. Neither may replace the stored pairing or session, because the operator is told the
+   /// existing pairing is unchanged. A later attempt with a fresh code still completes.
+   /// </summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public async Task BindFailureAfterAcceptedEnrollmentKeepsThePreviousPairing(bool connectionLost)
+   {
+      using SessionFixture fixture = new();
+      fixture.Local.SeedSpooledJob();
+      fixture.SaveSession();
+      string path = Path.Combine(fixture.Local.DirectoryPath, "connection.dpapi");
+      byte[] original = File.ReadAllBytes(path);
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
+      fixture.NextSession = UnboundSession();
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+      using(AgentRuntime runtime = fixture.Runtime())
+      {
+         _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.NextSession.ExportCredential(), StartNewPairing: true), timeout.Token);
+         byte[] signedIn = File.ReadAllBytes(authPath);
+         fixture.NextSession.FailBindingTransport = connectionLost;
+         fixture.NextSession.DenyBinding = !connectionLost;
+
+         _ = await Assert.ThrowsAnyAsync<IOException>(() => runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-accepted-code"), timeout.Token));
+
+         Assert.Equal(new[] { "devices/enroll" }, fixture.NextSession.Paths, StringComparer.Ordinal);
+         Assert.Equal(original, File.ReadAllBytes(path));
+         Assert.Equal(signedIn, File.ReadAllBytes(authPath));
+         AgentSnapshot failed = runtime.GetSnapshot();
+         Assert.False(failed.Authentication!.Authorized);
+         Assert.Equal("device", failed.DeviceId);
+         Assert.Contains(failed.Logs, entry => entry.Message.Contains("any existing pairing is unchanged", StringComparison.Ordinal));
+
+         fixture.NextSession.FailBindingTransport = false;
+         fixture.NextSession.DenyBinding = false;
+         _ = await runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-second-code"), timeout.Token);
+         Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
+      }
+      using(AgentStore store = new(fixture.Local.DirectoryPath))
+      {
+         Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
+      }
+      File.WriteAllBytes(path, original);
+      using AgentStore originalStore = new(fixture.Local.DirectoryPath);
+      Assert.Equal("SPOOLED", originalStore.GetState("job"));
+   }
+
+
+
    /// <summary>A fake session for a user with no device bound that treats the existing device id as revoked, which is what the server reports after a pairing is withdrawn.</summary>
    private static SessionFixture.FakeSession UnboundSession()
    {
