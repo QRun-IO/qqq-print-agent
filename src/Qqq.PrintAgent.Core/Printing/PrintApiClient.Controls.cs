@@ -26,7 +26,7 @@ public sealed partial class PrintApiClient
    public static void ValidateRealtimeCommand(DeviceControlCommand command)
    {
       if(!ValidControlCommand(command))
-      { throw new InvalidDataException("Invalid device control command."); }
+      { throw new PrintingProtocolException("The realtime command frame carries an invalid device control command."); }
    }
 
 
@@ -104,7 +104,7 @@ public sealed partial class PrintApiClient
 
 
    /// <summary>True for a non-empty identifier of at most 200 characters made only of letters, digits and the characters - _ . :, so it cannot carry path or markup characters into later use.</summary>
-   private static bool ValidControlId(string? value) => !string.IsNullOrEmpty(value) && value.Length <= 200 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':');
+   internal static bool ValidControlId([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value) => !string.IsNullOrEmpty(value) && value.Length <= 200 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.' or ':');
 
 
 

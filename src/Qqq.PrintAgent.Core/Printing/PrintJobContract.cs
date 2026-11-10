@@ -1,0 +1,163 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
+using System.Text.Json;
+
+namespace Qqq.PrintAgent.Core.Printing;
+
+/// <summary>
+/// Reads jobs the server sends and refuses any that break the contract, so nothing past the API client ever sees a job
+/// with a missing member or an identifier that is unsafe to put in a route, a file name or a log line. Whether a
+/// well-formed job may print (format supported, size and copies within policy, media still current) stays with the
+/// worker, which reports those as FAILED; this is only about shape.
+/// </summary>
+internal static class PrintJobContract
+{
+   /// <summary>The most queued jobs one response may list, as the contract states.</summary>
+   internal const int QueuedLimit = 200;
+
+   private const int TitleLimit = 1024;
+   private const int TokenLimit = 32;
+   private const int TimestampLimit = 64;
+   private const int CopiesLimit = 32767;
+
+
+
+   /// <summary>
+   /// Reads a claim response: null when the server has no job for this device, otherwise the validated job. A response
+   /// that is not a JSON object, or a job that breaks the contract, throws; when the job named itself with a usable
+   /// identifier the failure carries a stand-in so the worker can still report it.
+   /// </summary>
+   internal static PrintJob? ReadClaim(ReadOnlyMemory<byte> body)
+   {
+      using JsonDocument document = ProtocolJson.ParseObject(body, "claim response", 16);
+      if(!document.RootElement.TryGetProperty("job", out JsonElement element) || element.ValueKind == JsonValueKind.Null)
+      { return null; }
+      if(element.ValueKind != JsonValueKind.Object)
+      { throw new PrintingProtocolException("The claimed job is not a JSON object."); }
+      PrintJob job;
+      try
+      { job = ProtocolJson.Read<PrintJob>(element, "claimed job"); }
+      catch(PrintingProtocolException violation)
+      { throw Violation(violation.Message, StandIn(Text(element, "jobId"), Text(element, "printerId"), Text(element, "title"), Text(element, "format"), Text(element, "createdAt"))); }
+      return ClaimProblem(job) is { } problem
+         ? throw Violation(problem, StandIn(job.JobId, job.PrinterId, job.Title, job.Format, job.CreatedAt))
+         : Normalize(job);
+   }
+
+
+
+   /// <summary>
+   /// Reads the list of jobs the server is holding for this device. They are shown, never printed from here, so only
+   /// what the display relies on is required of each: a usable job and printer identifier. Everything else that is
+   /// missing becomes empty text. A response without a list means none; more than the contract's limit is refused.
+   /// </summary>
+   internal static IReadOnlyList<PrintJob> ReadQueued(ReadOnlyMemory<byte> body)
+   {
+      using JsonDocument document = ProtocolJson.ParseObject(body, "queued jobs response", 16);
+      if(!document.RootElement.TryGetProperty("jobs", out JsonElement list) || list.ValueKind == JsonValueKind.Null)
+      { return []; }
+      if(list.ValueKind != JsonValueKind.Array || list.GetArrayLength() > QueuedLimit)
+      { throw new PrintingProtocolException($"The queued jobs response does not hold a list of at most {QueuedLimit} jobs."); }
+      List<PrintJob> jobs = [];
+      foreach(JsonElement element in list.EnumerateArray())
+      {
+         if(element.ValueKind != JsonValueKind.Object)
+         { throw new PrintingProtocolException("A queued job is not a JSON object."); }
+         PrintJob job = ProtocolJson.Read<PrintJob>(element, "queued job");
+         if(!PrintApiClient.ValidControlId(job.JobId) || !PrintApiClient.ValidControlId(job.PrinterId))
+         { throw new PrintingProtocolException("A queued job has no usable job or printer identifier."); }
+         jobs.Add(Normalize(job) with { Title = job.Title ?? "", Format = job.Format ?? "", ContentSha256 = job.ContentSha256 ?? "", Options = job.Options ?? new PrintOptions() });
+      }
+      return jobs;
+   }
+
+
+
+   /// <summary>
+   /// Says what is wrong with a claimed job, or null when its shape is acceptable: safe identifiers, a bounded title, a
+   /// format token, a SHA-256 hash, a positive length and usable options.
+   /// </summary>
+   private static string? ClaimProblem(PrintJob job)
+   {
+      if(!PrintApiClient.ValidControlId(job.JobId))
+      { return "The claimed job has no usable job identifier."; }
+      if(!PrintApiClient.ValidControlId(job.PrinterId))
+      { return "The claimed job has no usable printer identifier."; }
+      if(job.Title is null || job.Title.Length > TitleLimit)
+      { return "The claimed job has no title, or one that is too long."; }
+      if(!IsToken(job.Format))
+      { return "The claimed job has no usable document format."; }
+      if(job.ContentSha256 is not { Length: 64 } || !job.ContentSha256.All(char.IsAsciiHexDigit))
+      { return "The claimed job has no SHA-256 content hash."; }
+      if(job.ContentLength is < 1 or > int.MaxValue)
+      { return "The claimed job declares an empty or impossibly large document."; }
+      return OptionsProblem(job.Options);
+   }
+
+
+
+   /// <summary>
+   /// Says what is wrong with a job's options, or null when they are usable: present, a possible copy count, a scale
+   /// token, and paper dimensions that are complete, in range and not combined with a media profile. Whether a selected
+   /// media profile is well formed and still current is judged once, by <see cref="PrinterMediaProfile.RequireMatch"/>,
+   /// just before submission.
+   /// </summary>
+   private static string? OptionsProblem(PrintOptions? options)
+   {
+      if(options is null)
+      { return "The claimed job has no print options."; }
+      if(options.Copies is < 1 or > CopiesLimit)
+      { return "The claimed job asks for an impossible number of copies."; }
+      if(!IsToken(options.Scale))
+      { return "The claimed job has no usable scale option."; }
+      try
+      { _ = options.CustomPaperMicrons(); }
+      catch(InvalidDataException)
+      { return "The claimed job has incomplete or out-of-range paper dimensions, or combines them with a media profile."; }
+      return null;
+   }
+
+
+
+   /// <summary>True for a short token of ASCII letters, digits and underscores, the form a format or scale name takes.</summary>
+   private static bool IsToken([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value) => value is { Length: >= 1 and <= TokenLimit } && value.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
+
+
+
+   /// <summary>Replaces a missing or over-long creation time or status, which are only ever displayed, with empty text.</summary>
+   private static PrintJob Normalize(PrintJob job) => job with
+   {
+      CreatedAt = job.CreatedAt is { Length: <= TimestampLimit } created ? created : "",
+      Status = job.Status is { Length: <= TokenLimit } status ? status : "",
+   };
+
+
+
+   /// <summary>
+   /// Builds the stand-in for a malformed job: its identifier, when that is usable, and whichever display facts are safe
+   /// to keep, with the rest left empty. Without a usable identifier there is nothing to report against, so there is no
+   /// stand-in.
+   /// </summary>
+   private static PrintJob? StandIn(string? jobId, string? printerId, string? title, string? format, string? createdAt)
+   {
+      if(!PrintApiClient.ValidControlId(jobId))
+      { return null; }
+      return new PrintJob(jobId, PrintApiClient.ValidControlId(printerId) ? printerId : "", title is { Length: <= TitleLimit } ? title : "", IsToken(format) ? format : "",
+         "", 0, new PrintOptions(), createdAt is { Length: <= TimestampLimit } ? createdAt : "", "CLAIMED");
+   }
+
+
+
+   /// <summary>Reads a text member, or null when it is missing or not text.</summary>
+   private static string? Text(JsonElement element, string name)
+      => element.TryGetProperty(name, out JsonElement member) && member.ValueKind == JsonValueKind.String ? member.GetString() : null;
+
+
+
+   /// <summary>The failure for a malformed claimed job, carrying the stand-in when the job could be identified.</summary>
+   private static PrintingProtocolException Violation(string message, PrintJob? standIn)
+      => standIn is null ? new PrintingProtocolException(message) : new PrintingProtocolException(message, standIn);
+}

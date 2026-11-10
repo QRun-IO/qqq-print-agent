@@ -51,14 +51,15 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          return false;
       }
       long claimStarted = Time.GetTimestamp();
-      PrintJob? job = await ClaimAndRegisterAsync(inventory, token).ConfigureAwait(false);
+      Claim claim = await ClaimAndRegisterAsync(inventory, token).ConfigureAwait(false);
       TimeSpan claimElapsed = Time.GetElapsedTime(claimStarted);
-      if(job is null)
+      if(claim.Job is null)
       {
-         return false;
+         // A refused job was reported as FAILED, so a lane keeps draining exactly as it does after any other failed job.
+         return claim.Refused && options?.RecoverIncomplete == false;
       }
       try
-      { return await ProcessJobAsync(job, inventory, new JobAttempt(Time, inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
+      { return await ProcessJobAsync(claim.Job, inventory, new JobAttempt(Time, inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
       finally { options?.ActiveJobChanged?.Invoke(null); }
    }
 
@@ -68,41 +69,83 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// Claims one job under the shared claim gate and registers it locally before anything else can happen to it. The
    /// server keeps replaying CLAIMED until RECEIVED commits, so admission is serialized through that acknowledgement; if
    /// it is interrupted the job is recorded FAILED with no bytes submitted. A job the journal already holds in a final
-   /// state is dropped here so a replayed claim can never print twice.
+   /// state is dropped here so a replayed claim can never print twice. A claimed job that breaks the contract but names
+   /// itself is refused and reported instead of returned.
    /// </summary>
-   private async Task<PrintJob?> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
+   private async Task<Claim> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
       if(options?.ClaimGate is not null)
       { await options.ClaimGate.WaitAsync(token).ConfigureAwait(false); }
       try
       {
          if(canDispatch?.Invoke() == false || options?.CanClaim?.Invoke() == false)
-         { return null; }
-         PrintJob? job = await api.ClaimAsync(token).ConfigureAwait(false);
-         if(job is not null)
+         { return default; }
+         PrintJob? job;
+         try
+         { job = await api.ClaimAsync(token).ConfigureAwait(false); }
+         catch(PrintingProtocolException violation) when(violation.RejectedJob is not null)
+         { return new Claim(null, await RefuseAsync(violation.RejectedJob, violation.Message, inventory, token).ConfigureAwait(false)); }
+         if(job is null)
+         { return default; }
+         Track(job, inventory);
+         if(IsFinal(journal.GetState(job.JobId)))
+         { return default; }
+         options?.ActiveJobChanged?.Invoke(job);
+         try
          {
-            PrinterInfo? printer = inventory.FirstOrDefault(item => string.Equals(item.PrinterId, job.PrinterId, StringComparison.Ordinal));
-            journal.TrackJob(job, string.IsNullOrWhiteSpace(printer?.DisplayName) ? printer?.Name : printer.DisplayName);
-            if(journal.GetState(job.JobId) is "SPOOLED" or "SPOOLER_COMPLETED" or "FAILED" or "OUTCOME_UNKNOWN")
-            { return null; }
-            options?.ActiveJobChanged?.Invoke(job);
-            try
-            {
-               Record(job, "RECEIVED");
-               // The server replays CLAIMED until RECEIVED commits. Serialize admission through its ACK.
-               await FlushAsync(token).ConfigureAwait(false);
-            }
-            catch
-            {
-               Record(job, "FAILED", "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
-               options?.ActiveJobChanged?.Invoke(null);
-               throw;
-            }
+            Record(job, "RECEIVED");
+            // The server replays CLAIMED until RECEIVED commits. Serialize admission through its ACK.
+            await FlushAsync(token).ConfigureAwait(false);
          }
-         return job;
+         catch
+         {
+            Record(job, "FAILED", "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
+            options?.ActiveJobChanged?.Invoke(null);
+            throw;
+         }
+         return new Claim(job, false);
       }
       finally { options?.ClaimGate?.Release(); }
    }
+
+
+
+   /// <summary>
+   /// Reports a claimed job the API client refused because it broke the contract. The server offers a claimed job again
+   /// until the agent answers for it, so leaving it unanswered would block every job behind it; the job is therefore
+   /// recorded as received and then FAILED, with the reason and the fact that nothing was submitted, and both events are
+   /// delivered. A job the journal already holds in a final state is left alone, so a malformed replay changes nothing.
+   /// Returns true when the refusal was reported.
+   /// </summary>
+   private async Task<bool> RefuseAsync(PrintJob rejected, string reason, IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
+   {
+      if(IsFinal(journal.GetState(rejected.JobId)))
+      { return false; }
+      Track(rejected, inventory);
+      Record(rejected, "RECEIVED");
+      Record(rejected, "FAILED", reason + " No bytes were submitted.");
+      await FlushAsync(token).ConfigureAwait(false);
+      return true;
+   }
+
+
+
+   /// <summary>Stores the job's display facts in the journal, naming its printer by the operator's friendly name when one is set and by the queue name otherwise.</summary>
+   private void Track(PrintJob job, IReadOnlyList<PrinterInfo> inventory)
+   {
+      PrinterInfo? printer = inventory.FirstOrDefault(item => string.Equals(item.PrinterId, job.PrinterId, StringComparison.Ordinal));
+      journal.TrackJob(job, string.IsNullOrWhiteSpace(printer?.DisplayName) ? printer?.Name : printer.DisplayName);
+   }
+
+
+
+   /// <summary>True for a state after which a job is never worked on again: spooled, completed, failed or of unknown outcome.</summary>
+   private static bool IsFinal(string? state) => state is "SPOOLED" or "SPOOLER_COMPLETED" or "FAILED" or "OUTCOME_UNKNOWN";
+
+
+
+   /// <summary>The result of one claim: the job to process, or none, and whether a malformed job was refused and reported instead.</summary>
+   private readonly record struct Claim(PrintJob? Job, bool Refused);
 
 
 
@@ -115,11 +158,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// </summary>
    private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, JobAttempt attempt, CancellationToken token)
    {
-      PrinterInfo? assignedPrinter = inventory.FirstOrDefault(printer => string.Equals(printer.PrinterId, job.PrinterId, StringComparison.Ordinal));
-      journal.TrackJob(job, string.IsNullOrWhiteSpace(assignedPrinter?.DisplayName) ? assignedPrinter?.Name : assignedPrinter.DisplayName);
-
-      string? state = journal.GetState(job.JobId);
-      if(state is "SPOOLED" or "SPOOLER_COMPLETED" or "FAILED" or "OUTCOME_UNKNOWN")
+      Track(job, inventory);
+      if(IsFinal(journal.GetState(job.JobId)))
       {
          return false;
       }

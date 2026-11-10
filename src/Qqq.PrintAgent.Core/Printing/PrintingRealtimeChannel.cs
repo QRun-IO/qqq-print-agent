@@ -148,8 +148,9 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
 
    /// <summary>
    /// The single reader. It assembles text messages from fragments within the negotiated size, rejects any other message
-   /// type, parses each message with a depth limit and no duplicate fields, checks the envelope, and hands it to the
-   /// callback. A close frame or any protocol violation ends the loop, which closes the connection and triggers a reconnect.
+   /// type, has each complete message parsed and checked as an envelope, and routes it. A close frame ends the loop as a
+   /// lost connection; anything the server gets wrong ends it as a <see cref="PrintingProtocolException"/>. Either way the
+   /// connection closes and the runtime reconnects.
    /// </summary>
    private async Task ReadAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
@@ -163,79 +164,56 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
          { throw new IOException("Server closed the realtime connection."); }
          if(result.MessageType != WebSocketMessageType.Text || message.Length + result.Count > _limits.MaxFrameBytes)
          {
-            throw new InvalidDataException("Realtime message type or size is invalid.");
+            throw new PrintingProtocolException("The realtime message is not text or exceeds the negotiated frame size.");
          }
          message.Write(buffer, 0, result.Count);
          if(!result.EndOfMessage)
          { continue; }
-         using var document = JsonDocument.Parse(message.GetBuffer().AsMemory(0, checked((int)message.Length)), new JsonDocumentOptions { MaxDepth = 24 });
-         RejectDuplicateFields(document.RootElement);
-         RealtimeEnvelope envelope = document.RootElement.Deserialize<RealtimeEnvelope>(PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Missing realtime envelope.");
-         if(string.IsNullOrEmpty(envelope.Type) || string.IsNullOrEmpty(envelope.MessageId) || envelope.MessageId.Length > 200)
-         {
-            throw new InvalidDataException("Invalid realtime envelope.");
-         }
-         DispatchFrame(envelope with { WireLength = checked((int)message.Length) }, received);
+         DispatchFrame(RealtimeEnvelope.Parse(message.GetBuffer().AsMemory(0, checked((int)message.Length))), received);
          message.SetLength(0);
       }
    }
 
 
 
-   /// <summary>Rejects any object that repeats a field name, ignoring case, anywhere in the message; two parsers could otherwise read different values from the same text.</summary>
-   private static void RejectDuplicateFields(JsonElement value)
-   {
-      if(value.ValueKind == JsonValueKind.Object)
-      {
-         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-         foreach(JsonProperty property in value.EnumerateObject())
-         {
-            if(!names.Add(property.Name))
-            { throw new InvalidDataException("Duplicate realtime JSON field."); }
-            RejectDuplicateFields(property.Value);
-         }
-      }
-      else if(value.ValueKind == JsonValueKind.Array)
-      {
-         foreach(JsonElement child in value.EnumerateArray())
-         { RejectDuplicateFields(child); }
-      }
-   }
-
-
-
    /// <summary>
-   /// Routes one validated frame. An ACK completes the send waiting on that message. An ERROR for a message still awaiting
-   /// acknowledgement fails that send with an HTTP-like status the callers already handle; errors that mean authorization
-   /// is gone are also passed on so the runtime can stop. Everything else goes to the callback with its payload cloned,
-   /// because the parsed document is freed as soon as the reader moves on.
+   /// Routes one validated frame. An ACK must name the message it acknowledges and completes the send waiting on it; an
+   /// ACK for a message no longer waiting is ignored. An ERROR must carry a code; for a message still awaiting
+   /// acknowledgement it fails that send with an HTTP-like status the callers already handle, and errors that mean
+   /// authorization is gone are also passed on so the runtime can stop. Everything else goes to the callback.
    /// </summary>
    private void DispatchFrame(RealtimeEnvelope envelope, Action<RealtimeEnvelope> received)
    {
       if(string.Equals(envelope.Type, "ACK", StringComparison.Ordinal))
       {
-         string? id = envelope.Payload.GetProperty("acknowledgedMessageId").GetString();
-         if(id is not null && _pending.TryGetValue(id, out TaskCompletionSource? completion))
+         string acknowledged = ProtocolJson.RequiredText(envelope.Payload, "acknowledgedMessageId", 200, "realtime ACK frame");
+         if(_pending.TryGetValue(acknowledged, out TaskCompletionSource? completion))
          { completion.TrySetResult(); }
          return;
       }
-      if(string.Equals(envelope.Type, "ERROR", StringComparison.Ordinal) && _pending.TryGetValue(envelope.MessageId, out TaskCompletionSource? failed))
+      if(string.Equals(envelope.Type, "ERROR", StringComparison.Ordinal))
       {
-         string? code = envelope.Payload.GetProperty("code").GetString();
-         System.Net.HttpStatusCode status = code switch
+         string code = ProtocolJson.RequiredText(envelope.Payload, "code", 128, "realtime ERROR frame");
+         if(_pending.TryGetValue(envelope.MessageId, out TaskCompletionSource? failed))
          {
-            "NOT_FOUND" => System.Net.HttpStatusCode.NotFound,
-            "EXPIRED" => System.Net.HttpStatusCode.Gone,
-            "CONFLICT" => System.Net.HttpStatusCode.Conflict,
-            _ => System.Net.HttpStatusCode.BadRequest,
-         };
-         failed.TrySetException(new HttpRequestException("Realtime operation was rejected: " + code, null, status));
-         if(code is not ("AUTHORIZATION_REQUIRED" or "AUTHENTICATION_REQUIRED"))
-         { return; }
+            failed.TrySetException(new HttpRequestException("Realtime operation was rejected: " + code, null, RejectionStatus(code)));
+            if(code is not ("AUTHORIZATION_REQUIRED" or "AUTHENTICATION_REQUIRED"))
+            { return; }
+         }
       }
-      received(envelope with { Payload = envelope.Payload.Clone() });
+      received(envelope);
    }
 
+
+
+   /// <summary>Maps the server's rejection code to the HTTP status the same refusal would have had over HTTP, which is what the callers of an acknowledged send already handle.</summary>
+   private static System.Net.HttpStatusCode RejectionStatus(string code) => code switch
+   {
+      "NOT_FOUND" => System.Net.HttpStatusCode.NotFound,
+      "EXPIRED" => System.Net.HttpStatusCode.Gone,
+      "CONFLICT" => System.Net.HttpStatusCode.Conflict,
+      _ => System.Net.HttpStatusCode.BadRequest,
+   };
 
 
    /// <summary>Marks the channel closed, stops the queue, fails any send still waiting so its caller replays the durable record, and disposes the socket.</summary>

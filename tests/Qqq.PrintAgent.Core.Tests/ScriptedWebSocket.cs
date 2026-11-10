@@ -80,8 +80,8 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
-   /// <summary>Makes the next receive fail, as a dropped connection does.</summary>
-   internal void FailReceive(Exception failure) => _incoming.Writer.TryComplete(failure);
+   /// <summary>Drops the connection: once the queued frames are read, the next receive fails as a socket does when its peer vanishes.</summary>
+   internal void Drop() => _incoming.Writer.TryComplete();
 
 
 
@@ -127,7 +127,10 @@ internal sealed class ScriptedWebSocket : WebSocket
    /// <summary>Hands the channel the next queued frame, waiting until the test queues one or the channel cancels.</summary>
    public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
    {
-      (byte[] bytes, WebSocketMessageType type, bool end) = await _incoming.Reader.ReadAsync(cancellationToken);
+      if(!await _incoming.Reader.WaitToReadAsync(cancellationToken))
+      { throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely); }
+      Assert.True(_incoming.Reader.TryRead(out (byte[] Bytes, WebSocketMessageType Type, bool End) frame));
+      (byte[] bytes, WebSocketMessageType type, bool end) = frame;
       Assert.True(bytes.Length <= buffer.Count, "A scripted frame must fit the channel's receive buffer; deliver a large message as fragments.");
       bytes.CopyTo(buffer.Array!, buffer.Offset);
       return new WebSocketReceiveResult(bytes.Length, type, end);

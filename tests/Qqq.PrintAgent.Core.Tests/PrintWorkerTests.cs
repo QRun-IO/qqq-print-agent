@@ -79,7 +79,7 @@ public sealed class PrintWorkerTests
    [InlineData("OUTCOME_UNKNOWN")]
    public async Task RunOnce_RetainedTerminalStateNeverResubmits(string state)
    {
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", "00", 1, new PrintOptions(), "", "CLAIMED");
+      PrintJob job = new("job1", "printer1", "Test", "ZPL", new string('0', 64), 1, new PrintOptions(), "", "CLAIMED");
       using FixtureHandler handler = new(job, [1]);
       using PrintApiClient api = new("http://localhost", "test-device", handler);
       MemoryJournal journal = new();
@@ -166,7 +166,7 @@ public sealed class PrintWorkerTests
    [Fact]
    public async Task RunOnce_PriorSubmittingMarksUnknownWithoutPrinting()
    {
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", "00", 1, new PrintOptions(), "", "CLAIMED");
+      PrintJob job = new("job1", "printer1", "Test", "ZPL", new string('0', 64), 1, new PrintOptions(), "", "CLAIMED");
       using FixtureHandler handler = new(job, [1]);
       using PrintApiClient api = new("http://localhost", "test-device", handler);
       MemoryJournal journal = new();
@@ -227,7 +227,7 @@ public sealed class PrintWorkerTests
    [Fact]
    public async Task RunOnce_BadHashNeverSubmits()
    {
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", "00", 1, new PrintOptions(), "", "CLAIMED");
+      PrintJob job = new("job1", "printer1", "Test", "ZPL", new string('0', 64), 1, new PrintOptions(), "", "CLAIMED");
       using FixtureHandler handler = new(job, [1]);
       using PrintApiClient api = new("http://localhost", "test-device", handler);
       MemoryJournal journal = new();

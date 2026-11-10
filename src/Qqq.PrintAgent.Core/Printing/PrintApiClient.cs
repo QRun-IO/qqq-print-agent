@@ -105,12 +105,17 @@ public sealed partial class PrintApiClient : IDisposable
 
 
 
-   /// <summary>Asks the server for the next job for this device, or null when none is waiting. The server replays a claimed job until its RECEIVED event commits, so the caller must record it.</summary>
+   /// <summary>
+   /// Asks the server for the next job for this device, or null when none is waiting. The server replays a claimed job
+   /// until its RECEIVED event commits, so the caller must record it. The job is checked against the contract before it
+   /// is returned: one that breaks it throws <see cref="PrintingProtocolException"/>, carrying a stand-in when the job
+   /// named itself, so nothing later ever handles a job with a missing member or an unsafe identifier.
+   /// </summary>
    public async Task<PrintJob?> ClaimAsync(CancellationToken token)
    {
       using HttpResponseMessage response = await _http.PostAsJsonAsync("device/jobs/claim", new { }, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
-      return (await response.Content.ReadFromJsonAsync<JobClaim>(token).ConfigureAwait(false))?.Job;
+      return PrintJobContract.ReadClaim(await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false));
    }
 
 
@@ -177,15 +182,18 @@ public sealed partial class PrintApiClient : IDisposable
 
 
 
-   /// <summary>Lists jobs the server is holding for this device but this computer has not received. A server without the endpoint (404) is treated as having none, so an older server only loses the preview.</summary>
+   /// <summary>
+   /// Lists jobs the server is holding for this device but this computer has not received. A server without the endpoint
+   /// (404) is treated as having none, so an older server only loses the preview. Each entry must name its job and
+   /// printer with usable identifiers; a list that breaks the contract throws <see cref="PrintingProtocolException"/>.
+   /// </summary>
    public async Task<IReadOnlyList<PrintJob>> QueuedJobsAsync(CancellationToken token)
    {
       using HttpResponseMessage response = await _http.GetAsync("device/jobs/queued", token).ConfigureAwait(false);
       if(response.StatusCode == System.Net.HttpStatusCode.NotFound)
       { return []; }
       response.EnsureSuccessStatusCode();
-      using var result = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token).ConfigureAwait(false));
-      return result.RootElement.TryGetProperty("jobs", out JsonElement jobs) ? jobs.Deserialize<PrintJob[]>(JsonOptions) ?? [] : [];
+      return PrintJobContract.ReadQueued(await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false));
    }
 
 
