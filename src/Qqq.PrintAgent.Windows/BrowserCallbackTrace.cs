@@ -47,7 +47,9 @@ internal sealed class BrowserCallbackTrace(ITraceFile file, TimeProvider clock)
    {
       try
       {
-         DateTimeOffset cutoff = clock.GetLocalNow() - window;
+         // Entries are stamped to the millisecond, so the start of the window is taken to the millisecond as well.
+         DateTimeOffset now = clock.GetLocalNow();
+         DateTimeOffset cutoff = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond)) - window;
          var recent = new List<string>();
          foreach(string line in file.ReadLines())
          {

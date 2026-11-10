@@ -169,6 +169,25 @@ public sealed class BrowserCallbackTraceTests
 
 
 
+   /// <summary>
+   /// An entry written exactly one window ago is still recent, and one millisecond later it is not. Entries are stamped
+   /// to the millisecond, so the start of the window is compared at the same precision; otherwise the fraction of a
+   /// millisecond the stamp drops would put such an entry outside its own window.
+   /// </summary>
+   [Fact]
+   public void EntryExactlyOneWindowOldIsStillRecent()
+   {
+      var clock = new ManualTimeProvider();
+      var trace = new BrowserCallbackTrace(new FakeTraceFile(), clock);
+      trace.Write("at the start of the window");
+      clock.Advance(TimeSpan.FromMinutes(10));
+      Assert.EndsWith(" at the start of the window", Assert.Single(trace.Recent(TimeSpan.FromMinutes(10))), StringComparison.Ordinal);
+      clock.Advance(TimeSpan.FromMilliseconds(1));
+      Assert.Empty(trace.Recent(TimeSpan.FromMinutes(10)));
+   }
+
+
+
    /// <summary>At most the newest 40 entries are returned, however many fall inside the window.</summary>
    [Fact]
    public void RecentTraceReturnsAtMostTheNewestForty()
