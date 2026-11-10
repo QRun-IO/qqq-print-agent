@@ -29,8 +29,25 @@ public sealed class CliProcessTests
       (int exitCode, string output, string error) = await RunAsync(input: null, argument);
 
       Assert.Equal(0, exitCode);
-      Assert.Equal(CommandLine.Usage.ReplaceLineEndings("\n") + "\n", output);
+      Assert.Equal(CommandLine.Usage + Environment.NewLine, output);
       Assert.Equal("", error);
+   }
+
+
+
+   /// <summary>Every line of the usage the real executable writes, to either stream, ends the way this platform ends lines. The help text is a multi-line literal whose line ends follow the source checkout, so without care a Windows console would get bare line feeds with one carriage return at the very end.</summary>
+   [Theory]
+   [InlineData("--help")]
+   [InlineData("status")]
+   public async Task Usage_IsWrittenWithThePlatformLineEnds(string argument)
+   {
+      (_, string output, string error) = await RunAsync(input: null, argument);
+
+      string written = output + error;
+      Assert.True(written.Split(Environment.NewLine).Length > 15, "The usage should span many lines.");
+      string withoutLineEnds = written.Replace(Environment.NewLine, "", StringComparison.Ordinal);
+      Assert.DoesNotContain('\n', withoutLineEnds);
+      Assert.DoesNotContain('\r', withoutLineEnds);
    }
 
 
@@ -42,7 +59,7 @@ public sealed class CliProcessTests
       (int exitCode, string output, string error) = await RunAsync(input: null);
 
       Assert.Equal(0, exitCode);
-      Assert.Equal(CommandLine.Usage.ReplaceLineEndings("\n") + "\n", output);
+      Assert.Equal(CommandLine.Usage + Environment.NewLine, output);
       Assert.Equal("", error);
    }
 
@@ -56,7 +73,7 @@ public sealed class CliProcessTests
 
       Assert.Equal(1, exitCode);
       Assert.Equal("", output);
-      Assert.Equal("Unknown command.\n" + CommandLine.Usage.ReplaceLineEndings("\n") + "\n", error);
+      Assert.Equal("Unknown command." + Environment.NewLine + CommandLine.Usage + Environment.NewLine, error);
    }
 
 
@@ -69,7 +86,7 @@ public sealed class CliProcessTests
 
       Assert.Equal(1, exitCode);
       Assert.Equal("", output);
-      Assert.Equal("Unknown command.\n" + CommandLine.Usage.ReplaceLineEndings("\n") + "\n", error);
+      Assert.Equal("Unknown command." + Environment.NewLine + CommandLine.Usage + Environment.NewLine, error);
    }
 
 
@@ -82,7 +99,7 @@ public sealed class CliProcessTests
 
       Assert.Equal(1, exitCode);
       Assert.Equal("", output);
-      Assert.Equal("Enrollment code: \nEnrollment code is required.\n", error);
+      Assert.Equal("Enrollment code: " + Environment.NewLine + "Enrollment code is required." + Environment.NewLine, error);
    }
 
 
@@ -97,8 +114,8 @@ public sealed class CliProcessTests
 
 
    /// <summary>
-   /// Starts the executable with the given arguments and waits for it to end, returning its exit code and what it wrote, with
-   /// line endings normalized. Standard input carries the given line, if any, and is then closed. The enrollment code
+   /// Starts the executable with the given arguments and waits for it to end, returning its exit code and exactly what it
+   /// wrote, line ends included. Standard input carries the given line, if any, and is then closed. The enrollment code
    /// variable is removed from the child's environment, so the result does not depend on the machine running the test. A
    /// process that has not finished within a minute is killed, so a hang fails the test instead of blocking the run.
    /// </summary>
@@ -129,7 +146,7 @@ public sealed class CliProcessTests
          }
          process.StandardInput.Close();
          await process.WaitForExitAsync(limit.Token);
-         return (process.ExitCode, (await output).ReplaceLineEndings("\n"), (await error).ReplaceLineEndings("\n"));
+         return (process.ExitCode, await output, await error);
       }
       finally
       {

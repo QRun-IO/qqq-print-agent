@@ -22,8 +22,12 @@ internal sealed class CommandLine(CommandLineHost host)
 
 
 
-   /// <summary>The help text: printed on standard output when asked for, and on standard error after a refused command line.</summary>
-   internal const string Usage = """
+   /// <summary>
+   /// The help text: printed on standard output when asked for, and on standard error after a refused command line. Its
+   /// line ends are made the platform's here, because the literal carries whatever this source file was checked out
+   /// with and a console or a captured file should not get a mixture.
+   /// </summary>
+   internal static readonly string Usage = """
       Usage: qqq-print-agent <command>
 
       Commands:
@@ -41,7 +45,7 @@ internal sealed class CommandLine(CommandLineHost host)
       The enrollment code is read from the QQQ_PRINT_ENROLLMENT_CODE environment variable, or else from standard input:
       typed at a prompt, where it is not shown, or piped in. It is never accepted on the command line.
       Exit code: 0 on success; 1 when the arguments are wrong, the service cannot be reached or the service reports an error.
-      """;
+      """.ReplaceLineEndings();
 
 
 
