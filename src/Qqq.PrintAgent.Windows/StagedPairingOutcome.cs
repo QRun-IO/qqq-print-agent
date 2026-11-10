@@ -24,7 +24,7 @@ internal enum StagedPairingOutcome
    /// <summary>The staged session belongs to the stored pairing and is being used, but could not be moved into place yet; the next reader tries again.</summary>
    Deferred,
 
-   /// <summary>The staged session did not belong to the stored pairing, or the stored session already did, so it was deleted.</summary>
+   /// <summary>The staged session did not belong to the stored pairing, or the stored session already did or was saved after it, and it was deleted.</summary>
    Discarded,
 
    /// <summary>The staged session could not be read and was moved aside under a recovery name instead of being deleted.</summary>
