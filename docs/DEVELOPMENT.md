@@ -69,6 +69,14 @@ with the printing QBit without Windows or hardware; it does not qualify this ser
 
 The worker persists receipt and SUBMITTING before invoking Windows. It records SPOOLED and the spooler job ID afterward and replays pending cloud events. A crash between spool acceptance and recording cannot be made atomic. The worker uses OUTCOME_UNKNOWN rather than automatic reprint. Preserve that distinction when extending retry/cancellation logic.
 
+Core has one composition, the one the service builds, and no optional paths beside it:
+
+- `PrintWorker` is one lane. Its log, its two predicates and every member of `PrintWorkerOptions` except the clock are required. It does not report unfinished jobs from a previous run, send inventory or send heartbeats; the runtime does.
+- `IPrinterBackend` is `Discover` and `PrintFileAsync(job, path, submissionTimeout, token)`. A document is always a verified staged file. A new backend, a wrapper included, implements both.
+- `PrintApiClient` is built only by `PrintApiClient.ForSession`. Inventory, job events and command receipts go over the realtime channel attached with `WithRealtime`, and fail as a closed connection without one.
+
+Core tests of the worker build it through `WorkerHarness`, which composes it the same way over hand-written fakes: a fake server that answers claims and documents and acknowledges or refuses each event frame, a journal, a printer that takes staged files, and a connection that can be dropped and reopened. A test that needs an API client over its own fake server gets one from `FakeSessionClient.ApiOver`.
+
 ## Packaging
 
 ```powershell

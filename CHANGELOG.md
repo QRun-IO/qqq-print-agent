@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+Removed the code the service never runs (2.0). The installed product behaves as before; the Core and Windows
+libraries lose every path that existed only for the polling transport and the `--legacy-compat` mode.
+
+- The API client can be built only from a signed-in session. Its device-token parameter and bearer header, the
+  device enrollment route, the control poll, the HTTP command receipt and the HTTP fallbacks for inventory,
+  heartbeat and job events are gone. Inventory, job events and command receipts travel only over the realtime
+  channel.
+- The print worker is the lane the service runs: it no longer has a mode that recovers the journal, sends its own
+  heartbeat and inventory, or downloads and submits a document from memory. Everything the runtime hands it is
+  required.
+- A printer backend prints a verified staged file and nothing else. `IFilePrinterBackend` is folded into
+  `IPrinterBackend`, the in-memory print is removed from the Windows adapter and the isolated backend, and the
+  print helper no longer accepts a `print` operation that carries the document in the request.
+- The update installer's message for a missing helper names the command line tool instead of a "diagnostic CLI".
+
 Core hardening for 2.0. No change to pairing, history or the wire protocol.
 
 - A job the server sends in a form the agent cannot use no longer blocks a device. The agent identifies the job

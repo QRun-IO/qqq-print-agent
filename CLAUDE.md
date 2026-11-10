@@ -81,13 +81,15 @@ Large classes are deliberately split into partial files by concern (`AgentRuntim
 
 **Reliability boundary.** `PrintWorker` persists receipt and `SUBMITTING` before calling Windows, records `SPOOLED` plus the spooler job ID afterward, and replays pending cloud events. A crash between spool acceptance and recording is not atomic; the worker reports `OUTCOME_UNKNOWN` rather than auto-reprinting. Preserve this distinction in any retry/cancel change, and keep "spool accepted" and "paper came out" separate in docs and messages.
 
+**One composition.** Core has only the shape the service builds; do not add optional paths beside it. `PrintWorker` is one lane and everything in `PrintWorkerOptions` except the clock is required (the runtime, not the worker, recovers unfinished jobs and sends inventory and heartbeats). `IPrinterBackend` is `Discover` plus `PrintFileAsync(job, path, submissionTimeout, token)`: a document is always a verified staged file, and wrappers forward it. `PrintApiClient` is built only by `ForSession`; inventory, job events and command receipts go only over the realtime channel.
+
 **Versions.** Product version (`VersionPrefix` in `Directory.Build.props`, release workflow overrides with `-p:Version`), native printing API (2.3), wire payload (v1) and the WebSocket subprotocol are independent. Do not conflate them when bumping.
 
 **Updates.** `MsiUpdateService` + `GitHubMsiReleaseClient` read the GitHub release feed and apply a machine MSI through Windows Installer, updating service, companion and CLI together. That GitHub feed is why the GitHub shadow must stay even though Gitea is primary.
 
 ## Test layout
 
-- `tests/Qqq.PrintAgent.Core.Tests`: protocol fixtures (`ProtocolFixtureTests`), loopback WebSocket peer, worker state machine, media contracts. New Core tests are written here (see the host note under Commands for where it builds).
+- `tests/Qqq.PrintAgent.Core.Tests`: protocol fixtures (`ProtocolFixtureTests`), loopback WebSocket peer, worker state machine, media contracts. Worker tests compose the worker as the service does through `WorkerHarness`; an API client over a test's own fake server comes from `FakeSessionClient.ApiOver`. New Core tests are written here (see the host note under Commands for where it builds).
 - `tests/Qqq.PrintAgent.Cli.Tests`: despite the name, this is mostly the Windows runtime suite (`AgentRuntime*`, `AgentRealtime*`, `AgentPipe*`, `AgentStore*`). Put Windows-layer tests here. The command-line tests are its `Cli*Tests.cs` files: they drive `CommandLine` through `CliFixture` (fakes for console, environment, pipe and helpers), and `CliProcessTests` starts the built executable.
 - `tests/Qqq.PrintAgent.Presentation.Tests`: the presentation assembly's suite, on hand-written fakes under `Fakes/` (`SignInFixture`, `FakeSession`, `FakeInbox`, `PumpContext`, `ManualTime`); no pipe, browser or network. Every line added to the assembly needs a test here, because its minimum is 100.
 - `tests/Qqq.PrintAgent.WorkerFixture`: child-process fixture used by runtime tests.

@@ -36,6 +36,26 @@ jobs have finished, even when that job is for an idle printer. There is no perio
 HTTP job/control/receipt fetch and no polling fallback. WebSocket liveness and
 normal QQQ session renewal do not query the job queue.
 
+Inventory, job events and command receipts travel only on the WebSocket, each
+acknowledged by the server. Version 2.0 deleted the HTTP requests the client
+once made in their place when no channel was attached (inventory, heartbeat,
+job events, the control poll and the HTTP command receipt): with no channel a
+send fails as a closed connection. Events and receipts stay in the journal and
+are replayed after the reconnect, and inventory is sent again on every new
+connection. The heartbeat is a frame the runtime sends on the channel. The
+printing requests that remain over HTTPS are the claim, the document, the
+queued-job preview, operator actions, the printer catalog and enrollment. The
+API client that makes them can be built only from the signed-in session, and
+every one of them, the document included, goes through that session.
+
+Each lane runs a worker that does four things in a pass: deliver the events
+the journal still holds, claim one job, stage its document and submit it once.
+Everything else belongs to the runtime and is handed to the worker, none of it
+optional: whether it may dispatch, claim or submit, the limits in force, the
+gates the lanes share and the leases a job holds. The runtime, not the worker,
+reports at start the jobs a previous run left unfinished, and sends inventory
+and heartbeats.
+
 Documents stream over separate authenticated HTTPS requests into owned files in
 the protected service staging directory. Length and SHA-256 are checked while
 streaming; only a complete verified file can reach the native printer worker.
@@ -79,7 +99,8 @@ levels, so that a job nested too deep to read can still be identified.
   The lane then ends its pass and the wave is marked drained, because the server
   would only offer the same job again; the next committed notification or
   released capacity starts a new wave. The outcome is reported by the lane that
-  is submitting the job or, after a restart, by recovery as OUTCOME_UNKNOWN.
+  is submitting the job or, after a restart, by the runtime's recovery at start
+  as OUTCOME_UNKNOWN.
 - **Between SUBMITTING and Windows.** If delivery of the SUBMITTING receipt
   cannot be confirmed, or the worker is stopped after it was acknowledged and
   before the native call, Windows is never asked. The job is FAILED and its
@@ -87,13 +108,16 @@ levels, so that a job nested too deep to read can still be identified.
 - **After spool acceptance.** Once a job is recorded as SPOOLED it stays
   SPOOLED. A failure while releasing its staging reservation or printer turn
   afterwards is logged and is not written over the record.
-- **File requirement.** A worker configured with a staging directory hands
-  staged files to its printer backend. Building such a worker with a backend
-  that does not declare file support fails at construction with an argument
-  error naming the backend. The check sees only the backend the worker is
-  given: the Windows runtime's wrappers always declare file support and forward
-  to the backend inside them, so a wrapped backend without it passes the check
-  and the job fails when the staged file is handed over.
+- **One way to print.** A printer backend lists printers and prints one
+  verified staged file under a submission limit; it has no other print
+  operation. Version 2.0 deleted the submission of a document from memory, and
+  with it the separate interface for backends that take files, so every
+  backend takes one, the exposure filter and the profile wrapper included. A
+  worker can no longer be built with a backend that cannot print its staged
+  file, and a wrapper can no longer refuse a file after SUBMITTING was
+  recorded because the backend inside it takes none. The print helper accepts
+  three operations (discover, print a staged file by its path, cancel one
+  spool job); it no longer accepts a document inside a request.
 
 ## Administrator settings
 

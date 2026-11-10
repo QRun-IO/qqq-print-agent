@@ -18,7 +18,7 @@ connection like every other negotiated state. The contract is in the protocol re
 
 ## Printing extension 2.3: the client reads the operator catalog
 
-- The inventory snapshot (`INVENTORY` over the realtime channel, `PUT /device/printers` otherwise) is
+- The inventory snapshot (`INVENTORY` over the realtime channel) is
   resent on every new connection, so a server that has never seen this computer's printers receives
   them as soon as the agent connects. New printers are disabled on the server until approved.
 - The device routes never report approval, so after each accepted inventory, and about once a
