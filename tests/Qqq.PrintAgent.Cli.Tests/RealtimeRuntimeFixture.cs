@@ -91,11 +91,14 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    /// <summary>
    /// Seeds an enrolled, signed-in agent store with two shared queues, lets the test add its own starting state, then starts the
    /// runtime with a session client wired to this fixture's fake HTTP server and loopback WebSocket. The concurrent-download
-   /// limit and (optionally) cached realtime settings are set up front so tests start from a known negotiated state.
+   /// limit and (optionally) cached realtime settings are set up front so tests start from a known negotiated state, and an
+   /// HTTP fault can be in place before the runtime makes its first request.
    /// </summary>
-   internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null, bool cacheSettings = false, string printingVersion = "2.0.0", Action<AgentStore>? seed = null)
+   internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null, bool cacheSettings = false, string printingVersion = "2.0.0",
+      Action<AgentStore>? seed = null, Func<HttpRequestMessage, Exception?>? httpFault = null)
    {
       PrintingVersion = printingVersion;
+      HttpFault = httpFault;
       _timeProvider = timeProvider;
       Settings = (settings ?? Settings) with { MaxConcurrentDownloads = downloads };
       using(var store = new AgentStore(DirectoryPath))

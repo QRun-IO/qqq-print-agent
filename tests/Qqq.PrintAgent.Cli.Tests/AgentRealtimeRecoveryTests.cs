@@ -17,7 +17,7 @@ public sealed class AgentRealtimeRecoveryTests
    [Fact]
    public async Task UnreadableOldProofStillStartsManagementPipeAndPreservesOriginalJournal()
    {
-      using var fixture = new ControlFixture();
+      using var fixture = new EnrolledStateFixture();
       fixture.SeedSpooledJob();
       string path = Path.Combine(fixture.DirectoryPath, "connection.dpapi");
       byte[] original = File.ReadAllBytes(path);

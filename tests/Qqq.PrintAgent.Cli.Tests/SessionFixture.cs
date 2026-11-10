@@ -20,7 +20,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 internal sealed class SessionFixture : IDisposable
 {
-   internal ControlFixture Local { get; } = new();
+   internal EnrolledStateFixture Local { get; } = new();
    internal FakeSession Session { get; } = new();
    internal FakeSession? NextSession { get; set; }
    internal Func<Uri, IQqqSessionClient>? Factory { get; set; }
@@ -57,7 +57,7 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-   /// <summary>Disposes the underlying control fixture, which removes the temporary state.</summary>
+   /// <summary>Disposes the underlying local state, which removes the temporary folder.</summary>
    public void Dispose() => Local.Dispose();
 
 

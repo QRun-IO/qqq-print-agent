@@ -4,74 +4,44 @@
  */
 
 using System.IO.Pipes;
-using System.Net;
 using System.Text;
-using System.Text.Json;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// The service's polling loop and management pipe in one running runtime against a fake server: it recovers from a network
-/// timeout when asked to reconnect, serves job actions over the pipe, and keeps serving after a client misbehaves.
+/// The service's connection loop and management pipe in one running runtime against a scripted server: it recovers from a
+/// network timeout as soon as it is asked to reconnect, serves job actions over the pipe, and keeps serving after a client misbehaves.
 /// </summary>
 public sealed class AgentRuntimeTests
 {
    /// <summary>
-   /// The first server request times out, and a reconnect request over the pipe wakes the loop immediately instead of waiting out
-   /// the poll interval, so the service reconnects within three seconds. The pipe then handles the job actions below, and a client
-   /// that disconnects halfway through a command does not stop the service or its next command.
+   /// The first server request times out, which leaves the connection loop waiting out a 60-second backoff. A reconnect request
+   /// over the pipe wakes the loop at once, so the service connects long before that backoff (which is longer than the
+   /// fixture's whole time limit) could have elapsed. The pipe then handles the job actions below, and a client that
+   /// disconnects halfway through a command does not stop the service or its next command.
    /// </summary>
    [Fact]
-   public async Task Reconnect_WakesPollingAfterHttpTimeout_AndRetainsPipeAfterClientDisconnect()
+   public async Task Reconnect_WakesTheConnectionLoopAfterHttpTimeout_AndRetainsPipeAfterClientDisconnect()
    {
-      string directory = Path.Combine(Path.GetTempPath(), "qqq-runtime-" + Guid.NewGuid().ToString("N"));
-      string pipeName = "QqqPrintAgent-test-" + Guid.NewGuid().ToString("N");
-      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(20));
-      TaskCompletionSource failed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-      TaskCompletionSource recovered = new(TaskCreationOptions.RunContinuationsAsynchronously);
       int requests = 0;
-      Task? running = null;
-      AgentRuntime? runtime = null;
-      try
-      {
-         using(AgentStore store = new(directory))
-         { store.SaveConfiguration(new AgentConfiguration("https://example.com", "test-device", "test-token")); }
-         runtime = new(directory, message =>
-         {
-            if(message.Contains("simulated timeout", StringComparison.Ordinal))
-            { failed.TrySetResult(); }
-            if(string.Equals(message, "Connected to the print server.", StringComparison.Ordinal))
-            { recovered.TrySetResult(); }
-         }, new NoPrinters(), configuration => new PrintApiClient(configuration.ServerUrl, configuration.DeviceToken, new Handler(() => Interlocked.Increment(ref requests))), pipeName, () => new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly));
-         running = runtime.RunAsync(stop.Token);
-         await failed.Task.WaitAsync(stop.Token);
-         string result = await SendAsync(pipeName, new PipeRequest("reconnect"), stop.Token);
-         Assert.StartsWith("Reconnect requested", result, StringComparison.Ordinal);
-         await recovered.Task.WaitAsync(TimeSpan.FromSeconds(3), stop.Token);
-         Assert.True(runtime.GetSnapshot().Connected);
-         await VerifyJobActionsAsync(directory, pipeName, runtime, stop.Token);
-         await DisconnectMidCommandAsync(pipeName, stop.Token);
-         string status = await SendAsync(pipeName, new PipeRequest("status"), stop.Token);
-         Assert.Contains("Connected", status, StringComparison.Ordinal);
-         Assert.False(running.IsCompleted);
-         await stop.CancelAsync();
-         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
-      }
-      finally
-      {
-         await stop.CancelAsync();
-         if(running is not null)
-         {
-            try
-            { await running; }
-            catch(OperationCanceledException) { }
-         }
-         runtime?.Dispose();
-         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-         Directory.Delete(directory, recursive: true);
-      }
+      var settings = new RealtimeSettings(Revision: 1, ReconnectMinDelayMillis: 60000, ReconnectMaxDelayMillis: 60000, ReconnectJitterPercent: 0);
+      await using RealtimeRuntimeFixture fixture = new(settings: settings, cacheSettings: true,
+         seed: store => store.SetExposure("other", false, new RealtimeRuntimeFixture.SyntheticFilePrinter().Discover()),
+         httpFault: _ => Interlocked.Increment(ref requests) == 1 ? new TaskCanceledException("simulated timeout") : null);
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal) && line.Contains("simulated timeout", StringComparison.Ordinal)));
+      Assert.False(fixture.Runtime.GetSnapshot().Connected);
+      string result = await fixture.PipeAsync(new PipeRequest("reconnect"));
+      Assert.StartsWith("Reconnect requested", result, StringComparison.Ordinal);
+      _ = await fixture.ConnectAsync();
+      Assert.True(fixture.Runtime.GetSnapshot().Connected);
+      await VerifyJobActionsAsync(fixture);
+      await DisconnectMidCommandAsync(fixture.PipeName);
+      string status = await fixture.PipeAsync(new PipeRequest("status"));
+      Assert.Contains("Connected", status, StringComparison.Ordinal);
+      Assert.False(fixture.Running.IsCompleted);
+      Assert.Equal(0, fixture.ForbiddenPolls);
    }
 
 
@@ -80,81 +50,37 @@ public sealed class AgentRuntimeTests
    /// A test print is refused until the printer is shared. A failed job turns health red and its details show the failure text;
    /// acknowledging it returns health to green without changing the delivery record; a shared printer's test print is queued on the server.
    /// </summary>
-   private static async Task VerifyJobActionsAsync(string directory, string pipeName, AgentRuntime runtime, CancellationToken token)
+   private static async Task VerifyJobActionsAsync(RealtimeRuntimeFixture fixture)
    {
-      string denied = await SendAsync(pipeName, new PipeRequest("test-print", PrinterId: "test-printer", Format: "PDF"), token);
+      string denied = await fixture.PipeAsync(new PipeRequest("test-print", PrinterId: "other", Format: "PDF"));
       Assert.StartsWith("Error: Share the printer", denied, StringComparison.Ordinal);
-      using(AgentStore store = new(directory))
+      Assert.Empty(fixture.OperatorActions);
+      using(AgentStore store = new(fixture.DirectoryPath))
       {
-         store.SetExposure("test-printer", true, new NoPrinters().Discover());
+         store.SetExposure("other", true, fixture.Printer.Discover());
          store.Record("failed-job", new PrintEvent("test-failed", "FAILED", "Synthetic failure", null));
       }
-      Assert.Equal("RED", runtime.GetSnapshot().Health);
-      string details = await SendAsync(pipeName, new PipeRequest("job-details", JobId: "failed-job"), token);
+      Assert.Equal("RED", fixture.Runtime.GetSnapshot().Health);
+      string details = await fixture.PipeAsync(new PipeRequest("job-details", JobId: "failed-job"));
       Assert.Contains("Synthetic failure", details, StringComparison.Ordinal);
-      string acknowledged = await SendAsync(pipeName, new PipeRequest("acknowledge-job", JobId: "failed-job"), token);
+      string acknowledged = await fixture.PipeAsync(new PipeRequest("acknowledge-job", JobId: "failed-job"));
       Assert.StartsWith("Job acknowledged", acknowledged, StringComparison.Ordinal);
-      Assert.Equal("GREEN", runtime.GetSnapshot().Health);
-      string queued = await SendAsync(pipeName, new PipeRequest("test-print", PrinterId: "test-printer", Format: "PDF"), token);
+      Assert.Equal("GREEN", fixture.Runtime.GetSnapshot().Health);
+      Assert.Equal("FAILED", fixture.State("failed-job"));
+      string queued = await fixture.PipeAsync(new PipeRequest("test-print", PrinterId: "other", Format: "PDF"));
       Assert.StartsWith("Queued on the server", queued, StringComparison.Ordinal);
-   }
-
-
-
-   /// <summary>Sends one line-delimited JSON request over the runtime's private test pipe and returns the one-line reply.</summary>
-   private static async Task<string> SendAsync(string name, PipeRequest request, CancellationToken token)
-   {
-      await using NamedPipeClientStream pipe = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
-      await pipe.ConnectAsync(token);
-      using StreamWriter writer = new(pipe, leaveOpen: true) { AutoFlush = true };
-      using StreamReader reader = new(pipe, leaveOpen: true);
-      await writer.WriteLineAsync(JsonSerializer.Serialize(request, PrintApiClient.JsonOptions));
-      return await reader.ReadLineAsync(token) ?? throw new IOException("Pipe closed before response.");
+      Assert.EndsWith("/device/test-print", Assert.Single(fixture.OperatorActions), StringComparison.Ordinal);
    }
 
 
 
    /// <summary>Writes half a command (invalid JSON, no newline) and drops the connection, to prove an abandoned pipe client cannot wedge the service.</summary>
-   private static async Task DisconnectMidCommandAsync(string name, CancellationToken token)
+   private static async Task DisconnectMidCommandAsync(string name)
    {
+      using CancellationTokenSource guard = new(TimeSpan.FromSeconds(30));
       await using NamedPipeClientStream pipe = new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
-      await pipe.ConnectAsync(token);
-      await pipe.WriteAsync(Encoding.UTF8.GetBytes("{invalid"), token);
-      await pipe.FlushAsync(token);
-   }
-
-
-
-   /// <summary>Fake server: the control poll gets 404, the first other request throws a simulated timeout, and later requests succeed (a test-print returns a queued job id).</summary>
-   private sealed class Handler(Func<int> count) : HttpMessageHandler
-   {
-      /// <summary>Applies the timeout-then-success script and counts non-control requests through the supplied counter.</summary>
-      protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-      {
-         if(request.RequestUri!.AbsolutePath.EndsWith("/control/poll", StringComparison.Ordinal))
-         {
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
-         }
-         if(count() == 1)
-         { throw new TaskCanceledException("simulated timeout"); }
-         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-         {
-            Content = new StringContent(request.RequestUri!.AbsolutePath.EndsWith("test-print", StringComparison.Ordinal) ? "{\"jobId\":\"test-queued\"}" : "{}", Encoding.UTF8, "application/json"),
-         });
-      }
-   }
-
-
-
-   /// <summary>Reports one ready PDF queue and refuses to print, so the test can exercise sharing and queuing without any physical output.</summary>
-   private sealed class NoPrinters : IPrinterBackend
-   {
-      /// <summary>Reports the single synthetic queue.</summary>
-      public IReadOnlyList<PrinterInfo> Discover() => [new PrinterInfo("test-printer", "Test printer", "Test driver", "Test port", "READY", ["PDF"])];
-
-
-
-      /// <summary>Always throws: no physical printing is allowed here.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new InvalidOperationException("No physical printing is allowed in this test.");
+      await pipe.ConnectAsync(guard.Token);
+      await pipe.WriteAsync(Encoding.UTF8.GetBytes("{invalid"), guard.Token);
+      await pipe.FlushAsync(guard.Token);
    }
 }
