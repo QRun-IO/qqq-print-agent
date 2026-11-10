@@ -18,6 +18,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// </summary>
 internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : ISignInSession
 {
+   private readonly TaskCompletionSource _completeEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
    private int _attempts;
    private bool _attemptOpen;
    private bool _signedIn;
@@ -46,6 +47,21 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
 
    /// <summary>When set, the password sign-in does not answer until the test completes it, or until the flow's token is cancelled.</summary>
    internal TaskCompletionSource? PendingPassword { get; set; }
+
+
+
+   /// <summary>When set, beginning the browser sign-in does not answer until the test completes it, or until the flow's token is cancelled.</summary>
+   internal TaskCompletionSource? PendingBegin { get; set; }
+
+
+
+   /// <summary>When set, completing the browser sign-in does not answer until the test completes it, or until the flow's token is cancelled.</summary>
+   internal TaskCompletionSource? PendingComplete { get; set; }
+
+
+
+   /// <summary>Completes when the flow has asked to complete a browser sign-in, so a test knows the callback has been taken up.</summary>
+   internal Task CompleteEntered => _completeEntered.Task;
 
 
 
@@ -150,41 +166,63 @@ internal sealed class FakeSession(Uri origin, bool allowUntrustedCertificate) : 
 
 
    /// <summary>Starts a new browser attempt with its own state, replacing any earlier one, and returns the provider page; or fails.</summary>
-   public Task<Uri> BeginBrowserSignInAsync(Uri redirect, CancellationToken cancellationToken)
+   public async Task<Uri> BeginBrowserSignInAsync(Uri redirect, CancellationToken cancellationToken)
    {
       ObjectDisposedException.ThrowIf(Disposed, this);
       Redirect = redirect;
-      if(BeginFailure is not null)
+      try
       {
-         return Task.FromException<Uri>(BeginFailure);
+         if(BeginFailure is not null)
+         {
+            throw BeginFailure;
+         }
+         if(PendingBegin is not null)
+         {
+            await PendingBegin.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+         }
+         _attempts++;
+         _attemptOpen = true;
+         return Authorization;
       }
-      _attempts++;
-      _attemptOpen = true;
-      return Task.FromResult(Authorization);
+      finally
+      {
+         Release();
+      }
    }
 
 
 
    /// <summary>Completes the open attempt when the callback carries that attempt's state; a callback without a begun attempt, or with another attempt's state, is refused the way the real session refuses it.</summary>
-   public Task CompleteBrowserSignInAsync(Uri callback, CancellationToken cancellationToken)
+   public async Task CompleteBrowserSignInAsync(Uri callback, CancellationToken cancellationToken)
    {
       ObjectDisposedException.ThrowIf(Disposed, this);
       Callback = callback;
-      if(!_attemptOpen)
+      _completeEntered.TrySetResult();
+      try
       {
-         return Task.FromException(new InvalidOperationException("No browser sign-in was begun on this session."));
+         if(!_attemptOpen)
+         {
+            throw new InvalidOperationException("No browser sign-in was begun on this session.");
+         }
+         _attemptOpen = false;
+         if(CompleteFailure is not null)
+         {
+            throw CompleteFailure;
+         }
+         if(!callback.Query.EndsWith("state=secret-state-" + _attempts, StringComparison.Ordinal))
+         {
+            throw new QqqSessionException(QqqSessionException.FailureKind.InvalidResponse, "The callback does not belong to this sign-in attempt.");
+         }
+         if(PendingComplete is not null)
+         {
+            await PendingComplete.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+         }
+         _signedIn = true;
       }
-      _attemptOpen = false;
-      if(CompleteFailure is not null)
+      finally
       {
-         return Task.FromException(CompleteFailure);
+         Release();
       }
-      if(!callback.Query.EndsWith("state=secret-state-" + _attempts, StringComparison.Ordinal))
-      {
-         return Task.FromException(new QqqSessionException(QqqSessionException.FailureKind.InvalidResponse, "The callback does not belong to this sign-in attempt."));
-      }
-      _signedIn = true;
-      return Task.CompletedTask;
    }
 
 

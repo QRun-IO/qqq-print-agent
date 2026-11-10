@@ -3,10 +3,13 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Presentation.SignIn;
 using Qqq.PrintAgent.Presentation.Tests.Fakes;
+using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 
@@ -253,6 +256,214 @@ public sealed class SignInFlowLifecycleTests
       Assert.True(fixture.Sessions[0].Disposed);
       Assert.Equal("DEBUG Browser sign-in ended because the connection flow was closed (OperationCanceledException).", Assert.Single(fixture.Log.Entries));
    }
+
+
+
+   /// <summary>
+   /// A failure that is not a cancellation, seen after the flow was disposed, is a quiet end too. The server's answer to a
+   /// discovery fails (here with a kind of failure the discovery does not handle at all), and the flow is disposed before
+   /// the discovery gets to continue: nothing escapes to the window's handler, nothing is announced, and the log has one
+   /// debug line that names what was swallowed.
+   /// </summary>
+   [Fact]
+   public void FailureSeenAfterTheFlowWasDisposed_IsAQuietEnd()
+   {
+      using PumpContext pump = new();
+      SignInFixture fixture = new() { ConfigureSession = session => session.PendingDiscovery = new TaskCompletionSource<QqqAuthenticationMetadata>() };
+      bool started = false;
+
+      pump.Run(async () =>
+      {
+         Task<bool> running = fixture.Flow.DiscoverAsync(SignInFixture.Server);
+         fixture.Forget();
+         fixture.Sessions[0].PendingDiscovery!.SetException(new NotSupportedException("A failure that is not a cancellation."));
+         fixture.Flow.Dispose();
+         started = await SignInFixture.EndsAsync(running);
+      });
+
+      Assert.True(started);
+      Assert.Empty(fixture.Changes);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.Equal("DEBUG Discovery ended because the connection flow was closed (NotSupportedException).", Assert.Single(fixture.Log.Entries));
+   }
+
+
+
+   /// <summary>
+   /// The server describes itself, and the caller ends the wait before the discovery gets to continue. The discovery
+   /// looks at its wait again before it uses the answer: no sign-in method is offered, no message is shown, no session
+   /// is left, and the flow is idle.
+   /// </summary>
+   [Fact]
+   public void CancelledAfterTheServerDescribedItself_OffersNothing()
+   {
+      using PumpContext pump = new();
+      using CancellationTokenSource cancellation = new();
+      SignInFixture fixture = new() { ConfigureSession = session => session.PendingDiscovery = new TaskCompletionSource<QqqAuthenticationMetadata>() };
+
+      pump.Run(async () =>
+      {
+         Task<bool> running = fixture.Flow.DiscoverAsync(SignInFixture.Server, cancellation.Token);
+         fixture.Sessions[0].PendingDiscovery!.SetResult(fixture.Sessions[0].Metadata);
+         EndTheWait(cancellation);
+         await SignInFixture.EndsAsync(running);
+      });
+
+      Assert.Empty(fixture.Shown);
+      Assert.False(fixture.Flow.PasswordOffered);
+      Assert.False(fixture.Flow.HasSession);
+      Assert.True(fixture.Sessions[0].Disposed);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.Equal("DEBUG Discovery was cancelled by its caller (OperationCanceledException).", fixture.Log.Entries[^1]);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("Sign-in options for", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// The server answers the start of a browser sign-in, and the flow is disposed before the sign-in gets to continue.
+   /// The sign-in looks at its wait again before it opens anything: no browser window is opened for a window that has
+   /// closed, and nothing more is logged or announced.
+   /// </summary>
+   [Fact]
+   public void DisposedBeforeTheBrowserWasOpened_OpensNothing()
+   {
+      using PumpContext pump = new();
+      SignInFixture fixture = new()
+      {
+         ConfigureSession = session =>
+         {
+            session.Metadata = SignInFixture.Offers(password: false, SignInFixture.Callback);
+            session.PendingBegin = new TaskCompletionSource();
+         },
+      };
+
+      pump.Run(async () =>
+      {
+         await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+         Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+         fixture.Forget();
+         fixture.Sessions[0].PendingBegin!.SetResult();
+         fixture.Flow.Dispose();
+         await SignInFixture.EndsAsync(running);
+      });
+
+      Assert.Empty(fixture.Opened);
+      Assert.Empty(fixture.Changes);
+      Assert.True(fixture.Inboxes[0].Disposed);
+      Assert.Equal("DEBUG Browser sign-in ended because the connection flow was closed (OperationCanceledException).", Assert.Single(fixture.Log.Entries));
+   }
+
+
+
+   /// <summary>
+   /// The server completes the browser sign-in, and the flow is disposed before the sign-in gets to continue. The sign-in
+   /// looks at its wait again before it takes the credential: nothing is prepared for the service, nothing is sent, and
+   /// the log does not say that a session is being handed over.
+   /// </summary>
+   [Fact]
+   public void DisposedAfterTheBrowserSignInCompleted_TakesNoCredential()
+   {
+      using PumpContext pump = new();
+      SignInFixture fixture = new()
+      {
+         ConfigureSession = session =>
+         {
+            session.Metadata = SignInFixture.Offers(password: false, SignInFixture.Callback);
+            session.PendingComplete = new TaskCompletionSource();
+         },
+      };
+
+      pump.Run(async () =>
+      {
+         await fixture.Flow.DiscoverAsync(SignInFixture.Server);
+         Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+         fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
+         await fixture.Sessions[0].CompleteEntered.WaitAsync(TimeSpan.FromSeconds(10));
+         fixture.Forget();
+         fixture.Sessions[0].PendingComplete!.SetResult();
+         fixture.Flow.Dispose();
+         await SignInFixture.EndsAsync(running);
+      });
+
+      Assert.Empty(fixture.Requests);
+      Assert.Empty(fixture.Changes);
+      Assert.Null(fixture.Flow.Readiness);
+      Assert.Equal("DEBUG Browser sign-in ended because the connection flow was closed (OperationCanceledException).", Assert.Single(fixture.Log.Entries));
+   }
+
+
+
+   /// <summary>
+   /// The identity provider confirms the sign-out, and the flow is disposed before the sign-out gets to continue. Nothing
+   /// more is said: the confirmation is neither logged nor announced to a window that has closed.
+   /// </summary>
+   [Fact]
+   public void DisposedAfterTheProviderConfirmedTheSignOut_SaysNothingMore()
+   {
+      using PumpContext pump = new();
+      QqqProviderLogout logout = new(new Uri("https://id.example.com/logout?id_token_hint=secret-hint"), new Uri(SignInFixture.Callback), "state-1");
+      SignInFixture fixture = new() { Service = _ => Task.FromResult(JsonSerializer.Serialize(new PipeSignOutResult(SignInFixture.SignedOut, logout), PrintApiClient.JsonOptions)) };
+
+      pump.Run(async () =>
+      {
+         Task<bool> running = fixture.Flow.SignOutAsync();
+         fixture.Forget();
+         fixture.Inboxes[0].Deliver(new Uri(SignInFixture.Callback + "?state=state-1"));
+         Assert.True(SpinWait.SpinUntil(() => fixture.Inboxes[0].Received, TimeSpan.FromSeconds(10)));
+         fixture.Flow.Dispose();
+         await SignInFixture.EndsAsync(running);
+      });
+
+      Assert.Empty(fixture.Changes);
+      Assert.True(fixture.Inboxes[0].Disposed);
+      Assert.Equal("DEBUG Sign-out ended because the connection flow was closed (OperationCanceledException).", Assert.Single(fixture.Log.Entries));
+   }
+
+
+
+   /// <summary>
+   /// The service confirms the sign-in, and a view's handler throws while "Signed in" is being announced, with a kind of
+   /// failure that means "not completed" when the server's sign-in raises it. The sign-in did complete, so it is not
+   /// reported or logged as failed: the handler's failure goes back to its caller, and the flow is released and holds what
+   /// the service confirmed, in the signed-in stage, without a session.
+   /// </summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public async Task HandlerThatThrowsWhileSignedInIsAnnounced_IsNotAFailedSignIn(bool browser)
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Flow.PropertyChanged += (_, change) =>
+      {
+         if(string.Equals(change.PropertyName, nameof(SignInFlow.Feedback), StringComparison.Ordinal) && string.Equals(fixture.Flow.Feedback?.Title, "Signed in", StringComparison.Ordinal))
+         {
+            throw new IOException("A view's handler failed.");
+         }
+      };
+
+      Task<bool> running = browser ? fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent) : fixture.Flow.SignInWithPasswordAsync("operator", "secret", PairingChoice.KeepCurrent);
+      if(browser)
+      {
+         fixture.Inboxes[0].Deliver(fixture.Sessions[0].CallbackForLatestAttempt);
+      }
+      IOException thrown = await Assert.ThrowsAsync<IOException>(() => running);
+
+      Assert.Equal("A view's handler failed.", thrown.Message);
+      Assert.Single(fixture.Requests);
+      Assert.Equal("Signed in", fixture.Shown[^1].Title);
+      Assert.Equal(SignInStage.SignedIn, fixture.Flow.Stage);
+      Assert.Equal(SignInReadiness.PrintingEnabled, fixture.Flow.Readiness);
+      Assert.False(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.False(fixture.Flow.BrowserPending);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("not completed", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal) || entry.StartsWith("WARN", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>Ends a caller's wait at once, on the calling thread, so the cancellation is certain to precede whatever the flow does next.</summary>
+   private static void EndTheWait(CancellationTokenSource cancellation) => cancellation.Cancel();
 
 
 

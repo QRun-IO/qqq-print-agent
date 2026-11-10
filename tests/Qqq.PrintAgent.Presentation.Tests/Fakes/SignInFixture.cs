@@ -19,7 +19,6 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// </summary>
 internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, IBrowserCallbackSource
 {
-   private TaskCompletionSource<FakeInbox>? _awaitedInbox;
    /// <summary>The address tests use for the server.</summary>
    internal const string Server = "https://print.example.com";
 
@@ -37,6 +36,8 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
 
    /// <summary>The sentence the real service sends when it enrolled this computer.</summary>
    internal const string Enrolled = "Enrolled device 7";
+
+   private TaskCompletionSource<FakeInbox>? _awaitedInbox;
 
 
 

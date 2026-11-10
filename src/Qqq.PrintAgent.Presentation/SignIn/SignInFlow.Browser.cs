@@ -38,53 +38,69 @@ public sealed partial class SignInFlow
       {
          return false;
       }
-      bool confirmed = false;
       return await RunAsync("Browser sign-in", SignInStage.WaitingForBrowser, async token =>
       {
-         confirmed = await TrySignInWithBrowserAsync(session, pairing, token);
+         await SignInWithBrowserCoreAsync(session, pairing, token);
          return true;
-      }, stopped: true, () => Settled(confirmed), cancellationToken);
+      }, stopped: true, Settled, cancellationToken);
    }
 
 
 
    /// <summary>
-   /// The browser sign-in and its hand-over; it returns whether the service confirmed. "Canceled" is only said while
-   /// nothing has been handed to the service: once the request to the service has left, an unanswered hand-over is
-   /// reported by the hand-over itself as unconfirmed. Nothing is handed over once the wait has ended.
+   /// The browser sign-in and its hand-over, with the Cancel button shown for as long as both take. The hand-over and what
+   /// it announces are outside the part whose failures mean the sign-in failed: once the browser exchange has produced a
+   /// session, a failure while the result is announced (a view's handler that throws) is not a failed sign-in.
    /// </summary>
-   private async Task<bool> TrySignInWithBrowserAsync(ISignInSession session, PairingChoice pairing, CancellationToken token)
+   private async Task SignInWithBrowserCoreAsync(ISignInSession session, PairingChoice pairing, CancellationToken token)
    {
       _callbackArrived = false;
       try
       {
          BrowserPending = true;
+         if(await TryBrowserExchangeAsync(session, token) is { } credential)
+         {
+            AfterBrowserHandOver(await HandOverAsync(credential, pairing, token));
+         }
+      }
+      finally
+      {
+         BrowserPending = false;
+      }
+   }
+
+
+
+   /// <summary>
+   /// The browser's part of the sign-in. It returns the session credential to hand over, or null when the exchange was
+   /// cancelled, timed out or failed and that was reported. "Canceled" is only said here, where nothing has been handed
+   /// to the service yet; once the request to the service has left, an unanswered hand-over is reported by the hand-over
+   /// itself as unconfirmed. No credential is taken once the wait has ended.
+   /// </summary>
+   private async Task<QqqSessionCredential?> TryBrowserExchangeAsync(ISignInSession session, CancellationToken token)
+   {
+      try
+      {
          _log.Info("Browser sign-in requested for " + session.Origin.Authority + "; this application's callback is " + _callbacks.RedirectUri + ".");
          string redirect = _metadata?.Values?.NativeSessionLogin?.RedirectUris.FirstOrDefault(value => string.Equals(value, _callbacks.RedirectUri, StringComparison.Ordinal))
             ?? throw Unlisted();
          await WaitForBrowserAsync(session, new Uri(redirect), token);
          token.ThrowIfCancellationRequested();
-         ServiceResult<SignInConfirmation> handover = await HandOverAsync(session, pairing, token);
-         AfterBrowserHandOver(handover);
-         return handover.Succeeded;
+         return session.ExportCredential();
       }
       catch(OperationCanceledException) when(!_disposed)
       {
          AbandonBrowserSignIn(_callbackArrived
             ? "Browser sign-in cancelled or timed out (three minute limit) after the callback arrived, before the sign-in was completed."
             : "Browser sign-in cancelled or timed out (three minute limit) before a callback arrived.");
-         return false;
+         return null;
       }
       catch(Exception exception) when(!_disposed && exception is IOException or InvalidOperationException or HttpRequestException or UnauthorizedAccessException or Win32Exception or InvalidDataException)
       {
          LogFailure("Browser sign-in not completed", exception);
          ReportCallbackTrace();
          Report(SignInMessages.BrowserNotCompleted(QqqSessionDiagnostics.Explain(exception)));
-         return false;
-      }
-      finally
-      {
-         BrowserPending = false;
+         return null;
       }
    }
 

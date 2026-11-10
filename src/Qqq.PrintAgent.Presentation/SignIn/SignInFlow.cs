@@ -189,22 +189,32 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
       {
          return false;
       }
-      bool confirmed = false;
       return await RunAsync("Password sign-in", SignInStage.SigningIn, async token =>
       {
-         confirmed = await TrySignInWithPasswordAsync(session, (username ?? string.Empty).Trim(), password, pairing, token);
+         if(await TrySignInWithPasswordAsync(session, (username ?? string.Empty).Trim(), password, token) is { } credential)
+         {
+            ServiceResult<SignInConfirmation> handover = await HandOverAsync(credential, pairing, token);
+            if(handover is { Outcome: ServiceOutcome.Unavailable, Unconfirmed: false })
+            {
+               _log.Error("Password sign-in not completed: the service did not answer (" + Describe(handover) + ").");
+               Report(SignInMessages.PasswordNotCompleted(handover.Message));
+            }
+         }
          return true;
-      }, stopped: true, () => Settled(confirmed), cancellationToken);
+      }, stopped: true, Settled, cancellationToken);
    }
 
 
 
    /// <summary>
-   /// The password sign-in and its hand-over; it returns whether the service confirmed. A failure of the server's sign-in,
-   /// including the server's own time limit, is shown as "not completed". A wait that the caller or disposal ended is not
-   /// a failure and is left to the runner. Nothing is handed to the service once the wait has ended.
+   /// The server's part of a password sign-in. It returns the session credential to hand over, or null when the sign-in
+   /// failed and was reported. A failure of the server's sign-in, including the server's own time limit, is shown as "not
+   /// completed". A wait that the caller or disposal ended is not a failure and is left to the runner, and no credential
+   /// is taken once the wait has ended. The hand-over and what it announces are deliberately not inside this method's
+   /// protection: once the server has accepted the sign-in, a failure while the result is announced (a view's handler
+   /// that throws) is not a failed sign-in and must not be reported as one.
    /// </summary>
-   private async Task<bool> TrySignInWithPasswordAsync(ISignInSession session, string username, string password, PairingChoice pairing, CancellationToken token)
+   private async Task<QqqSessionCredential?> TrySignInWithPasswordAsync(ISignInSession session, string username, string password, CancellationToken token)
    {
       try
       {
@@ -212,19 +222,13 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
          Report(SignInMessages.SigningIn);
          await session.SignInWithPasswordAsync(username, password, token);
          token.ThrowIfCancellationRequested();
-         ServiceResult<SignInConfirmation> handover = await HandOverAsync(session, pairing, token);
-         if(handover is { Outcome: ServiceOutcome.Unavailable, Unconfirmed: false })
-         {
-            _log.Error("Password sign-in not completed: the service did not answer (" + Describe(handover) + ").");
-            Report(SignInMessages.PasswordNotCompleted(handover.Message));
-         }
-         return handover.Succeeded;
+         return session.ExportCredential();
       }
       catch(Exception exception) when(Reportable(exception, token) && exception is IOException or ArgumentException or HttpRequestException or OperationCanceledException or UnauthorizedAccessException)
       {
          LogFailure("Password sign-in not completed", exception);
          Report(SignInMessages.PasswordNotCompleted(QqqSessionDiagnostics.Explain(exception)));
-         return false;
+         return null;
       }
    }
 
@@ -239,7 +243,7 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
    /// status before trying again, and the session is discarded too, because the service may hold it. When nothing was sent,
    /// the caller decides what that means for its kind of sign-in.
    /// </summary>
-   private async Task<ServiceResult<SignInConfirmation>> HandOverAsync(ISignInSession session, PairingChoice pairing, CancellationToken cancellationToken)
+   private async Task<ServiceResult<SignInConfirmation>> HandOverAsync(QqqSessionCredential credential, PairingChoice pairing, CancellationToken cancellationToken)
    {
       Stage = SignInStage.HandingOver;
       string choice = pairing switch
@@ -249,7 +253,7 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
          _ => "keep the current pairing",
       };
       _log.Info("Sign-in accepted by the server; handing the session to the service (" + choice + ").");
-      ServiceResult<SignInConfirmation> result = await _service.SignInAsync(session.ExportCredential(), pairing == PairingChoice.ClaimLegacyDevice, pairing == PairingChoice.StartNewPairing, cancellationToken);
+      ServiceResult<SignInConfirmation> result = await _service.SignInAsync(credential, pairing == PairingChoice.ClaimLegacyDevice, pairing == PairingChoice.StartNewPairing, cancellationToken);
       ThrowIfDisposed();
       if(result.Succeeded)
       {
@@ -393,9 +397,14 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
 
 
 
-   /// <summary>The stage a sign-in attempt ends in: signed in when the service confirmed, idle when no session is left, and otherwise ready for another attempt.</summary>
-   private SignInStage Settled(bool confirmed)
-      => confirmed ? SignInStage.SignedIn : _session is null ? SignInStage.Idle : SignInStage.Ready;
+   /// <summary>
+   /// The stage a sign-in attempt ends in, read from what the flow holds: ready for another attempt while a session is
+   /// left, signed in when the service confirmed (which is when the flow knows what the sign-in achieved and has given its
+   /// session up), and otherwise idle. Because it reads the state and not a result handed back, the stage is right even
+   /// when a view's handler throws while the confirmation is being announced.
+   /// </summary>
+   private SignInStage Settled()
+      => _session is not null ? SignInStage.Ready : _readiness is not null ? SignInStage.SignedIn : SignInStage.Idle;
 
 
 
