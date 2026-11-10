@@ -35,6 +35,10 @@ try
       & dotnet test $project --configuration Release '-p:Platform=x64' "-p:PrintingProtocolFixtures=$ProtocolFixtures" --no-restore --settings coverage.runsettings --logger trx --collect 'XPlat Code Coverage' --results-directory $resultsDirectory
       if($LASTEXITCODE -ne 0) { throw "Tests failed: $project" }
    }
+   # Each assembly must stay at or above its recorded minimum (docs/adr/0003-version-2.md). The minimums
+   # only move up: raise an entry in minimum-coverage.json in the change that adds the tests.
+   & (Join-Path $PSScriptRoot 'Assert-Coverage.ps1') -ResultsDirectory $resultsDirectory -ThresholdsPath (Join-Path $PSScriptRoot 'minimum-coverage.json')
+   if($LASTEXITCODE -ne 0) { throw 'Coverage gate failed.' }
    Write-Output "Current verification evidence: $resultsDirectory"
 }
 finally

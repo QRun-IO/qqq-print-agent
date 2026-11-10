@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Coverage reporting for the prerelease exception in docs/adr/0002-prerelease-quality-and-packaging.md.
-     This collection configuration does not enforce a 100% coverage gate.
+<!-- Coverage collection for the gate in docs/adr/0003-version-2.md. This file only decides what is
+     measured; build/Assert-Coverage.ps1 enforces the per-assembly minimums in
+     build/minimum-coverage.json, and build/Verify.ps1 runs it after the tests.
      There is deliberately no Include filter:
      coverlet measures the projects the unit tests reference whose sources are in this
      repository (including Core, Windows and CLI), never NuGet packages, and an Include
@@ -9,9 +10,11 @@
      - GeneratedCodeAttribute: source-generated JSON contexts and MVVM Toolkit members.
      - ExcludeFromCodeCoverageAttribute: thin adapters a test cannot reach, each with a
        justification at its declaration.
+     - Qqq.PrintAgent.WorkerFixture: the child-process fixture the runtime tests launch. It
+       is test support, not shipped code.
      The WinUI project is not measured: its views need a live compositor. FlaUI acceptance
      is run separately and must not be inferred from a successful unit-test run.
-     Report each suite separately; duplicate package measurements must not be averaged. -->
+     Each suite writes its own report; the gate merges them line by line and never averages. -->
 <RunSettings>
    <!-- A test run that executes zero tests (for example, a test assembly blocked from loading) must fail, not pass. -->
    <RunConfiguration>
@@ -23,6 +26,7 @@
             <Configuration>
                <Format>cobertura</Format>
                <ExcludeByAttribute>GeneratedCodeAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+               <Exclude>[Qqq.PrintAgent.WorkerFixture]*</Exclude>
             </Configuration>
          </DataCollector>
       </DataCollectors>
