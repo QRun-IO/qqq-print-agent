@@ -69,11 +69,11 @@ public sealed class ClaimedJobContractTests
    [Fact]
    public async Task TitleLimitCountsCodePointsNotUtf16Units()
    {
-      string atLimit = string.Concat(Enumerable.Repeat("🖨", 1024));
+      string atLimit = string.Concat(Enumerable.Repeat("\U0001F5A8", 1024));
       JsonObject accepted = ValidJob();
       accepted["title"] = atLimit;
       JsonObject refused = ValidJob();
-      refused["title"] = atLimit + "🖨";
+      refused["title"] = atLimit + "\U0001F5A8";
       using var server = new FakePrintServer();
       server.OfferRaw(Claim(accepted)).OfferRaw(Claim(refused));
       using PrintApiClient api = Api(server);
@@ -254,14 +254,14 @@ public sealed class ClaimedJobContractTests
    public async Task ByteOrderMarkBeforeTheResponseIsAccepted()
    {
       using var server = new FakePrintServer();
-      server.OfferRaw("﻿" + Claim(ValidJob())).OfferRaw("﻿").OfferRaw(" ﻿" + Claim(ValidJob()));
+      server.OfferRaw("\uFEFF" + Claim(ValidJob())).OfferRaw("\uFEFF").OfferRaw(" \uFEFF" + Claim(ValidJob()));
       using PrintApiClient api = Api(server);
       Assert.Equal("job-1", Assert.IsType<PrintJob>(await api.ClaimAsync(CancellationToken.None)).JobId);
       Assert.Equal("The claim response is not valid JSON.", (await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None))).Message);
       Assert.Equal("The claim response is not valid JSON.", (await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None))).Message);
 
       using var queue = new ScriptedServer();
-      queue.Add("﻿" + """{"jobs":[{"jobId":"queued-1","printerId":"printer1"}]}""");
+      queue.Add("\uFEFF" + """{"jobs":[{"jobId":"queued-1","printerId":"printer1"}]}""");
       using var queued = new PrintApiClient("https://synthetic.invalid", handler: queue);
       Assert.Equal("queued-1", Assert.Single(await queued.QueuedJobsAsync(CancellationToken.None)).JobId);
    }
