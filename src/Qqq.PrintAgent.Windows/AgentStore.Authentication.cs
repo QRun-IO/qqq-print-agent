@@ -125,15 +125,20 @@ public sealed partial class AgentStore
    /// <summary>
    /// Saves the session protected for the service account, writing a temporary file and moving it into place so a crash cannot
    /// leave a half-written secret. An unreadable earlier file is quarantined first. A staged session from an unfinished pairing
-   /// change is removed, because what is saved here is newer than it.
+   /// change is removed, because what is saved here is newer than it. When it cannot be removed, the saved file is stamped
+   /// later than the staged one, so the order the two were written in does not depend on the clock having moved forward.
    /// </summary>
    public void SaveAuthentication(AgentAuthentication authentication)
    {
       string path = Path.Combine(_directory, SessionFile);
+      string staged = Path.Combine(_directory, StagedSessionFile);
       WriteProtected(path + ".tmp", authentication);
       _ = QuarantineUnreadableAuthentication();
       File.Move(path + ".tmp", path, overwrite: true);
-      _ = DeleteQuietly(Path.Combine(_directory, StagedSessionFile));
+      if(!DeleteQuietly(staged) && File.GetLastWriteTimeUtc(path) <= File.GetLastWriteTimeUtc(staged))
+      {
+         File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(staged).AddTicks(1));
+      }
    }
 
 
@@ -143,13 +148,19 @@ public sealed partial class AgentStore
    /// staged name, and the pairing is replaced second. From then on the change is decided: every reader of the session
    /// uses the staged one and moves it into place, because it names the stored pairing's server and device. If the pairing
    /// cannot be written the staged session is removed and nothing has changed; a staged session left by a crash before the
-   /// pairing was replaced names a different device and is discarded by the next reader.
+   /// pairing was replaced names a different device and is discarded by the next reader. The staged file is never stamped
+   /// earlier than the stored session it is about to replace, whatever the clock did in between.
    /// </summary>
    internal void StagePairing(AgentConfiguration configuration, AgentAuthentication authentication)
    {
       string staged = Path.Combine(_directory, StagedSessionFile);
+      string path = Path.Combine(_directory, SessionFile);
       WriteProtected(staged + ".tmp", authentication);
       File.Move(staged + ".tmp", staged, overwrite: true);
+      if(File.Exists(path) && File.GetLastWriteTimeUtc(path) > File.GetLastWriteTimeUtc(staged))
+      {
+         File.SetLastWriteTimeUtc(staged, File.GetLastWriteTimeUtc(path));
+      }
       try
       {
          SaveConfiguration(configuration);

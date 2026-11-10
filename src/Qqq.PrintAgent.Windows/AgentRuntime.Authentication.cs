@@ -159,7 +159,7 @@ public sealed partial class AgentRuntime
                + (store.StagedPairingFailure is null ? "not recorded." : QqqSessionDiagnostics.Describe(store.StagedPairingFailure)));
             break;
          case StagedPairingOutcome.Discarded:
-            WriteLog("INFO", "Discarded a session left over from a pairing change: it did not belong to the stored pairing, or the stored session already did or is newer.");
+            WriteLog("INFO", "Discarded a session left over from a pairing change: it was for another pairing, or the stored session is newer or already belongs to this one.");
             break;
          case StagedPairingOutcome.SetAside:
             WriteLog("WARN", "A session staged for a pairing change could not be read and was moved aside for recovery.");

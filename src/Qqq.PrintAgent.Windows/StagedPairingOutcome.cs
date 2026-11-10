@@ -12,7 +12,7 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 internal enum StagedPairingOutcome
 {
-   /// <summary>Nothing was staged.</summary>
+   /// <summary>Nothing was staged, or a leftover could not be removed yet and waits for the next read.</summary>
    None,
 
    /// <summary>The staged session belonged to the stored pairing and was moved into place.</summary>
