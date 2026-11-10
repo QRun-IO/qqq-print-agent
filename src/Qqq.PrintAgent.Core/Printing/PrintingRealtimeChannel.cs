@@ -62,7 +62,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
          Exception? cause = ended.Exception?.InnerException;
          foreach(TaskCompletionSource pending in _pending.Values)
          {
-            pending.TrySetException(new IOException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
+            pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
          }
          await Task.WhenAll(reader, writer).ConfigureAwait(false);
       }
@@ -79,7 +79,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    {
       token.ThrowIfCancellationRequested();
       if(Volatile.Read(ref _closed) != 0)
-      { throw new IOException("Realtime connection is closed."); }
+      { throw new RealtimeChannelClosedException("Realtime connection is closed.", null); }
       string id = messageId ?? Guid.NewGuid().ToString("N");
       byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new { type, messageId = id, payload }, PrintApiClient.JsonOptions);
       if(bytes.Length > _limits.MaxFrameBytes)

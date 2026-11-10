@@ -252,11 +252,12 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Waits for every task of a finished connection and rethrows one failure as the reason it ended; the others go to
    /// <paramref name="alsoFailed"/>. Which task completes first is a matter of scheduling, so the reason is chosen by what
-   /// each failure is. A worker that failed with anything other than a plain I/O error has a reason of its own (a refusal, a
-   /// timeout, a session the server ended) and comes first, also when the server closed the socket straight afterwards and
-   /// the reader failed with that. A worker's plain I/O error only says the connection was gone when it tried to use it;
-   /// then the reader's failure (a frame it rejected, a socket the server closed) is the reason, and the worker's failure,
-   /// which carries that as its cause, is detail.
+   /// each failure is. A worker that failed with anything other than <see cref="RealtimeChannelClosedException"/> has a
+   /// reason of its own (a refusal, a timeout, a session the server ended, a full output queue) and comes first, also when
+   /// the server closed the socket straight afterwards and the reader failed with that. A worker's
+   /// <see cref="RealtimeChannelClosedException"/> only says the connection was gone when it tried to use it; then the
+   /// reader's failure (a frame it rejected, a socket the server closed) is the reason, and the worker's failure, which
+   /// carries that as its cause when it was waiting for an acknowledgement, is detail.
    /// </summary>
    internal static async Task CompleteConnectionAsync(Action<Exception> alsoFailed, Task reader, params Task[] workers)
    {
@@ -264,7 +265,7 @@ public sealed partial class AgentRuntime
       await all.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
       Exception? readerFailure = reader.Exception?.InnerException;
       Exception[] failures = all.Exception is null ? [] : [.. all.Exception.InnerExceptions];
-      Exception? reason = failures.FirstOrDefault(failure => !ReferenceEquals(failure, readerFailure) && failure.GetType() != typeof(IOException))
+      Exception? reason = failures.FirstOrDefault(failure => !ReferenceEquals(failure, readerFailure) && failure is not RealtimeChannelClosedException)
          ?? readerFailure ?? (failures.Length > 0 ? failures[0] : null);
       foreach(Exception other in failures.Where(failure => !ReferenceEquals(failure, reason)))
       { alsoFailed(other); }

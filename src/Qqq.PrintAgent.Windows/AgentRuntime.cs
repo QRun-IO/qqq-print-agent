@@ -66,13 +66,14 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
    /// <summary>
    /// Builds the API client for one unit of work, bound to the live QQQ session and the current realtime channel. It fails
-   /// when no channel exists, so no HTTP-only path can claim work.
+   /// when no channel exists, so no HTTP-only path can claim work, and it fails with the channel-closed type, because the
+   /// caller only found the connection gone and that is never the reason the connection ended.
    /// </summary>
    private PrintApiClient CreateApi()
    {
       PrintingRealtimeChannel realtime;
       lock(_stateLock)
-      { realtime = _realtime ?? throw new IOException("The realtime connection is unavailable."); }
+      { realtime = _realtime ?? throw new RealtimeChannelClosedException("The realtime connection is unavailable.", null); }
       return PrintApiClient.ForSession(_sessionClient ?? throw new InvalidOperationException($"Sign in to {AppIdentity.ServerName} before printing.")).WithRealtime(realtime, _realtimeSettings, CurrentRealtime);
    }
 
@@ -85,7 +86,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private PrintingRealtimeChannel CurrentRealtime()
    {
       lock(_stateLock)
-      { return _realtime ?? throw new IOException("Realtime connection unavailable; durable receipts are retained."); }
+      { return _realtime ?? throw new RealtimeChannelClosedException("Realtime connection unavailable; durable receipts are retained.", null); }
    }
 
 

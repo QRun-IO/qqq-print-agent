@@ -3,17 +3,16 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Net.WebSockets;
 using Qqq.PrintAgent.Core.Printing;
-using Qqq.PrintAgent.Testing;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
 /// Which failure is reported as the reason a realtime connection ended. Several of a connection's tasks usually fail together,
-/// and which of them completes first is a matter of scheduling, so the choice is made by rule. Most tests here complete tasks
-/// by hand, in the order that would mislead; one runs a real channel to show that a send it fails carries the cause.
+/// and which of them completes first is a matter of scheduling, so the choice is made by rule. The tests complete tasks by
+/// hand, in the order that would mislead. That a real channel gives its failed sends the channel-closed type and the cause
+/// is tested with the channel, in the Core tests.
 /// </summary>
 public sealed class AgentRealtimeFailureReasonTests
 {
@@ -42,8 +41,8 @@ public sealed class AgentRealtimeFailureReasonTests
 
    /// <summary>
    /// The reader rejects a frame and the channel fails a send that was waiting for an acknowledgement. The send's task
-   /// completes first, but its plain I/O error only says the connection was gone. The reader's failure is the reason, and the
-   /// failed send, which carries that failure as its cause, is detail.
+   /// completes first, but its channel-closed failure only says the connection was gone. The reader's failure is the reason,
+   /// and the failed send, which carries that failure as its cause, is detail.
    /// </summary>
    [Fact]
    public async Task ReaderFailureIsTheReasonWhenAWorkerOnlyFoundTheConnectionGone()
@@ -53,7 +52,7 @@ public sealed class AgentRealtimeFailureReasonTests
       var sender = new TaskCompletionSource();
       List<Exception> detail = [];
       Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, sender.Task);
-      sender.SetException(new IOException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", frame));
+      sender.SetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", frame));
       Assert.False(completion.IsCompleted);
       reader.SetException(frame);
       Assert.Same(frame, await Assert.ThrowsAsync<InvalidDataException>(() => completion));
@@ -62,7 +61,46 @@ public sealed class AgentRealtimeFailureReasonTests
 
 
 
-   /// <summary>A session the server ended is an I/O error by type but a reason of its own, so it comes before the reader's failure like any other worker failure that is not a plain I/O error.</summary>
+   /// <summary>
+   /// A worker could not queue a message because the output queue was full, and the channel aborted the socket, which made the
+   /// reader fail as well, first. The full queue is a plain I/O error by type but it is why the connection ended, so it is the
+   /// reason and the reader's failure is detail.
+   /// </summary>
+   [Fact]
+   public async Task WorkersOwnPlainIoFailureComesBeforeTheReadersEvenWhenTheReaderFailedFirst()
+   {
+      var reader = new TaskCompletionSource();
+      var worker = new TaskCompletionSource();
+      List<Exception> detail = [];
+      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      reader.SetException(new System.Net.WebSockets.WebSocketException("The remote party closed the WebSocket connection without completing the close handshake."));
+      Assert.False(completion.IsCompleted);
+      var full = new IOException("Realtime output queue is full; reconnect is required.");
+      worker.SetException(full);
+      Assert.Same(full, await Assert.ThrowsAsync<IOException>(() => completion));
+      _ = Assert.IsType<System.Net.WebSockets.WebSocketException>(Assert.Single(detail));
+   }
+
+
+
+   /// <summary>A worker that only found the connection unavailable, with no cause to carry, is still detail: the reader's failure is the reason.</summary>
+   [Fact]
+   public async Task WorkerThatFoundNoConnectionAtAllIsDetail()
+   {
+      var reader = new TaskCompletionSource();
+      var worker = new TaskCompletionSource();
+      List<Exception> detail = [];
+      Task completion = AgentRuntime.CompleteConnectionAsync(detail.Add, reader.Task, worker.Task);
+      worker.SetException(new RealtimeChannelClosedException("The realtime connection is unavailable.", null));
+      var regressed = new InvalidDataException("Desired state revision regressed.");
+      reader.SetException(regressed);
+      Assert.Same(regressed, await Assert.ThrowsAsync<InvalidDataException>(() => completion));
+      _ = Assert.IsType<RealtimeChannelClosedException>(Assert.Single(detail));
+   }
+
+
+
+   /// <summary>A session the server ended is an I/O error by type but a reason of its own, so it comes before the reader's failure like any other worker failure that is not the channel-closed one.</summary>
    [Fact]
    public async Task SessionFailureFromAWorkerComesBeforeTheReaders()
    {
@@ -109,35 +147,5 @@ public sealed class AgentRealtimeFailureReasonTests
       worker.SetCanceled();
       _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completion);
       Assert.Empty(detail);
-   }
-
-
-
-   /// <summary>
-   /// A real channel on a loopback socket: a send is waiting for its acknowledgement when the reader rejects a frame. The
-   /// channel fails the send, and that failure carries the reader's as its cause, so the consequence can always be traced to
-   /// what ended the connection.
-   /// </summary>
-   [Fact]
-   public async Task SendTheChannelFailsCarriesWhatEndedTheChannelAsItsCause()
-   {
-      using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-      using var peer = new LoopbackWebSocketPeer();
-      using var client = new ClientWebSocket();
-      client.Options.AddSubProtocol("qqq-printing.v1");
-      Task<WebSocket> accepting = peer.AcceptAsync(guard.Token);
-      await client.ConnectAsync(new Uri("ws://127.0.0.1:" + peer.Origin.Port.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/qqq/v1/qbit/printing/device/realtime"), guard.Token);
-      using WebSocket server = await accepting;
-      using var channel = new PrintingRealtimeChannel(client, new RealtimeSettings());
-      var rejected = new InvalidDataException("Synthetic rejected frame.");
-      Task running = channel.RunAsync(_ => throw rejected, guard.Token);
-      Task pending = channel.SendAsync("INVENTORY", new { printers = Array.Empty<object>() }, acknowledged: true, token: guard.Token);
-      RealtimeEnvelope sent = await LoopbackWebSocketPeer.ReceiveAsync(server, guard.Token);
-      Assert.Equal("INVENTORY", sent.Type);
-      await LoopbackWebSocketPeer.SendAsync(server, "PRINTERS", new { nothing = true }, guard.Token);
-      IOException failed = await Assert.ThrowsAsync<IOException>(() => pending);
-      Assert.Contains("closed before acknowledgement", failed.Message, StringComparison.Ordinal);
-      Assert.Same(rejected, failed.InnerException);
-      Assert.Same(rejected, await Assert.ThrowsAsync<InvalidDataException>(() => running));
    }
 }
