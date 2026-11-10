@@ -24,7 +24,8 @@ public sealed partial class AgentRuntime
    /// Runs an action that changes the connection identity (enroll, sign in, sign out) while nothing else is using the
    /// connection. It takes the connection gate, bumps the generation so late callbacks from the old connection are ignored,
    /// cancels the realtime socket and the claim wave, waits for the wave to end, and holds the control gate during the action.
-   /// Transition state and signalling are always restored afterwards.
+   /// Transition state and signalling are always restored afterwards, and the connection loop is asked to connect once
+   /// more: a request it received during the action found the transition still in progress and made it back off.
    /// </summary>
    private async Task<string> ConnectionTransitionAsync(Func<Task<string>> action, CancellationToken token)
    {
@@ -52,7 +53,11 @@ public sealed partial class AgentRuntime
       finally
       {
          lock(_stateLock)
-         { _transitioning = false; }
+         {
+            _transitioning = false;
+            if(_reconnectRequested.CurrentCount == 0)
+            { _reconnectRequested.Release(); }
+         }
          SignalPipeline();
          _connectionGate.Release();
       }

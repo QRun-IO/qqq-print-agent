@@ -34,7 +34,7 @@ public sealed partial class AgentRuntime
             {
                await channel.SendAsync("HEARTBEAT", new { agentVersion = PrintApiClient.AgentVersion, profile = store.GetDeviceProfile() }, token: token).ConfigureAwait(false);
             }
-            if(DateTimeOffset.UtcNow >= _nextSessionResume)
+            if(ObservationTime >= _nextSessionResume)
             { await EnsureAuthorizationAsync(token).ConfigureAwait(false); }
             ResumeWhenUpdatePauseRanOut();
             RequestStatusSynchronization();

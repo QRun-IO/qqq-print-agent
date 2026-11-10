@@ -89,8 +89,8 @@ public sealed partial class AgentRuntime
    /// Keeps one authenticated socket alive for the current connection generation. Each failure marks realtime and
    /// control not ready and records a reason the operator can read; when the server says sign-in or permission is gone
    /// it blocks further attempts, because reconnecting cannot repair that. A generation change (sign-out, re-pairing)
-   /// abandons the attempt without touching newer state. Between attempts it waits the backoff delay, cut short by an
-   /// explicit reconnect request.
+   /// abandons the attempt without touching newer state. Between attempts it waits the backoff delay on the runtime's
+   /// clock, cut short by an explicit reconnect request.
    /// </summary>
    private async Task RealtimeReconnectAsync(CancellationToken token)
    {
@@ -134,8 +134,24 @@ public sealed partial class AgentRuntime
          {
             WriteLog("DEBUG", $"Next realtime connection attempt ({_reconnectAttempts}) in {delay.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s, or sooner on an explicit reconnect request.");
          }
-         await _reconnectRequested.WaitAsync(delay, token).ConfigureAwait(false);
+         await WaitBeforeReconnectAsync(delay, token).ConfigureAwait(false);
       }
+   }
+
+
+
+   /// <summary>
+   /// Waits out the backoff before the next connection attempt, or less when a reconnect is requested. The delay is
+   /// measured on the runtime's clock. The wait on the request is cancelled when the delay ends, so a request that arrives
+   /// later is kept for the wait after the next attempt instead of being consumed by one that already gave up.
+   /// </summary>
+   private async Task WaitBeforeReconnectAsync(TimeSpan delay, CancellationToken token)
+   {
+      using var elapsed = new CancellationTokenSource(delay, Clock);
+      using var either = CancellationTokenSource.CreateLinkedTokenSource(token, elapsed.Token);
+      try
+      { await _reconnectRequested.WaitAsync(either.Token).ConfigureAwait(false); }
+      catch(OperationCanceledException) when(!token.IsCancellationRequested) { }
    }
 
 

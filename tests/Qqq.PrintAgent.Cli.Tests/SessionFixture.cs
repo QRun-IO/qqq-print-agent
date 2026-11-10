@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Net;
 using System.Text;
@@ -16,7 +17,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// Test harness for signed-in (QQQ session) behavior: an enrolled local state plus a scriptable fake session that records the
 /// printing requests it receives and can fail resume, deny device binding or hold the realtime socket open. No network or real
-/// sign-in is used.
+/// sign-in is used, and time moves only when a test advances the fixture's clock.
 /// </summary>
 internal sealed class SessionFixture : IDisposable
 {
@@ -28,22 +29,94 @@ internal sealed class SessionFixture : IDisposable
 
 
 
+   /// <summary>The clock every runtime of this fixture runs on. It moves only when advanced, so a renewal or a reconnect backoff happens when a test says so.</summary>
+   internal ManualTimeProvider Clock { get; } = new();
+
+
+
+   /// <summary>What the runtimes of this fixture logged, oldest first.</summary>
+   internal ConcurrentQueue<string> Logs { get; } = new();
+
+
+
+   /// <summary>The management pipe of the runtime built last.</summary>
+   internal string PipeName { get; private set; } = "";
+
+
+
    /// <summary>
-   /// Builds a runtime on a private pipe whose session factory hands out the scripted sessions in priority order (custom
-   /// factory, next session, default) and counts each creation. The session renewal interval is zero, so every authorization
-   /// evaluation after the first renews the session.
+   /// Builds a runtime on a private pipe and this fixture's clock whose session factory hands out the scripted sessions in
+   /// priority order (custom factory, next session, default) and counts each creation.
    /// </summary>
    internal AgentRuntime Runtime()
    {
-      string pipe = "qqq-session-fixture-" + Guid.NewGuid().ToString("N");
-      return new(Local.DirectoryPath, _ => { }, Local.Printer, pipeName: pipe,
+      string pipe = PipeName = "qqq-session-fixture-" + Guid.NewGuid().ToString("N");
+      return new(Local.DirectoryPath, Logs.Enqueue, Local.Printer, pipeName: pipe,
          pipeFactory: () => new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly),
          sessionFactory: origin =>
          {
             Created++;
             return Factory?.Invoke(origin) ?? NextSession ?? Session;
-         })
-      { SessionResumeInterval = TimeSpan.Zero };
+         }, timeProvider: Clock);
+   }
+
+
+
+   /// <summary>
+   /// Evaluates authorization at a moment when the session's renewal has come due, by letting the renewal interval pass on
+   /// the clock first. A first evaluation restores the saved session; every later one therefore renews it with the server
+   /// and checks the identity again, which is what makes a later evaluation a real check.
+   /// </summary>
+   internal Task<bool> EvaluateAsync(AgentRuntime runtime, CancellationToken token = default)
+   {
+      Clock.Advance(AgentRuntime.SessionResumeInterval);
+      return runtime.EnsureAuthorizationAsync(token);
+   }
+
+
+
+   /// <summary>
+   /// Runs the runtime's service loop until its connection loop has finished one whole pass and is waiting out its backoff,
+   /// then stops the loop. In that pass the service evaluated authorization and, had it been granted, asked the session for
+   /// the realtime socket. Waiting for the backoff, which is a timer on this fixture's clock, is what proves the pass is
+   /// over: a test that then finds no attempt knows none was made, not that none had been made yet.
+   /// </summary>
+   internal async Task RunOnePassAsync(AgentRuntime runtime)
+   {
+      using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+      Task running = runtime.RunAsync(guard.Token);
+      try
+      {
+         while(Clock.PendingTimers == 0)
+         {
+            if(running.IsCompleted)
+            { await running; }
+            await Task.Delay(10, guard.Token);
+         }
+      }
+      finally
+      {
+         await guard.CancelAsync();
+         try
+         { await running; }
+         catch(OperationCanceledException) { }
+      }
+   }
+
+
+
+   /// <summary>
+   /// Requires that a service which was not authorized sent nothing: no printing request went through any of the sessions,
+   /// none was asked for the realtime socket, and no connection was attempted and failed.
+   /// </summary>
+   internal void AssertSentNothing(params FakeSession[] sessions)
+   {
+      Assert.All(sessions, session =>
+      {
+         Assert.Empty(session.Paths);
+         Assert.Equal(0, session.RealtimeAttempts);
+      });
+      Assert.DoesNotContain(Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
    }
 
 
@@ -74,6 +147,9 @@ internal sealed class SessionFixture : IDisposable
       internal QqqSessionBinding Binding { get; set; } = new(new Uri("https://synthetic.invalid/"), "principal", "tenant", "device");
       internal List<string> Paths { get; } = [];
       internal int Resumes;
+
+      /// <summary>How many times the service asked this session for the realtime socket.</summary>
+      internal int RealtimeAttempts;
       internal QqqSessionException.FailureKind? ResumeFailure { get; set; }
       internal bool ClaimedLegacy;
       internal bool DenyBinding;
@@ -93,9 +169,12 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-      /// <summary>Opens the realtime channel through the scripted connector; without one the realtime path is unsupported in that test.</summary>
+      /// <summary>Counts the attempt, then opens the realtime channel through the scripted connector; without one the realtime path is unsupported in that test.</summary>
       public Task<System.Net.WebSockets.WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
-         => ConnectRealtime?.Invoke(cancellationToken) ?? throw new NotSupportedException();
+      {
+         Interlocked.Increment(ref RealtimeAttempts);
+         return ConnectRealtime?.Invoke(cancellationToken) ?? throw new NotSupportedException();
+      }
 
 
 

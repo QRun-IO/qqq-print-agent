@@ -348,17 +348,24 @@ public sealed class AgentRemoteControlTests
 
    /// <summary>
    /// When the server withdraws authorization on the realtime channel, printing is blocked and the service stops trying to
-   /// connect: the check the reconnect loop makes before every attempt now says no. An operator who asks to reconnect is
-   /// told that a sign-in is required, because a reconnect cannot repair this, and the status says the same in red. The job
-   /// journal is kept, and an explicit sign-in restores the connection.
+   /// connect: the connection loop goes on making its passes as the backoff runs out on the manual clock, and across them it
+   /// sends no HTTP request at all. An operator who asks to reconnect is told that a sign-in is required, because a reconnect
+   /// cannot repair this, and the status says the same in red. The job journal is kept, and an explicit sign-in restores the
+   /// connection. Dispatch is paused by the server throughout, so no claim is in flight to blur the request count.
    /// </summary>
    [Fact]
    public async Task AuthorizationWithdrawnOverRealtimeBlocksPrintingUntilSignInWithoutErasingJournal()
    {
-      await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      var clock = new ManualTimeProvider();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: clock, seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
+      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, true, "CONNECTED"));
       await connection.SendAsync("ERROR", new { code = "AUTHENTICATION_REQUIRED", message = "Synthetic session ended." });
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal)));
+      await fixture.BackoffPassAsync(clock);
+      int requests = fixture.Requests;
+      await fixture.BackoffPassAsync(clock);
+      await fixture.BackoffPassAsync(clock);
+      Assert.Equal(requests, fixture.Requests);
       Assert.Equal("AUTHORIZATION_REQUIRED", fixture.Runtime.GetTransportSnapshot().State);
       AgentSnapshot blocked = fixture.Runtime.GetSnapshot();
       Assert.False(blocked.Connected);

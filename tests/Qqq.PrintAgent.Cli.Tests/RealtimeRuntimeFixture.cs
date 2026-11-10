@@ -307,6 +307,20 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
 
+   /// <summary>
+   /// Lets the connection loop's backoff run out on a manual clock and waits until the loop has made its next pass and is
+   /// backing off again. While no connection is up the backoff is the only wait on the clock, so a pending wait means the
+   /// loop has finished a pass: it evaluated authorization and connected, or decided not to.
+   /// </summary>
+   internal async Task BackoffPassAsync(ManualTimeProvider clock)
+   {
+      await WaitAsync(() => clock.PendingTimers > 0, "connection loop backing off");
+      clock.Advance(TimeSpan.FromMilliseconds(Settings.ReconnectMaxDelayMillis));
+      await WaitAsync(() => clock.PendingTimers > 0, "connection loop backing off again");
+   }
+
+
+
    /// <summary>How many messages of one type the agent has sent so far.</summary>
    internal int Count(string type) => Messages.Count(message => string.Equals(message.Type, type, StringComparison.Ordinal));
 

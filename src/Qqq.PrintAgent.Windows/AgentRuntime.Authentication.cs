@@ -24,7 +24,10 @@ public sealed partial class AgentRuntime
    private bool _authorizationBlocked;
    private string _authenticationMessage = $"Sign in to {AppIdentity.ServerName} to enable printing. Existing pairing and history are preserved.";
    private string? _lastAuthorizationNote;
-   internal TimeSpan SessionResumeInterval { get; init; } = TimeSpan.FromMinutes(5);
+
+
+   /// <summary>How long a restored or renewed session is used before it is renewed with the server and its identity checked again.</summary>
+   internal static readonly TimeSpan SessionResumeInterval = TimeSpan.FromMinutes(5);
 
 
 
@@ -66,7 +69,7 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Answers whether the service may talk to QQQ right now. It reads the protected saved session, restores it on first
    /// use and checks that the identity (user, tenant, device) matches what was approved, and afterwards renews the
-   /// session on the resume interval without querying jobs. A saved session for a different server than the paired one,
+   /// session when the resume interval has passed on the runtime's clock, without querying jobs. A saved session for a different server than the paired one,
    /// or one the server no longer accepts, leaves printing blocked and keeps pairing and history intact.
    /// </summary>
    internal async Task<bool> EnsureAuthorizationAsync(CancellationToken token)
@@ -104,7 +107,7 @@ public sealed partial class AgentRuntime
             BlockAuthorization();
             return false;
          }
-         else if(DateTimeOffset.UtcNow >= _nextSessionResume)
+         else if(ObservationTime >= _nextSessionResume)
          {
             await ResumeAuthorizationAsync(saved, store, token).ConfigureAwait(false);
          }
@@ -251,7 +254,7 @@ public sealed partial class AgentRuntime
          _authorizationReady = configuration is not null && SameOrigin(binding.Origin, configuration.ServerUrl)
             && string.Equals(binding.DeviceId, configuration.DeviceId, StringComparison.Ordinal);
          _authorizationBlocked = false;
-         _nextSessionResume = DateTimeOffset.UtcNow + SessionResumeInterval;
+         _nextSessionResume = ObservationTime + SessionResumeInterval;
          _authenticationMessage = _authorizationReady ? $"Signed in to {AppIdentity.ServerName}." : "Signed in. Enroll this computer to enable printing.";
          ready = _authorizationReady;
          _lastAuthorizationNote = null;
