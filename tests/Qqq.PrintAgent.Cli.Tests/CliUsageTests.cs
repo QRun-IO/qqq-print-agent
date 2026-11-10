@@ -24,7 +24,7 @@ public sealed class CliUsageTests
         sign-out                                  End the service's QQQ session.
         service-status                            Show the service's connection status.
         snapshot                                  Show the service's state as JSON: connection, printers, recent jobs and logs.
-        help                                      Show this text (also --help, -h).
+        help                                      Show this text (also --help or -h, alone or after a command).
 
       Every command is carried out by the installed print service, which owns the sign-in, the pairing and all printing.
       Run from an administrator prompt, and sign in through the companion app first.
@@ -57,15 +57,12 @@ public sealed class CliUsageTests
 
 
 
-   /// <summary>A first word that is not a command is refused: standard error gets the reason and the usage, standard output stays empty, nothing is sent and the exit code is 1. Command names are case-sensitive, the service's own operation names are not commands, the option that selected the removed legacy mode is no longer a word the tool knows, and --printer-worker is not a role of this executable: the service starts its own executable as the printer worker.</summary>
+   /// <summary>A first word that is not a command is refused: standard error gets the reason and the usage, standard output stays empty, nothing is sent and the exit code is 1. Command names are case-sensitive, the service's own operation names are not commands, and --printer-worker is not a role of this executable: the service starts its own executable as the printer worker.</summary>
    [Theory]
    [InlineData("status")]
    [InlineData("Printers")]
    [InlineData("--printer-worker")]
    [InlineData("--printer-worker", "extra")]
-   [InlineData("--legacy-compat")]
-   [InlineData("--legacy-compat", "run", "--once")]
-   [InlineData("--service")]
    [InlineData("--version")]
    [InlineData("")]
    public async Task UnknownCommand_PrintsUsageOnStandardErrorAndFails(params string[] args)
@@ -105,19 +102,6 @@ public sealed class CliUsageTests
 
       Assert.Equal(7, CommandLine.CommandNames.Count);
       Assert.All(CommandLine.CommandNames, name => Assert.Contains(lines, line => line.StartsWith("  " + name + " ", StringComparison.Ordinal)));
-   }
-
-
-
-   /// <summary>The usage no longer describes the removed legacy mode or any option that existed only for it.</summary>
-   [Theory]
-   [InlineData("legacy")]
-   [InlineData("--data-dir")]
-   [InlineData("--once")]
-   [InlineData("--service")]
-   public void Usage_DoesNotMentionTheRemovedLegacyMode(string removed)
-   {
-      Assert.DoesNotContain(removed, CommandLine.Usage, StringComparison.OrdinalIgnoreCase);
    }
 
 

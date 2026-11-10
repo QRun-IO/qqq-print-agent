@@ -38,7 +38,7 @@ internal sealed class CommandLine(CommandLineHost host)
         sign-out                                  End the service's QQQ session.
         service-status                            Show the service's connection status.
         snapshot                                  Show the service's state as JSON: connection, printers, recent jobs and logs.
-        help                                      Show this text (also --help, -h).
+        help                                      Show this text (also --help or -h, alone or after a command).
 
       Every command is carried out by the installed print service, which owns the sign-in, the pairing and all printing.
       Run from an administrator prompt, and sign in through the companion app first.
@@ -60,6 +60,16 @@ internal sealed class CommandLine(CommandLineHost host)
       ["service-status"] = ("status", []),
       ["snapshot"] = ("snapshot", []),
    };
+
+
+
+   /// <summary>What a command line is told when it uses an option of the legacy mode that 2.0 removed, so a script written for 1.x learns why it fails.</summary>
+   internal const string RemovedOptionsReason = "The options --service, --legacy-compat, --data-dir and --once were removed in 2.0: the command line only manages the installed service.";
+
+
+
+   /// <summary>The options of the removed legacy mode. They are recognized only to explain the refusal.</summary>
+   private static readonly HashSet<string> s_removedOptions = new(StringComparer.Ordinal) { "--service", "--legacy-compat", "--data-dir", "--once" };
 
 
 
@@ -111,45 +121,30 @@ internal sealed class CommandLine(CommandLineHost host)
 
    /// <summary>
    /// Carries out an operator command: help is printed here, and any other command is checked against the table, turned into
-   /// one pipe request and sent to the service. The reply is printed as the service wrote it. A reply that starts with
-   /// "Error:" is the service refusing or failing the request, so it exits 1 for every command.
+   /// one pipe request and sent to the service. The reply is printed on standard output as the service wrote it, also when
+   /// it is a refusal. A reply that starts with "Error:" is the service refusing or failing the request, so it exits 1
+   /// for every command.
    /// </summary>
    private async Task<int> ManageServiceAsync(string[] args)
    {
-      ///////////////////////////////////////////////////////////////////////////
-      // help is decided by the first word alone: "help enroll" is a person    //
-      // asking how to enroll, and answering costs nothing and sends nothing   //
-      ///////////////////////////////////////////////////////////////////////////
-      if(args is [] or ["help" or "--help" or "-h", ..])
+      if(AsksForHelp(args))
       {
          host.Output.WriteLine(Usage);
          return 0;
       }
-      if(!s_commands.TryGetValue(args[0], out (string Operation, string[] Options) command))
+      Dictionary<string, string> options = new(StringComparer.Ordinal);
+      string? problem = FindProblem(args, options);
+      if(problem is not null)
       {
-         return RefuseArguments("Unknown command.");
-      }
-      Dictionary<string, string>? options = ReadOptions(args, command.Options);
-      if(options is null)
-      {
-         return RefuseArguments($"Invalid arguments for '{args[0]}'.");
-      }
-      bool? exposed = null;
-      if(options.TryGetValue("--exposed", out string? text))
-      {
-         if(!bool.TryParse(text, out bool parsed))
-         {
-            return RefuseArguments("--exposed must be true or false.");
-         }
-         exposed = parsed;
+         return RefuseArguments(problem);
       }
 
       ////////////////////////////////////////////////////////////////////////////
       // the enrollment code is asked for last, once the command line is known  //
       // to be valid, so a mistyped command never prompts for a single-use code //
       ////////////////////////////////////////////////////////////////////////////
-      PipeRequest request = new(command.Operation, options.GetValueOrDefault("--server"), args[0] is "enroll" ? ReadEnrollmentCode() : null,
-         options.GetValueOrDefault("--printer"), exposed);
+      PipeRequest request = new(s_commands[args[0]].Operation, options.GetValueOrDefault("--server"), args[0] is "enroll" ? ReadEnrollmentCode() : null,
+         options.GetValueOrDefault("--printer"), options.TryGetValue("--exposed", out string? choice) ? IsWord(choice, "true") : null);
       string response = await host.SendAsync(request);
       host.Output.WriteLine(response);
       bool failed = response.StartsWith("Error:", StringComparison.Ordinal);
@@ -159,6 +154,16 @@ internal sealed class CommandLine(CommandLineHost host)
       }
       return failed ? 1 : 0;
    }
+
+
+
+   /// <summary>
+   /// Says whether the command line is a request for help: no arguments, a help word in first place whatever follows
+   /// ("help enroll" is a person asking how to enroll), or a help flag in last place after a real command
+   /// ("printers --help"). Answering costs nothing and sends nothing.
+   /// </summary>
+   private static bool AsksForHelp(string[] args)
+      => args is [] or ["help" or "--help" or "-h", ..] || (s_commands.ContainsKey(args[0]) && args[^1] is "--help" or "-h");
 
 
 
@@ -177,26 +182,52 @@ internal sealed class CommandLine(CommandLineHost host)
 
 
    /// <summary>
-   /// Reads the "--name value" pairs that follow a command, in any order. Every option of a command is required exactly
-   /// once, so the argument count must match, each name must be one of the command's own, no name may repeat and no value
-   /// may be blank. Anything else returns null, and the caller refuses the whole command line rather than guess.
+   /// Checks the command line and reads the "--name value" pairs that follow the command, in any order, into the given
+   /// dictionary. It returns null when the command line is acceptable, and otherwise the reason it is not, which the
+   /// caller refuses with rather than guess what was meant. Every option of a command is required exactly once, with a
+   /// value that is not blank and is not itself an option name, so a forgotten value cannot swallow the next option.
+   /// Each reason is assembled only from this class's own command and option names, never from an argument that did not
+   /// match one of them, so it cannot repeat a secret that was typed in the wrong place.
    /// </summary>
-   private static Dictionary<string, string>? ReadOptions(string[] args, string[] names)
+   private static string? FindProblem(string[] args, Dictionary<string, string> options)
    {
-      if(args.Length != 1 + (2 * names.Length))
+      if(args.Any(s_removedOptions.Contains))
       {
-         return null;
+         return RemovedOptionsReason;
       }
-      Dictionary<string, string> values = new(StringComparer.Ordinal);
+      if(!s_commands.TryGetValue(args[0], out (string Operation, string[] Options) command))
+      {
+         return "Unknown command.";
+      }
       for(int index = 1; index < args.Length; index += 2)
       {
-         if(!names.Contains(args[index], StringComparer.Ordinal) || string.IsNullOrWhiteSpace(args[index + 1]) || !values.TryAdd(args[index], args[index + 1]))
+         string name = args[index];
+         if(!command.Options.Contains(name, StringComparer.Ordinal))
          {
-            return null;
+            return command.Options.Length == 0 ? $"'{args[0]}' takes no arguments." : $"'{args[0]}' accepts only {string.Join(" and ", command.Options)}.";
          }
+         if(options.ContainsKey(name))
+         {
+            return $"{name} may be given only once.";
+         }
+         if(index + 1 == args.Length || string.IsNullOrWhiteSpace(args[index + 1]) || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+         {
+            return $"{name} needs a value.";
+         }
+         options[name] = args[index + 1];
       }
-      return values;
+      string? missing = command.Options.FirstOrDefault(option => !options.ContainsKey(option));
+      if(missing is not null)
+      {
+         return $"{missing} is required.";
+      }
+      return options.TryGetValue("--exposed", out string? choice) && !IsWord(choice, "true") && !IsWord(choice, "false") ? "--exposed must be true or false." : null;
    }
+
+
+
+   /// <summary>Compares an option value with a fixed word, ignoring letter case and nothing else: "TRUE" is true, " true" is not.</summary>
+   private static bool IsWord(string text, string word) => string.Equals(text, word, StringComparison.OrdinalIgnoreCase);
 
 
 

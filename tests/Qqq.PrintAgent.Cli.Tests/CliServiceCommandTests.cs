@@ -54,10 +54,12 @@ public sealed class CliServiceCommandTests
 
 
 
-   /// <summary>Sharing or hiding a printer sends the printer and the choice, and nothing else. The two options may come in either order, and true or false is accepted in any letter case.</summary>
+   /// <summary>Sharing or hiding a printer sends the printer and the choice, and nothing else. The two options may come in either order, and true or false is accepted in any letter case (PowerShell writes $true as "True").</summary>
    [Theory]
    [InlineData(true, "expose", "--printer", "synthetic-queue-1", "--exposed", "true")]
    [InlineData(false, "expose", "--printer", "synthetic-queue-1", "--exposed", "false")]
+   [InlineData(true, "expose", "--printer", "synthetic-queue-1", "--exposed", "True")]
+   [InlineData(false, "expose", "--printer", "synthetic-queue-1", "--exposed", "FALSE")]
    [InlineData(true, "expose", "--exposed", "TRUE", "--printer", "synthetic-queue-1")]
    [InlineData(false, "expose", "--exposed", "False", "--printer", "synthetic-queue-1")]
    public async Task Expose_SendsThePrinterAndTheChoice(bool exposed, params string[] args)

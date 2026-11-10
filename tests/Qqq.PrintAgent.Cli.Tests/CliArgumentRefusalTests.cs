@@ -7,81 +7,99 @@ namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
 /// Malformed command lines. A command accepts exactly its own options, each once and each with a value, and nothing else.
-/// Anything different is refused before the service is contacted and before the enrollment code is asked for: the reason and
-/// the usage go to standard error, standard output stays empty and the exit code is 1. The tool never guesses what was meant.
+/// Anything different is refused before the service is contacted and before the enrollment code is asked for: one line
+/// that says what is wrong, then the usage, on standard error; nothing on standard output; exit code 1. The reason names
+/// only the tool's own commands and options, never what was typed, and the tool never guesses what was meant.
 /// </summary>
 public sealed class CliArgumentRefusalTests
 {
-   /// <summary>A command that takes no options refuses any extra word, including help flags after the command and every option of the removed legacy mode (--legacy-compat, --data-dir, --once, --service).</summary>
+   private const string Server = "https://qqq.example.test";
+   private const string Printer = "synthetic-queue-1";
+
+
+
+   /// <summary>A command that takes no options says so when anything follows it.</summary>
    [Theory]
    [InlineData("printers", "extra")]
-   [InlineData("printers", "--help")]
-   [InlineData("printers", "--legacy-compat")]
-   [InlineData("printers", "--legacy-compat", "--data-dir", "C:\\synthetic")]
-   [InlineData("run", "--once")]
-   [InlineData("run", "--once", "--legacy-compat")]
-   [InlineData("run", "--data-dir", "C:\\synthetic")]
-   [InlineData("run", "--service")]
-   [InlineData("sign-out", "--service")]
+   [InlineData("printers", "--server", Server)]
+   [InlineData("run", "now")]
    [InlineData("sign-out", "now")]
-   [InlineData("service-status", "--service")]
-   [InlineData("service-status", "-h")]
-   [InlineData("snapshot", "--data-dir", "C:\\synthetic")]
+   [InlineData("service-status", "--verbose")]
    [InlineData("snapshot", "")]
-   public async Task CommandWithoutOptions_RefusesAnythingExtra(params string[] args)
+   [InlineData("snapshot", "--help", "extra")]
+   public async Task CommandWithoutOptions_RefusesAnythingAfterIt(params string[] args)
    {
-      await AssertRefusedAsync($"Invalid arguments for '{args[0]}'.", args);
+      await AssertRefusedAsync($"'{args[0]}' takes no arguments.", args);
    }
 
 
 
-   /// <summary>Enrolling requires exactly --server with a value: a missing, blank, repeated, misspelled or positional server, any other option, and any trailing word are all refused.</summary>
+   /// <summary>An argument in an option's place that is not one of the command's options is refused with the options the command does accept: a positional value, a misspelled or differently cased option, another command's option, or a trailing word.</summary>
    [Theory]
-   [InlineData("enroll")]
-   [InlineData("enroll", "--server")]
-   [InlineData("enroll", "--server", "")]
-   [InlineData("enroll", "--server", "   ")]
-   [InlineData("enroll", "https://qqq.example.test")]
-   [InlineData("enroll", "https://qqq.example.test", "--server")]
-   [InlineData("enroll", "--Server", "https://qqq.example.test")]
-   [InlineData("enroll", "--printer", "synthetic-queue-1")]
-   [InlineData("enroll", "--server", "https://qqq.example.test", "--server", "https://other.example.test")]
-   [InlineData("enroll", "--server", "https://qqq.example.test", "extra")]
-   [InlineData("enroll", "--server", "https://qqq.example.test", "--service")]
-   [InlineData("enroll", "--server", "https://qqq.example.test", "--legacy-compat")]
-   [InlineData("enroll", "--server", "https://qqq.example.test", "--data-dir", "C:\\synthetic")]
-   [InlineData("enroll", "--legacy-compat", "--server", "https://qqq.example.test")]
-   public async Task Enroll_RefusesAnythingButOneServer(params string[] args)
+   [InlineData("'enroll' accepts only --server.", "enroll", Server)]
+   [InlineData("'enroll' accepts only --server.", "enroll", Server, "--server")]
+   [InlineData("'enroll' accepts only --server.", "enroll", "--Server", Server)]
+   [InlineData("'enroll' accepts only --server.", "enroll", "--printer", Printer)]
+   [InlineData("'enroll' accepts only --server.", "enroll", "--server", Server, "extra")]
+   [InlineData("'enroll' accepts only --server.", "enroll", "--code", "synthetic-code-4471", "--server", Server)]
+   [InlineData("'expose' accepts only --printer and --exposed.", "expose", Printer, "true")]
+   [InlineData("'expose' accepts only --printer and --exposed.", "expose", "--printer", Printer, "--server", Server)]
+   [InlineData("'expose' accepts only --printer and --exposed.", "expose", "--printer", Printer, "--exposed", "true", "extra")]
+   [InlineData("'expose' accepts only --printer and --exposed.", "expose", "--Exposed", "true", "--printer", Printer)]
+   public async Task UnexpectedArgument_IsRefusedWithTheOptionsTheCommandAccepts(string reason, params string[] args)
    {
-      await AssertRefusedAsync("Invalid arguments for 'enroll'.", args);
+      await AssertRefusedAsync(reason, args);
    }
 
 
 
-   /// <summary>Sharing a printer requires exactly --printer and --exposed, each once with a value: either one missing, blank or repeated, any other option, and any trailing word are all refused.</summary>
+   /// <summary>A required option that is absent is named.</summary>
    [Theory]
-   [InlineData("expose")]
-   [InlineData("expose", "--printer", "synthetic-queue-1")]
-   [InlineData("expose", "--exposed", "true")]
-   [InlineData("expose", "--printer", "synthetic-queue-1", "--exposed")]
-   [InlineData("expose", "--printer", "--exposed", "true")]
-   [InlineData("expose", "--printer", "", "--exposed", "true")]
-   [InlineData("expose", "--printer", "synthetic-queue-1", "--exposed", " ")]
-   [InlineData("expose", "--printer", "synthetic-queue-1", "--printer", "synthetic-queue-2")]
-   [InlineData("expose", "--exposed", "true", "--exposed", "false")]
-   [InlineData("expose", "--printer", "synthetic-queue-1", "--server", "https://qqq.example.test")]
-   [InlineData("expose", "--printer", "synthetic-queue-1", "--exposed", "true", "extra")]
-   [InlineData("expose", "--printer", "synthetic-queue-1", "--exposed", "true", "--service")]
-   [InlineData("expose", "--printer", "synthetic-queue-1", "--exposed", "true", "--legacy-compat")]
-   [InlineData("expose", "synthetic-queue-1", "true")]
-   public async Task Expose_RefusesAnythingButOnePrinterAndOneChoice(params string[] args)
+   [InlineData("--server is required.", "enroll")]
+   [InlineData("--printer is required.", "expose")]
+   [InlineData("--printer is required.", "expose", "--exposed", "true")]
+   [InlineData("--exposed is required.", "expose", "--printer", Printer)]
+   public async Task MissingOption_IsNamed(string reason, params string[] args)
    {
-      await AssertRefusedAsync("Invalid arguments for 'expose'.", args);
+      await AssertRefusedAsync(reason, args);
    }
 
 
 
-   /// <summary>The choice must be the word true or false; a number, yes or no, or any other word is refused with a message that says so.</summary>
+   /// <summary>An option with nothing after it, with a blank value, or followed by another option name is refused as needing a value. An option name is never taken as a value, so a forgotten value cannot make the next option disappear into it.</summary>
+   [Theory]
+   [InlineData("--server needs a value.", "enroll", "--server")]
+   [InlineData("--server needs a value.", "enroll", "--server", "")]
+   [InlineData("--server needs a value.", "enroll", "--server", "   ")]
+   [InlineData("--server needs a value.", "enroll", "--server", "--server")]
+   [InlineData("--server needs a value.", "enroll", "--server", "--anything")]
+   [InlineData("--printer needs a value.", "expose", "--printer", "--exposed", "true")]
+   [InlineData("--printer needs a value.", "expose", "--printer", "--exposed", "--exposed", "true")]
+   [InlineData("--printer needs a value.", "expose", "--printer", "", "--exposed", "true")]
+   [InlineData("--exposed needs a value.", "expose", "--printer", Printer, "--exposed")]
+   [InlineData("--exposed needs a value.", "expose", "--printer", Printer, "--exposed", " ")]
+   [InlineData("--exposed needs a value.", "expose", "--exposed", "--printer", Printer)]
+   public async Task OptionWithoutAValue_IsRefused(string reason, params string[] args)
+   {
+      await AssertRefusedAsync(reason, args);
+   }
+
+
+
+   /// <summary>An option given twice is refused, whether or not the two values agree; the tool does not pick one.</summary>
+   [Theory]
+   [InlineData("--server may be given only once.", "enroll", "--server", Server, "--server", "https://other.example.test")]
+   [InlineData("--server may be given only once.", "enroll", "--server", Server, "--server", Server)]
+   [InlineData("--printer may be given only once.", "expose", "--printer", Printer, "--printer", "synthetic-queue-2")]
+   [InlineData("--exposed may be given only once.", "expose", "--exposed", "true", "--exposed", "false", "--printer", Printer)]
+   public async Task RepeatedOption_IsRefused(string reason, params string[] args)
+   {
+      await AssertRefusedAsync(reason, args);
+   }
+
+
+
+   /// <summary>The choice must be the word true or false, in any letter case and with nothing around it. A number, yes or no, any other word, and true or false padded with white space are refused with a message that says so, wherever the option stands.</summary>
    [Theory]
    [InlineData("yes")]
    [InlineData("no")]
@@ -89,15 +107,79 @@ public sealed class CliArgumentRefusalTests
    [InlineData("0")]
    [InlineData("on")]
    [InlineData("truee")]
+   [InlineData(" true")]
+   [InlineData("true ")]
+   [InlineData("\tfalse")]
    public async Task Expose_RefusesAChoiceThatIsNotTrueOrFalse(string choice)
    {
-      await AssertRefusedAsync("--exposed must be true or false.", "expose", "--printer", "synthetic-queue-1", "--exposed", choice);
-      await AssertRefusedAsync("--exposed must be true or false.", "expose", "--exposed", choice, "--printer", "synthetic-queue-1");
+      await AssertRefusedAsync("--exposed must be true or false.", "expose", "--printer", Printer, "--exposed", choice);
+      await AssertRefusedAsync("--exposed must be true or false.", "expose", "--exposed", choice, "--printer", Printer);
    }
 
 
 
-   /// <summary>Runs the arguments against a command line whose enrollment code is available, and requires a complete refusal: exit code 1, the reason and the usage on standard error, nothing on standard output, nothing sent, and neither the environment nor standard input consulted.</summary>
+   /// <summary>Every option of the legacy mode removed in 2.0 is refused with one fixed sentence that names all four and says they are gone, wherever it appears and whatever else is on the command line, so a script written for 1.x learns why it no longer runs.</summary>
+   [Theory]
+   [InlineData("--legacy-compat")]
+   [InlineData("--service")]
+   [InlineData("--legacy-compat", "run", "--once")]
+   [InlineData("run", "--once")]
+   [InlineData("run", "--legacy-compat", "--once", "--data-dir", "C:\\synthetic")]
+   [InlineData("printers", "--data-dir", "C:\\synthetic")]
+   [InlineData("sign-out", "--service")]
+   [InlineData("service-status", "--service")]
+   [InlineData("enroll", "--service", "--server", Server)]
+   [InlineData("enroll", "--server", Server, "--legacy-compat")]
+   [InlineData("enroll", "--server", "--service")]
+   [InlineData("expose", "--printer", Printer, "--exposed", "true", "--service")]
+   [InlineData("unknown-word", "--once")]
+   public async Task RemovedLegacyOption_IsRefusedWithTheReasonItIsGone(params string[] args)
+   {
+      await AssertRefusedAsync("The options --service, --legacy-compat, --data-dir and --once were removed in 2.0: the command line only manages the installed service.", args);
+   }
+
+
+
+   /// <summary>A help flag in last place after a real command is a request for help, not a mistake: the usage goes to standard output, the exit code is 0, nothing is sent and no enrollment code is asked for, even when the rest of the command line would have been refused.</summary>
+   [Theory]
+   [InlineData("printers", "--help")]
+   [InlineData("printers", "-h")]
+   [InlineData("enroll", "--help")]
+   [InlineData("enroll", "--server", Server, "-h")]
+   [InlineData("enroll", "--server", "--help")]
+   [InlineData("expose", "--printer", Printer, "--exposed", "maybe", "--help")]
+   [InlineData("run", "--once", "--help")]
+   public async Task HelpFlagAfterACommand_PrintsTheUsageAndSucceeds(params string[] args)
+   {
+      using CliFixture cli = new();
+      cli.TypedLines.Enqueue("synthetic-code-4471");
+
+      int exitCode = await cli.RunAsync(args);
+
+      Assert.Equal(0, exitCode);
+      Assert.Equal(CommandLine.Usage.ReplaceLineEndings("\n") + "\n", cli.Output.ReplaceLineEndings("\n"));
+      Assert.Equal("", cli.Error);
+      Assert.Empty(cli.Sent);
+      Assert.Empty(cli.VariablesRead);
+      Assert.Equal(0, cli.LinesRead);
+   }
+
+
+
+   /// <summary>A help flag helps only in last place after a real command. After a word that is not a command it does not turn the refusal into a success, and in the middle of a command line it is an argument like any other.</summary>
+   [Theory]
+   [InlineData("Unknown command.", "unknown-word", "--help")]
+   [InlineData("Unknown command.", "--printer-worker", "-h")]
+   [InlineData("'printers' takes no arguments.", "printers", "--help", "extra")]
+   [InlineData("'enroll' accepts only --server.", "enroll", "-h", "--server", Server)]
+   public async Task HelpFlagElsewhere_DoesNotRescueABadCommandLine(string reason, params string[] args)
+   {
+      await AssertRefusedAsync(reason, args);
+   }
+
+
+
+   /// <summary>Runs the arguments against a command line whose enrollment code is available every way it could be asked for, and requires a complete refusal: exit code 1, the reason and the usage on standard error, nothing on standard output, nothing sent, and the environment, standard input and the console all left unread.</summary>
    private static async Task AssertRefusedAsync(string reason, params string[] args)
    {
       using CliFixture cli = new();
@@ -112,5 +194,6 @@ public sealed class CliArgumentRefusalTests
       Assert.Empty(cli.Sent);
       Assert.Empty(cli.VariablesRead);
       Assert.Equal(0, cli.LinesRead);
+      Assert.Equal(0, cli.KeysRead);
    }
 }
