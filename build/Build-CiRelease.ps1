@@ -13,10 +13,12 @@ bundle with SHA256SUMS. It takes no certificate, timestamp server or payload inp
 #>
 [CmdletBinding()]
 param(
+   # Both default to the reviewed source version (VersionPrefix in Directory.Build.props). A CI job that builds a
+   # branch should pass neither, so the branch decides its own version; a tag build passes the tag's version.
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = '2.0.0',
+   [string] $ProductVersion = ([xml](Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'Directory.Build.props') -Raw)).SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText,
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '2.0.0'
+   [string] $ReleaseVersion = $ProductVersion
 )
 
 $ErrorActionPreference = 'Stop'

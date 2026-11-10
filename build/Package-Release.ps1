@@ -4,8 +4,9 @@
 
 [CmdletBinding()]
 param(
-   [string] $ProductVersion = '2.0.0',
-   [string] $ReleaseVersion = '2.0.0',
+   # Both default to the reviewed source version (VersionPrefix in Directory.Build.props).
+   [string] $ProductVersion = ([xml](Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'Directory.Build.props') -Raw)).SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText,
+   [string] $ReleaseVersion = $ProductVersion,
    # Assemble artifacts/release from an already built MSI (the signed stable flow builds and signs it in
    # separate workflow steps). With ExpectedPublisherSubject the MSI must carry that publisher's signature.
    [switch] $AssembleOnly,

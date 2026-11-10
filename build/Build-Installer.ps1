@@ -4,10 +4,12 @@
 
 [CmdletBinding()]
 param(
+   # Both default to the reviewed source version (VersionPrefix in Directory.Build.props), so a caller that names
+   # no version cannot disagree with the source. Name -ReleaseVersion X.Y.Z-rc.N for a test build.
    [ValidatePattern('^\d+\.\d+\.\d+$')]
-   [string] $ProductVersion = '2.0.0',
+   [string] $ProductVersion = ([xml](Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'Directory.Build.props') -Raw)).SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText,
    [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
-   [string] $ReleaseVersion = '2.0.0',
+   [string] $ReleaseVersion = $ProductVersion,
    [string] $PayloadDirectory,
    [switch] $SkipPublish,
    [switch] $PublishOnly,
