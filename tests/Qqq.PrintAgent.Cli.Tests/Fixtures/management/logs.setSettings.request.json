@@ -2,13 +2,9 @@
    "v": 2,
    "op": "logs.setSettings",
    "args": {
-      "settings": {
-         "retentionDays": 14,
-         "maxFileMegabytes": 50,
-         "segmentsPerDay": 5,
-         "debugLogging": true,
-         "currentFileBytes": 0,
-         "segmentsToday": 0
-      }
+      "retentionDays": 14,
+      "maxFileMegabytes": 50,
+      "segmentsPerDay": 5,
+      "debugLogging": true
    }
 }

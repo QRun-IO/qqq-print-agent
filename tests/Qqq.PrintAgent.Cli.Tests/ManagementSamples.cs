@@ -16,19 +16,53 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// management contract, for the tests that need a value of each: the golden files are these examples as the wire carries
 /// them, and the secrecy test serializes every result here. The examples are built the way the service will build them,
 /// from the objects that hold its secrets (a session credential, a stored pairing, an enrollment answer), each of which
-/// carries a canary where the real one carries the secret, so a result that copied a secret would show it.
+/// carries a canary where the real one carries the secret, so a result that copied a secret would show it. The fully
+/// populated snapshot sets every member at once, which no real service would; two further snapshots show what a healthy
+/// service and a degraded one really send.
 /// </summary>
 internal static class ManagementSamples
 {
+   /// <summary>The local identifier of the first example server.</summary>
    internal const string ServerId = "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f";
+
+
+
+   /// <summary>The local identifier of the second example server; it shares its first eight characters with the first.</summary>
    internal const string SecondServerId = "3f2b8c1e-0000-4f6b-9a7c-0e1d2c3b4a60";
+
+
+
+   /// <summary>The address of the first example server.</summary>
    internal const string Address = "https://qqq.example.test";
+
+
+
+   /// <summary>The address of the sign-in provider the first example server names.</summary>
    internal const string ProviderOrigin = "https://sign-in.example.test";
+
+
+
+   /// <summary>Stands for a session cookie. It may appear in a request that carries a credential and in no reply.</summary>
    internal const string SessionCookieCanary = "CANARY-SESSION-COOKIE-7f3a";
+
+
+
+   /// <summary>Stands for a device token. It may appear in no request and no reply.</summary>
    internal const string DeviceTokenCanary = "CANARY-DEVICE-TOKEN-91c2";
+
+
+
+   /// <summary>Stands for an enrollment code. It may appear in the enrollment request and in no reply.</summary>
    internal const string EnrollmentCodeCanary = "CANARY-ENROLLMENT-CODE-55d0";
+
+
+
+   /// <summary>Stands for the provider's ID-token hint. It may appear in the sign-out reply and nowhere else.</summary>
    internal const string IdTokenHintCanary = "CANARY-ID-TOKEN-HINT-08be";
 
+
+
+   /// <summary>The instant the examples count their times from.</summary>
    private static readonly DateTimeOffset s_instant = new(2026, 11, 10, 15, 4, 5, TimeSpan.Zero);
 
 
@@ -58,6 +92,15 @@ internal static class ManagementSamples
 
 
 
+   /// <summary>Further golden replies beside the one per operation, by file name: what a healthy service with two servers sends for a snapshot, and what a service whose stored data is not ready sends.</summary>
+   internal static IReadOnlyDictionary<string, ServiceSnapshot> FurtherSnapshots { get; } = new Dictionary<string, ServiceSnapshot>(StringComparer.Ordinal)
+   {
+      ["snapshot.healthy.reply.json"] = HealthySnapshot,
+      ["snapshot.degraded.reply.json"] = DegradedSnapshot,
+   };
+
+
+
    /// <summary>The server an operation's example request names, or null for an operation on the computer.</summary>
    internal static string? ServerFor(ManagementOperationInfo operation) => operation.Scope == ManagementScope.Server ? ServerId : null;
 
@@ -70,7 +113,7 @@ internal static class ManagementSamples
       ManagementOperations.ServersAdd => new ServersAddArgs(Address, "Warehouse", AcceptCertificateException: true, SessionCredential),
       ManagementOperations.ServersReorder => new ServersReorderArgs([SecondServerId, ServerId]),
       ManagementOperations.ComputerSetProfile => new ComputerSetProfileArgs(Computer.Profile),
-      ManagementOperations.LogsSetSettings => new LogsSetSettingsArgs(new LogSettings(14, 50, 5, DebugLogging: true)),
+      ManagementOperations.LogsSetSettings => new LogsSetSettingsArgs(RetentionDays: 14, MaxFileMegabytes: 50, SegmentsPerDay: 5, DebugLogging: true),
       ManagementOperations.ServersRename => new ServersRenameArgs("Warehouse east"),
       ManagementOperations.SessionSignIn => new SessionSignInArgs(SessionCredential, SessionSignInArgs.AssociatePairing),
       ManagementOperations.SessionSignOut => new SessionSignOutArgs("io.qrun.qqq-print-agent:/oauth/callback"),
@@ -93,6 +136,7 @@ internal static class ManagementSamples
    internal static object Result(string operation) => operation switch
    {
       ManagementOperations.Snapshot => new ServiceSnapshot(Computer, [Server]),
+      ManagementOperations.TransportGet => new TransportResult([new ServerTransport(ServerId, Server.Transport, Server.LastContact), new ServerTransport(SecondServerId, Stopped)]),
       ManagementOperations.ServersList or ManagementOperations.ServersReorder => new ServerListResult([Summary, new ServerSummary(SecondServerId, "Test bench", "https://bench.example.test", 1, ServerSnapshot.Red, "Sign-in is required.", Removing: true)]),
       ManagementOperations.ServersCheck => CheckPassed,
       ManagementOperations.ServersAdd => new ServerAddResult(Summary, Authentication),
@@ -103,7 +147,7 @@ internal static class ManagementSamples
       ManagementOperations.ServersRename => Summary,
       ManagementOperations.ServersRemove => new ServerRemoveResult(ServerRemoveResult.Removing),
       ManagementOperations.SessionSignIn => new SignInResult(Authentication, Paired: true, PrintingEnabled: true),
-      ManagementOperations.SessionSignOut => new SignOutResult(UnreadableSessionSetAside: true, ProviderLogout),
+      ManagementOperations.SessionSignOut => new SignOutResult(ServerSessionEnded: true, UnreadableSessionSetAside: true, ProviderLogout),
       ManagementOperations.PairingEnroll => EnrollResult.From(EnrollmentAnswer),
       ManagementOperations.ConnectionReconnect => new ReconnectResult(ReconnectResult.Requested),
       ManagementOperations.TrustGet or ManagementOperations.TrustSet => new TrustResult(Server.CertificateException, Certificate),
@@ -122,10 +166,12 @@ internal static class ManagementSamples
       ManagementErrorCode.ServerIncompatible => ServerCheckResult.From(new QqqServerCompatibility(
          [new QqqCompatibilityProblem(QqqCompatibilityIssue.PrintingExtensionTooOld, "the printing extension is version 1.4 and realtime printing needs 2.3")], null, QqqSignInMethods.None)),
       ManagementErrorCode.CertificateUntrusted => ServerCheckResult.From(new QqqServerCompatibility(
-         [new QqqCompatibilityProblem(QqqCompatibilityIssue.SecureConnectionFailed, "Windows does not trust the authority that issued the server's certificate")], null, QqqSignInMethods.None,
+         [new QqqCompatibilityProblem(QqqCompatibilityIssue.SecureConnectionFailed, "Windows does not trust the authority that issued the certificate")], null, QqqSignInMethods.None,
          new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateChainErrors | SslPolicyErrors.RemoteCertificateNameMismatch, "CN=qqq.example.test", "CN=Example Development Root",
-            new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334")), ProviderOrigin, ServerId),
+            new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334")), ProviderOrigin, ServerId, Address, s_instant),
+      ManagementErrorCode.IdentityChanged => new IdentityChangedDetails(StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId),
       ManagementErrorCode.EnrollmentUnconfirmed => new EnrollmentUnconfirmedDetails(EnrollmentUnconfirmedDetails.DeviceBound, PrintingBlocked: true, EnrollmentAnswer.DeviceId),
+      ManagementErrorCode.CancelRefused => new CancelRefusedDetails(CancelRefusedDetails.OwnershipMismatch),
       _ => null,
    };
 
@@ -142,9 +188,10 @@ internal static class ManagementSamples
 
 
 
-   /// <summary>The certificate Windows refused, as the trust operations describe it.</summary>
-   private static PresentedCertificate Certificate => PresentedCertificate.From(new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateChainErrors, "CN=qqq.example.test",
-      "CN=Example Development Root", new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334"));
+   /// <summary>The certificate Windows refused, as the trust operations describe it: remembered from the sign-in provider's address.</summary>
+   private static PresentedCertificate Certificate => PresentedCertificate.From(new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateChainErrors, "CN=sign-in.example.test",
+      "CN=Example Development Root", new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334"),
+      ProviderOrigin, s_instant.AddMinutes(-20));
 
 
 
@@ -159,10 +206,20 @@ internal static class ManagementSamples
 
 
 
+   /// <summary>The transport of a server that has no connection: nothing sent, nothing received.</summary>
+   private static AgentTransportSnapshot Stopped => new("qqq-printing.v1", "STOPPED", 0, 0, 0, 0, s_instant.AddHours(-3));
+
+
+
+   /// <summary>The one Windows printer the examples have.</summary>
+   private static ComputerPrinter LabelPrinter => ComputerPrinter.From(new PrinterInfo("printer-a1", "ZDesigner ZT411", "ZDesigner ZT411-203dpi ZPL", "USB001", "READY", ["PDF", "ZPL"],
+      "Not carried", "Not carried", "Not carried", [new PrinterMediaProfile("label-4x6", new string('a', 64), "4 x 6 in", 101600, 152400, 203, 203)]));
+
+
+
    /// <summary>The computer with every member set.</summary>
    private static ComputerSnapshot Computer => new(
-      [ComputerPrinter.From(new PrinterInfo("printer-a1", "ZDesigner ZT411", "ZDesigner ZT411-203dpi ZPL", "USB001", "READY", ["PDF", "ZPL"], "Not carried", "Not carried", "Not carried",
-         [new PrinterMediaProfile("label-4x6", new string('a', 64), "4 x 6 in", 101600, 152400, 203, 203)]))],
+      [LabelPrinter],
       new ServiceState("2.0.0-dev+abc1234", s_instant.AddHours(-3)),
       new UpdateState(Paused: true, s_instant.AddMinutes(10)),
       new LogSettings(30, 100, 10, DebugLogging: true, CurrentFileBytes: 20480, SegmentsToday: 2),
@@ -174,9 +231,37 @@ internal static class ManagementSamples
    /// <summary>One server with every member set, built from the stored pairing and session the way the service will build it.</summary>
    private static ServerSnapshot Server => new(ServerId, "Warehouse", Address, 0, ServerSnapshot.Orange, "Dispatch paused by the administrator.", AttentionCount: 3,
       Authentication, Paired: true, StoredPairing.DeviceId,
-      new AgentTransportSnapshot("qqq-printing.v1", "CONNECTED", 1048576, 73400320, 512.5, 20480.25, s_instant.AddHours(-3)),
+      new AgentTransportSnapshot("qqq-printing.v1", "CONNECTED", 1048576, 73400320, 512.5, 20480.25, s_instant.AddHours(-3)), s_instant.AddSeconds(-4),
       ServerControl.From(new AgentControlState("SUPPORTED", new DeviceDesiredState(12, DispatchPaused: true, "CONNECTED"), "2026-11-10T15:04:00.0000000Z", "REFRESH_INVENTORY", "INVENTORY_REFRESHED", "2026-11-10T14:58:00.0000000Z")),
       [new ServerPrinter("printer-a1", PrinterServerState.Approved, "Shipping labels", "Thermal printer", "Dock 2")],
       new PrinterServerSync(PrinterServerSync.Reported, "2026-11-10T15:03:00.0000000Z", "2 printers approved", Address, PrinterServerSync.RealtimeSource),
       new CertificateExceptionState(Enabled: true, Address, ProviderOrigin), StateUnreadable: true, Removing: true);
+
+
+
+   /// <summary>What a healthy service sends: stored data ready, no update pause, one server connected and printing, and a second that is signed in but not yet paired and shares nothing.</summary>
+   private static ServiceSnapshot HealthySnapshot => new(
+      new ComputerSnapshot([LabelPrinter], new ServiceState("2.0.0", s_instant.AddDays(-2)), new UpdateState(Paused: false), new LogSettings(), new StoredState(StoredState.Ready),
+         new DeviceProfile("Packing station 7", "", "West warehouse")),
+      [
+         new ServerSnapshot(ServerId, "Warehouse", Address, 0, ServerSnapshot.Green, "Connected. Waiting for print jobs.", AttentionCount: 0,
+            new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", "Signed in. Printing is enabled.", Authorized: true), Paired: true, "device-17",
+            new AgentTransportSnapshot("qqq-printing.v1", "CONNECTED", 20480, 5242880, 0, 0, s_instant.AddDays(-2)), s_instant.AddSeconds(-12),
+            new ServerControl("SUPPORTED", new DeviceDesiredState(3, DispatchPaused: false, "CONNECTED"), "2026-11-10T15:03:53.0000000Z"),
+            [new ServerPrinter("printer-a1", PrinterServerState.Approved, "Shipping labels")],
+            new PrinterServerSync(PrinterServerSync.Reported, "2026-11-10T15:03:00.0000000Z", Server: Address, Source: PrinterServerSync.RealtimeSource),
+            new CertificateExceptionState(Enabled: false, Address), StateUnreadable: false, Removing: false),
+         new ServerSnapshot(SecondServerId, "Test bench", "https://bench.example.test", 1, ServerSnapshot.Orange, "Signed in. Pair this computer to enable printing.", AttentionCount: 0,
+            new AgentAuthenticationStatus(SignedIn: true, "principal-9", "tenant-2", "Signed in. Pair this computer to enable printing.", Authorized: false), Paired: false, DeviceId: null,
+            Stopped, LastContact: null, new ServerControl("UNKNOWN", new DeviceDesiredState(0, DispatchPaused: false, "CONNECTED")), [],
+            PrinterServerSync.Initial, new CertificateExceptionState(Enabled: true, "https://bench.example.test", "https://bench.example.test"), StateUnreadable: false, Removing: false),
+      ]);
+
+
+
+   /// <summary>What a service sends when a newer build wrote its stored data: it runs no connections, so there are no servers, and the computer's part says why.</summary>
+   private static ServiceSnapshot DegradedSnapshot => new(
+      new ComputerSnapshot([LabelPrinter], new ServiceState("2.0.0-rc.2", s_instant.AddMinutes(-5)), new UpdateState(Paused: false), new LogSettings(),
+         new StoredState(StoredState.NewerBuild, FoundVersion: 4, SupportedVersion: 3), new DeviceProfile()),
+      []);
 }

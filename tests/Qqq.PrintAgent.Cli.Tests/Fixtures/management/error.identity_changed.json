@@ -1,0 +1,12 @@
+{
+   "v": 2,
+   "ok": false,
+   "error": {
+      "code": "identity_changed",
+      "message": "Synthetic message for people.",
+      "details": {
+         "approvedPrincipalId": "principal-4",
+         "approvedTenantId": "tenant-2"
+      }
+   }
+}

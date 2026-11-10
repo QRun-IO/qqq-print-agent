@@ -7,30 +7,46 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Qqq.PrintAgent.Windows.Management;
 
 /// <summary>
 /// The one way version 2 of the management pipe is written and read. Names on the wire are camel case; a member that
 /// has no value is left out; dates are ISO 8601 in UTC; the text is one line, so it fits the pipe's newline framing.
-/// Requests are read strictly: the envelope is checked member by member, and arguments refuse an unknown member, a
-/// missing required one and a null where a value is needed, because a request the service does not fully understand
-/// must not be half-obeyed. Replies are read leniently: an unknown member is skipped, so a newer service can add one
-/// without breaking an older client.
+/// Nothing is read from an object that has the same member twice, at any depth, because readers disagree about which
+/// value counts. A required member that is missing, a null where a value is needed and a null inside a list make the
+/// whole record unreadable, in a request and in a reply alike: a record with a hole in it is not half-used. Requests
+/// are also read strictly about what they may contain: the envelope is checked member by member and arguments refuse a
+/// member they do not know, because a request the service does not fully understand must not be half-obeyed. Replies
+/// skip a member they do not know, so a newer service can add one without breaking an older client; for the same
+/// reason a client treats a vocabulary value it does not know (a health, a stage, an outcome) as unknown, never as a
+/// failure to read the reply.
 /// </summary>
 public static class ManagementJson
 {
-   private static readonly JsonDocumentOptions s_documentOptions = new() { AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow, MaxDepth = 32 };
+   /// <summary>How a document is parsed: no comments, no trailing commas, a bounded depth, and no object with a repeated member.</summary>
+   private static readonly JsonDocumentOptions s_documentOptions = new() { AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow, MaxDepth = 32, AllowDuplicateProperties = false };
 
 
 
-   /// <summary>The options everything is written with, and replies are read with: unknown members are skipped.</summary>
-   public static JsonSerializerOptions Options { get; } = CreateOptions(strict: false);
+   /// <summary>The same, but tolerating a repeated member. It is used only to find out whether a repeated member is the reason the strict parse refused a text, so that case can be told apart from text that is not JSON at all.</summary>
+   private static readonly JsonDocumentOptions s_repeatTolerantOptions = s_documentOptions with { AllowDuplicateProperties = true };
 
 
 
-   /// <summary>The options request arguments are read with: an unknown member, a missing required member and a null for a member that needs a value are each refused.</summary>
-   public static JsonSerializerOptions StrictOptions { get; } = CreateOptions(strict: true);
+   /// <summary>The empty object that stands for arguments a request left out.</summary>
+   private static readonly JsonElement s_noArguments = JsonSerializer.SerializeToElement(new NoResult());
+
+
+
+   /// <summary>The options everything is written with, and replies are read with: a member the reader does not know is skipped.</summary>
+   public static JsonSerializerOptions Options { get; } = CreateOptions(skipUnknownMembers: true);
+
+
+
+   /// <summary>The options request arguments are read with: a member the reader does not know is refused.</summary>
+   public static JsonSerializerOptions StrictOptions { get; } = CreateOptions(skipUnknownMembers: false);
 
 
 
@@ -48,8 +64,8 @@ public static class ManagementJson
    /// Reads a request's envelope and tells apart everything that can be wrong with it. Size is checked before anything is
    /// parsed. The version is checked before the other members, because a request of another version may rightly have
    /// members this one does not know. After that the envelope allows exactly <c>v</c>, <c>op</c>, <c>server</c> and
-   /// <c>args</c>, each once. Whether the operation exists, and whether it should name a server, is not decided here
-   /// but by <see cref="ManagementOperations.Check"/>, and the arguments are read by <see cref="TryReadArguments"/>.
+   /// <c>args</c>. Whether the operation exists, and whether it should name a server, is not decided here but by
+   /// <see cref="ManagementOperations.Check"/>, and the arguments are read by <see cref="TryReadArguments"/>.
    /// </summary>
    public static ManagementRequestParse ParseRequest(string? text)
    {
@@ -87,27 +103,28 @@ public static class ManagementJson
 
 
    /// <summary>
-   /// Reads a request's arguments into the operation's own record, strictly. It returns false when the request has no
-   /// arguments, when a member is unknown, missing or of the wrong kind, or when a value is refused by the type it belongs
-   /// to (a session credential that is not a valid one, for instance); the caller answers
+   /// Reads a request's arguments into the operation's own record, strictly. Arguments that were left out are read as
+   /// an empty object, so a request without <c>args</c> is valid exactly when every member of the record is optional.
+   /// It returns false when a member is unknown, repeated, missing or of the wrong kind, or when a value is refused by
+   /// the type it belongs to (a session credential that is not a valid one, for instance); the caller answers
    /// <see cref="ManagementErrorCode.InvalidRequest"/>. What was wrong is not returned, because it may quote a secret.
    /// </summary>
    public static bool TryReadArguments<TArguments>(ManagementRequest request, [NotNullWhen(true)] out TArguments? arguments)
       where TArguments : class
    {
       ArgumentNullException.ThrowIfNull(request);
-      arguments = request.Args is { } element ? Read<TArguments>(element, StrictOptions) : null;
+      arguments = Read<TArguments>(request.Args?.ToElement() ?? s_noArguments, StrictOptions);
       return arguments is not null;
    }
 
 
 
-   /// <summary>Reads a successful reply's result into the operation's own record, skipping members this version does not know. It returns false when the reply has no result or the result does not fit the type.</summary>
+   /// <summary>Reads a successful reply's result into the operation's own record, skipping members this version does not know. It returns false when the reply has no result, or the result lacks a required member or otherwise does not fit the type.</summary>
    public static bool TryReadResult<TResult>(ManagementReply reply, [NotNullWhen(true)] out TResult? result)
       where TResult : class
    {
       ArgumentNullException.ThrowIfNull(reply);
-      result = reply.Result is { } element ? Read<TResult>(element, Options) : null;
+      result = reply.Result is { } payload ? Read<TResult>(payload.ToElement(), Options) : null;
       return result is not null;
    }
 
@@ -118,7 +135,7 @@ public static class ManagementJson
       where TDetails : class
    {
       ArgumentNullException.ThrowIfNull(error);
-      details = error.Details is { } element ? Read<TDetails>(element, Options) : null;
+      details = error.Details is { } payload ? Read<TDetails>(payload.ToElement(), Options) : null;
       return details is not null;
    }
 
@@ -136,8 +153,8 @@ public static class ManagementJson
 
 
 
-   /// <summary>Builds the serializer options. Both sets write the same text; they differ only in how much a reader forgives.</summary>
-   private static JsonSerializerOptions CreateOptions(bool strict)
+   /// <summary>Builds the serializer options. Both sets write the same text and are equally strict about repeated, missing and null members; they differ only in whether a reader skips a member it does not know.</summary>
+   private static JsonSerializerOptions CreateOptions(bool skipUnknownMembers)
    {
       JsonSerializerOptions options = new()
       {
@@ -148,18 +165,41 @@ public static class ManagementJson
          ReadCommentHandling = JsonCommentHandling.Disallow,
          AllowTrailingCommas = false,
          MaxDepth = 32,
-         UnmappedMemberHandling = strict ? JsonUnmappedMemberHandling.Disallow : JsonUnmappedMemberHandling.Skip,
-         RespectRequiredConstructorParameters = strict,
-         RespectNullableAnnotations = strict,
+         AllowDuplicateProperties = false,
+         UnmappedMemberHandling = skipUnknownMembers ? JsonUnmappedMemberHandling.Skip : JsonUnmappedMemberHandling.Disallow,
+         RespectRequiredConstructorParameters = true,
+         RespectNullableAnnotations = true,
+         TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { LetNullableMembersBeAbsent } },
       };
       options.Converters.Add(new UtcDateTimeConverter());
-      options.MakeReadOnly(populateMissingResolver: true);
+      options.Converters.Add(new PayloadConverter());
+      options.MakeReadOnly();
       return options;
    }
 
 
 
-   /// <summary>Checks the size, parses the text and requires an object. On success the document is handed to the caller, who disposes it.</summary>
+   /// <summary>
+   /// Lets a member that may be null be absent. Such a member is left out of the text when it is null, so its absence
+   /// must read back as null even where the record gives its constructor parameter no default (a nullable member that
+   /// comes before a required one cannot have a default). A member that may not be null and has no default stays
+   /// required; one with a default stays optional.
+   /// </summary>
+   private static void LetNullableMembersBeAbsent(JsonTypeInfo type)
+   {
+      foreach(JsonPropertyInfo member in type.Properties.Where(member => member.IsRequired && member.IsSetNullable))
+      {
+         member.IsRequired = false;
+      }
+   }
+
+
+
+   /// <summary>
+   /// Checks the size, parses the text and requires an object. On success the document is handed to the caller, who
+   /// disposes it. Text the strict parse refuses is parsed once more with repeated members tolerated, only to learn
+   /// whether a repeated member was the reason.
+   /// </summary>
    private static ManagementEnvelopeProblem ParseObject(string? text, int maximumCharacters, out JsonDocument? document)
    {
       document = null;
@@ -178,7 +218,7 @@ public static class ManagementJson
       }
       catch(JsonException)
       {
-         return ManagementEnvelopeProblem.NotJson;
+         return IsJsonWithARepeatedMember(text) ? ManagementEnvelopeProblem.RepeatedMember : ManagementEnvelopeProblem.NotJson;
       }
       if(parsed.RootElement.ValueKind != JsonValueKind.Object)
       {
@@ -187,6 +227,22 @@ public static class ManagementJson
       }
       document = parsed;
       return ManagementEnvelopeProblem.None;
+   }
+
+
+
+   /// <summary>True when text the strict parse refused is well-formed JSON once a repeated member is tolerated, which means a repeated member is what was wrong with it.</summary>
+   private static bool IsJsonWithARepeatedMember(string text)
+   {
+      try
+      {
+         using var tolerated = JsonDocument.Parse(text, s_repeatTolerantOptions);
+         return true;
+      }
+      catch(JsonException)
+      {
+         return false;
+      }
    }
 
 
@@ -204,14 +260,13 @@ public static class ManagementJson
 
 
 
-   /// <summary>Reads the members of a request object whose root is known to be an object.</summary>
+   /// <summary>Reads the members of a request object whose root is known to be an object and to repeat no member.</summary>
    private static ManagementRequestParse ReadRequest(JsonElement root)
    {
       ManagementEnvelopeProblem problem = CheckVersion(root);
       string? operation = null;
       string? server = null;
-      JsonElement? arguments = null;
-      HashSet<string> seen = new(StringComparer.Ordinal);
+      ManagementPayload? arguments = null;
       foreach(JsonProperty member in root.EnumerateObject())
       {
          if(problem != ManagementEnvelopeProblem.None)
@@ -219,18 +274,17 @@ public static class ManagementJson
             break;
          }
          JsonValueKind kind = member.Value.ValueKind;
-         problem = (seen.Add(member.Name), member.Name) switch
+         problem = member.Name switch
          {
-            (false, _) => ManagementEnvelopeProblem.UnexpectedMember,
-            (true, "v") => ManagementEnvelopeProblem.None,
-            (true, "op") => kind == JsonValueKind.String ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.OperationMissing,
-            (true, "server") => kind == JsonValueKind.String && ManagementProtocol.IsServerId(member.Value.GetString()) ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ServerMalformed,
-            (true, "args") => kind == JsonValueKind.Object ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ArgumentsNotAnObject,
+            "v" => ManagementEnvelopeProblem.None,
+            "op" => kind == JsonValueKind.String ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.OperationMissing,
+            "server" => kind == JsonValueKind.String && ManagementProtocol.IsServerId(member.Value.GetString()) ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ServerMalformed,
+            "args" => kind == JsonValueKind.Object ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ArgumentsNotAnObject,
             _ => ManagementEnvelopeProblem.UnexpectedMember,
          };
          operation = member.NameEquals("op") ? member.Value.ToString() : operation;
          server = member.NameEquals("server") ? member.Value.ToString() : server;
-         arguments = member.NameEquals("args") ? member.Value.Clone() : arguments;
+         arguments = member.NameEquals("args") && kind == JsonValueKind.Object ? ManagementPayload.FromElement(member.Value) : arguments;
       }
       if(problem == ManagementEnvelopeProblem.None && operation is null)
       {
@@ -259,7 +313,7 @@ public static class ManagementJson
       ManagementError? error = root.TryGetProperty("error", out JsonElement failure) ? ReadError(failure) : null;
       ManagementReply? reply = root.TryGetProperty("ok", out JsonElement ok) switch
       {
-         true when ok.ValueKind == JsonValueKind.True && hasResult => new ManagementReply(ManagementProtocol.Version, true, result.Clone()),
+         true when ok.ValueKind == JsonValueKind.True && hasResult => new ManagementReply(ManagementProtocol.Version, true, ManagementPayload.FromElement(result)),
          true when ok.ValueKind == JsonValueKind.False && error is not null => new ManagementReply(ManagementProtocol.Version, false, Error: error),
          _ => null,
       };
@@ -277,19 +331,23 @@ public static class ManagementJson
       {
          return null;
       }
-      JsonElement? details = error.TryGetProperty("details", out JsonElement found) && found.ValueKind == JsonValueKind.Object ? found.Clone() : null;
+      ManagementPayload? details = error.TryGetProperty("details", out JsonElement found) && found.ValueKind == JsonValueKind.Object ? ManagementPayload.FromElement(found) : null;
       return new ManagementError(code.ToString(), message.ToString(), details);
    }
 
 
 
-   /// <summary>Reads one element into a type, returning null for anything that does not fit it instead of throwing: a shape the serializer refuses, or a value the type's own constructor refuses.</summary>
+   /// <summary>
+   /// Reads one element into a type, returning null for anything that does not fit it instead of throwing: a shape the
+   /// serializer refuses, a value the type's own constructor refuses, or a list with a null in it. The serializer's
+   /// own null checks do not reach inside a list, and no list in this contract may hold a null.
+   /// </summary>
    private static TValue? Read<TValue>(JsonElement element, JsonSerializerOptions options)
       where TValue : class
    {
       try
       {
-         return element.Deserialize<TValue>(options);
+         return HasNullInAList(element) ? null : element.Deserialize<TValue>(options);
       }
       catch(Exception exception) when(exception is JsonException or ArgumentException or FormatException or InvalidOperationException or NotSupportedException)
       {
@@ -299,21 +357,60 @@ public static class ManagementJson
 
 
 
+   /// <summary>True when any list in the element, at any depth, has a null among its items.</summary>
+   private static bool HasNullInAList(JsonElement element) => element.ValueKind switch
+   {
+      JsonValueKind.Array => element.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.Null || HasNullInAList(item)),
+      JsonValueKind.Object => element.EnumerateObject().Any(member => HasNullInAList(member.Value)),
+      _ => false,
+   };
+
+
+
    /// <summary>
-   /// Writes every date and time as ISO 8601 in UTC with a trailing Z, whatever offset the value had, and reads any ISO
-   /// 8601 date and time back as UTC, so two computers in different time zones exchange the same text for the same instant.
+   /// Writes every date and time as ISO 8601 in UTC with a trailing Z, whatever offset the value had, and reads back only
+   /// ISO 8601 that says which instant it means: with a trailing Z or an offset. A date and time without one, a date
+   /// alone and any other notation are refused, so two computers in different time zones cannot read one text as two
+   /// instants.
    /// </summary>
    private sealed class UtcDateTimeConverter : JsonConverter<DateTimeOffset>
    {
-      /// <summary>Reads an ISO 8601 date and time; text without an offset is taken as UTC.</summary>
+      /// <summary>Reads an ISO 8601 date and time that ends in Z or in an offset, as UTC.</summary>
       public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-         => DateTimeOffset.TryParse(reader.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset value)
-            ? value : throw new JsonException("A date and time must be ISO 8601.");
+      {
+         /////////////////////////////////////////////////////////////////////////////////////////
+         // The serializer never hands a null to this converter: it reads a null itself for a  //
+         // member that may be null and refuses it for one that may not. Any token but text    //
+         // makes GetString throw, which the caller treats as a value that does not fit.       //
+         /////////////////////////////////////////////////////////////////////////////////////////
+         string text = reader.GetString()!;
+         bool namesItsOffset = text.EndsWith('Z') || (text.Length > 6 && text[^6] is '+' or '-' && text[^3] == ':');
+         return namesItsOffset && reader.TryGetDateTimeOffset(out DateTimeOffset value)
+            ? value.ToUniversalTime() : throw new JsonException("A date and time must be ISO 8601 with a trailing Z or an offset.");
+      }
 
 
 
       /// <summary>Writes the instant in UTC with seven fractional digits and a trailing Z.</summary>
       public override void Write(Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options)
          => writer.WriteStringValue(value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
+   }
+
+
+
+   /// <summary>Writes a payload as the JSON object it holds and reads a JSON object as a payload, so the envelope records can be written by the serializer although their payloads are untyped.</summary>
+   private sealed class PayloadConverter : JsonConverter<ManagementPayload>
+   {
+      /// <summary>Reads the object at the reader's position; anything but an object is refused.</summary>
+      public override ManagementPayload Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+      {
+         var element = JsonElement.ParseValue(ref reader);
+         return element.ValueKind == JsonValueKind.Object ? ManagementPayload.FromElement(element) : throw new JsonException("A payload must be a JSON object.");
+      }
+
+
+
+      /// <summary>Writes the object as it is held.</summary>
+      public override void Write(Utf8JsonWriter writer, ManagementPayload value, JsonSerializerOptions options) => value.ToElement().WriteTo(writer);
    }
 }

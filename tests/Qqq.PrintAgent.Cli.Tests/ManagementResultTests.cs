@@ -85,12 +85,12 @@ public sealed class ManagementResultTests
       QqqCompatibilityProblem secure = new(QqqCompatibilityIssue.SecureConnectionFailed, "the certificate was refused");
       QqqCompatibilityProblem unreachable = new(QqqCompatibilityIssue.ServerUnreachable, "no answer");
 
-      var untrusted = ServerCheckResult.From(new QqqServerCompatibility([secure], null, QqqSignInMethods.None, rejection));
+      var untrusted = ServerCheckResult.From(new QqqServerCompatibility([secure], null, QqqSignInMethods.None, rejection), certificateOrigin: "https://qqq.example.test", observedAt: new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero));
       var handshake = ServerCheckResult.From(new QqqServerCompatibility([secure], null, QqqSignInMethods.None));
       var elsewhere = ServerCheckResult.From(new QqqServerCompatibility([unreachable], null, QqqSignInMethods.None, rejection));
 
       Assert.Equal(ManagementErrorCode.CertificateUntrusted, untrusted.FailureCode());
-      Assert.Equal(PresentedCertificate.From(rejection).Fingerprint, untrusted.Certificate!.Fingerprint);
+      Assert.Equal(("A1B2C3", "https://qqq.example.test", new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero)), (untrusted.Certificate!.Fingerprint, untrusted.Certificate.Origin, untrusted.Certificate.ObservedAt));
       Assert.Equal(ManagementErrorCode.ServerIncompatible, handshake.FailureCode());
       Assert.Null(handshake.Certificate);
       Assert.Equal(ManagementErrorCode.ServerIncompatible, elsewhere.FailureCode());
@@ -98,7 +98,7 @@ public sealed class ManagementResultTests
 
 
 
-   /// <summary>A refused certificate is described by its subject, issuer, validity in UTC and fingerprint as Core recorded them, with every reason Windows gave in a fixed order; a certificate that was never presented has reasons and nothing else.</summary>
+   /// <summary>A refused certificate is described by its subject, issuer, validity in UTC and fingerprint as Core recorded them, with every reason Windows gave in a fixed order and the address and time the service adds; a certificate that was never presented has reasons and nothing else.</summary>
    [Theory]
    [InlineData(SslPolicyErrors.RemoteCertificateChainErrors, "untrustedAuthority")]
    [InlineData(SslPolicyErrors.RemoteCertificateNameMismatch, "nameMismatch")]
@@ -108,13 +108,16 @@ public sealed class ManagementResultTests
    public void Certificate_IsDescribedWithEveryReasonItWasRefused(SslPolicyErrors errors, string refusals)
    {
       var described = PresentedCertificate.From(new QqqCertificateRejection(errors, "CN=qqq.example.test", "CN=Example Development Root",
-         new DateTime(2026, 1, 1, 8, 30, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 8, 30, 0, DateTimeKind.Unspecified), "A1B2C3"));
+         new DateTime(2026, 1, 1, 8, 30, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 8, 30, 0, DateTimeKind.Unspecified), "A1B2C3"),
+         "https://sign-in.example.test", new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero));
       var absent = PresentedCertificate.From(new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateNotAvailable, null, null, null, null, null));
 
       Assert.Equal(refusals.Split(','), described.Refusals);
       Assert.Equal(("CN=qqq.example.test", "CN=Example Development Root", "A1B2C3"), (described.Subject, described.Issuer, described.Fingerprint));
       Assert.Equal(new DateTimeOffset(2026, 1, 1, 8, 30, 0, TimeSpan.Zero), described.NotBefore);
       Assert.Equal(new DateTimeOffset(2027, 1, 1, 8, 30, 0, TimeSpan.Zero), described.NotAfter);
+      Assert.Equal(("https://sign-in.example.test", new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero)), (described.Origin, described.ObservedAt));
+      Assert.Equal((null, null), (absent.Origin, absent.ObservedAt));
       Assert.Equal(new PresentedCertificate(absent.Refusals), absent);
       Assert.Equal(["notPresented"], absent.Refusals);
    }
@@ -140,9 +143,9 @@ public sealed class ManagementResultTests
 
 
 
-   /// <summary>A server's control state carries the stored state's members and not the obsolete one the stored record keeps for version 1.</summary>
+   /// <summary>A server's control state on the wire is a record of the contract, built from the stored state member by member, so the form of the state file can change without changing what clients read. The times are carried as the stored text.</summary>
    [Fact]
-   public void ServerControl_CarriesTheStoredStateWithoutItsObsoleteMember()
+   public void ServerControl_IsBuiltFromTheStoredStateMemberByMember()
    {
       AgentControlState stored = new("SUPPORTED", new DeviceDesiredState(12, DispatchPaused: true, "DISCONNECTED"), "contact", "REFRESH_INVENTORY", "INVENTORY_REFRESHED", "commanded");
 
@@ -177,6 +180,8 @@ public sealed class ManagementResultTests
       Assert.Equal(("removing", "removed"), (ServerRemoveResult.Removing, ServerRemoveResult.Removed));
       Assert.Equal(("requested", "heldByAdministrator"), (ReconnectResult.Requested, ReconnectResult.HeldByAdministrator));
       Assert.Equal(("spooler", "server"), (JobCancelResult.Spooler, JobCancelResult.Server));
+      Assert.Equal(("documentGone", "ownershipMismatch"), (CancelRefusedDetails.DocumentGone, CancelRefusedDetails.OwnershipMismatch));
+      Assert.Equal(("untrustedAuthority", "nameMismatch", "notPresented"), (PresentedCertificate.UntrustedAuthority, PresentedCertificate.NameMismatch, PresentedCertificate.NotPresented));
       Assert.Equal(("associatePairing", "newPairing"), (SessionSignInArgs.AssociatePairing, SessionSignInArgs.NewPairing));
       Assert.Equal(("nothingChanged", "deviceBound", "saved", "activated"),
          (EnrollmentUnconfirmedDetails.NothingChanged, EnrollmentUnconfirmedDetails.DeviceBound, EnrollmentUnconfirmedDetails.Saved, EnrollmentUnconfirmedDetails.Activated));

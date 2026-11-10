@@ -5,5 +5,9 @@
 
 namespace Qqq.PrintAgent.Windows.Management;
 
-/// <summary>Arguments of <see cref="ManagementOperations.LogsSetSettings"/>: the log limits to store. The two observations a <see cref="LogSettings"/> also carries (the current file's size and today's segment count) are ignored.</summary>
-public sealed record LogsSetSettingsArgs(LogSettings Settings);
+/// <summary>
+/// Arguments of <see cref="ManagementOperations.LogsSetSettings"/>: the four log limits a client can set, all of them, so
+/// a change never depends on what was stored before. The current file's size and today's segment count, which the
+/// result also reports, are observations and are not arguments.
+/// </summary>
+public sealed record LogsSetSettingsArgs(int RetentionDays, int MaxFileMegabytes, int SegmentsPerDay, bool DebugLogging);

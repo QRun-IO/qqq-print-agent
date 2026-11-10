@@ -15,7 +15,7 @@
                "stage": "security",
                "outcome": "failed",
                "problems": [
-                  "Windows does not trust the authority that issued the server\u0027s certificate"
+                  "Windows does not trust the authority that issued the certificate"
                ]
             },
             {
@@ -41,6 +41,8 @@
                "untrustedAuthority",
                "nameMismatch"
             ],
+            "origin": "https://qqq.example.test",
+            "observedAt": "2026-11-10T15:04:05.0000000Z",
             "subject": "CN=qqq.example.test",
             "issuer": "CN=Example Development Root",
             "notBefore": "2026-01-01T00:00:00.0000000Z",

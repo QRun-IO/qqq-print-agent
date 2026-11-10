@@ -5,6 +5,7 @@
 
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Windows;
 using Qqq.PrintAgent.Windows.Management;
 
 namespace Qqq.PrintAgent.Cli.Tests;
@@ -17,6 +18,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class ManagementEnvelopeTests
 {
+   /// <summary>The server the example requests name.</summary>
    private const string Server = ManagementSamples.ServerId;
 
 
@@ -117,18 +119,37 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>A version 2 request may hold v, op, server and args, each once, and nothing else: an unknown member, a member repeated, and a known member in another letter case are refused, because a request the service does not fully understand must not be half-obeyed.</summary>
+   /// <summary>A version 2 request may hold v, op, server and args and nothing else: an unknown member and a known member in another letter case are refused, because a request the service does not fully understand must not be half-obeyed.</summary>
    [Theory]
    [InlineData("{\"v\":2,\"op\":\"snapshot\",\"extra\":1}")]
    [InlineData("{\"v\":2,\"op\":\"snapshot\",\"Server\":\"" + Server + "\"}")]
-   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"op\":\"snapshot\"}")]
-   [InlineData("{\"v\":2,\"v\":2,\"op\":\"snapshot\"}")]
-   [InlineData("{\"v\":2,\"op\":\"trust.get\",\"server\":\"" + Server + "\",\"server\":\"" + Server + "\"}")]
-   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"args\":{},\"args\":{}}")]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"Args\":{}}")]
    [InlineData("{\"v\":2,\"op\":\"snapshot\",\"result\":{}}")]
    public void Request_WithAnUnexpectedMember_IsRefused(string text)
    {
       AssertRefused(text, ManagementEnvelopeProblem.UnexpectedMember, ManagementErrorCode.InvalidRequest);
+   }
+
+
+
+   /// <summary>
+   /// A request in which any object has the same member twice is refused whole, and told apart from text that is not
+   /// JSON: in the envelope, in the arguments, and in a record nested inside the arguments. Two readers can disagree
+   /// about which of two values counts; the second row from the end would otherwise confirm a duplicate print the first
+   /// value declined. This is decided before the version is looked at, because nothing can be trusted in such a text.
+   /// </summary>
+   [Theory]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"op\":\"snapshot\"}")]
+   [InlineData("{\"v\":2,\"v\":2,\"op\":\"snapshot\"}")]
+   [InlineData("{\"v\":2,\"v\":3,\"op\":\"snapshot\"}")]
+   [InlineData("{\"v\":2,\"op\":\"trust.get\",\"server\":\"" + Server + "\",\"server\":\"" + Server + "\"}")]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"args\":{},\"args\":{}}")]
+   [InlineData("{\"v\":2,\"op\":\"jobs.retry\",\"server\":\"" + Server + "\",\"args\":{\"jobId\":\"job-204\",\"confirmDuplicateRisk\":false,\"confirmDuplicateRisk\":true}}")]
+   [InlineData("{\"v\":2,\"op\":\"jobs.query\",\"server\":\"" + Server + "\",\"args\":{\"query\":{\"pageSize\":25,\"pageSize\":500}}}")]
+   [InlineData("{\"op\":\"snapshot\",\"op\":\"snapshot\"}")]
+   public void Request_WithARepeatedMember_IsRefusedAtAnyDepth(string text)
+   {
+      AssertRefused(text, ManagementEnvelopeProblem.RepeatedMember, ManagementErrorCode.InvalidRequest);
    }
 
 
@@ -285,6 +306,8 @@ public sealed class ManagementEnvelopeTests
       Assert.Equal("Management request v2 pairing.enroll for server " + Server + " (arguments not shown)", enrollRequest.ToString());
       Assert.Equal("Management request v2 snapshot (arguments not shown)", plain.ToString());
       Assert.Null(plain.Args);
+      Assert.Equal("arguments (management payload not shown)", $"arguments {addRequest.Args}");
+      Assert.DoesNotContain(ManagementSamples.SessionCookieCanary, $"{addRequest} {addRequest.Args} {enrollRequest} {enrollRequest.Args}", StringComparison.Ordinal);
       Assert.Equal("Arguments of servers.add (session credential not shown)", add.ToString());
       Assert.Equal("Arguments of session.signIn (session credential not shown)", signIn.ToString());
       Assert.Equal("Arguments of pairing.enroll (enrollment code not shown)", enroll.ToString());
@@ -296,7 +319,7 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void Reply_NeverShowsItsResultAsText()
    {
-      SignOutResult signedOut = new(UnreadableSessionSetAside: false, ManagementSamples.ProviderLogout);
+      SignOutResult signedOut = new(ServerSessionEnded: true, UnreadableSessionSetAside: false, ManagementSamples.ProviderLogout);
       var success = ManagementReply.Success(signedOut);
       var failure = ManagementReply.Failure(ManagementErrorCode.Busy, "Another sign-in is running.");
       var detailed = ManagementReply.Failure(ManagementErrorCode.EnrollmentUnconfirmed, "The outcome is not known.", new EnrollmentUnconfirmedDetails(EnrollmentUnconfirmedDetails.Saved, PrintingBlocked: true, "device-17"));
@@ -308,6 +331,9 @@ public sealed class ManagementEnvelopeTests
       Assert.Equal("busy: Another sign-in is running.", failure.Error!.ToString());
       Assert.Equal("enrollment_unconfirmed: The outcome is not known.", detailed.Error!.ToString());
       Assert.Equal("Management reply v2 failed: no error given", new ManagementReply(2, false).ToString());
+      Assert.Equal("(management payload not shown)", success.Result!.ToString());
+      Assert.Equal("result (management payload not shown) details (management payload not shown)", $"result {success.Result} details {detailed.Error.Details}");
+      Assert.Contains(ManagementSamples.IdTokenHintCanary, success.Result.ToElement().ToString(), StringComparison.Ordinal);
    }
 
 
@@ -407,11 +433,13 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>Arguments are read strictly: an unknown member, a missing required member, a null where a value is needed, a value of the wrong kind, a member in another letter case and a missing arguments object are each refused, and optional members may be left out.</summary>
+   /// <summary>Arguments are read strictly: an unknown member, a repeated member, a missing required member, a null where a value is needed, a value of the wrong kind and a member in another letter case are each refused. Arguments that are left out are read as an empty object, which this operation refuses because its members are required.</summary>
    [Theory]
    [InlineData("{\"printerId\":\"printer-a1\",\"shared\":true}", true)]
    [InlineData("{\"shared\":false,\"printerId\":\"printer-a1\"}", true)]
    [InlineData("{\"printerId\":\"printer-a1\",\"shared\":true,\"extra\":1}", false)]
+   [InlineData("{\"printerId\":\"printer-a1\",\"shared\":false,\"shared\":true}", false)]
+   [InlineData("{\"printerId\":\"other\",\"printerId\":\"printer-a1\",\"shared\":true}", false)]
    [InlineData("{\"printerId\":\"printer-a1\"}", false)]
    [InlineData("{\"shared\":true}", false)]
    [InlineData("{\"printerId\":null,\"shared\":true}", false)]
@@ -422,7 +450,7 @@ public sealed class ManagementEnvelopeTests
    [InlineData(null, false)]
    public void Arguments_AreReadStrictly(string? arguments, bool accepted)
    {
-      ManagementRequest request = new(2, ManagementOperations.PrintersShare, Server, arguments is null ? null : JsonDocument.Parse(arguments).RootElement.Clone());
+      ManagementRequest request = new(2, ManagementOperations.PrintersShare, Server, arguments is null ? null : Payload(arguments));
 
       bool read = ManagementJson.TryReadArguments(request, out PrintersShareArgs? shared);
 
@@ -458,9 +486,9 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void ResultAndDetails_ThatDoNotFit_AreNotRead()
    {
-      ManagementReply wrongShape = new(2, true, JsonDocument.Parse("{\"ready\":\"soon\"}").RootElement.Clone());
+      ManagementReply wrongShape = new(2, true, Payload("{\"ready\":\"soon\"}"));
       var failure = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
-      ManagementError wrongDetails = new(ManagementErrorCode.EnrollmentUnconfirmed, "Unknown.", JsonDocument.Parse("{\"stage\":5}").RootElement.Clone());
+      ManagementError wrongDetails = new(ManagementErrorCode.EnrollmentUnconfirmed, "Unknown.", Payload("{\"stage\":5}"));
 
       Assert.False(ManagementJson.TryReadResult(wrongShape, out UpdatePrepareResult? _));
       Assert.False(ManagementJson.TryReadResult(failure, out UpdatePrepareResult? _));
@@ -470,7 +498,7 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>Names on the wire are camel case, a member without a value is left out, and a date is written in UTC with a trailing Z whatever offset it had and read back as the same instant. A date without an offset is read as UTC, and text that is not a date fails the read.</summary>
+   /// <summary>Names on the wire are camel case, a member without a value is left out, and a date is written in UTC with a trailing Z whatever offset it had and read back as the same instant. Only ISO 8601 that names its instant is read: a date and time with a Z or an offset. One without either, a date alone, and other notations of a date are refused, as is text that is not a date.</summary>
    [Fact]
    public void Wire_IsCamelCase_OmitsNulls_AndCarriesDatesInUtc()
    {
@@ -484,9 +512,12 @@ public sealed class ManagementEnvelopeTests
       Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(written).Reply!, out UpdateState? read));
       Assert.Equal(paused.PausedUntil, read.PausedUntil);
       Assert.Equal(TimeSpan.Zero, read.PausedUntil!.Value.Offset);
-      Assert.True(ManagementJson.TryReadResult(Result("{\"paused\":true,\"pausedUntil\":\"2026-11-10T15:04:05\"}"), out UpdateState? withoutOffset));
-      Assert.Equal(new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero), withoutOffset.PausedUntil);
-      Assert.False(ManagementJson.TryReadResult(Result("{\"paused\":true,\"pausedUntil\":\"tomorrow\"}"), out UpdateState? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"paused\":true,\"pausedUntil\":\"2026-11-10T17:04:05+02:00\"}"), out UpdateState? withOffset));
+      Assert.Equal((new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero), TimeSpan.Zero), (withOffset.PausedUntil!.Value, withOffset.PausedUntil.Value.Offset));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"paused\":true,\"pausedUntil\":\"2026-11-10T09:34:05.5-05:30\"}"), out UpdateState? negativeOffset));
+      Assert.Equal(new DateTimeOffset(2026, 11, 10, 15, 4, 5, 500, TimeSpan.Zero), negativeOffset.PausedUntil);
+      Assert.All(new[] { "2026-11-10T15:04:05", "2026-11-10", "11/10/2026", "11/10/2026 15:04:05 +00:00", "Tue, 10 Nov 2026 15:04:05 GMT", "2026-11-10 15:04:05Z", "tomorrow", "", "Z" },
+         text => Assert.False(ManagementJson.TryReadResult(Result("{\"paused\":true,\"pausedUntil\":\"" + text + "\"}"), out UpdateState? _)));
       Assert.False(ManagementJson.TryReadResult(Result("{\"paused\":true,\"pausedUntil\":17}"), out UpdateState? _));
    }
 
@@ -506,6 +537,115 @@ public sealed class ManagementEnvelopeTests
 
 
 
+   /// <summary>
+   /// A request without arguments is read as one with empty arguments, so it is valid exactly when every member of the
+   /// operation's argument record is optional. Sign-out is the one such operation today, which is why the command line
+   /// can send it bare; an operation with a required argument refuses the same request. The update operations take no
+   /// arguments at all, and must go on accepting a request without them if they ever gain some, because the update helper
+   /// is always one version behind the service.
+   /// </summary>
+   [Fact]
+   public void ArgumentsThatAreLeftOut_AreReadAsAnEmptyObject()
+   {
+      var signOut = ManagementRequest.For(ManagementOperations.SessionSignOut, Server);
+      string written = ManagementJson.Write(signOut);
+
+      Assert.Equal("{\"v\":2,\"op\":\"session.signOut\",\"server\":\"" + Server + "\"}", written);
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(written).Request!, out SessionSignOutArgs? arguments));
+      Assert.Equal(new SessionSignOutArgs(), arguments);
+      Assert.False(ManagementJson.TryReadArguments(ManagementRequest.For(ManagementOperations.JobsCancel, Server), out JobsCancelArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(ManagementRequest.For(ManagementOperations.PairingEnroll, Server), out PairingEnrollArgs? _));
+      Assert.Null(ManagementOperations.All.Single(operation => string.Equals(operation.Name, ManagementOperations.UpdatePrepare, StringComparison.Ordinal)).ArgumentsType);
+      Assert.Null(ManagementOperations.All.Single(operation => string.Equals(operation.Name, ManagementOperations.UpdateResume, StringComparison.Ordinal)).ArgumentsType);
+   }
+
+
+
+   /// <summary>A repeated member is refused by the typed readers too, at the top of the arguments and inside a nested record, so the rule does not depend on the text having come through the envelope parser.</summary>
+   [Theory]
+   [InlineData("{\"jobId\":\"job-204\",\"confirmDuplicateRisk\":false,\"confirmDuplicateRisk\":true}")]
+   [InlineData("{\"jobId\":\"job-1\",\"jobId\":\"job-204\"}")]
+   public void Arguments_WithARepeatedMember_AreRefusedByTheTypedReader(string arguments)
+   {
+      Assert.False(ManagementJson.TryReadArguments(Request(arguments), out JobsRetryArgs? retry));
+      Assert.Null(retry);
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"query\":{\"pageSize\":25,\"pageSize\":500}}"), out JobsQueryArgs? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"ready\":true,\"jobsInHand\":0,\"jobsInHand\":5,\"claimPending\":false}"), out UpdatePrepareResult? _));
+   }
+
+
+
+   /// <summary>A list with a null in it is refused, in arguments and in a result, at any depth; the serializer's own null checks do not reach inside a list.</summary>
+   [Fact]
+   public void ListsWithANullItem_AreRefused()
+   {
+      Assert.True(ManagementJson.TryReadArguments(Request("{\"serverIds\":[\"" + Server + "\"]}"), out ServersReorderArgs? order));
+      Assert.Equal(Server, Assert.Single(order.ServerIds));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"serverIds\":[null]}"), out ServersReorderArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"serverIds\":[\"" + Server + "\",null]}"), out ServersReorderArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"serverIds\":null}"), out ServersReorderArgs? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"servers\":[null]}"), out ServerListResult? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"stages\":[{\"stage\":\"connection\",\"outcome\":\"failed\",\"problems\":[null]}],\"signInMethods\":[]}"), out ServerCheckResult? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"servers\":[]}"), out ServerListResult? empty));
+      Assert.Empty(empty.Servers);
+   }
+
+
+
+   /// <summary>A reply that lacks a member its record requires, or has a null where the record needs a value, is an unreadable reply, not a record with a hole in it; an optional member may still be absent, and an unknown one is still skipped.</summary>
+   [Fact]
+   public void Result_ThatLacksARequiredMember_IsNotRead()
+   {
+      Assert.False(ManagementJson.TryReadResult(Result("{\"ready\":true}"), out UpdatePrepareResult? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{}"), out ServerListResult? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"servers\":null}"), out ServerListResult? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"server\":{\"serverId\":\"" + Server + "\",\"name\":null,\"address\":\"https://qqq.example.test\",\"position\":0,\"health\":\"GREEN\",\"status\":\"Connected.\"}}"), out ServerListResult? _));
+      Assert.False(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.CancelRefused, "Refused.", Payload("{}")), out CancelRefusedDetails? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"paused\":false,\"addedLater\":1}"), out UpdateState? state));
+      Assert.Equal(new UpdateState(Paused: false), state);
+      Assert.True(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.CancelRefused, "Refused.", Payload("{\"reason\":\"reasonAddedLater\"}")), out CancelRefusedDetails? unknownReason));
+      Assert.Equal("reasonAddedLater", unknownReason.Reason);
+   }
+
+
+
+   /// <summary>
+   /// A member that may be null is left out of the text when it is null, and its absence reads back as null even where the
+   /// record gives it no default: a signed-out status has no principal or tenant, a job that has not reached Windows has
+   /// no spooler job or message. A member that may not be null is still required right beside it.
+   /// </summary>
+   [Fact]
+   public void Result_ThatLeavesOutAMemberThatMayBeNull_IsRead()
+   {
+      AgentAuthenticationStatus signedOut = new(SignedIn: false, PrincipalId: null, TenantId: null, Message: "Sign in to start printing.");
+      ManagementReply written = ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Success(signedOut))).Reply!;
+
+      Assert.DoesNotContain("principalId", ManagementJson.Write(ManagementReply.Success(signedOut)), StringComparison.Ordinal);
+      Assert.True(ManagementJson.TryReadResult(written, out AgentAuthenticationStatus? read));
+      Assert.Equal(signedOut, read);
+      Assert.True(ManagementJson.TryReadResult(Result("{\"serverId\":\"" + Server + "\",\"transport\":{\"protocol\":\"WSS\",\"state\":\"DISCONNECTED\",\"uploadedBytes\":0,\"downloadedBytes\":0,\"uploadBytesPerSecond\":0,\"downloadBytesPerSecond\":0,\"totalsSinceUtc\":\"2026-11-10T09:00:00Z\"}}"), out ServerTransport? neverReached));
+      Assert.Null(neverReached.LastContact);
+      Assert.False(ManagementJson.TryReadResult(Result("{\"serverId\":\"" + Server + "\"}"), out ServerTransport? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"signedIn\":false,\"authorized\":false}"), out AgentAuthenticationStatus? _));
+   }
+
+
+
+   /// <summary>The envelope records can also be read by the serializer itself, which reads a payload as the JSON object it is and refuses anything else; and a payload cannot be made from anything but an object.</summary>
+   [Fact]
+   public void Payload_IsAJsonObject_AndNothingElse()
+   {
+      ManagementRequest? read = JsonSerializer.Deserialize<ManagementRequest>("{\"v\":2,\"op\":\"printers.share\",\"server\":\"" + Server + "\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Options);
+
+      Assert.True(ManagementJson.TryReadArguments(read!, out PrintersShareArgs? arguments));
+      Assert.Equal(new PrintersShareArgs("printer-a1", Shared: true), arguments);
+      Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ManagementRequest>("{\"v\":2,\"op\":\"printers.share\",\"args\":[1]}", ManagementJson.Options));
+      Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("[1]").RootElement));
+      Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("\"text\"").RootElement));
+   }
+
+
+
    /// <summary>Requires a request's text to be refused with one problem and one code, and no request to come back.</summary>
    private static void AssertRefused(string? text, ManagementEnvelopeProblem problem, string code)
    {
@@ -521,10 +661,15 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>A request for some operation with the given arguments object; which operation does not matter to reading arguments.</summary>
-   private static ManagementRequest Request(string arguments) => new(2, ManagementOperations.Snapshot, null, JsonDocument.Parse(arguments).RootElement.Clone());
+   private static ManagementRequest Request(string arguments) => new(2, ManagementOperations.Snapshot, null, Payload(arguments));
 
 
 
    /// <summary>A successful reply with the given result object.</summary>
-   private static ManagementReply Result(string result) => new(2, true, JsonDocument.Parse(result).RootElement.Clone());
+   private static ManagementReply Result(string result) => new(2, true, Payload(result));
+
+
+
+   /// <summary>A JSON object as the payload an envelope carries. It is parsed the lenient way on purpose, so a test can hand the typed readers something the envelope parser would have refused.</summary>
+   private static ManagementPayload Payload(string json) => ManagementPayload.FromElement(JsonDocument.Parse(json).RootElement);
 }

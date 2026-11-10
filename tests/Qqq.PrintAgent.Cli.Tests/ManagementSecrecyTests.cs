@@ -29,8 +29,12 @@ public sealed class ManagementSecrecyTests
       typeof(PrinterServerSync), typeof(DeviceProfile), typeof(DeviceDesiredState), typeof(PrinterMediaProfile),
    ];
 
+
+
    /// <summary>The kinds of value a member of a reply may have. Text is bounded by whoever produces it; none of these can hold a credential object or arbitrary JSON.</summary>
    private static readonly Type[] s_plainValues = [typeof(string), typeof(bool), typeof(int), typeof(long), typeof(double), typeof(DateTimeOffset)];
+
+
 
    /// <summary>Types that hold a secret, or could hold anything: none may appear in a reply.</summary>
    private static readonly Type[] s_forbidden =
@@ -85,7 +89,10 @@ public sealed class ManagementSecrecyTests
    /// Every operation's example result, written as the service will write it, contains none of the canaries that stand for
    /// the session cookie, the device token and the enrollment code. The examples are built from a session credential, a
    /// stored pairing, a stored session and an enrollment answer that each carry a canary where the real one carries its
-   /// secret, so a result that copied one would show it. The same holds for the example details of every error code.
+   /// secret, so a result that copied one would show it. The same holds for the example details of every error code and
+   /// for the further snapshot examples. What this proves is that the examples, and the factories they are built with,
+   /// carry no secret; it does not prove that a running service builds its replies the same way. The step that writes
+   /// the handlers adds that test, with a real store and a real session behind the pipe.
    /// </summary>
    [Fact]
    public void NoReply_ContainsACredentialCanary()
@@ -94,17 +101,21 @@ public sealed class ManagementSecrecyTests
       foreach(ManagementOperationInfo operation in ManagementOperations.All)
       {
          object result = ManagementSamples.Result(operation.Name);
-         written.Add(ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, true, JsonSerializer.SerializeToElement(result, operation.ResultType, ManagementJson.Options))));
+         written.Add(ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, true, Payload(result, operation.ResultType))));
          written.Add(result.ToString()!);
       }
       foreach(string code in ManagementErrorCode.All)
       {
          object? details = ManagementSamples.Details(code);
          written.Add(ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, false, Error: new ManagementError(code, "Synthetic message for people.",
-            details is null ? null : JsonSerializer.SerializeToElement(details, details.GetType(), ManagementJson.Options)))));
+            details is null ? null : Payload(details, details.GetType())))));
+      }
+      foreach(ServiceSnapshot further in ManagementSamples.FurtherSnapshots.Values)
+      {
+         written.Add(ManagementJson.Write(ManagementReply.Success(further)));
       }
 
-      Assert.Equal(28 + 28 + 26, written.Count);
+      Assert.Equal(29 + 29 + 31 + 2, written.Count);
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.SessionCookieCanary, text, StringComparison.Ordinal));
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.DeviceTokenCanary, text, StringComparison.Ordinal));
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.EnrollmentCodeCanary, text, StringComparison.Ordinal));
@@ -132,7 +143,7 @@ public sealed class ManagementSecrecyTests
    public void ProviderSignOutRequest_IsInTheSignOutReplyAndNowhereElse()
    {
       string[] carrying = [.. ManagementOperations.All.Where(operation => ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, true,
-         JsonSerializer.SerializeToElement(ManagementSamples.Result(operation.Name), operation.ResultType, ManagementJson.Options))).Contains(ManagementSamples.IdTokenHintCanary, StringComparison.Ordinal))
+         Payload(ManagementSamples.Result(operation.Name), operation.ResultType))).Contains(ManagementSamples.IdTokenHintCanary, StringComparison.Ordinal))
          .Select(operation => operation.Name)];
 
       Assert.Equal([ManagementOperations.SessionSignOut], carrying);
@@ -146,7 +157,24 @@ public sealed class ManagementSecrecyTests
    private static string RequestText(string operation)
    {
       object arguments = ManagementSamples.Arguments(operation)!;
-      return ManagementJson.Write(new ManagementRequest(ManagementProtocol.Version, operation, null, JsonSerializer.SerializeToElement(arguments, arguments.GetType(), ManagementJson.Options)));
+      return ManagementJson.Write(new ManagementRequest(ManagementProtocol.Version, operation, null, Payload(arguments, arguments.GetType())));
+   }
+
+
+
+   /// <summary>A record written as the payload an envelope carries, for a type known only at run time.</summary>
+   private static ManagementPayload Payload(object value, Type type) => ManagementPayload.FromElement(JsonSerializer.SerializeToElement(value, type, ManagementJson.Options));
+
+
+
+   /// <summary>The same check for the envelope itself: its arguments, result and details are payloads whose text form is fixed, never bare JSON.</summary>
+   [Fact]
+   public void Envelope_HoldsPayloadsAndNeverBareJson()
+   {
+      Type[] members = [typeof(ManagementRequest).GetProperty(nameof(ManagementRequest.Args))!.PropertyType, typeof(ManagementReply).GetProperty(nameof(ManagementReply.Result))!.PropertyType,
+         typeof(ManagementError).GetProperty(nameof(ManagementError.Details))!.PropertyType];
+
+      Assert.All(members, member => Assert.Equal(typeof(ManagementPayload), member));
    }
 
 

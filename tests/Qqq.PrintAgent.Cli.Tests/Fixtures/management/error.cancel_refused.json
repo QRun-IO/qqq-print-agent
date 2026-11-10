@@ -1,0 +1,11 @@
+{
+   "v": 2,
+   "ok": false,
+   "error": {
+      "code": "cancel_refused",
+      "message": "Synthetic message for people.",
+      "details": {
+         "reason": "ownershipMismatch"
+      }
+   }
+}

@@ -19,18 +19,22 @@ public sealed class ManagementTableTests
    /// <summary>The error codes exactly as ADR-0004's table spells them, in its order.</summary>
    private static readonly string[] s_codesInTheAdr =
    [
-      "unsupported_version", "unknown_operation", "invalid_request", "server_not_found", "server_ambiguous", "server_limit", "server_exists", "busy",
-      "not_signed_in", "not_paired", "server_incompatible", "certificate_untrusted", "sign_in_refused", "bind_refused", "identity_changed",
-      "enrollment_refused", "enrollment_unconfirmed", "printer_not_found", "job_not_found", "job_not_current", "duplicate_risk_unconfirmed",
+      "unsupported_version", "unknown_operation", "invalid_request", "server_not_found", "server_ambiguous", "server_limit", "server_exists", "server_removing", "busy",
+      "not_signed_in", "not_paired", "not_connected", "server_incompatible", "certificate_untrusted", "server_unreachable", "server_refused", "sign_in_refused", "bind_refused",
+      "identity_changed", "enrollment_refused", "enrollment_unconfirmed", "printer_not_found", "job_not_found", "job_not_current", "duplicate_risk_unconfirmed", "cancel_refused",
       "state_unreadable", "state_newer", "migration_incomplete", "update_in_progress", "internal_error",
    ];
+
+
 
    /// <summary>ADR-0004: operations on the computer or the list of servers, which name no server.</summary>
    private static readonly string[] s_computerOperationsInTheAdr =
    [
-      "snapshot", "servers.list", "servers.check", "servers.add", "servers.reorder", "computer.getProfile", "computer.setProfile",
+      "snapshot", "transport.get", "servers.list", "servers.check", "servers.add", "servers.reorder", "computer.getProfile", "computer.setProfile",
       "logs.getSettings", "logs.setSettings", "logs.clear", "update.prepare", "update.resume",
    ];
+
+
 
    /// <summary>ADR-0004: operations on one server, which must name it.</summary>
    private static readonly string[] s_serverOperationsInTheAdr =
@@ -48,21 +52,23 @@ public sealed class ManagementTableTests
       string[] declared = Constants(typeof(ManagementErrorCode));
 
       Assert.Equal(s_codesInTheAdr, ManagementErrorCode.All);
-      Assert.Equal(26, ManagementErrorCode.All.Count);
+      Assert.Equal(31, ManagementErrorCode.All.Count);
       Assert.Equal(s_codesInTheAdr.Order(StringComparer.Ordinal), declared.Order(StringComparer.Ordinal));
       Assert.All(ManagementErrorCode.All, code => Assert.Matches("^[a-z]+(_[a-z]+)*$", code));
    }
 
 
 
-   /// <summary>Exactly three codes carry details, as their table entries say: the two compatibility failures carry the check's stages, and an unconfirmed enrollment says what was left behind. Every other code, and a code that is not in the table, carries none.</summary>
+   /// <summary>Exactly five codes carry details, as their table entries say: the two compatibility failures carry the check's stages, a changed identity names the approved account, an unconfirmed enrollment says what was left behind, and a refused cancellation says why. Every other code, and a code that is not in the table, carries none.</summary>
    [Fact]
-   public void ErrorCodes_ThatCarryDetails_AreTheThreeTheAdrNames()
+   public void ErrorCodes_ThatCarryDetails_AreTheFiveTheAdrNames()
    {
       Assert.Equal(typeof(ServerCheckResult), ManagementErrorCode.DetailsType(ManagementErrorCode.ServerIncompatible));
       Assert.Equal(typeof(ServerCheckResult), ManagementErrorCode.DetailsType(ManagementErrorCode.CertificateUntrusted));
       Assert.Equal(typeof(EnrollmentUnconfirmedDetails), ManagementErrorCode.DetailsType(ManagementErrorCode.EnrollmentUnconfirmed));
-      Assert.Equal(3, ManagementErrorCode.All.Count(code => ManagementErrorCode.DetailsType(code) is not null));
+      Assert.Equal(typeof(IdentityChangedDetails), ManagementErrorCode.DetailsType(ManagementErrorCode.IdentityChanged));
+      Assert.Equal(typeof(CancelRefusedDetails), ManagementErrorCode.DetailsType(ManagementErrorCode.CancelRefused));
+      Assert.Equal(5, ManagementErrorCode.All.Count(code => ManagementErrorCode.DetailsType(code) is not null));
       Assert.Null(ManagementErrorCode.DetailsType("code_added_later"));
    }
 
@@ -77,7 +83,7 @@ public sealed class ManagementTableTests
 
       Assert.Equal(s_computerOperationsInTheAdr, computer);
       Assert.Equal(s_serverOperationsInTheAdr, server);
-      Assert.Equal(28, ManagementOperations.All.Count);
+      Assert.Equal(29, ManagementOperations.All.Count);
       Assert.Equal([.. s_computerOperationsInTheAdr, .. s_serverOperationsInTheAdr], ManagementOperations.All.Select(operation => operation.Name), StringComparer.Ordinal);
       Assert.Equal(ManagementOperations.All.Select(operation => operation.Name).Order(StringComparer.Ordinal), Constants(typeof(ManagementOperations)).Order(StringComparer.Ordinal));
    }
@@ -103,7 +109,7 @@ public sealed class ManagementTableTests
    public void Operations_KindsFollowTheAdrsConcurrencyRules()
    {
       string[] sessionChanges = ["session.signIn", "session.signOut", "pairing.enroll", "trust.set", "servers.remove"];
-      string[] reads = ["snapshot", "servers.list", "servers.check", "computer.getProfile", "logs.getSettings", "trust.get", "jobs.query", "jobs.details"];
+      string[] reads = ["snapshot", "transport.get", "servers.list", "servers.check", "computer.getProfile", "logs.getSettings", "trust.get", "jobs.query", "jobs.details"];
 
       Assert.Equal(sessionChanges.Order(StringComparer.Ordinal), Names(operation => operation.Kind == ManagementOperationKind.SessionChange), StringComparer.Ordinal);
       Assert.Equal(reads.Order(StringComparer.Ordinal), Names(operation => operation.Kind == ManagementOperationKind.Read), StringComparer.Ordinal);
@@ -122,14 +128,14 @@ public sealed class ManagementTableTests
       Assert.Equal(TimeSpan.FromSeconds(30), ManagementOperations.OrdinaryTimeLimit);
       Assert.Equal(TimeSpan.FromSeconds(120), ManagementOperations.LongTimeLimit);
       Assert.Equal(longOnes.Order(StringComparer.Ordinal), Names(operation => operation.ServerTimeLimit == ManagementOperations.LongTimeLimit), StringComparer.Ordinal);
-      Assert.Equal(23, ManagementOperations.All.Count(operation => operation.ServerTimeLimit == ManagementOperations.OrdinaryTimeLimit));
+      Assert.Equal(24, ManagementOperations.All.Count(operation => operation.ServerTimeLimit == ManagementOperations.OrdinaryTimeLimit));
       Assert.All(ManagementOperations.All, operation => Assert.Equal(
          operation.ServerTimeLimit == ManagementOperations.LongTimeLimit ? TimeSpan.FromSeconds(150) : TimeSpan.FromSeconds(35), operation.ClientTimeLimit()));
    }
 
 
 
-   /// <summary>While the stored data is not ready (written by a newer build, or an upgrade that could not finish) only the snapshot, the log operations and the update operations answer, so the newer build can be reinstalled; no operation on a server does.</summary>
+   /// <summary>While the stored data is not ready (written by a newer build, or an upgrade that could not finish) only the snapshot, the log operations and the update operations answer, so the newer build can be reinstalled; no operation on a server does, and neither does the transport read, which has no connections to report.</summary>
    [Fact]
    public void Operations_AvailableWhenDegraded_AreTheSnapshotTheLogsAndTheUpdates()
    {
@@ -141,11 +147,11 @@ public sealed class ManagementTableTests
 
 
 
-   /// <summary>Ten operations take no arguments; each of the other eighteen has its own argument record, used by no other operation, and every operation has a result record.</summary>
+   /// <summary>Eleven operations take no arguments; each of the other eighteen has its own argument record, used by no other operation, and every operation has a result record.</summary>
    [Fact]
    public void Operations_EachHaveTheirOwnArgumentRecord_AndAResult()
    {
-      string[] withoutArguments = ["snapshot", "servers.list", "computer.getProfile", "logs.getSettings", "logs.clear", "update.prepare", "update.resume", "servers.remove", "connection.reconnect", "trust.get"];
+      string[] withoutArguments = ["snapshot", "transport.get", "servers.list", "computer.getProfile", "logs.getSettings", "logs.clear", "update.prepare", "update.resume", "servers.remove", "connection.reconnect", "trust.get"];
       Type[] argumentTypes = [.. ManagementOperations.All.Where(operation => operation.ArgumentsType is not null).Select(operation => operation.ArgumentsType!)];
 
       Assert.Equal(withoutArguments.Order(StringComparer.Ordinal), Names(operation => operation.ArgumentsType is null), StringComparer.Ordinal);

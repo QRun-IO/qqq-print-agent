@@ -11,7 +11,9 @@
          "refusals": [
             "untrustedAuthority"
          ],
-         "subject": "CN=qqq.example.test",
+         "origin": "https://sign-in.example.test",
+         "observedAt": "2026-11-10T14:44:05.0000000Z",
+         "subject": "CN=sign-in.example.test",
          "issuer": "CN=Example Development Root",
          "notBefore": "2026-01-01T00:00:00.0000000Z",
          "notAfter": "2027-01-01T00:00:00.0000000Z",

@@ -15,86 +15,145 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// </summary>
 public static class ManagementOperations
 {
-   /// <summary>The whole aggregated state: the computer once and every server once. No jobs and no log lines.</summary>
+   /// <summary>The whole aggregated state: the computer once and every server once. No jobs and no log lines. It reports what the service already knows and never starts printer discovery, so it is always cheap.</summary>
    public const string Snapshot = "snapshot";
+
+
+
+   /// <summary>Each server's transport state, traffic meter and last contact, and nothing else: the light read a client repeats every second to draw the meter, between the snapshots it takes every five.</summary>
+   public const string TransportGet = "transport.get";
+
+
 
    /// <summary>The servers in the operator's order, with what is needed to name and select one.</summary>
    public const string ServersList = "servers.list";
 
+
+
    /// <summary>Runs the compatibility check for an address in the service, under the service's own identity and certificate store.</summary>
    public const string ServersCheck = "servers.check";
+
+
 
    /// <summary>Stores a new server together with its certificate exception and its session, or nothing.</summary>
    public const string ServersAdd = "servers.add";
 
+
+
    /// <summary>Puts the servers in a new order.</summary>
    public const string ServersReorder = "servers.reorder";
+
+
 
    /// <summary>Reads this computer's name, description and location.</summary>
    public const string ComputerGetProfile = "computer.getProfile";
 
+
+
    /// <summary>Changes this computer's name, description and location.</summary>
    public const string ComputerSetProfile = "computer.setProfile";
+
+
 
    /// <summary>Reads the log limits and the current log file's size.</summary>
    public const string LogsGetSettings = "logs.getSettings";
 
+
+
    /// <summary>Changes the log limits.</summary>
    public const string LogsSetSettings = "logs.setSettings";
+
+
 
    /// <summary>Deletes the activity log files.</summary>
    public const string LogsClear = "logs.clear";
 
-   /// <summary>Pauses claiming for an update and says whether work in hand has finished.</summary>
+
+
+   /// <summary>Pauses claiming for an update and says whether work in hand has finished. The update helper is always one version behind the service it talks to, so if this operation ever gains arguments, a request without them must stay accepted.</summary>
    public const string UpdatePrepare = "update.prepare";
 
-   /// <summary>Lifts the update pause.</summary>
+
+
+   /// <summary>Lifts the update pause. The update helper is always one version behind the service it talks to, so if this operation ever gains arguments, a request without them must stay accepted.</summary>
    public const string UpdateResume = "update.resume";
+
+
 
    /// <summary>Changes a server's name.</summary>
    public const string ServersRename = "servers.rename";
 
+
+
    /// <summary>Starts removing a server from this computer.</summary>
    public const string ServersRemove = "servers.remove";
+
+
 
    /// <summary>Gives a server that already exists a new session from a completed sign-in.</summary>
    public const string SessionSignIn = "session.signIn";
 
+
+
    /// <summary>Ends a server's session.</summary>
    public const string SessionSignOut = "session.signOut";
+
+
 
    /// <summary>Pairs this computer with a server using a one-time enrollment code.</summary>
    public const string PairingEnroll = "pairing.enroll";
 
+
+
    /// <summary>Asks a server's connection to reconnect.</summary>
    public const string ConnectionReconnect = "connection.reconnect";
 
-   /// <summary>Reads a server's certificate exception, the two addresses it covers and the certificate last refused.</summary>
+
+
+   /// <summary>Reads a server's certificate exception, the two addresses it covers and the certificate the service last saw refused for it. It reports what the service remembers and never contacts the server.</summary>
    public const string TrustGet = "trust.get";
+
+
 
    /// <summary>Switches a server's certificate exception on or off.</summary>
    public const string TrustSet = "trust.set";
 
+
+
    /// <summary>Shares a Windows printer with a server, or stops sharing it.</summary>
    public const string PrintersShare = "printers.share";
+
+
 
    /// <summary>Changes the name, description and location a server is given for a shared printer.</summary>
    public const string PrintersSetProfile = "printers.setProfile";
 
-   /// <summary>Asks a server to queue a test print for a shared printer.</summary>
+
+
+   /// <summary>Asks a server to queue a test print for a printer shared with it. A printer that is not shared with the server is refused as not found, and a format the printer does not offer as an invalid request.</summary>
    public const string PrintersTestPrint = "printers.testPrint";
+
+
 
    /// <summary>Reads one page of a server's jobs.</summary>
    public const string JobsQuery = "jobs.query";
 
+
+
    /// <summary>Reads one job and its recorded events.</summary>
    public const string JobsDetails = "jobs.details";
+
+
 
    /// <summary>Asks a server to queue a job again.</summary>
    public const string JobsRetry = "jobs.retry";
 
+
+
    /// <summary>Cancels a job: in the Windows spooler when it is there, otherwise on the server.</summary>
    public const string JobsCancel = "jobs.cancel";
+
+
 
    /// <summary>Marks a failed job as seen by the operator.</summary>
    public const string JobsAcknowledge = "jobs.acknowledge";
@@ -118,6 +177,7 @@ public static class ManagementOperations
    public static IReadOnlyList<ManagementOperationInfo> All { get; } =
    [
       Computer(Snapshot, ManagementOperationKind.Read, typeof(ServiceSnapshot), degraded: true),
+      Computer(TransportGet, ManagementOperationKind.Read, typeof(TransportResult)),
       Computer(ServersList, ManagementOperationKind.Read, typeof(ServerListResult)),
       Computer(ServersCheck, ManagementOperationKind.Read, typeof(ServerCheckResult), typeof(ServersCheckArgs), isLong: true),
       Computer(ServersAdd, ManagementOperationKind.Change, typeof(ServerAddResult), typeof(ServersAddArgs), isLong: true),

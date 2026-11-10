@@ -84,6 +84,7 @@
                "downloadBytesPerSecond": 20480.25,
                "totalsSinceUtc": "2026-11-10T12:04:05.0000000Z"
             },
+            "lastContact": "2026-11-10T15:04:01.0000000Z",
             "control": {
                "support": "SUPPORTED",
                "desiredState": {

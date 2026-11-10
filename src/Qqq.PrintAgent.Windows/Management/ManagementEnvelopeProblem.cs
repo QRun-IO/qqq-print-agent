@@ -22,6 +22,9 @@ public enum ManagementEnvelopeProblem
    /// <summary>The text is empty or is not JSON.</summary>
    NotJson,
 
+   /// <summary>The text is JSON, but one of its objects has the same member twice: in the envelope, in the arguments or anywhere beneath them. Readers disagree about which of two values counts, so neither is taken.</summary>
+   RepeatedMember,
+
    /// <summary>The text is JSON but its root is not an object.</summary>
    NotAnObject,
 
@@ -31,7 +34,7 @@ public enum ManagementEnvelopeProblem
    /// <summary>The object has a <c>v</c> that is not this contract's version, or is not a whole number.</summary>
    VersionUnsupported,
 
-   /// <summary>A request has a member the envelope does not define, or the same member twice.</summary>
+   /// <summary>A request has a member the envelope does not define.</summary>
    UnexpectedMember,
 
    /// <summary>A request has no <c>op</c>, or one that is not text.</summary>

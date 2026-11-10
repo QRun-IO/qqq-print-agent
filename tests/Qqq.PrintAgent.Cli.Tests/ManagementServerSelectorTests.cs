@@ -14,10 +14,22 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class ManagementServerSelectorTests
 {
+   /// <summary>The identifier of the server named Warehouse; it shares its first eight characters with the next one.</summary>
    private const string Warehouse = "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f";
+
+
+
+   /// <summary>The identifier of the server named Test bench.</summary>
    private const string Bench = "3f2b8c1e-0000-4f6b-9a7c-0e1d2c3b4a60";
+
+
+
+   /// <summary>The identifier of the server named Office, which no other identifier resembles.</summary>
    private const string Office = "a81d44c0-17b2-4e0f-8d6a-5c4b3a291807";
 
+
+
+   /// <summary>Three servers in the operator's order; the last is being removed.</summary>
    private static readonly ServerSummary[] s_three =
    [
       new(Warehouse, "Warehouse", "https://qqq.example.test", 0, ServerSnapshot.Green, "Connected."),

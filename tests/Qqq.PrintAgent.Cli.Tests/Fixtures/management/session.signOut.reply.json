@@ -2,6 +2,7 @@
    "v": 2,
    "ok": true,
    "result": {
+      "serverSessionEnded": true,
       "unreadableSessionSetAside": true,
       "providerLogout": {
          "endSessionUri": "https://sign-in.example.test/logout?id_token_hint=CANARY-ID-TOKEN-HINT-08be",

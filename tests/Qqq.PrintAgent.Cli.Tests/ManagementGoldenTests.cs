@@ -17,6 +17,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class ManagementGoldenTests
 {
+   /// <summary>Where the golden files are copied to beside the test assembly.</summary>
    private static string GoldenDirectory => Path.Combine(AppContext.BaseDirectory, "Fixtures", "management");
 
 
@@ -31,17 +32,18 @@ public sealed class ManagementGoldenTests
 
 
 
-   /// <summary>The golden directory holds exactly one request and one reply per operation and one failure per error code with details: an operation or such a code without its files fails here, and so does a file that belongs to nothing.</summary>
+   /// <summary>The golden directory holds exactly one request and one reply per operation, one failure per error code with details, and the further snapshot examples the tests name: an operation or such a code without its files fails here, and so does a file that belongs to nothing.</summary>
    [Fact]
    public void GoldenFiles_AreExactlyThoseTheContractNeeds()
    {
       IEnumerable<string> expected = ManagementOperations.All.SelectMany(operation => new[] { operation.Name + ".request.json", operation.Name + ".reply.json" })
-         .Concat(ManagementErrorCode.All.Where(code => ManagementErrorCode.DetailsType(code) is not null).Select(code => "error." + code + ".json"));
+         .Concat(ManagementErrorCode.All.Where(code => ManagementErrorCode.DetailsType(code) is not null).Select(code => "error." + code + ".json"))
+         .Concat(ManagementSamples.FurtherSnapshots.Keys);
 
       string[] found = [.. Directory.GetFiles(GoldenDirectory).Select(path => Path.GetFileName(path)!)];
 
       Assert.Equal(expected.Order(StringComparer.Ordinal), found.Order(StringComparer.Ordinal));
-      Assert.Equal(59, found.Length);
+      Assert.Equal((29 * 2) + 5 + 2, found.Length);
    }
 
 
@@ -63,7 +65,7 @@ public sealed class ManagementGoldenTests
       Assert.Equal(operation.Scope == ManagementScope.Server, parse.Request.Server is not null);
       Assert.Equal(operation.ArgumentsType is not null, parse.Request.Args is not null);
       object? arguments = operation.ArgumentsType is null ? null : ReadTyped(nameof(ManagementJson.TryReadArguments), operation.ArgumentsType, parse.Request);
-      Assert.Equal(golden, ManagementJson.Write(parse.Request with { Args = arguments is null ? null : JsonSerializer.SerializeToElement(arguments, operation.ArgumentsType!, ManagementJson.Options) }));
+      Assert.Equal(golden, ManagementJson.Write(parse.Request with { Args = arguments is null ? null : Payload(arguments, operation.ArgumentsType!) }));
    }
 
 
@@ -76,7 +78,7 @@ public sealed class ManagementGoldenTests
       Assert.True(ManagementOperations.TryFind(name, out ManagementOperationInfo? operation));
       object? arguments = ManagementSamples.Arguments(name);
       ManagementRequest example = new(ManagementProtocol.Version, name, ManagementSamples.ServerFor(operation),
-         arguments is null ? null : JsonSerializer.SerializeToElement(arguments, operation.ArgumentsType!, ManagementJson.Options));
+         arguments is null ? null : Payload(arguments, operation.ArgumentsType!));
 
       Assert.Equal(arguments?.GetType(), operation.ArgumentsType);
       Assert.Equal(Normalized(name + ".request.json"), ManagementJson.Write(example));
@@ -99,7 +101,7 @@ public sealed class ManagementGoldenTests
       Assert.True(parse.Reply.Ok);
       Assert.Null(parse.Reply.Error);
       object result = ReadTyped(nameof(ManagementJson.TryReadResult), operation.ResultType, parse.Reply);
-      Assert.Equal(golden, ManagementJson.Write(parse.Reply with { Result = JsonSerializer.SerializeToElement(result, operation.ResultType, ManagementJson.Options) }));
+      Assert.Equal(golden, ManagementJson.Write(parse.Reply with { Result = Payload(result, operation.ResultType) }));
    }
 
 
@@ -134,11 +136,35 @@ public sealed class ManagementGoldenTests
       Assert.Equal(code, parse.Reply.Error!.Code);
       Assert.Equal("Synthetic message for people.", parse.Reply.Error.Message);
       object details = ReadTyped(nameof(ManagementJson.TryReadDetails), detailsType, parse.Reply.Error);
-      ManagementError rewritten = parse.Reply.Error with { Details = JsonSerializer.SerializeToElement(details, detailsType, ManagementJson.Options) };
+      ManagementError rewritten = parse.Reply.Error with { Details = Payload(details, detailsType) };
       Assert.Equal(golden, ManagementJson.Write(parse.Reply with { Error = rewritten }));
       Assert.Equal(detailsType, ManagementSamples.Details(code)!.GetType());
       Assert.Equal(golden, ManagementJson.Write(FailureOf(code, ManagementSamples.Details(code)!)));
    }
+
+
+
+   /// <summary>The further snapshot examples (a healthy service with two servers, and one whose stored data is not ready, which has none) are successes that read as a snapshot, come back as the same document, and are the examples the tests build in code.</summary>
+   [Theory]
+   [InlineData("snapshot.healthy.reply.json", 2, StoredState.Ready)]
+   [InlineData("snapshot.degraded.reply.json", 0, StoredState.NewerBuild)]
+   public void FurtherSnapshot_RoundTripsAndIsTheExample(string fileName, int servers, string state)
+   {
+      string golden = Normalized(fileName);
+
+      ManagementReplyParse parse = ManagementJson.ParseReply(golden);
+
+      Assert.True(parse.Succeeded());
+      Assert.True(ManagementJson.TryReadResult(parse.Reply, out ServiceSnapshot? snapshot));
+      Assert.Equal((servers, state), (snapshot.Servers.Count, snapshot.Computer.State.Status));
+      Assert.Equal(golden, ManagementJson.Write(ManagementReply.Success(snapshot)));
+      Assert.Equal(golden, ManagementJson.Write(ManagementReply.Success(ManagementSamples.FurtherSnapshots[fileName])));
+   }
+
+
+
+   /// <summary>A record written as the payload an envelope carries, for a type known only at run time.</summary>
+   private static ManagementPayload Payload(object value, Type type) => ManagementPayload.FromElement(JsonSerializer.SerializeToElement(value, type, ManagementJson.Options));
 
 
 
