@@ -78,7 +78,7 @@ public sealed partial class AgentRuntime
                freshInventory = true;
                lock(_stateLock)
                { _inventoryReady = true; }
-               SignalPipeline();
+               _pipelineChanged.Raise();
                WakeClaims();
             }
             // A 2.4 server pushes approval in a PRINTERS frame after this inventory; an older server's operator catalog is read instead.
@@ -141,7 +141,7 @@ public sealed partial class AgentRuntime
             {
                if(_realtimeReady)
                { break; }
-               changed = _pipelineChanged.Task;
+               changed = _pipelineChanged.NextChange;
             }
             await changed.WaitAsync(token).ConfigureAwait(false);
          }

@@ -58,7 +58,7 @@ public sealed partial class AgentRuntime
             if(_reconnectRequested.CurrentCount == 0)
             { _reconnectRequested.Release(); }
          }
-         SignalPipeline();
+         _pipelineChanged.Raise();
          _connectionGate.Release();
       }
    }

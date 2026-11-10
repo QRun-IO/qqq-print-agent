@@ -151,7 +151,7 @@ public sealed partial class AgentRuntime
          {
             if(_jobTickets.Count == 0)
             { return; }
-            changed = _pipelineChanged.Task;
+            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -167,7 +167,7 @@ public sealed partial class AgentRuntime
          _updatePauseUntil = default;
       }
       WakeClaims();
-      SignalPipeline();
+      _pipelineChanged.Raise();
       _log.Write("INFO", "Printing resumed after the application update attempt.");
       return "Printing resumed.";
    }
@@ -189,6 +189,6 @@ public sealed partial class AgentRuntime
       }
       _log.Write("WARN", "The update pause ran out without the updater resuming printing; printing continues.");
       WakeClaims();
-      SignalPipeline();
+      _pipelineChanged.Raise();
    }
 }

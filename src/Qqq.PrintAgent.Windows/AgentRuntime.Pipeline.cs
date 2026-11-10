@@ -20,7 +20,7 @@ public sealed partial class AgentRuntime
    /// </summary>
    private const int DrainLanes = 16;
 
-   private TaskCompletionSource _pipelineChanged = NewSignal();
+   private readonly ChangeSignal _pipelineChanged = new();
    private readonly Dictionary<string, CancellationTokenSource> _activeTransfers = new(StringComparer.Ordinal);
    private readonly HashSet<string> _printingQueues = new(StringComparer.Ordinal);
    private readonly HashSet<string> _submittingJobs = new(StringComparer.Ordinal);
@@ -34,28 +34,6 @@ public sealed partial class AgentRuntime
    private bool _transitioning;
    private CancellationTokenSource? _pipelineLifetime;
    private Task _pipelineTask = Task.CompletedTask;
-
-
-
-   /// <summary>Creates a one-shot signal whose continuations run asynchronously, so completing it under a lock never runs waiter code inside that lock.</summary>
-   private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-
-
-   /// <summary>
-   /// Wakes everything waiting for a change, such as freed capacity or changed readiness. A fresh signal is swapped in
-   /// under the state lock and the old one completed, so a waiter holding the old signal is released and a later arrival
-   /// waits for the next change instead of missing it.
-   /// </summary>
-   private void SignalPipeline()
-   {
-      lock(_stateLock)
-      {
-         TaskCompletionSource previous = _pipelineChanged;
-         _pipelineChanged = NewSignal();
-         previous.TrySetResult();
-      }
-   }
 
 
 
@@ -97,7 +75,7 @@ public sealed partial class AgentRuntime
          {
             lock(_stateLock)
             { _pipelineLifetime = null; }
-            SignalPipeline();
+            _pipelineChanged.Raise();
          }
       }
    }
@@ -145,7 +123,7 @@ public sealed partial class AgentRuntime
             wave.Failed = true;
             wave.Drained = true;
          }
-         SignalPipeline();
+         _pipelineChanged.Raise();
       }
       if(report)
       { _log.Write("ERROR", "Print lane stopped: " + exception.Message); }
@@ -201,7 +179,7 @@ public sealed partial class AgentRuntime
       {
          lock(_stateLock)
          { wave.Drained = true; }
-         SignalPipeline();
+         _pipelineChanged.Raise();
       }
       return processed;
    }
@@ -224,9 +202,9 @@ public sealed partial class AgentRuntime
             if(_realtimeReady && _activeDownloads < _realtimeSettings.MaxConcurrentDownloads)
             {
                _activeDownloads++;
-               return new PipelineLease(() => { lock(_stateLock) { _activeDownloads--; } SignalPipeline(); });
+               return new ReleaseOnce(() => { lock(_stateLock) { _activeDownloads--; } _pipelineChanged.Raise(); });
             }
-            changed = _pipelineChanged.Task;
+            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -296,9 +274,9 @@ public sealed partial class AgentRuntime
             {
                _stagedBytes += job.ContentLength;
                ticket.Reserved.TrySetResult();
-               return new PipelineLease(() => { lock(_stateLock) { _stagedBytes -= job.ContentLength; } SignalPipeline(); });
+               return new ReleaseOnce(() => { lock(_stateLock) { _stagedBytes -= job.ContentLength; } _pipelineChanged.Raise(); });
             }
-            changed = _pipelineChanged.Task;
+            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -327,14 +305,14 @@ public sealed partial class AgentRuntime
             {
                _activePrints++;
                _submittingJobs.Add(job.JobId);
-               return new PipelineLease(() =>
+               return new ReleaseOnce(() =>
                {
                   lock(_stateLock)
                   { _activePrints--; _printingQueues.Remove(job.PrinterId); _submittingJobs.Remove(job.JobId); }
-                  SignalPipeline();
+                  _pipelineChanged.Raise();
                });
             }
-            changed = _pipelineChanged.Task;
+            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -370,24 +348,7 @@ public sealed partial class AgentRuntime
    /// <summary>A job's place in its printer's order: the previous job's reservation and completion to wait for, and this job's own signals for its successor.</summary>
    private sealed record JobTicket(Task PreviousReservation, Task PreviousCompletion)
    {
-      public TaskCompletionSource Reserved { get; } = NewSignal();
-      public TaskCompletionSource Completed { get; } = NewSignal();
-   }
-
-
-
-   /// <summary>Runs its release action exactly once however many times it is disposed, so a normal path and an error path cannot double-count a freed resource.</summary>
-   private sealed class PipelineLease(Action release) : IAsyncDisposable
-   {
-      private Action? _release = release;
-
-
-
-      /// <summary>Atomically takes the release action and runs it; later calls do nothing.</summary>
-      public ValueTask DisposeAsync()
-      {
-         Interlocked.Exchange(ref _release, null)?.Invoke();
-         return ValueTask.CompletedTask;
-      }
+      public TaskCompletionSource Reserved { get; } = ChangeSignal.OneShot();
+      public TaskCompletionSource Completed { get; } = ChangeSignal.OneShot();
    }
 }

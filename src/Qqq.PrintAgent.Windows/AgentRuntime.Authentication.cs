@@ -231,7 +231,7 @@ public sealed partial class AgentRuntime
             if(_reconnectRequested.CurrentCount == 0)
             { _reconnectRequested.Release(); }
          }
-         SignalPipeline();
+         _pipelineChanged.Raise();
       }
    }
 
@@ -288,7 +288,7 @@ public sealed partial class AgentRuntime
       }
       if(changed)
       { _log.Write("WARN", $"Printing blocked: {AppIdentity.ServerName} authorization is required. Sign in again from the companion; pairing and history are preserved."); }
-      SignalPipeline();
+      _pipelineChanged.Raise();
    }
 
 

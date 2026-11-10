@@ -37,6 +37,6 @@ public sealed partial class AgentRuntime
          _realtimeSettings = settings;
          _controlReady = false;
       }
-      SignalPipeline();
+      _pipelineChanged.Raise();
    }
 }

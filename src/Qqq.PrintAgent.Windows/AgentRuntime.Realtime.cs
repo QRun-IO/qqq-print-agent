@@ -126,7 +126,7 @@ public sealed partial class AgentRuntime
             { if(generation == _connectionGeneration) { _realtime = null; _realtimeReady = false; _realtimeLifetime = null; _approvalNegotiated = false; } }
             // The next connection asks the server about printer approval again rather than showing the previous connection's answer.
             ResetPrinterCatalog();
-            SignalPipeline();
+            _pipelineChanged.Raise();
          }
          RealtimeSettings settings = _realtimeSettings;
          TimeSpan delay = ReconnectDelay(settings, _reconnectAttempts++, Random.Shared.NextDouble());
@@ -224,7 +224,7 @@ public sealed partial class AgentRuntime
             _realtimeReady = false;
             _realtime = null;
          }
-         SignalPipeline();
+         _pipelineChanged.Raise();
          await lifetime.CancelAsync().ConfigureAwait(false);
          await CompleteConnectionAsync(other => _log.Write("DEBUG", "Realtime connection also failed with: " + QqqSessionDiagnostics.Describe(other)),
             reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
@@ -371,7 +371,7 @@ public sealed partial class AgentRuntime
          {
             if(_realtimeReady)
             { break; }
-            changed = _pipelineChanged.Task;
+            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(handshake).ConfigureAwait(false);
       }
@@ -449,7 +449,7 @@ public sealed partial class AgentRuntime
       {
          lock(_stateLock)
          { _realtimeReady = false; }
-         SignalPipeline();
+         _pipelineChanged.Raise();
          return;
       }
       JsonElement value = string.Equals(envelope.Type, "WELCOME", StringComparison.Ordinal) ? envelope.Payload.GetProperty("desiredState") : envelope.Payload;
@@ -463,7 +463,7 @@ public sealed partial class AgentRuntime
          _controlState = _controlState with { Support = "SUPPORTED", DesiredState = desired, LastContact = Now() };
          _realtimeReady = false;
       }
-      SignalPipeline();
+      _pipelineChanged.Raise();
    }
 
 
@@ -498,7 +498,7 @@ public sealed partial class AgentRuntime
          { _log.Write("INFO", $"Realtime channel ready after {envelope.Type}: settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision}. Connected to the print server."); }
          else
          { _log.Write("DEBUG", $"Realtime {envelope.Type} applied and acknowledged (settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision})."); }
-         SignalPipeline();
+         _pipelineChanged.Raise();
          RequestStatusSynchronization();
          RequestQueueRefresh();
          if(envelope.Type is "WELCOME" or "DESIRED_STATE")
