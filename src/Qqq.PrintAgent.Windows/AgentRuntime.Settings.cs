@@ -40,17 +40,14 @@ public sealed partial class AgentRuntime
             {
                store.SaveServerTrust(trust);
             }
-            WriteLog(trust.AllowUntrustedCertificate ? "WARN" : "INFO", trust.AllowUntrustedCertificate
+            _log.Write(trust.AllowUntrustedCertificate ? "WARN" : "INFO", trust.AllowUntrustedCertificate
                ? $"An administrator ALLOWED untrusted server certificates for {trust.Origin}. The service and companion will accept any certificate, including a forged one, from that server only; use this with a development server and turn it off afterwards."
                : "Untrusted server certificates are refused again for every server (default). Only certificates Windows trusts for the LocalSystem account are accepted.");
             return JsonSerializer.Serialize(trust, PrintApiClient.JsonOptions);
          case "clear-logs":
             int deleted = AgentActivityLog.ClearLogs(directory);
-            lock(_stateLock)
-            {
-               _logs.Clear();
-            }
-            WriteLog("INFO", "Activity logs cleared by an administrator. Job history and enrollment were retained.");
+            _log.ClearEntries();
+            _log.Write("INFO", "Activity logs cleared by an administrator. Job history and enrollment were retained.");
             return $"Cleared {deleted} activity log files. Job history and enrollment were retained.";
          case "get-device-profile":
             using(var store = new AgentStore(directory))

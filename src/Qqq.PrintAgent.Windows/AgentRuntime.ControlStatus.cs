@@ -104,7 +104,7 @@ public sealed partial class AgentRuntime
          if(_reconnectRequested.CurrentCount == 0)
          { _reconnectRequested.Release(); }
       }
-      WriteLog("INFO", "Connection retry requested.");
+      _log.Write("INFO", "Connection retry requested.");
       return "Reconnect requested. Connection status will update after the next server response.";
    }
 

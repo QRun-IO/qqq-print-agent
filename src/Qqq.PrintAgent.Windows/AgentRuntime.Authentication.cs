@@ -45,10 +45,10 @@ public sealed partial class AgentRuntime
       { trust = store.LoadServerTrust(); }
       bool allowUntrusted = trust.AppliesTo(origin);
       if(allowUntrusted)
-      { WriteLog("WARN", $"Creating a session for {origin.Authority} with untrusted server certificates ALLOWED for this server (administrator setting; development only)."); }
+      { _log.Write("WARN", $"Creating a session for {origin.Authority} with untrusted server certificates ALLOWED for this server (administrator setting; development only)."); }
       else if(trust.AllowUntrustedCertificate)
-      { WriteLog("INFO", $"The untrusted-certificate exception is saved for {trust.Origin}, not {ServerTrust.Normalize(origin)}; normal certificate validation applies to this session."); }
-      return new QqqSessionClient(origin, allowLoopbackHttp: origin.IsLoopback, traffic: _traffic, diagnostics: SessionDiagnostics(), allowUntrustedCertificate: allowUntrusted);
+      { _log.Write("INFO", $"The untrusted-certificate exception is saved for {trust.Origin}, not {ServerTrust.Normalize(origin)}; normal certificate validation applies to this session."); }
+      return new QqqSessionClient(origin, allowLoopbackHttp: origin.IsLoopback, traffic: _traffic, diagnostics: _log.SessionDiagnostics(), allowUntrustedCertificate: allowUntrusted);
    }
 
 
@@ -62,7 +62,7 @@ public sealed partial class AgentRuntime
          { return; }
          _lastAuthorizationNote = message;
       }
-      WriteLog(level, message);
+      _log.Write(level, message);
    }
 
 
@@ -104,7 +104,7 @@ public sealed partial class AgentRuntime
          }
          else if(!_sessionClient.IsAuthenticated)
          {
-            WriteLog("WARN", $"The held {AppIdentity.ServerName} session is no longer authenticated (the server ended it or an identity check failed).");
+            _log.Write("WARN", $"The held {AppIdentity.ServerName} session is no longer authenticated (the server ended it or an identity check failed).");
             BlockAuthorization();
             return false;
          }
@@ -116,7 +116,7 @@ public sealed partial class AgentRuntime
       }
       catch(QqqSessionException exception) when(exception.Failure is QqqSessionException.FailureKind.AuthenticationRequired or QqqSessionException.FailureKind.PermissionDenied)
       {
-         WriteLog("WARN", $"Authorization withdrawn ({exception.Failure}): {exception.Message}");
+         _log.Write("WARN", $"Authorization withdrawn ({exception.Failure}): {exception.Message}");
          BlockAuthorization();
          return false;
       }
@@ -149,20 +149,20 @@ public sealed partial class AgentRuntime
       switch(store.StagedPairing)
       {
          case StagedPairingOutcome.Completed:
-            WriteLog("INFO", "Finished a pairing change that was interrupted: the session saved with the new pairing is now in place.");
+            _log.Write("INFO", "Finished a pairing change that was interrupted: the session saved with the new pairing is now in place.");
             break;
          case StagedPairingOutcome.CompletedAfterQuarantine:
-            WriteLog("WARN", "Finished a pairing change that was interrupted: the session saved with the new pairing is now in place, and the earlier session data, which could not be read, was moved aside for recovery.");
+            _log.Write("WARN", "Finished a pairing change that was interrupted: the session saved with the new pairing is now in place, and the earlier session data, which could not be read, was moved aside for recovery.");
             break;
          case StagedPairingOutcome.Deferred:
-            WriteLog("WARN", "A pairing change is waiting to finish: the session saved with the new pairing is in use but could not be moved into place yet, and will be tried again. Reason: "
+            _log.Write("WARN", "A pairing change is waiting to finish: the session saved with the new pairing is in use but could not be moved into place yet, and will be tried again. Reason: "
                + (store.StagedPairingFailure is null ? "not recorded." : QqqSessionDiagnostics.Describe(store.StagedPairingFailure)));
             break;
          case StagedPairingOutcome.Discarded:
-            WriteLog("INFO", "Discarded a session left over from a pairing change: it was for another pairing, or the stored session is newer or already belongs to this one.");
+            _log.Write("INFO", "Discarded a session left over from a pairing change: it was for another pairing, or the stored session is newer or already belongs to this one.");
             break;
          case StagedPairingOutcome.SetAside:
-            WriteLog("WARN", "A session staged for a pairing change could not be read and was moved aside for recovery.");
+            _log.Write("WARN", "A session staged for a pairing change could not be read and was moved aside for recovery.");
             break;
          default:
             break;
@@ -187,7 +187,7 @@ public sealed partial class AgentRuntime
    private async Task RestoreSavedSessionAsync(AgentAuthentication saved, AgentConfiguration? configuration, AgentStore store, CancellationToken token)
    {
       QqqSessionCredential credential = saved.Credential ?? throw new InvalidOperationException("Sign in is required.");
-      WriteLog("INFO", $"Restoring the saved {AppIdentity.ServerName} session for {credential.Origin.Authority} (saved identity: principal {saved.Binding.PrincipalId}, tenant {saved.Binding.TenantId}, device {saved.Binding.DeviceId ?? "(none)"}).");
+      _log.Write("INFO", $"Restoring the saved {AppIdentity.ServerName} session for {credential.Origin.Authority} (saved identity: principal {saved.Binding.PrincipalId}, tenant {saved.Binding.TenantId}, device {saved.Binding.DeviceId ?? "(none)"}).");
       IQqqSessionClient restored = NewSession(credential.Origin);
       try
       {
@@ -196,11 +196,11 @@ public sealed partial class AgentRuntime
             : await restored.BindDeviceAsync(new QqqDeviceCredential(configuration.DeviceId, configuration.DeviceToken), cancellationToken: token).ConfigureAwait(false);
          RequireSameIdentity(saved.Binding, binding);
          ActivateSession(restored, binding, store);
-         WriteLog("INFO", $"Saved {AppIdentity.ServerName} session restored. " + _authenticationMessage);
+         _log.Write("INFO", $"Saved {AppIdentity.ServerName} session restored. " + _authenticationMessage);
       }
       catch(Exception exception)
       {
-         WriteFailure($"Saved {AppIdentity.ServerName} session could not be restored", exception);
+         _log.Failure($"Saved {AppIdentity.ServerName} session could not be restored", exception);
          restored.Dispose();
          throw;
       }
@@ -216,14 +216,14 @@ public sealed partial class AgentRuntime
    {
       IQqqSessionClient session = _sessionClient ?? throw new InvalidOperationException("Sign in is required.");
       string previousToken = session.ExportCredential().SessionToken;
-      WriteLog("INFO", "Scheduled session renewal: renewing with the server and re-checking the identity.");
+      _log.Write("INFO", "Scheduled session renewal: renewing with the server and re-checking the identity.");
       await session.ResumeSessionAsync(token).ConfigureAwait(false);
       QqqSessionBinding binding = await session.GetSessionIdentityAsync(token).ConfigureAwait(false);
       RequireSameIdentity(saved.Binding, binding);
       ActivateSession(session, binding, store);
       if(!string.Equals(previousToken, session.ExportCredential().SessionToken, StringComparison.Ordinal))
       {
-         WriteLog("INFO", "The session token was rotated during renewal; the realtime socket will reconnect with the new token.");
+         _log.Write("INFO", "The session token was rotated during renewal; the realtime socket will reconnect with the new token.");
          lock(_stateLock)
          {
             _realtimeReady = false;
@@ -260,7 +260,7 @@ public sealed partial class AgentRuntime
          ready = _authorizationReady;
          _lastAuthorizationNote = null;
       }
-      WriteLog("INFO", $"{AppIdentity.ServerName} session active for {binding.Origin.Authority}: principal {binding.PrincipalId}, tenant {binding.TenantId}, device {binding.DeviceId ?? "(none)"}; "
+      _log.Write("INFO", $"{AppIdentity.ServerName} session active for {binding.Origin.Authority}: principal {binding.PrincipalId}, tenant {binding.TenantId}, device {binding.DeviceId ?? "(none)"}; "
          + (ready ? "authorized to print." : configuration is null ? "this computer is not enrolled on any server; enroll to print."
             : !SameOrigin(binding.Origin, configuration.ServerUrl) ? $"the pairing is for {configuration.ServerUrl}, so printing stays blocked until this computer is enrolled on the signed-in server."
             : $"the session device is {binding.DeviceId ?? "(none)"} but the pairing is device {configuration.DeviceId}, so printing stays blocked until the pairing is re-associated.")
@@ -287,7 +287,7 @@ public sealed partial class AgentRuntime
          _authenticationMessage = $"{AppIdentity.ServerName} authorization is required. Sign in again; pairing and history are preserved.";
       }
       if(changed)
-      { WriteLog("WARN", $"Printing blocked: {AppIdentity.ServerName} authorization is required. Sign in again from the companion; pairing and history are preserved."); }
+      { _log.Write("WARN", $"Printing blocked: {AppIdentity.ServerName} authorization is required. Sign in again from the companion; pairing and history are preserved."); }
       SignalPipeline();
    }
 
@@ -310,7 +310,7 @@ public sealed partial class AgentRuntime
    {
       if(!string.Equals(expected.IdentityKey, actual.IdentityKey, StringComparison.Ordinal))
       {
-         WriteLog("WARN", $"Identity check failed: the approved identity is principal {expected.PrincipalId}, tenant {expected.TenantId}, device {expected.DeviceId ?? "(none)"} on {expected.Origin.Authority}; "
+         _log.Write("WARN", $"Identity check failed: the approved identity is principal {expected.PrincipalId}, tenant {expected.TenantId}, device {expected.DeviceId ?? "(none)"} on {expected.Origin.Authority}; "
             + $"the session now reports principal {actual.PrincipalId}, tenant {actual.TenantId}, device {actual.DeviceId ?? "(none)"} on {actual.Origin.Authority}. Sign in as the approved user, or start a new pairing.");
          throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, $"The {AppIdentity.ServerName} user, tenant or device changed. Explicit connection setup is required.");
       }

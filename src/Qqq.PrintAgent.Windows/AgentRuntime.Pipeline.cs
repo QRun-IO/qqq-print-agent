@@ -148,7 +148,7 @@ public sealed partial class AgentRuntime
          SignalPipeline();
       }
       if(report)
-      { WriteLog("ERROR", "Print lane stopped: " + exception.Message); }
+      { _log.Write("ERROR", "Print lane stopped: " + exception.Message); }
    }
 
 
@@ -195,7 +195,7 @@ public sealed partial class AgentRuntime
          },
       };
       ExposedPrinterBackend printers = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
-      bool processed = await new PrintWorker(api, printers, store, message => WriteLog("INFO", message),
+      bool processed = await new PrintWorker(api, printers, store, message => _log.Write("INFO", message),
          () => DispatchAllowed && !UpdatePaused && !_transitioning, () => _realtimeReady, options).RunOnceAsync(jobCancellation.Token).ConfigureAwait(false);
       if(!processed)
       {

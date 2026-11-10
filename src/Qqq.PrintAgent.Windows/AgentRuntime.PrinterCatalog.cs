@@ -119,7 +119,7 @@ public sealed partial class AgentRuntime
             _ => QqqSessionDiagnostics.Explain(exception),
          };
          RecordCatalog(null, new PrinterServerSync(PrinterServerSync.NotReported, Now(), reason, server, PrinterServerSync.CatalogSource), shared.Select(printer => printer.PrinterId).ToArray(), NameOf(shared), 0);
-         WriteLog("DEBUG", "Printer catalog detail: " + exception);
+         _log.Write("DEBUG", "Printer catalog detail: " + exception);
       }
    }
 
@@ -147,13 +147,13 @@ public sealed partial class AgentRuntime
       { return; }
       if(approved is null)
       {
-         WriteLog("WARN", $"Printer approval is not reported by {sync.Server}: {sync.Detail} Shared printers show as 'not reported' until the catalog can be read.");
+         _log.Write("WARN", $"Printer approval is not reported by {sync.Server}: {sync.Detail} Shared printers show as 'not reported' until the catalog can be read.");
          return;
       }
       string[] approvedNames = shared.Where(approved.Contains).Select(nameOf).ToArray();
       string[] waitingNames = shared.Where(id => !approved.Contains(id)).Select(nameOf).ToArray();
       string source = string.Equals(sync.Source, PrinterServerSync.RealtimeSource, StringComparison.Ordinal) ? "Printer approval pushed by" : "Printer catalog from";
-      WriteLog("INFO", $"{source} {sync.Server}: {approvedNames.Length} of {shared.Length} shared printer(s) approved for this device"
+      _log.Write("INFO", $"{source} {sync.Server}: {approvedNames.Length} of {shared.Length} shared printer(s) approved for this device"
          + (approvedNames.Length > 0 ? $" [{string.Join(", ", approvedNames)}]" : "")
          + (waitingNames.Length > 0 ? $"; awaiting approval on the server [{string.Join(", ", waitingNames)}]" : "")
          + (string.Equals(sync.Source, PrinterServerSync.RealtimeSource, StringComparison.Ordinal) ? "." : $"; the catalog listed {catalogCount} destination(s) in total."));

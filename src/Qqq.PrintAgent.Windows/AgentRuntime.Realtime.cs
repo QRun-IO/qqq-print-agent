@@ -118,7 +118,7 @@ public sealed partial class AgentRuntime
                if(exception is QqqSessionException session && session.Failure is QqqSessionException.FailureKind.AuthenticationRequired or QqqSessionException.FailureKind.PermissionDenied)
                { BlockAuthorization(); }
             }
-            WriteFailure("Realtime connection stopped", exception);
+            _log.Failure("Realtime connection stopped", exception);
          }
          finally
          {
@@ -132,7 +132,7 @@ public sealed partial class AgentRuntime
          TimeSpan delay = ReconnectDelay(settings, _reconnectAttempts++, Random.Shared.NextDouble());
          if(!token.IsCancellationRequested)
          {
-            WriteLog("DEBUG", $"Next realtime connection attempt ({_reconnectAttempts}) in {delay.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s, or sooner on an explicit reconnect request.");
+            _log.Write("DEBUG", $"Next realtime connection attempt ({_reconnectAttempts}) in {delay.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s, or sooner on an explicit reconnect request.");
          }
          await WaitBeforeReconnectAsync(delay, token).ConfigureAwait(false);
       }
@@ -226,7 +226,7 @@ public sealed partial class AgentRuntime
          }
          SignalPipeline();
          await lifetime.CancelAsync().ConfigureAwait(false);
-         await CompleteConnectionAsync(other => WriteLog("DEBUG", "Realtime connection also failed with: " + QqqSessionDiagnostics.Describe(other)),
+         await CompleteConnectionAsync(other => _log.Write("DEBUG", "Realtime connection also failed with: " + QqqSessionDiagnostics.Describe(other)),
             reader, state, control, heartbeat, synchronize, handshakeWatch).ConfigureAwait(false);
       }
    }
@@ -236,7 +236,7 @@ public sealed partial class AgentRuntime
    /// <summary>Sends HELLO, the first message on a socket: the agent version, this socket's capabilities, the revisions already applied and the ceilings this client can honor.</summary>
    private async Task SendHelloAsync(PrintingRealtimeChannel channel, string[] capabilities, RealtimeSettings settings, CancellationToken token)
    {
-      WriteLog("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
+      _log.Write("INFO", $"Realtime socket open; sending HELLO (agent {PrintApiClient.AgentVersion}, capabilities [{string.Join(", ", capabilities)}], applied desired-state revision {_controlState.DesiredState.Revision}, settings revision {settings.Revision}); waiting up to {settings.WebSocketHandshakeTimeoutMillis} ms for WELCOME.");
       await channel.SendAsync("HELLO", new
       {
          agentVersion = PrintApiClient.AgentVersion,
@@ -390,7 +390,7 @@ public sealed partial class AgentRuntime
    {
       lock(_stateLock)
       { _lastServerContact = ObservationTime; _heartbeatFailure = null; }
-      WriteLog("DEBUG", $"Realtime frame received: {envelope.Type}.");
+      _log.Write("DEBUG", $"Realtime frame received: {envelope.Type}.");
       if(envelope.Type is "WELCOME" or "PONG")
       {
          string? serverTime = envelope.Payload.GetProperty("serverTime").GetString();
@@ -427,7 +427,7 @@ public sealed partial class AgentRuntime
             break;
          case "ERROR":
             string code = envelope.Payload.GetProperty("code").GetString() ?? "UNKNOWN";
-            WriteLog("WARN", $"The server sent a realtime ERROR frame with code {code}{(envelope.Payload.TryGetProperty("message", out JsonElement detail) && detail.ValueKind == JsonValueKind.String ? ": " + detail.GetString() : "")}.");
+            _log.Write("WARN", $"The server sent a realtime ERROR frame with code {code}{(envelope.Payload.TryGetProperty("message", out JsonElement detail) && detail.ValueKind == JsonValueKind.String ? ": " + detail.GetString() : "")}.");
             if(code is "AUTHENTICATION_REQUIRED" or "PERMISSION_DENIED" or "AUTHORIZATION_REQUIRED")
             { BlockAuthorization(); }
             throw new IOException("Realtime server response: " + code);
@@ -495,9 +495,9 @@ public sealed partial class AgentRuntime
          await channel.SendAsync("STATE_APPLIED", new { lastAppliedRevision = saved.DesiredState.Revision, lastSettingsRevision = _realtimeSettings.Revision }, acknowledged: true, token: token).ConfigureAwait(false);
          bool becameReady = MarkRealtimeReady(generation, update, saved);
          if(becameReady)
-         { WriteLog("INFO", $"Realtime channel ready after {envelope.Type}: settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision}. Connected to the print server."); }
+         { _log.Write("INFO", $"Realtime channel ready after {envelope.Type}: settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision}. Connected to the print server."); }
          else
-         { WriteLog("DEBUG", $"Realtime {envelope.Type} applied and acknowledged (settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision})."); }
+         { _log.Write("DEBUG", $"Realtime {envelope.Type} applied and acknowledged (settings revision {_realtimeSettings.Revision}, desired-state revision {saved.DesiredState.Revision})."); }
          SignalPipeline();
          RequestStatusSynchronization();
          RequestQueueRefresh();
