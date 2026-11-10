@@ -124,7 +124,8 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// Runs server commands one at a time in arrival order. Each waits until the connection is ready, executes under the control
-   /// gate with the server's clock offset applied to its expiry, and has its receipt delivered straight afterwards. The command's
+   /// gate with the server's clock offset applied to its expiry, and has its receipt delivered straight afterwards. The offset
+   /// and the present time are both read from the runtime's time provider, so the expiry is judged on one clock. The command's
    /// inbound-queue reservation is released as soon as it is taken off the queue.
    /// </summary>
    private async Task RealtimeCommandsAsync(ChannelReader<RealtimeEnvelope> commands, CancellationToken token)
@@ -152,7 +153,7 @@ public sealed partial class AgentRuntime
             if(configuration is null)
             { throw new InvalidOperationException("Device configuration is unavailable."); }
             using PrintApiClient api = CreateApi();
-            await ApplyControlCommandAsync(store, api, command, DateTimeOffset.UtcNow + _serverTimeOffset, token).ConfigureAwait(false);
+            await ApplyControlCommandAsync(store, api, command, ObservationTime + _serverTimeOffset, token).ConfigureAwait(false);
             await FlushControlReceiptsAsync(store, api, token).ConfigureAwait(false);
          }
          finally { _controlExecutionGate.Release(); }

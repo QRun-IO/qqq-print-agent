@@ -395,7 +395,7 @@ public sealed partial class AgentRuntime
          string? serverTime = envelope.Payload.GetProperty("serverTime").GetString();
          if(!DateTimeOffset.TryParse(serverTime, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset server))
          { throw new InvalidDataException("Invalid realtime server time."); }
-         _serverTimeOffset = server - DateTimeOffset.UtcNow;
+         _serverTimeOffset = server - ObservationTime;
       }
       switch(envelope.Type)
       {

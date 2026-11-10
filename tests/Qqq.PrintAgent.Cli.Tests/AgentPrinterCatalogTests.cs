@@ -71,16 +71,33 @@ public sealed class AgentPrinterCatalogTests
 
 
 
-   /// <summary>A reading is kept for a minute: the heartbeat-driven synchronization passes do not read the catalog again straight away.</summary>
+   /// <summary>
+   /// A reading is kept for a minute, on a clock the test advances. Every heartbeat round asks for a synchronization pass. The
+   /// rounds that fall inside the minute do not read the catalog again; the round that completes the minute reads it, and it
+   /// is then the only further read. A runtime that read on every pass would have read once per round by then. A pass that
+   /// reads nothing leaves no trace to wait for, so a correct runtime can never fail here, and one that reads too often is
+   /// caught as soon as any of its earlier passes ran before the last round.
+   /// </summary>
    [Fact]
    public async Task Catalog_IsNotReadOnEverySynchronizationPass()
    {
-      await using RealtimeRuntimeFixture fixture = new();
+      var clock = new ManualTimeProvider();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
       await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
       int reads = fixture.CatalogRequests;
-      await Task.Delay(1500);
-      Assert.Equal(reads, fixture.CatalogRequests);
+      int rounds = (int)Math.Ceiling(AgentRuntime.CatalogRefreshInterval / TimeSpan.FromSeconds(fixture.Settings.HeartbeatIntervalSeconds));
+      Assert.True(rounds >= 3);
+      for(int round = 1; round < rounds; round++)
+      {
+         await fixture.HeartbeatAsync(clock);
+         Assert.Equal(reads, fixture.CatalogRequests);
+      }
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => fixture.CatalogRequests > reads);
+      Assert.Equal(reads + 1, fixture.CatalogRequests);
+      await fixture.HeartbeatAsync(clock);
+      Assert.Equal(reads + 1, fixture.CatalogRequests);
    }
 
 
