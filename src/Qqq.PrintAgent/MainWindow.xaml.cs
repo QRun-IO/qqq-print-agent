@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Text.Json;
 using CommunityToolkit.Mvvm.Input;
 using H.NotifyIcon;
 using KofTwentyTwo.AppKit.WinUI;
@@ -11,8 +10,12 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Qqq.PrintAgent.Presentation;
+using Qqq.PrintAgent.Presentation.Printers;
+using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Presentation.Shell;
 using Qqq.PrintAgent.Windows;
+using PrintersSummaryText = Qqq.PrintAgent.Presentation.Printers.PrintersSummary;
 
 
 namespace Qqq.PrintAgent;
@@ -21,6 +24,8 @@ namespace Qqq.PrintAgent;
 public sealed partial class MainWindow : Window, IDisposable
 {
    private readonly Func<PipeRequest, Task<string>> _sendRequest;
+   private readonly ServiceClient _service;
+   private readonly TimestampFormat _time = new();
    private readonly AppSettings _settings = AppIdentity.SettingsStore.Load();
    private bool _busy;
    private bool _refreshing;
@@ -49,6 +54,7 @@ public sealed partial class MainWindow : Window, IDisposable
    internal MainWindow(Func<PipeRequest, Task<string>> sendRequest)
    {
       _sendRequest = sendRequest ?? throw new ArgumentNullException(nameof(sendRequest));
+      _service = new ServiceClient(_sendRequest, new CompanionLog(), AppIdentity.ServerName);
       InitializeComponent();
       ApplyBranding();
       this.ResizeForDpi(1100, 760);
@@ -66,7 +72,7 @@ public sealed partial class MainWindow : Window, IDisposable
       trayMenu.Items.Add(new MenuFlyoutItem { Text = "Refresh status", Command = new AsyncRelayCommand(RefreshAsync) });
       trayMenu.Items.Add(new MenuFlyoutSeparator());
       trayMenu.Items.Add(new MenuFlyoutItem { Text = "Exit companion (printing continues)", Command = new RelayCommand(ExitCompanion) });
-      _tray = new TaskbarIcon { ToolTipText = TrayTooltip("Service not connected"), ContextFlyout = trayMenu, LeftClickCommand = new RelayCommand(ShowDetails) };
+      _tray = new TaskbarIcon { ToolTipText = HealthStatus.TrayToolTip("Service not connected", AppIdentity.Info.DisplayName), ContextFlyout = trayMenu, LeftClickCommand = new RelayCommand(ShowDetails) };
       SetHealth("RED");
       _tray.ForceCreate(enablesEfficiencyMode: false);
       App.Log.Info($"Tray icon created: {_tray.IsCreated}.");
@@ -191,21 +197,15 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          return;
       }
-      string page = args.IsSettingsSelected ? "Settings" : (args.SelectedItem as NavigationViewItem)?.Tag as string ?? "Printers";
+      string page = ShellPages.Name(args.IsSettingsSelected, (args.SelectedItem as NavigationViewItem)?.Tag as string);
       InvalidateJobDetails();
-      PrintersPage.Visibility = string.Equals(page, "Printers", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
-      JobsPage.Visibility = string.Equals(page, "Jobs", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
-      LogsPage.Visibility = string.Equals(page, "Logs", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
-      SettingsPage.Visibility = string.Equals(page, "Settings", StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      PrintersPage.Visibility = string.Equals(page, ShellPages.Printers, StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      JobsPage.Visibility = string.Equals(page, ShellPages.Jobs, StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      LogsPage.Visibility = string.Equals(page, ShellPages.Logs, StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
+      SettingsPage.Visibility = string.Equals(page, ShellPages.Settings, StringComparison.Ordinal) ? Visibility.Visible : Visibility.Collapsed;
       PageTitle.Text = page;
-      PageDescription.Text = page switch
-      {
-         "Jobs" => "Recent jobs received by this computer.",
-         "Logs" => "Activity and diagnostics in the AppKit log viewer.",
-         "Settings" => "Connection, appearance and application information.",
-         _ => "Choose which printers this computer shares with the server.",
-      };
-      if(string.Equals(page, "Logs", StringComparison.Ordinal))
+      PageDescription.Text = ShellPages.Description(page);
+      if(string.Equals(page, ShellPages.Logs, StringComparison.Ordinal))
       {
          ShowActivityLog();
       }
@@ -213,7 +213,7 @@ public sealed partial class MainWindow : Window, IDisposable
       {
          await RefreshLifecycleAsync();
       }
-      if(string.Equals(page, "Jobs", StringComparison.Ordinal) && !_initializing)
+      if(string.Equals(page, ShellPages.Jobs, StringComparison.Ordinal) && !_initializing)
       {
          await RefreshJobPageAsync();
       }
@@ -301,12 +301,15 @@ public sealed partial class MainWindow : Window, IDisposable
       SetBusy(true);
       try
       {
-         string response = await _sendRequest(new PipeRequest("reconnect"));
-         Feedback("Reconnect requested", response, InfoBarSeverity.Informational);
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
-      {
-         ServiceUnavailable();
+         ServiceResult<string> result = await _service.ReconnectAsync();
+         if(result.Reply is string reply)
+         {
+            Feedback(ShellFeedback.ReconnectRequested(reply));
+         }
+         else
+         {
+            ServiceUnavailable();
+         }
       }
       finally
       {
@@ -317,7 +320,10 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
-   /// <summary>Query diagnostic information without exposing credentials.</summary>
+   /// <summary>
+   /// Query diagnostic information without exposing credentials. Overlapping refreshes are skipped, and a reply that arrived
+   /// after an administration request started is dropped, because that request will render a newer state itself.
+   /// </summary>
    private async Task RefreshAsync()
    {
       if(_updatesClosed || _busy || _refreshing)
@@ -328,37 +334,55 @@ public sealed partial class MainWindow : Window, IDisposable
       int mutationVersion = _mutationVersion;
       try
       {
-         string response = await _sendRequest(new PipeRequest("snapshot"));
-         if(_updatesClosed || _busy || mutationVersion != _mutationVersion)
+         ServiceResult<AgentSnapshot> result = await _service.SnapshotAsync();
+         bool replied = result.Outcome != ServiceOutcome.Unavailable || result.Failure == ServiceFailure.UnreadableReply;
+         if(replied && (_updatesClosed || _busy || mutationVersion != _mutationVersion))
          {
             return;
          }
-         if(response.StartsWith("Error: ", StringComparison.Ordinal))
-         {
-            SetHealth("RED");
-            StatusText.Text = "Local service needs attention";
-            Feedback("Service reported a problem", response[7..], InfoBarSeverity.Error);
-            return;
-         }
-         AgentSnapshot snapshot = JsonSerializer.Deserialize<AgentSnapshot>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions)
-            ?? throw new JsonException("Missing snapshot.");
-         if(!_busy)
-         {
-            RenderSnapshot(snapshot);
-         }
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException)
-      {
-         ServiceUnavailable();
-      }
-      catch(Exception exception) when(exception is JsonException or InvalidOperationException or KeyNotFoundException)
-      {
-         SetHealth("RED");
-         Feedback("Cannot read service response", "Install matching versions of print agent companion and service, then refresh.", InfoBarSeverity.Error);
+         ApplyStatus(result);
       }
       finally
       {
          _refreshing = false;
+      }
+   }
+
+
+
+   /// <summary>
+   /// Shows the outcome of a status request: the snapshot, the service's own error, a reply this version cannot read (which
+   /// means mismatched versions), or an unreachable service. A snapshot whose content cannot be rendered is reported the same
+   /// way as an unreadable one.
+   /// </summary>
+   private void ApplyStatus(ServiceResult<AgentSnapshot> result)
+   {
+      if(result.Outcome == ServiceOutcome.Rejected)
+      {
+         SetHealth("RED");
+         StatusText.Text = ShellStatus.ServiceProblemStatus;
+         Feedback(ShellFeedback.ServiceProblem(result.Message));
+         return;
+      }
+      if(!result.Succeeded)
+      {
+         if(result.Failure == ServiceFailure.UnreadableReply)
+         {
+            SetHealth("RED");
+            Feedback(ShellFeedback.UnreadableStatus);
+            return;
+         }
+         ServiceUnavailable();
+         return;
+      }
+      try
+      {
+         RenderSnapshot(result.Payload);
+      }
+      catch(Exception exception) when(exception is InvalidOperationException or KeyNotFoundException)
+      {
+         SetHealth("RED");
+         Feedback(ShellFeedback.UnreadableStatus);
       }
    }
 
@@ -372,15 +396,18 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       SetHealth("RED");
-      StatusText.Text = "Local print service unavailable";
-      FooterContact.Text = "Local service unavailable · retrying automatically; shown data may be stale";
+      StatusText.Text = ShellStatus.ServiceUnavailableStatus;
+      FooterContact.Text = ShellStatus.ServiceUnavailableContact;
       RenderTransport(null);
-      Feedback("Service unavailable", (_serviceStatus?.Guidance ?? "The local service could not be reached.") + " Open Settings for service controls, Windows Services or the installer. This administration window needs administrator access.", InfoBarSeverity.Error);
+      Feedback(ShellFeedback.ServiceUnavailable(_serviceStatus?.Guidance));
    }
 
 
 
-   /// <summary>Prevent overlapping local administration requests.</summary>
+   /// <summary>
+   /// Prevent overlapping local administration requests. This one flag covers the whole window; busy state per server
+   /// belongs to the multi-server work and is deliberately not attempted here.
+   /// </summary>
    private void SetBusy(bool busy)
    {
       if(_updatesClosed)
@@ -393,8 +420,8 @@ public sealed partial class MainWindow : Window, IDisposable
          InvalidateJobDetails();
       }
       _busy = busy;
-      JobsPrevious.IsEnabled = !busy && _jobOffset > 0;
-      JobsNext.IsEnabled = !busy && _jobOffset + JobPageSize < _jobTotal;
+      JobsPrevious.IsEnabled = _jobs.CanGoPrevious(busy);
+      JobsNext.IsEnabled = _jobs.CanGoNext(busy);
       SetTableHeadersEnabled(!busy);
       PairingChoice.IsEnabled = !busy;
       EnrollButton.IsEnabled = !busy;
@@ -429,6 +456,17 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
+   /// <summary>Presents a message prepared by the presentation assembly, mapping its severity to the message bar's.</summary>
+   private void Feedback(FeedbackMessage message) => Feedback(message.Title, message.Message, message.Severity switch
+   {
+      FeedbackSeverity.Success => InfoBarSeverity.Success,
+      FeedbackSeverity.Warning => InfoBarSeverity.Warning,
+      FeedbackSeverity.Error => InfoBarSeverity.Error,
+      _ => InfoBarSeverity.Informational,
+   });
+
+
+
    /// <summary>Close only the companion; the service remains running.</summary>
    private void Exit_Click(object sender, RoutedEventArgs e) => ExitCompanion();
 
@@ -460,7 +498,11 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
-   /// <summary>Render the service's authoritative health, queues, jobs and bounded logs.</summary>
+   /// <summary>
+   /// Renders the service's authoritative health, connection texts and printers. The texts are worked out by
+   /// <see cref="ShellStatus"/>; this method copies them into the footer and the Settings page, fills the server box the
+   /// first time an address is known, and closes a service-level message that the good status made obsolete.
+   /// </summary>
    private void RenderSnapshot(AgentSnapshot snapshot)
    {
       if(_updatesClosed)
@@ -469,37 +511,17 @@ public sealed partial class MainWindow : Window, IDisposable
       }
       SetHealth(snapshot.Health);
       RenderTransport(snapshot.Transport);
-      FooterServerLabel.Text = TransportFormatting.Server(snapshot.ServerUrl);
-      ToolTipService.SetToolTip(FooterServer, "Open connection settings: " + FooterServerLabel.Text);
-      Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(FooterServer, "Open connection settings: " + FooterServerLabel.Text);
-      ConnectionButton.Content = snapshot.Enrolled ? "Sign in again" : "Connect this device";
-      ConnectionDialog.Title = snapshot.Enrolled ? "Sign in again" : "Connect to the server";
-      FooterContact.Text = $"Last server contact: {FormatTime(snapshot.LastSuccessfulPoll)} · Local status refreshes every 5 seconds";
+      var status = ShellStatus.From(snapshot, _time, AppIdentity.ServerName);
+      FooterServerLabel.Text = status.ServerLabel;
+      ToolTipService.SetToolTip(FooterServer, status.ServerLinkName);
+      Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(FooterServer, status.ServerLinkName);
+      ConnectionButton.Content = status.ConnectionAction;
+      ConnectionDialog.Title = status.ConnectionDialogTitle;
+      FooterContact.Text = status.FooterContact;
       StatusText.Text = snapshot.Status;
-      if(snapshot.Control is { } control)
-      {
-         if(control.AuthorizationRequired)
-         { FooterStatus.Text = "Server authorization required — sign in again"; }
-         else if(string.Equals(control.DesiredState.ConnectionState, "DISCONNECTED", StringComparison.Ordinal))
-         { FooterStatus.Text = "Dispatch disconnected by administrator"; }
-         else if(control.DesiredState.DispatchPaused)
-         { FooterStatus.Text = "Dispatch paused by administrator"; }
-         FooterContact.Text += $" · Remote controls: {AgentControlLabels.Support(control.Support)} · Last control contact: {FormatTime(control.LastContact)}";
-         if(control.LastCommand is not null)
-         {
-            FooterContact.Text += $"\n{AgentControlLabels.Action(control.LastCommand)}: {AgentControlLabels.Outcome(control.LastOutcome)} · {FormatTime(control.LastCommandAt)}";
-         }
-      }
-      ConnectionText.Text = snapshot.Enrolled
-         ? $"Server: {snapshot.ServerUrl}\nDevice: {snapshot.DeviceId}\nLast server contact: {FormatTime(snapshot.LastSuccessfulPoll)}"
-         : "This device has not been enrolled. Open Connection settings to connect it to the server.";
-      AuthenticationText.Text = snapshot.Authentication is { } authentication
-         ? authentication.SignedIn ? $"Signed in as {authentication.PrincipalId} · Tenant {authentication.TenantId}\n{authentication.Message}" : authentication.Message
-         : $"Sign in to {AppIdentity.ServerName} to enable printing.";
-      if(snapshot.Authentication is { Authorized: false })
-      {
-         FooterStatus.Text = AppIdentity.ServerName + " authorization required";
-      }
+      FooterStatus.Text = status.FooterStatus;
+      ConnectionText.Text = status.ConnectionText;
+      AuthenticationText.Text = status.AuthenticationText;
       ToolTipService.SetToolTip(FooterStatus, FooterStatus.Text);
       ToolTipService.SetToolTip(FooterContact, FooterContact.Text);
       if(string.IsNullOrWhiteSpace(ServerBox.Text) && snapshot.ServerUrl is not null)
@@ -509,7 +531,7 @@ public sealed partial class MainWindow : Window, IDisposable
       UpdatePrinters(snapshot);
       UpdateDeviceProfile(snapshot);
       _ = RefreshJobPageAsync();
-      if(FeedbackBar.Title is "Checking service" or "Service unavailable" or "Cannot read service response")
+      if(ShellFeedback.ClearsOnStatus(FeedbackBar.Title))
       {
          FeedbackBar.IsOpen = false;
       }
@@ -539,12 +561,12 @@ public sealed partial class MainWindow : Window, IDisposable
             _printerRows.Add(printer.PrinterId, row);
             PrintersList.Items.Add(row);
          }
-         row.Update(printer, FriendlyState(printer.Status), PrinterRowView.ServerDetail(printer, snapshot.PrinterSync, AppIdentity.ServerName), _busy);
+         row.Update(printer, PrinterRow.From(printer, snapshot.PrinterSync, AppIdentity.ServerName), _busy);
       }
       SortPrinterRows();
       PrintersEmpty.Visibility = snapshot.Printers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-      PrintersEmptyText.Text = snapshot.Enrolled ? "Add a printer in Windows Settings, then refresh this list." : "Connect this device to the server, then choose the printers to share.";
-      PrintersSummary.Text = PrintersSummaryText(snapshot);
+      PrintersEmptyText.Text = PrintersSummaryText.EmptyText(snapshot.Enrolled);
+      PrintersSummary.Text = PrintersSummaryText.Text(snapshot, AppIdentity.ServerName);
       ToolTipService.SetToolTip(PrintersSummary, snapshot.PrinterSync?.Detail);
       UpdateSelectedPrinter();
    }
@@ -552,29 +574,9 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
    /// <summary>
-   /// One line over the table: how many printers are shared and, for the connected server, how many of those it approved or still
-   /// has to approve; when the server could not report approval, says so instead of counting.
+   /// Persists local printer sharing through the service and shows the snapshot it returns. When the service does not
+   /// confirm the change, the checkbox goes back to what the service last reported, so the list never shows a choice that was not saved.
    /// </summary>
-   internal static string PrintersSummaryText(AgentSnapshot snapshot)
-   {
-      int shared = snapshot.Printers.Count(printer => printer.Exposed);
-      string text = $"{snapshot.Printers.Count} printers · {shared} shared";
-      if(shared == 0)
-      { return text; }
-      string server = AppIdentity.ServerName;
-      return snapshot.PrinterSync?.Outcome switch
-      {
-         PrinterServerSync.Reported => text + $" · {snapshot.Printers.Count(printer => string.Equals(printer.ServerState, PrinterServerState.Approved, StringComparison.Ordinal))} approved by {server}"
-            + (snapshot.Printers.Any(printer => string.Equals(printer.ServerState, PrinterServerState.AwaitingApproval, StringComparison.Ordinal))
-               ? $" · {snapshot.Printers.Count(printer => string.Equals(printer.ServerState, PrinterServerState.AwaitingApproval, StringComparison.Ordinal))} awaiting approval" : ""),
-         PrinterServerSync.NotReported => text + $" · approval not reported by {server}",
-         _ => text + $" · approval not checked with {server} yet",
-      };
-   }
-
-
-
-   /// <summary>Persist local printer exposure through the protected service pipe.</summary>
    private async Task SetExposureAsync(PrinterSnapshot printer, bool exposed)
    {
       if(_busy)
@@ -584,18 +586,17 @@ public sealed partial class MainWindow : Window, IDisposable
       SetBusy(true);
       try
       {
-         string response = await _sendRequest(new PipeRequest("set-exposure", PrinterId: printer.PrinterId, Exposed: exposed));
-         AgentSnapshot snapshot = JsonSerializer.Deserialize<AgentSnapshot>(response, Qqq.PrintAgent.Core.Printing.PrintApiClient.JsonOptions)
-            ?? throw new JsonException("Missing snapshot.");
-         RenderSnapshot(snapshot);
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
-      {
+         ServiceResult<AgentSnapshot> result = await _service.SetExposureAsync(printer.PrinterId, exposed);
+         if(result.Succeeded)
+         {
+            RenderSnapshot(result.Payload);
+            return;
+         }
          if(_printerRows.TryGetValue(printer.PrinterId, out PrinterRowView? row))
          {
             row.Exposure.IsChecked = printer.Exposed;
          }
-         Feedback("Printer setting not saved", "The service did not confirm this change. Refresh and try again.", InfoBarSeverity.Error);
+         Feedback(ShellFeedback.ExposureNotSaved);
       }
       finally
       {
@@ -605,30 +606,33 @@ public sealed partial class MainWindow : Window, IDisposable
 
 
 
-   /// <summary>Pair tray color with a text status so color is never the only signal.</summary>
+   /// <summary>
+   /// Pairs the tray color with a text status so color is never the only signal. The label, level and icon name come from
+   /// <see cref="HealthStatus"/>; this method puts them on the footer and the tray, and changes the dot and the tray icon
+   /// only when the health word itself changed.
+   /// </summary>
    private void SetHealth(string health)
    {
       if(_updatesClosed)
       {
          return;
       }
-      string label = health switch { "GREEN" => "Connected and ready", "ORANGE" => "Connected · printers need attention", _ => "Disconnected or needs attention" };
-      FooterStatus.Text = label;
-      _trayStatus.Text = label;
-      _tray.ToolTipText = TrayTooltip(label);
+      var status = HealthStatus.From(health);
+      FooterStatus.Text = status.Label;
+      _trayStatus.Text = status.Label;
+      _tray.ToolTipText = HealthStatus.TrayToolTip(status.Label, AppIdentity.Info.DisplayName);
       if(string.Equals(_currentHealth, health, StringComparison.Ordinal))
       {
          return;
       }
       Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.FromElement(FooterStatus)?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
-      global::Windows.UI.Color color = health switch { "GREEN" => Microsoft.UI.Colors.LimeGreen, "ORANGE" => Microsoft.UI.Colors.Orange, _ => Microsoft.UI.Colors.Red };
+      global::Windows.UI.Color color = status.Level switch { HealthLevel.Green => Microsoft.UI.Colors.LimeGreen, HealthLevel.Orange => Microsoft.UI.Colors.Orange, _ => Microsoft.UI.Colors.Red };
       SolidColorBrush brush = new(color);
       FooterDot.Fill = brush;
-      string icon = health switch { "GREEN" => "green", "ORANGE" => "orange", _ => "red" };
-      if(!_trayIcons.TryGetValue(icon, out System.Drawing.Icon? trayIcon))
+      if(!_trayIcons.TryGetValue(status.IconName, out System.Drawing.Icon? trayIcon))
       {
-         trayIcon = LoadTrayIcon(icon);
-         _trayIcons.Add(icon, trayIcon);
+         trayIcon = LoadTrayIcon(status.IconName);
+         _trayIcons.Add(status.IconName, trayIcon);
       }
       // H.NotifyIcon owns and disposes values assigned to Icon. These cached icons
       // remain ours; UpdateIcon sends their native handle without transferring ownership.
@@ -638,24 +642,6 @@ public sealed partial class MainWindow : Window, IDisposable
          return;
       }
       _currentHealth = health;
-   }
-
-
-
-   /// <summary>
-   /// Builds the tray tooltip from the status and product name, cut to the 127 UTF-16 characters Windows allows for a
-   /// notification icon without splitting a surrogate pair, so the tooltip is never rejected or shown with a broken character.
-   /// </summary>
-   private static string TrayTooltip(string status)
-   {
-      string text = status + " — " + AppIdentity.Info.DisplayName;
-      // Windows notification icons allow 127 UTF-16 characters plus the terminator.
-      if(text.Length <= 127)
-      {
-         return text;
-      }
-      int length = char.IsHighSurrogate(text[125]) ? 125 : 126;
-      return text[..length] + "…";
    }
 
 
@@ -738,18 +724,6 @@ public sealed partial class MainWindow : Window, IDisposable
       Navigation.SelectedItem = LogsNavigation;
       ShowActivityLog();
    }
-
-
-
-   /// <summary>Formats a service timestamp in the user's local time and culture, or "Not yet" when the service has not reported one.</summary>
-   private static string FormatTime(string? timestamp)
-      => DateTimeOffset.TryParse(timestamp, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset time)
-         ? time.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture) : "Not yet";
-
-
-
-   /// <summary>Maps a protocol state word to the label shown to people, through the same table the Jobs page uses.</summary>
-   private static string FriendlyState(string state) => JobLabels.Status(state);
 
 
 

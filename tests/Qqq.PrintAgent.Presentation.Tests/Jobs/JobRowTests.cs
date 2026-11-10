@@ -97,6 +97,17 @@ public sealed class JobRowTests
 
 
 
+   /// <summary>An expanded row says it is loading, and when the details did not load it points to the refresh button after a refusal and to the service when no answer arrived.</summary>
+   [Fact]
+   public void InlineDetails_SayWhatIsHappeningAndWhatToTry()
+   {
+      Assert.Equal("Loading job details…", JobActions.InlineDetailsLoading);
+      Assert.Equal("Details unavailable. Use Refresh details to try again.", JobActions.InlineDetailsUnavailable(rejected: true));
+      Assert.Equal("Details unavailable. Check the service, then refresh details.", JobActions.InlineDetailsUnavailable(rejected: false));
+   }
+
+
+
    /// <summary>The confirmations name the job, warn about duplicate output, say cancellation is best effort, and say that reviewing changes no outcome; the details failure asks for a refresh.</summary>
    [Fact]
    public void Confirmations_SayWhatTheActionWillAndWillNotDo()

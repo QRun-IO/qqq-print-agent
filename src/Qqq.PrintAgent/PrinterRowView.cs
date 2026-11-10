@@ -7,6 +7,8 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Qqq.PrintAgent.Presentation;
+using Qqq.PrintAgent.Presentation.Printers;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
@@ -97,39 +99,36 @@ internal sealed class PrinterRowView : Grid
 
 
    /// <summary>
-   /// Applies a refreshed snapshot in place: the friendly name falls back to the Windows queue name, the status, server
-   /// approval and formats are shown as text (never color alone), the share checkbox follows the service, and tooltips carry
-   /// the full values and the unattended-printing explanation. The expanded or collapsed state is preserved.
+   /// Applies a refreshed snapshot in place. Every text and tooltip comes ready-made from <see cref="PrinterRow"/>; this
+   /// method only copies them into the controls, sets the share checkbox to what the service holds, and preserves the
+   /// expanded or collapsed state.
    /// </summary>
-   internal void Update(PrinterSnapshot printer, string status, string serverDetail, bool busy)
+   internal void Update(PrinterSnapshot printer, PrinterRow row, bool busy)
    {
       Snapshot = printer;
-      SetCell(_name, string.IsNullOrWhiteSpace(printer.DisplayName) ? printer.Name : printer.DisplayName);
-      SetCell(_status, StatusLabel(printer));
-      SetCell(_server, ServerLabel(printer));
-      SetCell(_location, string.IsNullOrWhiteSpace(printer.Location) ? "—" : printer.Location);
-      SetCell(_formats, printer.Formats.Length == 0 ? "—" : string.Join(", ", printer.Formats));
+      SetCell(_name, row.Name);
+      SetCell(_status, row.Status);
+      SetCell(_server, row.Server);
+      SetCell(_location, row.Location);
+      SetCell(_formats, row.Formats);
       Exposure.IsChecked = printer.Exposed;
-      _detailsView.Update(printer, _name.Text, _status.Text, serverDetail);
+      _detailsView.Update(PrinterDetails.From(printer), row);
       SetBusy(busy);
-      ToolTipService.SetToolTip(_name, $"{_name.Text}\nWindows queue: {printer.Name}");
-      ToolTipService.SetToolTip(_status, printer.Formats.Length == 0 ? "Unavailable for unattended service printing. Select this printer for details." : status);
-      ToolTipService.SetToolTip(_server, serverDetail);
-      Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(Exposure, $"Share {_name.Text} with the server");
+      ToolTipService.SetToolTip(_name, row.NameToolTip);
+      ToolTipService.SetToolTip(_status, row.StatusToolTip);
+      ToolTipService.SetToolTip(_server, row.ServerDetail);
+      AutomationProperties.SetName(Exposure, row.ShareName);
       SetSelected(_details.Visibility == Visibility.Visible);
    }
 
 
 
-   /// <summary>
-   /// Enables sharing only for a printer that supports unattended printing (or one already shared, so it can be turned off),
-   /// and the test print only for a shared printer that has a format. Everything is disabled while a request is running.
-   /// </summary>
+   /// <summary>Applies the enablement rules of <see cref="PrinterActions"/> to the share checkbox and the two action buttons for the current busy state.</summary>
    internal void SetBusy(bool busy)
    {
-      Exposure.IsEnabled = !busy && Snapshot is PrinterSnapshot printer && (printer.Formats.Length > 0 || printer.Exposed);
-      _settings.IsEnabled = !busy;
-      _test.IsEnabled = !busy && Snapshot is { Exposed: true } selected && selected.Formats.Length > 0;
+      Exposure.IsEnabled = PrinterActions.CanShare(Snapshot, busy);
+      _settings.IsEnabled = PrinterActions.CanEdit(busy);
+      _test.IsEnabled = PrinterActions.CanTest(Snapshot, busy);
    }
 
 
@@ -139,51 +138,10 @@ internal sealed class PrinterRowView : Grid
    {
       _details.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
       _chevron.Glyph = selected ? "\uE70D" : "\uE76C";
-      string action = selected ? "Collapse" : "Expand";
-      AutomationProperties.SetName(_disclosure, $"{action} printer details for {_name.Text}");
-      AutomationProperties.SetItemStatus(_disclosure, selected ? "Expanded" : "Collapsed");
-      ToolTipService.SetToolTip(_disclosure, $"{action} printer details");
-   }
-
-
-
-   /// <summary>
-   /// The status word shown for a printer. A printer with no usable format cannot print unattended, so it reads "Offline" when
-   /// the spooler says so and otherwise "Interactive only" instead of a misleading ready state.
-   /// </summary>
-   internal static string StatusLabel(PrinterSnapshot printer) => printer.Formats.Length > 0 ? JobLabels.Status(printer.Status)
-      : string.Equals(printer.Status, "OFFLINE", StringComparison.Ordinal) ? "Offline" : "Interactive only";
-
-
-
-   /// <summary>The server-approval word shown for a printer, from the service's last catalog reading for the connected server.</summary>
-   internal static string ServerLabel(PrinterSnapshot printer) => printer.ServerState switch
-   {
-      PrinterServerState.Approved => "Approved",
-      PrinterServerState.AwaitingApproval => "Awaiting approval",
-      PrinterServerState.NotReported => "Not reported",
-      PrinterServerState.NotShared => "Not shared",
-      _ => "Not checked",
-   };
-
-
-
-   /// <summary>
-   /// The sentence behind the server-approval word: what it means and, for a reading that failed, the service's reason.
-   /// The server is named so a printer shared before a server change is never read as approved by the new one.
-   /// </summary>
-   internal static string ServerDetail(PrinterSnapshot printer, PrinterServerSync? sync, string serverName)
-   {
-      string server = string.IsNullOrEmpty(sync?.Server) ? serverName : $"{serverName} ({sync!.Server})";
-      string freshness = string.Equals(sync?.Source, PrinterServerSync.RealtimeSource, StringComparison.Ordinal) ? " The server pushes a change the moment an administrator makes it." : " Checked about once a minute while connected.";
-      return printer.ServerState switch
-      {
-         PrinterServerState.Approved => $"{server} approved this printer for this computer; it can receive jobs.{freshness}",
-         PrinterServerState.AwaitingApproval => $"{server} received this printer in the inventory but has not approved it. An administrator approves it on the server (Printing → Print devices).{freshness}",
-         PrinterServerState.NotReported => $"{server} did not report approval: {sync?.Detail ?? "the catalog could not be read."} Approve or check the printer on the server.",
-         PrinterServerState.NotShared => "Not shared with the server. Turn on Shared to offer it; the server then has to approve it.",
-         _ => $"Not checked yet with {server}. The service asks the server after it connects and sends the inventory.",
-      };
+      var disclosure = RowDisclosure.For("printer", _name.Text, selected);
+      AutomationProperties.SetName(_disclosure, disclosure.Name);
+      AutomationProperties.SetItemStatus(_disclosure, disclosure.ItemStatus);
+      ToolTipService.SetToolTip(_disclosure, disclosure.ToolTip);
    }
 
 

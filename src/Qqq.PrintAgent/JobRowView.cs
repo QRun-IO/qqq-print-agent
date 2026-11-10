@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Qqq.PrintAgent.Presentation;
 using Qqq.PrintAgent.Presentation.Jobs;
 using Qqq.PrintAgent.Windows;
 
@@ -105,25 +106,24 @@ internal sealed class JobRowView : Grid
 
 
    /// <summary>
-   /// Applies a refreshed snapshot in place. A changed job invalidates any loaded details, so stale detail text is never
-   /// shown for new data. Cells are rewritten only when their text changed, which keeps tooltips and screen-reader focus
-   /// stable, and the full creation time is kept as help text beside the shortened display.
+   /// Applies a refreshed snapshot in place, with the cell texts prepared by <see cref="JobRow"/>. A changed job invalidates
+   /// any loaded details, so stale detail text is never shown for new data. Cells are rewritten only when their text changed,
+   /// which keeps tooltips and screen-reader focus stable, and the full creation time is kept as help text beside the shortened display.
    /// </summary>
-   internal void Update(JobSnapshot job, string status, string time)
+   internal void Update(JobSnapshot job, JobRow row)
    {
       if(!Equals(Snapshot, job))
       {
          InvalidateDetails();
       }
       Snapshot = job;
-      AutomationProperties.SetHelpText(_cells[4], job.CreatedAt ?? string.Empty);
-      string[] values = [job.Title ?? job.JobId, job.PrinterName ?? job.PrinterId ?? "Not recorded", status + (job.FailureAcknowledged ? " · Reviewed" : ""), job.Format ?? "—", time];
+      AutomationProperties.SetHelpText(_cells[4], row.CreatedHelpText);
       for(int index = 0; index < _cells.Length; index++)
       {
-         if(!string.Equals(_cells[index].Text, values[index], StringComparison.Ordinal))
+         if(!string.Equals(_cells[index].Text, row.Cells[index], StringComparison.Ordinal))
          {
-            _cells[index].Text = values[index];
-            ToolTipService.SetToolTip(_cells[index], values[index]);
+            _cells[index].Text = row.Cells[index];
+            ToolTipService.SetToolTip(_cells[index], row.Cells[index]);
          }
       }
       SetExpanded(Expanded);
@@ -144,26 +144,22 @@ internal sealed class JobRowView : Grid
       }
       _details.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
       _chevron.Glyph = expanded ? "\uE70D" : "\uE76C";
-      string action = expanded ? "Collapse" : "Expand";
-      AutomationProperties.SetName(_disclosure, $"{action} job details for {Snapshot.Title ?? Snapshot.JobId}");
-      AutomationProperties.SetItemStatus(_disclosure, expanded ? "Expanded" : "Collapsed");
-      ToolTipService.SetToolTip(_disclosure, $"{action} job details");
+      var disclosure = RowDisclosure.For("job", Snapshot.Title ?? Snapshot.JobId, expanded);
+      AutomationProperties.SetName(_disclosure, disclosure.Name);
+      AutomationProperties.SetItemStatus(_disclosure, disclosure.ItemStatus);
+      ToolTipService.SetToolTip(_disclosure, disclosure.ToolTip);
    }
 
 
 
-   /// <summary>
-   /// Enables each action only when it is valid for the job and no administration request is running: retry for finished
-   /// or uncertain jobs, cancel for queued jobs or spooled ones with a spooler number, and review for unreviewed failures.
-   /// A running detail load also disables refresh, so requests cannot overlap.
-   /// </summary>
+   /// <summary>Applies the enablement rules of <see cref="JobActions"/> to the five action buttons for the current busy state; a running detail load also disables refresh, so requests cannot overlap.</summary>
    internal void SetBusy(bool busy)
    {
-      _full.IsEnabled = !busy;
-      _refresh.IsEnabled = !busy && !_detailRequests.IsLoading;
-      _retry.IsEnabled = !busy && Snapshot.Status is "FAILED" or "OUTCOME_UNKNOWN" or "SPOOLED" or "SPOOLER_COMPLETED";
-      _cancel.IsEnabled = !busy && (Snapshot.Status is "QUEUED" || Snapshot.Status is "SPOOLED" && Snapshot.SpoolerJobId is not null);
-      _review.IsEnabled = !busy && Snapshot is { FailureAcknowledged: false, Status: "FAILED" or "OUTCOME_UNKNOWN" };
+      _full.IsEnabled = JobActions.CanOpenDetails(busy);
+      _refresh.IsEnabled = JobActions.CanRefreshDetails(busy, _detailRequests.IsLoading);
+      _retry.IsEnabled = JobActions.CanRetry(Snapshot, busy);
+      _cancel.IsEnabled = JobActions.CanCancel(Snapshot, busy);
+      _review.IsEnabled = JobActions.CanReview(Snapshot, busy);
    }
 
 
@@ -180,7 +176,7 @@ internal sealed class JobRowView : Grid
          return false;
       }
       _detailsFor = Snapshot;
-      SetMessage("Loading job details…");
+      SetMessage(JobActions.InlineDetailsLoading);
       return true;
    }
 
@@ -206,8 +202,8 @@ internal sealed class JobRowView : Grid
 
 
    /// <summary>Shows loaded details in the compact form used inline.</summary>
-   internal void SetDetails(JobDetailsSnapshot details, Func<string, string> state, Func<string?, string> time)
-      => _body.Content = new JobDetailsView(details, state, time, compact: true);
+   internal void SetDetails(JobDetailsContent content)
+      => _body.Content = new JobDetailsView(content, compact: true);
 
 
 

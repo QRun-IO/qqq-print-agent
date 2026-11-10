@@ -71,4 +71,15 @@ public static class JobActions
 
    /// <summary>The message when the full details of a job could not be read from the service.</summary>
    public static FeedbackMessage DetailsUnavailable { get; } = new("Job details unavailable", "The service could not return this job. Refresh and try again.", FeedbackSeverity.Error);
+
+
+
+   /// <summary>The line shown inside an expanded row while its details are being read.</summary>
+   public const string InlineDetailsLoading = "Loading job details…";
+
+
+
+   /// <summary>The line shown inside an expanded row when its details did not load: a refusal by the service points to the refresh button, and no usable answer points to the service itself.</summary>
+   public static string InlineDetailsUnavailable(bool rejected)
+      => rejected ? "Details unavailable. Use Refresh details to try again." : "Details unavailable. Check the service, then refresh details.";
 }

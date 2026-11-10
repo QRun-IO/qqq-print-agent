@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Presentation.Jobs;
+using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent;
@@ -63,9 +63,9 @@ public sealed partial class MainWindow
 
 
    /// <summary>
-   /// Loads details for the expanded row, if it needs them. The reply must pass <c>CanApplyJobDetails</c> before it is shown, an error
-   /// reply or a reply for a different job becomes a short message instead of wrong data, and the request is always marked finished
-   /// so refresh can be enabled again.
+   /// Loads details for the expanded row, if it needs them. The reply must pass <c>CanApplyJobDetails</c> before it is shown, a
+   /// refusal or a reply for a different job becomes a short message instead of wrong data, and the request is always marked
+   /// finished so refresh can be enabled again.
    /// </summary>
    private async Task RefreshExpandedJobAsync()
    {
@@ -77,28 +77,18 @@ public sealed partial class MainWindow
       row.SetBusy(_busy);
       try
       {
-         string response = await _sendRequest(new PipeRequest("job-details", JobId: requested.JobId));
+         ServiceResult<JobDetailsSnapshot> result = await _service.JobDetailsAsync(requested.JobId);
          if(!CanApplyJobDetails(row, requested, generation))
          {
             return;
          }
-         if(response.StartsWith("Error:", StringComparison.Ordinal))
+         if(result.Succeeded)
          {
-            row.SetMessage("Details unavailable. Use Refresh details to try again.");
-            return;
+            row.SetDetails(JobDetailsContent.From(result.Payload, _time, compact: true));
          }
-         JobDetailsSnapshot details = JsonSerializer.Deserialize<JobDetailsSnapshot>(response, PrintApiClient.JsonOptions) ?? throw new JsonException("Missing job details.");
-         if(details.Job is null || details.Events is null || !string.Equals(details.Job.JobId, requested.JobId, StringComparison.Ordinal))
+         else
          {
-            throw new JsonException("Job details do not match the selected row.");
-         }
-         row.SetDetails(details, FriendlyState, FormatTime);
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or OperationCanceledException or JsonException)
-      {
-         if(CanApplyJobDetails(row, requested, generation))
-         {
-            row.SetMessage("Details unavailable. Check the service, then refresh details.");
+            row.SetMessage(JobActions.InlineDetailsUnavailable(result.Outcome == ServiceOutcome.Rejected));
          }
       }
       finally
