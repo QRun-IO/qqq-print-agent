@@ -345,11 +345,21 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>A malformed replay of a job the journal already holds in a final state changes nothing: no new event, no new receipt, and the job's recorded title and printer are not overwritten by the stand-in.</summary>
+   /// <summary>
+   /// A malformed replay of a job the journal already knows changes nothing, whatever state the job is in: no new
+   /// event, no new receipt, and the recorded title and printer are not overwritten by the stand-in's blanks. That
+   /// matters most for RECEIVED and SUBMITTING, where another lane is working on the job at that moment and a FAILED
+   /// saying "no bytes were submitted" would be false. The replay is logged, with the state and the reason, and the
+   /// lane ends its pass because the server would only offer the same job again.
+   /// </summary>
    [Theory]
+   [InlineData("RECEIVED")]
+   [InlineData("SUBMITTING")]
    [InlineData("SPOOLED")]
+   [InlineData("SPOOLER_COMPLETED")]
+   [InlineData("FAILED")]
    [InlineData("OUTCOME_UNKNOWN")]
-   public async Task MalformedReplayOfAFinishedJobChangesNothing(string state)
+   public async Task MalformedReplayOfAJobTheJournalKnowsChangesNothing(string state)
    {
       JsonObject malformed = ValidJob();
       malformed.Remove("options");
@@ -362,12 +372,17 @@ public sealed class ClaimedJobContractTests
       journal.Record("job-1", new PrintEvent("earlier", state));
       journal.Acknowledge("earlier");
       var printer = new FakePrinterBackend();
-      Assert.False(await new PrintWorker(api, printer, journal, options: new PrintWorkerOptions { RecoverIncomplete = false }).RunOnceAsync());
+      var lines = new List<string>();
+      Assert.False(await new PrintWorker(api, printer, journal, lines.Add, options: new PrintWorkerOptions { RecoverIncomplete = false }).RunOnceAsync());
       Assert.Equal(new[] { state }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Empty(journal.Pending());
       Assert.Empty(server.Events);
+      Assert.Equal(1, server.Claims);
       Assert.Equal("Original title", journal.Jobs["job-1"].Job.Title);
       Assert.Equal("Original printer", journal.Jobs["job-1"].PrinterName);
+      Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
+      Assert.Equal($"job-1: offered again in a form that breaks the contract while already recorded as {state}; nothing was recorded or reported for it. The claimed job has no print options.", Assert.Single(lines));
    }
 
 

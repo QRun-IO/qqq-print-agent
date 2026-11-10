@@ -116,13 +116,18 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// Reports a claimed job the API client refused because it broke the contract. The server offers a claimed job again
    /// until the agent answers for it, so leaving it unanswered would block every job behind it; the job is therefore
    /// recorded as received and then FAILED, with the reason and the fact that nothing was submitted, and both events are
-   /// delivered. A job the journal already holds in a final state is left alone, so a malformed replay changes nothing.
-   /// Returns true when the refusal was reported.
+   /// delivered. A job the journal already knows, in any state, is left exactly as it is: it was answered for once, its
+   /// outcome is recorded or another lane is working on it right now, and a FAILED written over RECEIVED or SUBMITTING
+   /// would claim that nothing was submitted while a submission may be under way. The replay is only logged. Returns
+   /// true when the refusal was reported.
    /// </summary>
    private async Task<bool> RefuseAsync(PrintJob rejected, string reason, IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
-      if(PrintJobState.IsFinal(journal.GetState(rejected.JobId)))
-      { return false; }
+      if(journal.GetState(rejected.JobId) is { } known)
+      {
+         log?.Invoke($"{rejected.JobId}: offered again in a form that breaks the contract while already recorded as {known}; nothing was recorded or reported for it. {reason}");
+         return false;
+      }
       Track(rejected, inventory);
       Record(rejected, PrintJobState.Received);
       Record(rejected, PrintJobState.Failed, reason + " No bytes were submitted.");
