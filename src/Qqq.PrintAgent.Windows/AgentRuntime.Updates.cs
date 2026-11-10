@@ -49,9 +49,10 @@ public sealed partial class AgentRuntime
    /// a sign-in or a state change in progress, and the gate is released before the wait: a desired state or settings the
    /// server sends meanwhile must still be saved and acknowledged, or the runtime would stay not ready and the very jobs
    /// being waited for could not be submitted. When the wait takes longer than the preparation limit the answer says what was
-   /// still in progress, the pause stays, and that work carries on.
+   /// still in progress, the pause stays, and that work carries on. Because the gate is not held, other commands can run
+   /// during the wait, so the answer is decided afresh when the wait ends.
    /// </summary>
-   private async Task<string> PrepareUpdateAsync(CancellationToken token)
+   internal async Task<string> PrepareUpdateAsync(CancellationToken token)
    {
       await _connectionGate.WaitAsync(token).ConfigureAwait(false);
       try
@@ -82,8 +83,35 @@ public sealed partial class AgentRuntime
          if(PreparationLimitReached(claimAnswered) is string notReady)
          { return notReady; }
       }
-      WriteLog("INFO", "Printing paused for an application update after active submission finished.");
-      return "Ready for update.";
+      return PreparationOutcome();
+   }
+
+
+
+   /// <summary>
+   /// Decides the answer once nothing claimed before the pause is in progress. "Ready for update." tells the updater that
+   /// files may be replaced, which is true only while the pause is still in force and the connection is not being changed.
+   /// Another command may have resumed printing during the wait (claims may then have started again), the pause may have run
+   /// out, or a sign-in, sign-out or enrollment may be under way; in each of those cases the answer says that preparation
+   /// was interrupted and must be repeated.
+   /// </summary>
+   private string PreparationOutcome()
+   {
+      bool paused;
+      bool transitioning;
+      lock(_stateLock)
+      {
+         paused = _updatePauseUntil > ObservationTime;
+         transitioning = _transitioning;
+      }
+      if(paused && !transitioning)
+      {
+         WriteLog("INFO", "Printing paused for an application update after active submission finished.");
+         return "Ready for update.";
+      }
+      string why = paused ? "a sign-in, sign-out or enrollment began while preparation was waiting" : "printing was resumed, or the pause ran out, while preparation was waiting";
+      WriteLog("WARN", $"Update preparation was interrupted: {why}. The service is not ready for an update; the updater must prepare again.");
+      return $"Update preparation was interrupted: {why}. Try the update again.";
    }
 
 
@@ -132,7 +160,7 @@ public sealed partial class AgentRuntime
 
 
    /// <summary>Lifts the update pause, wakes the claim loop and logs it; called by the update helper after the installer finishes, whatever its result.</summary>
-   private string ResumeAfterUpdate()
+   internal string ResumeAfterUpdate()
    {
       lock(_stateLock)
       {
