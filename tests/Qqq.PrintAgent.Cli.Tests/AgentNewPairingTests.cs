@@ -449,6 +449,7 @@ public sealed class AgentNewPairingTests
       Assert.True(recovered.Authentication!.Authorized);
       Assert.Equal("replacement-device", recovered.DeviceId);
       Assert.False(File.Exists(StagedSession(fixture)));
+      Assert.Contains(recovered.Logs, entry => entry.Message.Contains("Finished a pairing change that was interrupted", StringComparison.Ordinal));
    }
 
 
@@ -607,6 +608,67 @@ public sealed class AgentNewPairingTests
       Assert.Equal("third-device", reader.LoadAuthentication()!.Binding.DeviceId);
       Assert.Equal(StagedPairingOutcome.Completed, reader.StagedPairing);
       Assert.Equal("third-device", reader.LoadConfiguration()!.DeviceId);
+   }
+
+
+
+   /// <summary>
+   /// A leftover staged session that something holds open cannot be deleted or moved aside. The read must still return the
+   /// stored session, must not claim to have discarded or set aside a file that is still there, and the first read after
+   /// the file is released deals with it.
+   /// </summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public void HeldLeftoverStagedSessionDoesNotFailTheReadAndIsDealtWithLater(bool unreadable)
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      if(unreadable)
+      { File.WriteAllBytes(StagedSession(fixture), [2, 4, 6]); }
+      else
+      { File.Copy(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), StagedSession(fixture)); }
+      using(FileStream held = new(StagedSession(fixture), FileMode.Open, FileAccess.Read, FileShare.Read))
+      {
+         using AgentStore blocked = new(fixture.Local.DirectoryPath);
+         Assert.Equal("device", blocked.LoadAuthentication()!.Binding.DeviceId);
+         Assert.Equal(StagedPairingOutcome.None, blocked.StagedPairing);
+         Assert.True(File.Exists(StagedSession(fixture)));
+         Assert.Empty(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"));
+      }
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      Assert.Equal("device", store.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(unreadable ? StagedPairingOutcome.SetAside : StagedPairingOutcome.Discarded, store.StagedPairing);
+      Assert.False(File.Exists(StagedSession(fixture)));
+   }
+
+
+
+   /// <summary>
+   /// A session saved after a pairing change was staged is newer than the staged one, even when it does not belong to the
+   /// stored pairing (a sign-in for a new pairing, say) and the staged file could not be removed at the time. The staged
+   /// session must not replace it later.
+   /// </summary>
+   [Fact]
+   public void SessionSavedAfterStagingIsNotReplacedByTheStagedOne()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      string authPath = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
+      Stage(fixture, "replacement-device", "https://synthetic.invalid/");
+      using(FileStream held = new(StagedSession(fixture), FileMode.Open, FileAccess.Read, FileShare.Read))
+      {
+         using AgentStore saving = new(fixture.Local.DirectoryPath);
+         saving.SaveAuthentication(new AgentAuthentication(fixture.Session.Binding with { DeviceId = null }, fixture.Session.ExportCredential()));
+      }
+      Assert.True(File.Exists(StagedSession(fixture)));
+      File.SetLastWriteTimeUtc(authPath, File.GetLastWriteTimeUtc(StagedSession(fixture)).AddSeconds(1));
+      byte[] saved = File.ReadAllBytes(authPath);
+      using AgentStore store = new(fixture.Local.DirectoryPath);
+      Assert.Null(store.LoadAuthentication()!.Binding.DeviceId);
+      Assert.Equal(StagedPairingOutcome.Discarded, store.StagedPairing);
+      Assert.Equal(saved, File.ReadAllBytes(authPath));
+      Assert.False(File.Exists(StagedSession(fixture)));
    }
 
 

@@ -133,7 +133,7 @@ public sealed partial class AgentStore
       WriteProtected(path + ".tmp", authentication);
       _ = QuarantineUnreadableAuthentication();
       File.Move(path + ".tmp", path, overwrite: true);
-      DeleteQuietly(Path.Combine(_directory, StagedSessionFile));
+      _ = DeleteQuietly(Path.Combine(_directory, StagedSessionFile));
    }
 
 
@@ -156,7 +156,7 @@ public sealed partial class AgentStore
       }
       catch
       {
-         DeleteQuietly(staged);
+         _ = DeleteQuietly(staged);
          throw;
       }
    }
@@ -174,16 +174,16 @@ public sealed partial class AgentStore
 
    /// <summary>
    /// Decides what a staged session is and acts on it. One that belongs to the stored pairing, while the stored session
-   /// does not, is the session of a pairing change in progress: it is moved into place when that is possible, an unreadable
-   /// earlier session being moved aside first, and returned either way. One that names another server or device, or that
-   /// the stored session has already superseded, is a leftover and is deleted. One that cannot be read is moved aside.
+   /// does not and is older, is the session of a pairing change in progress: it is moved into place when that is possible,
+   /// an unreadable earlier session being moved aside first, and returned either way. One that names another server or
+   /// device, or that the stored session has superseded, is a leftover and is deleted. One that cannot be read is moved aside.
    /// </summary>
    private AgentAuthentication? ResolveStagedPairing()
    {
-      string staged = Path.Combine(_directory, StagedSessionFile);
-      DeleteQuietly(staged + ".tmp");
       StagedPairing = StagedPairingOutcome.None;
       StagedPairingFailure = null;
+      string staged = Path.Combine(_directory, StagedSessionFile);
+      _ = DeleteQuietly(staged + ".tmp");
       AgentAuthentication? session = File.Exists(staged) ? ReadStagedOrSetAside(staged) : null;
       if(session is null)
       {
@@ -192,11 +192,15 @@ public sealed partial class AgentStore
       string path = Path.Combine(_directory, SessionFile);
       AgentConfiguration? pairing = LoadPairingOrNull();
       AgentAuthentication? stored = ReadStoredOrFlag(path);
-      if(!BelongsToPairing(session, pairing) || (stored is not null && BelongsToPairing(stored, pairing)))
+      if(!BelongsToPairing(session, pairing) || (stored is not null && (BelongsToPairing(stored, pairing) || File.GetLastWriteTimeUtc(path) > File.GetLastWriteTimeUtc(staged))))
       {
-         // The stored session is already the right answer, so a leftover that cannot be deleted now must not fail the read.
-         DeleteQuietly(staged);
-         StagedPairing = StagedPairingOutcome.Discarded;
+         ////////////////////////////////////////////////////////////////////////
+         // a leftover: it is for another pairing, or the stored session is    //
+         // already this pairing's, or was saved after it and so is newer. One //
+         // that cannot be deleted now must not fail the read, and is reported //
+         // as discarded only once it is gone                                  //
+         ////////////////////////////////////////////////////////////////////////
+         StagedPairing = DeleteQuietly(staged) ? StagedPairingOutcome.Discarded : StagedPairingOutcome.None;
          return null;
       }
       try
@@ -295,16 +299,18 @@ public sealed partial class AgentStore
 
 
 
-   /// <summary>Deletes a leftover file without failing the operation that noticed it.</summary>
-   private static void DeleteQuietly(string path)
+   /// <summary>Deletes a leftover file without failing the operation that noticed it, and says whether the file is gone.</summary>
+   private static bool DeleteQuietly(string path)
    {
       try
       {
          File.Delete(path);
+         return true;
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
       {
-         // A leftover is harmless: a staged session is examined again by the next reader, and a temporary file is overwritten by the next write.
+         // A staged session is examined again by the next reader, which discards it by the same rules, and a temporary file is overwritten by the next write.
+         return false;
       }
    }
 }
