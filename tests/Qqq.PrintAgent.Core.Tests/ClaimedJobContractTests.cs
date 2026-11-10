@@ -42,21 +42,105 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>Members the agent only displays may be absent: a missing or over-long creation time or status becomes empty text instead of a null that later code would trip over, and a hash in capitals is accepted because integrity is compared without regard to case.</summary>
-   [Fact]
-   public async Task DisplayOnlyMembersAreNormalized()
+   /// <summary>
+   /// Members the agent only displays may be absent or over-long: a missing creation time or status, or one a single
+   /// character past its limit (64 for the time, 32 for the status), becomes empty text instead of a null that later
+   /// code would trip over or a value too long to show. The job itself is still accepted.
+   /// </summary>
+   [Theory]
+   [InlineData("missing")]
+   [InlineData("one-past-the-limit")]
+   [InlineData("far-past-the-limit")]
+   public async Task DisplayOnlyMembersAreNormalized(string fault)
    {
       JsonObject job = ValidJob();
-      job.Remove("createdAt");
-      job["status"] = new string('S', 200);
-      job["contentSha256"] = Hash.ToUpperInvariant();
+      switch(fault)
+      {
+         case "missing":
+            job.Remove("createdAt");
+            job.Remove("status");
+            break;
+         case "one-past-the-limit":
+            job["createdAt"] = new string('c', 65);
+            job["status"] = new string('S', 33);
+            break;
+         default:
+            job["createdAt"] = new string('c', 2000);
+            job["status"] = new string('S', 200);
+            break;
+      }
       using var server = new FakePrintServer();
       server.OfferRaw(Claim(job));
       using PrintApiClient api = Api(server);
       PrintJob claimed = Assert.IsType<PrintJob>(await api.ClaimAsync(CancellationToken.None));
       Assert.Equal("", claimed.CreatedAt);
       Assert.Equal("", claimed.Status);
-      Assert.Equal(Hash.ToUpperInvariant(), claimed.ContentSha256);
+      Assert.Equal("job-1", claimed.JobId);
+   }
+
+
+
+   /// <summary>
+   /// The contract writes the content hash in lowercase hexadecimal. The agent also accepts capitals, and this test
+   /// says so on purpose: it is looser than the contract, the agent always was, and it costs nothing, because the hash
+   /// is only ever compared with the hash of the downloaded bytes, without regard to case. So a job whose hash arrives
+   /// in capitals is claimed with the hash as sent, and it prints when the document matches and fails when it does not.
+   /// </summary>
+   [Theory]
+   [InlineData(true, "SPOOLED")]
+   [InlineData(false, "FAILED")]
+   public async Task HashInCapitalsIsAcceptedOnPurposeAndStillVerifiesTheDocument(bool documentMatches, string outcome)
+   {
+      byte[] document = [1, 2, 3];
+      PrintJob lowercase = FakePrintServer.Job(document);
+      Assert.Equal(lowercase.ContentSha256.ToLowerInvariant(), lowercase.ContentSha256);
+      PrintJob capitals = lowercase with { ContentSha256 = lowercase.ContentSha256.ToUpperInvariant() };
+      Assert.NotEqual(lowercase.ContentSha256, capitals.ContentSha256, StringComparer.Ordinal);
+      using var server = new FakePrintServer();
+      server.Offer(capitals, documentMatches ? document : [3, 2, 1]);
+      using PrintApiClient api = Api(server);
+      var journal = new RecordingJournal();
+      var printer = new FakePrinterBackend();
+      await new PrintWorker(api, printer, journal).RunOnceAsync();
+      Assert.Equal(capitals.ContentSha256, journal.Jobs["job-1"].Job.ContentSha256);
+      Assert.Equal(outcome, journal.GetState("job-1"));
+      Assert.Equal(documentMatches ? 1 : 0, printer.Submissions);
+   }
+
+
+
+   /// <summary>
+   /// The accepting side of every limit a claimed job has. Each row puts one member exactly at its limit, or uses every
+   /// character an identifier may contain, and the job is claimed with that member unchanged. The refusing side, one
+   /// step past each of these, is in the theory below; together they fail if any limit is moved.
+   /// </summary>
+   [Theory]
+   [InlineData("jobId-200-characters")]
+   [InlineData("jobId-every-allowed-character")]
+   [InlineData("printerId-200-characters")]
+   [InlineData("printerId-every-allowed-character")]
+   [InlineData("title-1024-characters")]
+   [InlineData("format-32-characters")]
+   [InlineData("format-1-character")]
+   [InlineData("length-1")]
+   [InlineData("length-2147483647")]
+   [InlineData("copies-32767")]
+   [InlineData("scale-32-characters")]
+   [InlineData("scale-1-character")]
+   [InlineData("paper-2000-millimetres")]
+   [InlineData("paper-smallest")]
+   [InlineData("createdAt-64-characters")]
+   [InlineData("status-32-characters")]
+   public async Task ClaimedJobAtEachLimitIsAcceptedUnchanged(string limit)
+   {
+      JsonObject job = ValidJob();
+      AtLimit[limit](job);
+      using var server = new FakePrintServer();
+      server.OfferRaw(Claim(job));
+      using PrintApiClient api = Api(server);
+      PrintJob claimed = Assert.IsType<PrintJob>(await api.ClaimAsync(CancellationToken.None));
+      Assert.True(JsonNode.DeepEquals(JsonNode.Parse(job.ToJsonString()), JsonNode.Parse(JsonSerializer.Serialize(claimed, PrintApiClient.JsonOptions))),
+         $"The claimed job differs from the one offered: {JsonSerializer.Serialize(claimed, PrintApiClient.JsonOptions)}");
    }
 
 
@@ -98,18 +182,29 @@ public sealed class ClaimedJobContractTests
    [InlineData("jobId-path", "The claimed job has no usable job identifier.", false)]
    [InlineData("jobId-long", "The claimed job has no usable job identifier.", false)]
    [InlineData("jobId-number", "The claimed job does not have the expected fields.", false)]
+   [InlineData("jobId-201-characters", "The claimed job has no usable job identifier.", false)]
+   [InlineData("jobId-space", "The claimed job has no usable job identifier.", false)]
+   [InlineData("jobId-letter-outside-ascii", "The claimed job has no usable job identifier.", false)]
    [InlineData("printerId-missing", "The claimed job has no usable printer identifier.", true)]
    [InlineData("printerId-path", "The claimed job has no usable printer identifier.", true)]
+   [InlineData("printerId-201-characters", "The claimed job has no usable printer identifier.", true)]
+   [InlineData("printerId-comma", "The claimed job has no usable printer identifier.", true)]
    [InlineData("title-missing", "The claimed job has no title, or one that is too long.", true)]
    [InlineData("title-long", "The claimed job has no title, or one that is too long.", true)]
+   [InlineData("title-1025-characters", "The claimed job has no title, or one that is too long.", true)]
    [InlineData("title-number", "The claimed job does not have the expected fields.", true)]
    [InlineData("format-missing", "The claimed job has no usable document format.", true)]
    [InlineData("format-empty", "The claimed job has no usable document format.", true)]
    [InlineData("format-symbols", "The claimed job has no usable document format.", true)]
+   [InlineData("format-33-characters", "The claimed job has no usable document format.", true)]
+   [InlineData("format-hyphen", "The claimed job has no usable document format.", true)]
    [InlineData("hash-missing", "The claimed job has no SHA-256 content hash.", true)]
    [InlineData("hash-short", "The claimed job has no SHA-256 content hash.", true)]
+   [InlineData("hash-63-characters", "The claimed job has no SHA-256 content hash.", true)]
+   [InlineData("hash-65-characters", "The claimed job has no SHA-256 content hash.", true)]
    [InlineData("hash-not-hex", "The claimed job has no SHA-256 content hash.", true)]
    [InlineData("length-missing", "The claimed job declares an empty or impossibly large document.", true)]
+   [InlineData("length-zero", "The claimed job declares an empty or impossibly large document.", true)]
    [InlineData("length-negative", "The claimed job declares an empty or impossibly large document.", true)]
    [InlineData("length-huge", "The claimed job declares an empty or impossibly large document.", true)]
    [InlineData("length-text", "The claimed job does not have the expected fields.", true)]
@@ -121,8 +216,12 @@ public sealed class ClaimedJobContractTests
    [InlineData("copies-huge", "The claimed job asks for an impossible number of copies.", true)]
    [InlineData("scale-null", "The claimed job has no usable scale option.", true)]
    [InlineData("scale-long", "The claimed job has no usable scale option.", true)]
+   [InlineData("scale-33-characters", "The claimed job has no usable scale option.", true)]
+   [InlineData("scale-hyphen", "The claimed job has no usable scale option.", true)]
    [InlineData("paper-partial", "The claimed job has incomplete or out-of-range paper dimensions, or combines them with a media profile.", true)]
    [InlineData("paper-range", "The claimed job has incomplete or out-of-range paper dimensions, or combines them with a media profile.", true)]
+   [InlineData("paper-just-over-2000-millimetres", "The claimed job has incomplete or out-of-range paper dimensions, or combines them with a media profile.", true)]
+   [InlineData("paper-zero", "The claimed job has incomplete or out-of-range paper dimensions, or combines them with a media profile.", true)]
    [InlineData("paper-with-media", "The claimed job has incomplete or out-of-range paper dimensions, or combines them with a media profile.", true)]
    public async Task EachMalformedMemberOfAClaimedJobIsAProtocolViolation(string fault, string message, bool identified)
    {
@@ -511,12 +610,33 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>A queued-job list that breaks the contract (not JSON, two lists, not a list, too long, an entry that is not an object, has no usable identifiers or gives one twice, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
+   /// <summary>
+   /// The accepting side of the queued-job list's two limits: exactly 200 jobs are all returned, and an entry whose
+   /// unknown option nests to exactly the 64 levels the JSON reader accepts, counted from the response, is read. One
+   /// more of either is refused in the theory below.
+   /// </summary>
+   [Fact]
+   public async Task QueuedListAtItsLimitsIsAccepted()
+   {
+      using var server = new ScriptedServer();
+      server.Add("{\"jobs\":[" + string.Join(",", Enumerable.Range(0, 200).Select(index => $$"""{"jobId":"queued-{{index}}","printerId":"printer1"}""")) + "]}")
+         .Add(QueuedWithNestedOption(64));
+      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      IReadOnlyList<PrintJob> full = await api.QueuedJobsAsync(CancellationToken.None);
+      Assert.Equal(200, full.Count);
+      Assert.Equal("queued-199", full[^1].JobId);
+      Assert.Equal("queued-1", Assert.Single(await api.QueuedJobsAsync(CancellationToken.None)).JobId);
+   }
+
+
+
+   /// <summary>A queued-job list that breaks the contract (not JSON, nested past what the JSON reader accepts, two lists, not a list, too long, an entry that is not an object, has no usable identifiers or gives one twice, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
    [Theory]
    [InlineData("<html></html>", "The queued jobs response is not valid JSON.")]
    [InlineData("[]", "The queued jobs response is not a JSON object.")]
    [InlineData("""{"jobs":{}}""", "The queued jobs response does not hold a list of at most 200 jobs.")]
    [InlineData("too-many", "The queued jobs response does not hold a list of at most 200 jobs.")]
+   [InlineData("nested-65", "The queued jobs response is not valid JSON.")]
    [InlineData("""{"jobs":[null]}""", "A queued job is not a JSON object.")]
    [InlineData("""{"jobs":["queued-1"]}""", "A queued job is not a JSON object.")]
    [InlineData("""{"jobs":[{"printerId":"printer1"}]}""", "A queued job has no usable job or printer identifier.")]
@@ -529,6 +649,8 @@ public sealed class ClaimedJobContractTests
    {
       if(string.Equals(body, "too-many", StringComparison.Ordinal))
       { body = "{\"jobs\":[" + string.Join(",", Enumerable.Range(0, 201).Select(index => $$"""{"jobId":"queued-{{index}}","printerId":"printer1"}""")) + "]}"; }
+      if(string.Equals(body, "nested-65", StringComparison.Ordinal))
+      { body = QueuedWithNestedOption(65); }
       using var server = new ScriptedServer();
       server.Add(body).Add("{}", HttpStatusCode.InternalServerError);
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
@@ -548,18 +670,29 @@ public sealed class ClaimedJobContractTests
       ["jobId-path"] = job => job["jobId"] = "../../hostile-marker",
       ["jobId-long"] = job => job["jobId"] = new string('j', 201),
       ["jobId-number"] = job => job["jobId"] = 7,
+      ["jobId-201-characters"] = job => job["jobId"] = new string('j', 201),
+      ["jobId-space"] = job => job["jobId"] = "job 1",
+      ["jobId-letter-outside-ascii"] = job => job["jobId"] = "job" + (char)0xE9,
       ["printerId-missing"] = job => job.Remove("printerId"),
       ["printerId-path"] = job => job["printerId"] = "hostile-marker/..\\x",
+      ["printerId-201-characters"] = job => job["printerId"] = new string('p', 201),
+      ["printerId-comma"] = job => job["printerId"] = "printer,1",
       ["title-missing"] = job => job.Remove("title"),
       ["title-long"] = job => job["title"] = "hostile-marker" + new string('t', 1024),
+      ["title-1025-characters"] = job => job["title"] = new string('t', 1025),
       ["title-number"] = job => job["title"] = 7,
       ["format-missing"] = job => job.Remove("format"),
       ["format-empty"] = job => job["format"] = "",
       ["format-symbols"] = job => job["format"] = "PDF;hostile-marker",
+      ["format-33-characters"] = job => job["format"] = new string('F', 33),
+      ["format-hyphen"] = job => job["format"] = "PDF-A",
       ["hash-missing"] = job => job.Remove("contentSha256"),
       ["hash-short"] = job => job["contentSha256"] = "00",
-      ["hash-not-hex"] = job => job["contentSha256"] = new string('z', 64),
+      ["hash-63-characters"] = job => job["contentSha256"] = new string('a', 63),
+      ["hash-65-characters"] = job => job["contentSha256"] = new string('a', 65),
+      ["hash-not-hex"] = job => job["contentSha256"] = new string('a', 63) + "g",
       ["length-missing"] = job => job.Remove("contentLength"),
+      ["length-zero"] = job => job["contentLength"] = 0,
       ["length-negative"] = job => job["contentLength"] = -1,
       ["length-huge"] = job => job["contentLength"] = 2_147_483_648,
       ["length-text"] = job => job["contentLength"] = "three",
@@ -571,10 +704,45 @@ public sealed class ClaimedJobContractTests
       ["copies-huge"] = job => job["options"]!["copies"] = 32_768,
       ["scale-null"] = job => job["options"]!["scale"] = null,
       ["scale-long"] = job => job["options"]!["scale"] = "hostile-marker" + new string('S', 40),
+      ["scale-33-characters"] = job => job["options"]!["scale"] = new string('S', 33),
+      ["scale-hyphen"] = job => job["options"]!["scale"] = "ACTUAL-SIZE",
       ["paper-partial"] = job => job["options"]!["paperWidthMm"] = 100,
+      ["paper-just-over-2000-millimetres"] = job => job["options"] = new JsonObject { ["paperWidthMm"] = 2000.001, ["paperHeightMm"] = 10 },
+      ["paper-zero"] = job => job["options"] = new JsonObject { ["paperWidthMm"] = 0, ["paperHeightMm"] = 10 },
       ["paper-range"] = job => job["options"] = new JsonObject { ["paperWidthMm"] = 3000, ["paperHeightMm"] = 10 },
       ["paper-with-media"] = job => job["options"] = new JsonObject { ["paperWidthMm"] = 100, ["paperHeightMm"] = 150, ["mediaProfile"] = new JsonObject { ["id"] = "default", ["revision"] = Hash } },
    };
+
+
+   /// <summary>Each limit of a claimed job at its accepting edge, by the name the theory uses: the change that puts one member of an otherwise valid job exactly there.</summary>
+   private static readonly Dictionary<string, Action<JsonObject>> AtLimit = new(StringComparer.Ordinal)
+   {
+      ["jobId-200-characters"] = job => job["jobId"] = new string('j', 200),
+      ["jobId-every-allowed-character"] = job => job["jobId"] = "Az09-_.:",
+      ["printerId-200-characters"] = job => job["printerId"] = new string('p', 200),
+      ["printerId-every-allowed-character"] = job => job["printerId"] = "Az09-_.:",
+      ["title-1024-characters"] = job => job["title"] = new string('t', 1024),
+      ["format-32-characters"] = job => job["format"] = "Az09_" + new string('F', 27),
+      ["format-1-character"] = job => job["format"] = "Z",
+      ["length-1"] = job => job["contentLength"] = 1,
+      ["length-2147483647"] = job => job["contentLength"] = 2_147_483_647,
+      ["copies-32767"] = job => job["options"]!["copies"] = 32_767,
+      ["scale-32-characters"] = job => job["options"]!["scale"] = "Az09_" + new string('S', 27),
+      ["scale-1-character"] = job => job["options"]!["scale"] = "S",
+      ["paper-2000-millimetres"] = job =>
+      {
+         job["options"]!["paperWidthMm"] = 2000;
+         job["options"]!["paperHeightMm"] = 2000;
+      },
+      ["paper-smallest"] = job =>
+      {
+         job["options"]!["paperWidthMm"] = 0.001;
+         job["options"]!["paperHeightMm"] = 0.001;
+      },
+      ["createdAt-64-characters"] = job => job["createdAt"] = new string('c', 64),
+      ["status-32-characters"] = job => job["status"] = new string('S', 32),
+   };
+
 
 
    /// <summary>A well-formed job as the contract describes it; tests remove or replace one member at a time.</summary>
@@ -616,10 +784,18 @@ public sealed class ClaimedJobContractTests
 
    /// <summary>A claim for the valid job with one unknown option whose nesting brings the whole response to exactly the given depth: the response is level one, the job two, its options three.</summary>
    private static string ClaimWithNestedOption(int depth)
-   {
-      string nested = string.Concat(Enumerable.Repeat("{\"deeper\":", depth - 4)) + "{}" + new string('}', depth - 4);
-      return Claim(ValidJob()).Replace("\"scale\":\"ACTUAL_SIZE\"", "\"scale\":\"ACTUAL_SIZE\",\"finishing\":" + nested, StringComparison.Ordinal);
-   }
+      => Claim(ValidJob()).Replace("\"scale\":\"ACTUAL_SIZE\"", "\"scale\":\"ACTUAL_SIZE\",\"finishing\":" + Nested(depth - 3), StringComparison.Ordinal);
+
+
+
+   /// <summary>A queued-job list of one job with one unknown option whose nesting brings the whole response to exactly the given depth: the response is level one, the list two, the job three, its options four.</summary>
+   private static string QueuedWithNestedOption(int depth)
+      => "{\"jobs\":[{\"jobId\":\"queued-1\",\"printerId\":\"printer1\",\"options\":{\"finishing\":" + Nested(depth - 4) + "}}]}";
+
+
+
+   /// <summary>The given number of JSON objects, each inside the one before.</summary>
+   private static string Nested(int levels) => string.Concat(Enumerable.Repeat("{\"deeper\":", levels - 1)) + "{}" + new string('}', levels - 1);
 
 
 

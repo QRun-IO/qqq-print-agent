@@ -62,9 +62,9 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 
-   /// <summary>A synthetic ZPL job for printer1 whose length and hash match the given document.</summary>
+   /// <summary>A synthetic ZPL job for printer1 whose length and hash match the given document. The hash is lowercase hexadecimal, as the contract writes it.</summary>
    internal static PrintJob Job(byte[] document, string jobId = "job-1", PrintOptions? options = null, string format = "ZPL")
-      => new(jobId, "printer1", "Synthetic", format, Convert.ToHexString(SHA256.HashData(document)), document.Length, options ?? new PrintOptions(), "2026-01-01T00:00:00Z", "CLAIMED");
+      => new(jobId, "printer1", "Synthetic", format, Convert.ToHexStringLower(SHA256.HashData(document)), document.Length, options ?? new PrintOptions(), "2026-01-01T00:00:00Z", "CLAIMED");
 
 
 

@@ -82,6 +82,117 @@ public sealed class RealtimeProtocolTests
 
 
 
+   /// <summary>
+   /// The accepting side of every limit a frame has, one step inside the malformed shapes above: nesting of exactly 24
+   /// levels, a type of exactly 64 characters and a message identifier of exactly 200. Each frame reaches the callback
+   /// unchanged and the connection stays open.
+   /// </summary>
+   [Theory]
+   [InlineData("depth-24")]
+   [InlineData("type-64-characters")]
+   [InlineData("id-200-characters")]
+   public async Task FrameAtEachLimitIsDelivered(string limit)
+   {
+      string type = string.Equals(limit, "type-64-characters", StringComparison.Ordinal) ? new string('T', 64) : "PING";
+      string messageId = string.Equals(limit, "id-200-characters", StringComparison.Ordinal) ? new string('m', 200) : "m-1";
+      string payload = string.Equals(limit, "depth-24", StringComparison.Ordinal) ? string.Concat(Enumerable.Repeat("{\"deeper\":", 22)) + "{}" + new string('}', 22) : "{}";
+      using var socket = new ScriptedWebSocket();
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      var received = System.Threading.Channels.Channel.CreateUnbounded<RealtimeEnvelope>();
+      using var stop = new CancellationTokenSource();
+      Task run = channel.RunAsync(envelope => Assert.True(received.Writer.TryWrite(envelope)), stop.Token);
+      socket.Deliver($$"""{"type":"{{type}}","messageId":"{{messageId}}","payload":{{payload}}}""");
+      RealtimeEnvelope envelope = await received.Reader.ReadAsync(stop.Token).AsTask().WaitAsync(Patience);
+      Assert.Equal(type, envelope.Type);
+      Assert.Equal(messageId, envelope.MessageId);
+      Assert.Equal(payload, envelope.Payload.GetRawText());
+      Assert.True(channel.IsOpen);
+      await stop.CancelAsync();
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+   }
+
+
+
+   /// <summary>
+   /// The accepting side of the two limits inside a frame's payload: an ACK may name a message identifier of exactly
+   /// 200 characters and completes the send that used it, and an ERROR may carry a code of exactly 128 characters and
+   /// fails the send it answers with that code. One character more of either ends the connection, in the theory above.
+   /// </summary>
+   [Fact]
+   public async Task AckAndErrorAtTheirLimitsAreApplied()
+   {
+      string longestId = new('a', 200);
+      string longestCode = new('C', 128);
+      using var socket = new ScriptedWebSocket();
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      using var stop = new CancellationTokenSource();
+      Task run = channel.RunAsync(_ => { }, stop.Token);
+      Task acknowledged = channel.SendAsync("JOB_EVENT", new { jobId = "job-1" }, longestId, acknowledged: true);
+      Task refused = channel.SendAsync("COMMAND_RECEIPT", new { commandId = "command-1" }, "receipt-1", acknowledged: true);
+      await socket.NextSentAsync();
+      await socket.NextSentAsync();
+      socket.Deliver("ACK", "ack-1", new { acknowledgedMessageId = longestId });
+      socket.Deliver("ERROR", "receipt-1", new { code = longestCode, message = "Synthetic refusal.", retryable = false });
+      await acknowledged.WaitAsync(Patience);
+      HttpRequestException rejection = await Assert.ThrowsAsync<HttpRequestException>(() => refused.WaitAsync(Patience));
+      Assert.Equal("Realtime operation was rejected: " + longestCode, rejection.Message);
+      Assert.True(channel.IsOpen);
+      await stop.CancelAsync();
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+   }
+
+
+
+   /// <summary>
+   /// Every realtime message the shared contract publishes as a fixture, in either direction, is read as an envelope by
+   /// the reader the channel uses: its type and message identifier are the fixture's own, its payload is the fixture's
+   /// payload object, and its wire length is the fixture's size. A fixture the reader refused would mean the agent
+   /// drops the connection on a message the contract calls valid.
+   /// </summary>
+   [Theory]
+   [MemberData(nameof(RealtimeFixtures))]
+   public async Task EverySharedRealtimeFixtureIsReadAsAnEnvelope(string fixture)
+   {
+      byte[] frame = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "fixtures", fixture));
+      using var expected = JsonDocument.Parse(frame);
+      var envelope = RealtimeEnvelope.Parse(frame);
+      Assert.Equal(expected.RootElement.GetProperty("type").GetString(), envelope.Type);
+      Assert.Equal(expected.RootElement.GetProperty("messageId").GetString(), envelope.MessageId);
+      Assert.Equal(JsonValueKind.Object, envelope.Payload.ValueKind);
+      Assert.Equal(expected.RootElement.GetProperty("payload").GetRawText(), envelope.Payload.GetRawText());
+      Assert.Equal(frame.Length, envelope.WireLength);
+   }
+
+
+
+   /// <summary>The fixture theory above runs over what the build copied, so this pins that the contract's nineteen realtime messages are all there; a missing checkout cannot make it pass by having nothing to read.</summary>
+   [Fact]
+   public void AllNineteenSharedRealtimeFixturesArePresent()
+   {
+      string[] expected =
+      [
+         "realtime-ack.message.json", "realtime-approval-hello.message.json", "realtime-command-receipt.message.json", "realtime-command.message.json",
+         "realtime-desired-state.message.json", "realtime-error.message.json", "realtime-heartbeat.message.json", "realtime-hello.message.json",
+         "realtime-inventory.message.json", "realtime-job-available.message.json", "realtime-job-event-replay.message.json", "realtime-job-event.message.json",
+         "realtime-media-hello.message.json", "realtime-ping.message.json", "realtime-pong.message.json", "realtime-printers.message.json",
+         "realtime-settings.message.json", "realtime-state-applied.message.json", "realtime-welcome.message.json",
+      ];
+      Assert.Equal(expected, RealtimeFixtureNames().Order(StringComparer.Ordinal), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>One theory row for each shared realtime message fixture the build copied beside the tests.</summary>
+   public static TheoryData<string> RealtimeFixtures() => [.. RealtimeFixtureNames()];
+
+
+
+   /// <summary>The file names of the shared realtime message fixtures the build copied beside the tests.</summary>
+   private static string[] RealtimeFixtureNames()
+      => [.. Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "fixtures"), "realtime-*.message.json").Select(path => Path.GetFileName(path))];
+
+
+
    /// <summary>The server closing the socket, or the connection dropping, is a lost connection, not a protocol violation, so the two can be told apart; both still release a waiting send.</summary>
    [Theory]
    [InlineData(true)]
@@ -219,19 +330,32 @@ public sealed class RealtimeProtocolTests
 
 
 
-   /// <summary>The shared realtime command fixture passes validation, and every way a command can be unsafe to act on is a protocol violation, the same failure a malformed frame raises.</summary>
+   /// <summary>
+   /// The shared realtime command fixture passes validation, and every way a command can be unsafe to act on is a
+   /// protocol violation, the same failure a malformed frame raises. Each limit is tested on both sides: the fixture's
+   /// own lifetime is exactly the fifteen minutes allowed and one second more is refused; identifiers of 200
+   /// characters and an action of 64 pass, and one character more of each is refused.
+   /// </summary>
    [Theory]
    [InlineData("valid", true)]
+   [InlineData("commandId-200-characters", true)]
+   [InlineData("commandId-201-characters", false)]
    [InlineData("commandId-path", false)]
    [InlineData("commandId-missing", false)]
+   [InlineData("requestId-200-characters", true)]
    [InlineData("requestId-long", false)]
    [InlineData("action-missing", false)]
+   [InlineData("action-64-characters", true)]
    [InlineData("action-long", false)]
    [InlineData("created-not-a-time", false)]
    [InlineData("expires-not-a-time", false)]
    [InlineData("expires-before-created", false)]
+   [InlineData("expires-when-created", false)]
+   [InlineData("lifetime-one-second", true)]
    [InlineData("lifetime-over-fifteen-minutes", false)]
    [InlineData("cancel-without-job", false)]
+   [InlineData("cancel-with-200-character-job", true)]
+   [InlineData("cancel-with-201-character-job", false)]
    [InlineData("cancel-with-unsafe-job", false)]
    public async Task RealtimeCommandIsValidatedAsAProtocolBoundary(string fault, bool valid)
    {
@@ -239,25 +363,35 @@ public sealed class RealtimeProtocolTests
       DeviceControlCommand command = envelope.ReadPayload<DeviceControlCommand>();
       command = fault switch
       {
+         "commandId-200-characters" => command with { CommandId = new string('c', 200) },
+         "commandId-201-characters" => command with { CommandId = new string('c', 201) },
          "commandId-path" => command with { CommandId = "../command" },
          "commandId-missing" => command with { CommandId = null! },
+         "requestId-200-characters" => command with { RequestId = new string('r', 200) },
          "requestId-long" => command with { RequestId = new string('r', 201) },
          "action-missing" => command with { Action = "" },
+         "action-64-characters" => command with { Action = new string('A', 64) },
          "action-long" => command with { Action = new string('A', 65) },
          "created-not-a-time" => command with { CreatedAt = "yesterday" },
          "expires-not-a-time" => command with { ExpiresAt = "" },
          "expires-before-created" => command with { ExpiresAt = "2026-10-31T21:59:59Z" },
+         "expires-when-created" => command with { ExpiresAt = "2026-10-31T22:00:00Z" },
+         "lifetime-one-second" => command with { ExpiresAt = "2026-10-31T22:00:01Z" },
          "lifetime-over-fifteen-minutes" => command with { ExpiresAt = "2026-10-31T22:15:01Z" },
          "cancel-without-job" => command with { JobId = null },
+         "cancel-with-200-character-job" => command with { JobId = new string('j', 200) },
+         "cancel-with-201-character-job" => command with { JobId = new string('j', 201) },
          "cancel-with-unsafe-job" => command with { JobId = "job/../1" },
          _ => command,
       };
-      if(valid)
+      if(string.Equals(fault, "valid", StringComparison.Ordinal))
       {
-         PrintApiClient.ValidateRealtimeCommand(command);
          Assert.Equal("CANCEL_SPOOL", command.Action);
          Assert.Equal("job-example-1", command.JobId);
+         Assert.Equal(TimeSpan.FromMinutes(15), DateTimeOffset.Parse(command.ExpiresAt, System.Globalization.CultureInfo.InvariantCulture) - DateTimeOffset.Parse(command.CreatedAt, System.Globalization.CultureInfo.InvariantCulture));
       }
+      if(valid)
+      { PrintApiClient.ValidateRealtimeCommand(command); }
       else
       {
          PrintingProtocolException violation = Assert.Throws<PrintingProtocolException>(() => PrintApiClient.ValidateRealtimeCommand(command));
