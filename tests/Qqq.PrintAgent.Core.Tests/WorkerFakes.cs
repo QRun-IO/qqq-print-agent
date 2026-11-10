@@ -13,8 +13,9 @@ namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>
 /// A hand-written fake of the device-facing print API for worker tests. It hands out the jobs a test offers (as raw
-/// JSON, so a malformed claim can be offered too), serves one document, and records every event, heartbeat and
-/// inventory it receives. A hook runs before each answer so a test can fail a request or move a clock at that point.
+/// JSON, so a malformed claim can be offered too) and serves one document over HTTP, and records every job event,
+/// which reaches it as a realtime frame the test harness passes on. A hook runs before each answer so a test can
+/// fail a request, refuse an event or move a clock at that point.
 /// </summary>
 internal sealed class FakePrintServer : HttpMessageHandler
 {
@@ -42,22 +43,17 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 
-   /// <summary>How many heartbeats arrived.</summary>
-   internal int Heartbeats { get; private set; }
-
-
-
-   /// <summary>How many inventory reports arrived.</summary>
-   internal int Inventories { get; private set; }
-
-
-
    /// <summary>How many document requests arrived.</summary>
    internal int Downloads { get; private set; }
 
 
 
-   /// <summary>Runs before each answer with the kind of request ("claim", "content", "events", "heartbeat", "printers" or "other"); it may throw to fail that request.</summary>
+   /// <summary>Everything that arrived and was not a claim, a document request or a job event: the path of an HTTP request, or "frame" and the type of a realtime frame. A worker sends none.</summary>
+   internal List<string> Unexpected { get; } = [];
+
+
+
+   /// <summary>Runs before each answer with the kind of request ("claim", "content" or "other") and before each job event is recorded ("events"); it may throw to fail that request or refuse that event.</summary>
    internal Func<string, CancellationToken, Task>? Arriving { get; set; }
 
 
@@ -72,7 +68,7 @@ internal sealed class FakePrintServer : HttpMessageHandler
    internal FakePrintServer Offer(PrintJob job, byte[] document)
    {
       Document = document;
-      return OfferRaw(JsonSerializer.Serialize(new JobClaim(job), PrintApiClient.JsonOptions));
+      return OfferRaw(JsonSerializer.Serialize(new { job }, PrintApiClient.JsonOptions));
    }
 
 
@@ -86,15 +82,26 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 
-   /// <summary>Counts the request by route, runs the hook, records an event, and answers a claim with the next offered body or an empty claim.</summary>
+   /// <summary>
+   /// Takes one job event that arrived as a realtime frame. The hook runs first, as it does for a request, and the
+   /// event is recorded only when the hook lets it through; a hook that throws <see cref="HttpRequestException"/>
+   /// refuses the event, and the harness tells the worker so.
+   /// </summary>
+   internal async Task ReceiveEventAsync(string jobId, PrintEvent printEvent)
+   {
+      if(Arriving is not null)
+      { await Arriving("events", CancellationToken.None); }
+      Events.Add((jobId, printEvent));
+   }
+
+
+
+   /// <summary>Counts the request by route, runs the hook, and answers a claim with the next offered body or an empty claim and a document request with the document.</summary>
    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
    {
       string path = request.RequestUri!.AbsolutePath;
       string kind = path.EndsWith("/claim", StringComparison.Ordinal) ? "claim"
-         : path.EndsWith("/content", StringComparison.Ordinal) ? "content"
-         : path.EndsWith("/events", StringComparison.Ordinal) ? "events"
-         : path.EndsWith("/heartbeat", StringComparison.Ordinal) ? "heartbeat"
-         : path.EndsWith("/printers", StringComparison.Ordinal) ? "printers" : "other";
+         : path.EndsWith("/content", StringComparison.Ordinal) ? "content" : "other";
       if(Arriving is not null)
       { await Arriving(kind, cancellationToken); }
       switch(kind)
@@ -105,18 +112,10 @@ internal sealed class FakePrintServer : HttpMessageHandler
          case "content":
             Downloads++;
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Document) };
-         case "events":
-            string jobId = Uri.UnescapeDataString(path.Split('/')[^2]);
-            Events.Add((jobId, JsonSerializer.Deserialize<PrintEvent>(await request.Content!.ReadAsStringAsync(cancellationToken), PrintApiClient.JsonOptions)!));
-            break;
-         case "heartbeat":
-            Heartbeats++;
-            break;
-         case "printers":
-            Inventories++;
-            break;
+         default:
+            Unexpected.Add(path);
+            return Json("{}");
       }
-      return Json("{}");
    }
 
 
@@ -128,8 +127,8 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 /// <summary>
-/// An in-memory stand-in for the durable job journal with the recording, acknowledgement and incomplete-job semantics the
-/// worker relies on. It keeps every event in order so a test can assert the exact sequence of states a job went through.
+/// An in-memory stand-in for the durable job journal with the recording and acknowledgement semantics the worker
+/// relies on. It keeps every event in order so a test can assert the exact sequence of states a job went through.
 /// </summary>
 internal sealed class RecordingJournal : IJobJournal
 {
@@ -194,22 +193,16 @@ internal sealed class RecordingJournal : IJobJournal
 
    /// <summary>Marks the event as delivered so it is no longer pending.</summary>
    public void Acknowledge(string eventId) => _acknowledged.Add(eventId);
-
-
-
-   /// <summary>Jobs whose latest event is RECEIVED or SUBMITTING, meaning a run stopped before finishing them.</summary>
-   public IReadOnlyList<(string JobId, string State)> Incomplete() => [.. _events.GroupBy(entry => entry.JobId, StringComparer.Ordinal).Select(group => group.Last())
-      .Where(entry => entry.Event.Status is "RECEIVED" or "SUBMITTING").Select(entry => (entry.JobId, entry.Event.Status))];
 }
 
 
 
 /// <summary>
-/// A printing platform that prints nothing: it lists the printers a test gives it and counts every submission that
-/// reached the native step, with hooks at discovery and at submission so a test can change the queue or fail the print
-/// at that exact point.
+/// A printing platform that prints nothing: it lists the printers a test gives it, reads each staged file as the spooler
+/// would, and counts every submission that reached the native step, with hooks at discovery and at submission so a test
+/// can change the queue or fail the print at that exact point.
 /// </summary>
-internal class FakePrinterBackend : IPrinterBackend
+internal sealed class FakePrinterBackend : IPrinterBackend
 {
    /// <summary>The printers reported by discovery; one ready ZPL and PDF queue named printer1 by default.</summary>
    internal List<PrinterInfo> Printers { get; } = [new("printer1", "Queue one", "Synthetic driver", "USB001", "READY", ["ZPL", "PDF"])];
@@ -222,12 +215,12 @@ internal class FakePrinterBackend : IPrinterBackend
 
 
    /// <summary>How many submissions reached the native step, whether they then succeeded or failed.</summary>
-   internal int Submissions { get; private protected set; }
+   internal int Submissions { get; private set; }
 
 
 
-   /// <summary>The content of every in-memory submission.</summary>
-   internal List<byte[]> Printed { get; } = [];
+   /// <summary>The content and submission limit of every submission.</summary>
+   internal List<(byte[] Content, TimeSpan Limit)> Files { get; } = [];
 
 
 
@@ -236,8 +229,8 @@ internal class FakePrinterBackend : IPrinterBackend
 
 
 
-   /// <summary>Replaces the in-memory submission; returns the spooler receipt or throws.</summary>
-   internal Func<PrintJob, CancellationToken, Task<string>>? Printing { get; set; }
+   /// <summary>Replaces the submission, given the job and the staged file's path; returns the spooler receipt or throws.</summary>
+   internal Func<PrintJob, string, CancellationToken, Task<string>>? Printing { get; set; }
 
 
 
@@ -251,40 +244,11 @@ internal class FakePrinterBackend : IPrinterBackend
 
 
 
-   /// <summary>Counts the submission and keeps its content, then defers to the hook or returns a fixed spooler receipt.</summary>
-   public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
-   {
-      Submissions++;
-      Printed.Add(content);
-      return Printing is null ? Task.FromResult("spool-1") : Printing(job, cancellationToken);
-   }
-}
-
-
-
-/// <summary>A printing platform that also takes staged files, recording the file's content and the submission limit it was given.</summary>
-internal sealed class FakeFilePrinterBackend : FakePrinterBackend, IFilePrinterBackend
-{
-   /// <summary>The content and submission limit of every file submission.</summary>
-   internal List<(byte[] Content, TimeSpan Limit)> Files { get; } = [];
-
-
-
-   /// <summary>Replaces the file submission; returns the spooler receipt or throws.</summary>
-   internal Func<PrintJob, string, CancellationToken, Task<string>>? PrintingFile { get; set; }
-
-
-
-   /// <summary>The overload without a limit is never the one the worker should use.</summary>
-   public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken) => throw new InvalidOperationException("The worker must pass the submission limit.");
-
-
-
    /// <summary>Counts the submission and reads the staged file as the spooler would, then defers to the hook or returns a fixed receipt.</summary>
    public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
    {
       Submissions++;
       Files.Add((File.ReadAllBytes(path), submissionTimeout));
-      return PrintingFile is null ? Task.FromResult("spool-file-1") : PrintingFile(job, path, cancellationToken);
+      return Printing is null ? Task.FromResult("spool-1") : Printing(job, path, cancellationToken);
    }
 }

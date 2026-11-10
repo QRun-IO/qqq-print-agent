@@ -67,7 +67,7 @@ internal sealed class EnrolledStateFixture : IDisposable
 
 
       /// <summary>Always throws: no test on this state may submit a document.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
+      public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Tests on enrolled local state must never print.");
    }
 }

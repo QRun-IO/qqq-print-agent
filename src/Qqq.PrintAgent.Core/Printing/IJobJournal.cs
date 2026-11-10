@@ -8,7 +8,8 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// <summary>
 /// The durable record the worker depends on. Every state is written here before it is reported, and a reported event is
 /// acknowledged here only after the server accepted it, so a crash or an outage can be recovered without losing an outcome
-/// or printing a job twice. The service implements it with SQLite; tests supply an in-memory version.
+/// or printing a job twice. The service implements it with SQLite, and reads from that store itself, at start, the jobs a
+/// previous run left unfinished; tests supply an in-memory version.
 /// </summary>
 public interface IJobJournal
 {
@@ -34,11 +35,6 @@ public interface IJobJournal
 
    /// <summary>Marks one event delivered, after the server accepted it.</summary>
    void Acknowledge(string eventId);
-
-
-
-   /// <summary>Returns jobs recorded as received or submitting that never finished, so a restart can report them instead of leaving them unknown.</summary>
-   IReadOnlyList<(string JobId, string State)> Incomplete();
 }
 
 

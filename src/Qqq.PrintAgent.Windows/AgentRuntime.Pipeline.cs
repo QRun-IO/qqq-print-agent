@@ -155,8 +155,8 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// One pass of a lane: acquire a download slot, then run the worker once to claim and process a single job with fresh
-   /// store and API objects. Realtime lanes neither recover journal leftovers nor resynchronize inventory, because the
-   /// runtime does that once. It returns false when the lane should stop: the wave has drained, the computer is not
+   /// store and API objects. A lane neither reports journal leftovers nor sends inventory, because the runtime does
+   /// both itself. It returns false when the lane should stop: the wave has drained, the computer is not
    /// enrolled, or this pass found the queue empty, in which case it marks the wave drained so the others stop claiming.
    /// </summary>
    private async Task<bool> RunLaneOnceAsync(string staging, PipelineWave wave, LaneJob held, CancellationToken token)
@@ -176,8 +176,6 @@ public sealed partial class AgentRuntime
          Settings = _realtimeSettings,
          CurrentSettings = () => _realtimeSettings,
          CanSubmit = () => NormalTrafficAllowed && !_transitioning,
-         RecoverIncomplete = false,
-         SynchronizeInventory = false,
          EventGate = _eventDeliveryGate,
          ClaimGate = _claimGate,
          ThrottleDownloadAsync = ThrottleDownloadAsync,

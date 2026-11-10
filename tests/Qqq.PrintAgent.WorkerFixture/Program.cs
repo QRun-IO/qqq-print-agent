@@ -42,7 +42,7 @@ public static class Program
 
 
    /// <summary>The fake printer backend the worker loop talks to: one synthetic queue, with optional hanging or media-drift behavior, and no ability to print anything.</summary>
-   private sealed class FakePrinters(bool hang, bool mediaDrift) : IFilePrinterBackend
+   private sealed class FakePrinters(bool hang, bool mediaDrift) : IPrinterBackend
    {
       /// <summary>Returns the single synthetic queue; in hang mode it first announces READY and then blocks forever, simulating a native call that never returns.</summary>
       public IReadOnlyList<PrinterInfo> Discover()
@@ -58,14 +58,8 @@ public static class Program
 
 
 
-      /// <summary>Always throws: this fixture must never print.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
-         => throw new InvalidOperationException("This fixture must never print.");
-
-
-
       /// <summary>Reports a media change when asked to, blocks forever in hang mode, and otherwise throws; it never opens the document or prints.</summary>
-      public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
+      public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
       {
          if(mediaDrift)
          { throw new PrinterMediaMismatchException("The fixture changed its default before submission."); }

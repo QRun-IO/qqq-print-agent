@@ -6,49 +6,31 @@
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>
-/// Serial happy-path worker. A locally ambiguous submission is never automatically printed again. A worker whose
-/// options name a staging directory hands staged files to its backend, so it is refused at construction, with an
-/// <see cref="ArgumentException"/> naming the backend parameter, unless that backend declares that it takes files.
+/// One lane of the print pipeline: each pass claims at most one job, stages its document and submits it once. A
+/// locally ambiguous submission is never automatically printed again. The worker keeps those rules and nothing else:
+/// whether it may dispatch, claim or submit, the limits in force, the gates shared with the other lanes and the
+/// leases a job holds all come from the runtime that composes it, and every one of them is required. Jobs a previous
+/// run left unfinished are reported by the runtime once, at start, and inventory and heartbeats are the runtime's to
+/// send, so a pass does none of that.
 /// </summary>
-public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null,
-   Func<bool>? canDispatch = null, Func<bool>? canSynchronize = null, PrintWorkerOptions? options = null)
+public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string> log,
+   Func<bool> canDispatch, Func<bool> canSynchronize, PrintWorkerOptions options)
 {
    /// <summary>
-   /// The backend as one that takes staged files; null for a worker that stages nothing and submits from memory. The
-   /// check made here, when the worker is built, is that the backend handed to the worker declares the file interface;
-   /// a backend that does not is a composition error raised to whoever composed it. It proves nothing about a backend
-   /// that declares the interface and forwards to another: a wrapper around a backend without file support passes
-   /// this check and still fails when a staged file is handed to it.
+   /// One pass of a lane. It first drains the durable event outbox, because an outcome the server never heard of would
+   /// stay invisible. Only when nothing is pending, the connection is synchronized and dispatch is allowed does it
+   /// discover printers and claim at most one job. Returns true whenever a claimed job was processed, whatever its
+   /// outcome, and when a malformed job was refused and reported, so the lane keeps draining; false when idle,
+   /// paused, blocked, or the claimed job was one the journal already holds as final or as submitting, which ends the
+   /// lane's pass because the server would only offer that job again.
    /// </summary>
-   private readonly IFilePrinterBackend? _filePrinters = options?.StagingDirectory is null ? null
-      : printers as IFilePrinterBackend ?? throw new ArgumentException("A worker that stages documents to files needs a printer backend that takes files.", nameof(printers));
-
-
-
-   /// <summary>
-   /// One pass of the claim loop. It first reports work a previous run left half-done and drains the durable event
-   /// outbox, because the server never re-claims those jobs and an unreported outcome would stay invisible. Only when
-   /// nothing is pending, dispatch is allowed and the connection is synchronized does it discover printers and claim at
-   /// most one job. Returns true when a job was spooled, or, when recovery is switched off (realtime lanes, where the
-   /// runtime recovers once and each lane only drains), whenever a claimed job was processed whatever its outcome so
-   /// the lane keeps draining; false when idle, paused, blocked, or the claimed job was one the journal already holds as
-   /// final or as submitting, which ends a lane's pass because the server would only offer that job again.
-   /// </summary>
-   public async Task<bool> RunOnceAsync(CancellationToken token = default)
+   public async Task<bool> RunOnceAsync(CancellationToken token)
    {
-      // A recovered job must be reported even when the server never claims it again.
-      foreach((string jobId, string previousState) in options?.RecoverIncomplete == false ? [] : journal.Incomplete())
-      {
-         Record(jobId, previousState is PrintJobState.Submitting ? PrintJobState.OutcomeUnknown : PrintJobState.Failed,
-            previousState is PrintJobState.Submitting ? "Agent restarted during submission; inspect the printer before reprinting." : "Agent stopped before submitting this job; submit a new job if printing is still needed.");
-      }
       await FlushAsync(token).ConfigureAwait(false);
-      if(canSynchronize?.Invoke() == false)
+      if(!canSynchronize())
       {
          return false;
       }
-      if(!api.UsesRealtime)
-      { await api.HeartbeatAsync(token).ConfigureAwait(false); }
       if(journal.Pending().Count > 0)
       {
          // Drain a bounded outbox batch before claiming more work after an outage.
@@ -57,13 +39,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       long inventoryStarted = Time.GetTimestamp();
       IReadOnlyList<PrinterInfo> inventory = printers.Discover();
       TimeSpan inventoryElapsed = Time.GetElapsedTime(inventoryStarted);
-      if(canSynchronize?.Invoke() == false)
-      {
-         return false;
-      }
-      if(options?.SynchronizeInventory != false)
-      { await api.InventoryAsync(inventory, token).ConfigureAwait(false); }
-      if(canDispatch?.Invoke() == false)
+      if(!canSynchronize() || !canDispatch())
       {
          return false;
       }
@@ -72,12 +48,12 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       TimeSpan claimElapsed = Time.GetElapsedTime(claimStarted);
       if(claim.Job is null)
       {
-         // A refused job was reported as FAILED, so a lane keeps draining exactly as it does after any other failed job.
-         return claim.Refused && options?.RecoverIncomplete == false;
+         // A refused job was reported as FAILED, so the lane keeps draining exactly as it does after any other failed job.
+         return claim.Refused;
       }
       try
       { return await ProcessJobAsync(claim.Job, inventory, new JobAttempt(Time, inventoryElapsed, claimElapsed), token).ConfigureAwait(false); }
-      finally { options?.ActiveJobChanged?.Invoke(null); }
+      finally { options.ActiveJobChanged(null); }
    }
 
 
@@ -92,11 +68,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// </summary>
    private async Task<Claim> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
-      if(options?.ClaimGate is not null)
-      { await options.ClaimGate.WaitAsync(token).ConfigureAwait(false); }
+      await options.ClaimGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
-         if(canDispatch?.Invoke() == false || options?.CanClaim?.Invoke() == false)
+         if(!canDispatch() || !options.CanClaim())
          { return default; }
          PrintJob? job;
          try
@@ -111,15 +86,15 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
             ////////////////////////////////////////////////////////////////////////
             // a job recorded as submitting was handed to a printer once already  //
             // and has not concluded: another lane is submitting it now, or a run //
-            // stopped part-way and recovery will report it as OUTCOME_UNKNOWN.   //
+            // stopped part-way and the runtime's recovery reports it as unknown. //
             // claiming it again must never print it a second time, and it must   //
             // not pass silently, because the server should not be offering it    //
             ////////////////////////////////////////////////////////////////////////
             if(!PrintJobState.IsFinal(state))
-            { log?.Invoke($"{job.JobId}: offered again while recorded as {state}, so its submission has started and not concluded; it is not submitted a second time and this pass claims nothing more."); }
+            { log($"{job.JobId}: offered again while recorded as {state}, so its submission has started and not concluded; it is not submitted a second time and this pass claims nothing more."); }
             return default;
          }
-         options?.ActiveJobChanged?.Invoke(job);
+         options.ActiveJobChanged(job);
          try
          {
             Record(job, PrintJobState.Received);
@@ -129,12 +104,12 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          catch
          {
             Record(job, PrintJobState.Failed, "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
-            options?.ActiveJobChanged?.Invoke(null);
+            options.ActiveJobChanged(null);
             throw;
          }
          return new Claim(job, false);
       }
-      finally { options?.ClaimGate?.Release(); }
+      finally { options.ClaimGate.Release(); }
    }
 
 
@@ -152,7 +127,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    {
       if(journal.GetState(rejected.JobId) is { } known)
       {
-         log?.Invoke($"{rejected.JobId}: offered again in a form that breaks the contract while already recorded as {known}; nothing was recorded or reported for it. {reason}");
+         log($"{rejected.JobId}: offered again in a form that breaks the contract while already recorded as {known}; nothing was recorded or reported for it. {reason}");
          return false;
       }
       Track(rejected, inventory);
@@ -185,7 +160,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// submission had begun, and nothing at all when the job is already recorded as SPOOLED, because a release that
    /// fails after Windows accepted the document says nothing about the print and must not be written over it. One
    /// timing line per job is logged afterwards so a slow print can be attributed to a phase from the service's own log
-   /// without any extra request, payload or printer access.
+   /// without any extra request, payload or printer access. Returns true when the job was processed, whatever its
+   /// outcome; false only when something else had already recorded a final state for it, so nothing was done.
    /// </summary>
    private async Task<bool> ProcessJobAsync(PrintJob job, IReadOnlyList<PrinterInfo> inventory, JobAttempt attempt, CancellationToken token)
    {
@@ -201,25 +177,25 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       catch(Exception exception)
       {
          if(attempt.Spooled)
-         { log?.Invoke($"{job.JobId}: spooled, and stays recorded as spooled; releasing what the job held failed afterwards: {exception.Message}"); }
+         { log($"{job.JobId}: spooled, and stays recorded as spooled; releasing what the job held failed afterwards: {exception.Message}"); }
          else
          { Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? PrintJobState.OutcomeUnknown : PrintJobState.Failed, exception.Message); }
       }
-      log?.Invoke(attempt.TimingMessage(job.JobId));
+      log(attempt.TimingMessage(job.JobId));
       if(!token.IsCancellationRequested)
       { await FlushAsync(token).ConfigureAwait(false); }
-      return attempt.Spooled || options?.RecoverIncomplete == false;
+      return true;
    }
 
 
 
    /// <summary>
-   /// Downloads, revalidates and submits one job. The reservation, staged file and submission lease are declared here and
-   /// released when this method returns, after SPOOLED is recorded, exactly as when the same steps ran inline. The
-   /// attempt records how far the job got so the caller can tell a refusal before any bytes from an uncertain submission.
-   /// Between recording SUBMITTING and calling Windows nothing has been sent, so the two things that can stop the job
-   /// there (delivery of the receipt not being confirmed, and cancellation) say in their own words that no bytes were
-   /// submitted.
+   /// Stages, revalidates and submits one job. The reservation, staged file and submission lease are declared here and
+   /// released when this method returns, after SPOOLED is recorded. The attempt records how far the job got so the
+   /// caller can tell a refusal before any bytes from an uncertain submission. Between recording SUBMITTING and calling
+   /// Windows nothing has been sent, so the two things that can stop the job there (delivery of the receipt not being
+   /// confirmed, and cancellation) say in their own words that no bytes were submitted. Handing the verified staged
+   /// file to the backend is the only step after which an outcome is uncertain.
    /// </summary>
    private async Task SubmitJobAsync(PrintJob job, JobAttempt attempt, CancellationToken token)
    {
@@ -227,14 +203,13 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       {
          throw new InvalidDataException("Copies exceed the effective printing policy.");
       }
-      await using IAsyncDisposable? reservation = options?.ReserveDocumentAsync is null ? null : await options.ReserveDocumentAsync(job, token).ConfigureAwait(false);
-      using DownloadedDocument? file = options?.StagingDirectory is null ? null : await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, token, options.ThrottleDownloadAsync).ConfigureAwait(false);
-      byte[]? content = file is null ? await api.DownloadAsync(job, token).ConfigureAwait(false) : null;
+      await using IAsyncDisposable reservation = await options.ReserveDocumentAsync(job, token).ConfigureAwait(false);
+      using DownloadedDocument file = await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, options.ThrottleDownloadAsync, token).ConfigureAwait(false);
       attempt.Download = attempt.Lap();
       RequireCurrentPrinter(job);
       attempt.Revalidate = attempt.Lap();
 
-      await using IAsyncDisposable? submission = options?.AcquireSubmissionAsync is null ? null : await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
+      await using IAsyncDisposable submission = await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
       RequireSubmitAllowed("Dispatch is paused before native submission.");
       Record(job, PrintJobState.Submitting);
       try
@@ -261,7 +236,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       { throw new OperationCanceledException("Stopped before native submission; no bytes were submitted.", token); }
       attempt.Submitting = true;
       attempt.Restart();
-      string spoolId = await SubmitNativeAsync(job, file, content, submissionSettings, token).ConfigureAwait(false);
+      string spoolId = await printers.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token).ConfigureAwait(false);
       attempt.Submit = attempt.Lap();
       Record(job, PrintJobState.Spooled, spoolerJobId: spoolId);
       attempt.Spooled = true;
@@ -292,37 +267,19 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// </summary>
    private void RequireSubmitAllowed(string refusal)
    {
-      if((options?.CanSubmit ?? canDispatch)?.Invoke() == false)
+      if(!options.CanSubmit())
       { throw new InvalidOperationException(refusal); }
    }
 
 
 
-   /// <summary>
-   /// Hands the verified staged file to the file backend, or the in-memory content to a worker that stages nothing, and
-   /// returns its spooler receipt. This is the only step after which an outcome is uncertain. A staged file exists only
-   /// for a worker built with a staging directory, and such a worker was required, when it was built, to have a backend
-   /// that declares the file interface, so the staged file always has somewhere to go from here.
-   /// </summary>
-   private Task<string> SubmitNativeAsync(PrintJob job, DownloadedDocument? file, byte[]? content, RealtimeSettings submissionSettings, CancellationToken token)
-   {
-      return file is not null
-         ? _filePrinters!.PrintFileAsync(job, file.Path, TimeSpan.FromMilliseconds(submissionSettings.NativeSubmissionTimeoutMillis), token)
-         : printers.PrintAsync(job, content!, token);
-   }
+   /// <summary>The limits in force right now, read from the runtime each time, so an administrator's policy change reaches a job that is already past its first check.</summary>
+   private RealtimeSettings EffectiveSettings => options.CurrentSettings();
 
 
 
-   /// <summary>
-   /// The limits in force right now. A live callback wins over the snapshot taken at construction so an administrator's
-   /// policy change reaches a job that is already past its first check; defaults apply when no settings were supplied.
-   /// </summary>
-   private RealtimeSettings EffectiveSettings => options?.CurrentSettings?.Invoke() ?? options?.Settings ?? new();
-
-
-
-   /// <summary>The clock the phase timings are measured on: the one supplied in the options, otherwise the system clock.</summary>
-   private TimeProvider Time => options?.TimeProvider ?? TimeProvider.System;
+   /// <summary>The clock the phase timings are measured on: the one supplied in the options, the system clock unless a test supplies its own.</summary>
+   private TimeProvider Time => options.TimeProvider;
 
 
 
@@ -341,7 +298,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    private void Record(string jobId, string state, string? message = null, string? spoolerJobId = null)
    {
       journal.Record(jobId, new PrintEvent(Guid.NewGuid().ToString("N"), state, message, spoolerJobId));
-      log?.Invoke($"{jobId}: {state}");
+      log($"{jobId}: {state}");
    }
 
 
@@ -353,8 +310,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// </summary>
    private async Task FlushAsync(CancellationToken token)
    {
-      if(options?.EventGate is not null)
-      { await options.EventGate.WaitAsync(token).ConfigureAwait(false); }
+      await options.EventGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
          foreach((string jobId, PrintEvent printEvent) in journal.Pending())
@@ -363,7 +319,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
             journal.Acknowledge(printEvent.EventId);
          }
       }
-      finally { options?.EventGate?.Release(); }
+      finally { options.EventGate.Release(); }
    }
 
 

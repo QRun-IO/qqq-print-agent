@@ -49,12 +49,12 @@ public sealed class RealtimeTransportTests
       byte[] bytes = new byte[25 * 1024 * 1024];
       Random.Shared.NextBytes(bytes);
       using var handler = new DocumentHandler(bytes);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: handler);
+      using PrintApiClient api = FakeSessionClient.ApiOver(handler);
       string staging = Path.Combine(Path.GetTempPath(), "qqq-large-stream-" + Guid.NewGuid().ToString("N"));
       PrintJob job = Job(bytes.Length) with { ContentSha256 = Convert.ToHexString(SHA256.HashData(bytes)) };
       try
       {
-         using DownloadedDocument downloaded = await api.DownloadFileAsync(job, staging, new RealtimeSettings(), CancellationToken.None);
+         using DownloadedDocument downloaded = await api.DownloadFileAsync(job, staging, new RealtimeSettings(), WorkerHarness.Unpaced, CancellationToken.None);
          Assert.Equal(bytes.Length, new FileInfo(downloaded.Path).Length);
          using FileStream file = File.OpenRead(downloaded.Path);
          Assert.Equal(job.ContentSha256, Convert.ToHexString(await SHA256.HashDataAsync(file)));
@@ -90,7 +90,7 @@ public sealed class RealtimeTransportTests
       Task reader = channel.RunAsync(message => state.TrySetResult(message), timeout.Token);
       using PrintApiClient api = PrintApiClient.ForSession(session).WithRealtime(channel, new RealtimeSettings());
       string staging = Path.Combine(Path.GetTempPath(), "qqq-realtime-test-" + Guid.NewGuid().ToString("N"));
-      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(25 * 1024 * 1024), staging, new RealtimeSettings(), timeout.Token);
+      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(25 * 1024 * 1024), staging, new RealtimeSettings(), WorkerHarness.Unpaced, timeout.Token);
       try
       {
          await body.Entered.Task.WaitAsync(timeout.Token);
@@ -124,16 +124,16 @@ public sealed class RealtimeTransportTests
    {
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-content");
       using var handler = new DocumentHandler(bytes);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: handler);
+      using PrintApiClient api = FakeSessionClient.ApiOver(handler);
       string staging = Path.Combine(Path.GetTempPath(), "qqq-download-test-" + Guid.NewGuid().ToString("N"));
       PrintJob job = Job(bytes.Length) with { ContentSha256 = Convert.ToHexString(SHA256.HashData(corrupt ? [1] : bytes)) };
       try
       {
          if(corrupt)
-         { await Assert.ThrowsAsync<InvalidDataException>(() => api.DownloadFileAsync(job, staging, new RealtimeSettings(), CancellationToken.None)); }
+         { await Assert.ThrowsAsync<InvalidDataException>(() => api.DownloadFileAsync(job, staging, new RealtimeSettings(), WorkerHarness.Unpaced, CancellationToken.None)); }
          else
          {
-            using DownloadedDocument downloaded = await api.DownloadFileAsync(job, staging, new RealtimeSettings(), CancellationToken.None);
+            using DownloadedDocument downloaded = await api.DownloadFileAsync(job, staging, new RealtimeSettings(), WorkerHarness.Unpaced, CancellationToken.None);
             Assert.Equal(bytes, await File.ReadAllBytesAsync(downloaded.Path));
             Assert.Throws<IOException>(() => { using var write = new FileStream(downloaded.Path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite); });
          }

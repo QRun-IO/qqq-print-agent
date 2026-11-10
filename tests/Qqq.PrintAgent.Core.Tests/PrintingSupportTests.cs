@@ -41,47 +41,25 @@ public sealed class PrintingSupportTests
 
 
 
-   /// <summary>A job is submitted only while its printer is still shared: the check is made again at submission, for in-memory and staged documents alike, and a refusal never reaches the inner backend.</summary>
+   /// <summary>A job is submitted only while its printer is still shared: the check is made again at submission, the staged file and its submission limit reach the inner backend unchanged, and a refusal never reaches it.</summary>
    [Fact]
    public async Task ExposureFilterRechecksSharingAtSubmission()
    {
       using var temp = new TempDirectory();
       await File.WriteAllBytesAsync(temp.File("staged.document"), [9, 8, 7]);
-      var inner = new FakeFilePrinterBackend();
+      var inner = new FakePrinterBackend();
       var shared = new HashSet<string>(StringComparer.Ordinal) { "printer1" };
       var backend = new ExposedPrinterBackend(inner, () => shared);
 
-      Assert.Equal("spool-1", await backend.PrintAsync(Job, [1], CancellationToken.None));
-      Assert.Equal("spool-file-1", await backend.PrintFileAsync(Job, temp.File("staged.document"), CancellationToken.None));
-      Assert.Equal("spool-file-1", await backend.PrintFileAsync(Job, temp.File("staged.document"), TimeSpan.FromSeconds(30), CancellationToken.None));
-      Assert.Equal(new[] { TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(30) }, inner.Files.Select(file => file.Limit));
-      Assert.Equal(3, inner.Submissions);
+      Assert.Equal("spool-1", await backend.PrintFileAsync(Job, temp.File("staged.document"), TimeSpan.FromSeconds(30), CancellationToken.None));
+      (byte[] content, TimeSpan limit) = Assert.Single(inner.Files);
+      Assert.Equal(new byte[] { 9, 8, 7 }, content);
+      Assert.Equal(TimeSpan.FromSeconds(30), limit);
 
       shared.Clear();
-      Assert.Equal("The printer is not exposed to QQQ on this computer.", (await Assert.ThrowsAsync<InvalidOperationException>(() => backend.PrintAsync(Job, [1], CancellationToken.None))).Message);
-      await Assert.ThrowsAsync<InvalidOperationException>(() => backend.PrintFileAsync(Job, temp.File("staged.document"), CancellationToken.None));
-      Assert.Equal(3, inner.Submissions);
-   }
-
-
-
-   /// <summary>A staged file cannot be handed to an inner backend that only takes in-memory content; the filter says so instead of silently printing nothing.</summary>
-   [Fact]
-   public async Task ExposureFilterRefusesAFileWhenTheInnerBackendCannotTakeOne()
-   {
-      var backend = new ExposedPrinterBackend(new FakePrinterBackend(), () => new HashSet<string>(StringComparer.Ordinal) { "printer1" });
-      NotSupportedException refused = await Assert.ThrowsAsync<NotSupportedException>(() => backend.PrintFileAsync(Job, "unused.document", TimeSpan.FromSeconds(1), CancellationToken.None));
-      Assert.Equal("The printer backend does not support file submissions.", refused.Message);
-   }
-
-
-
-   /// <summary>A file backend written before submission limits existed still works: the overload with a limit falls back to the one without.</summary>
-   [Fact]
-   public async Task FileBackendWithoutALimitOverloadStillReceivesTheFile()
-   {
-      var backend = new LegacyFileBackend();
-      Assert.Equal("legacy:staged.document", await ((IFilePrinterBackend)backend).PrintFileAsync(Job, "staged.document", TimeSpan.FromSeconds(5), CancellationToken.None));
+      InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(() => backend.PrintFileAsync(Job, temp.File("staged.document"), TimeSpan.FromSeconds(30), CancellationToken.None));
+      Assert.Equal("The printer is not exposed to QQQ on this computer.", refused.Message);
+      Assert.Equal(1, inner.Submissions);
    }
 
 
@@ -335,25 +313,6 @@ public sealed class PrintingSupportTests
       Assert.Equal(14, counted);
       Assert.Equal("text/plain", content.Headers.ContentType!.MediaType);
       Assert.True(destination.CanWrite);
-   }
-
-
-
-   /// <summary>A file backend that predates submission limits: it implements only the overload without one.</summary>
-   private sealed class LegacyFileBackend : IFilePrinterBackend
-   {
-      /// <inheritdoc/>
-      public IReadOnlyList<PrinterInfo> Discover() => [];
-
-
-
-      /// <inheritdoc/>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new NotSupportedException();
-
-
-
-      /// <summary>Returns a receipt naming the file it was given.</summary>
-      public Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken) => Task.FromResult("legacy:" + path);
    }
 
 

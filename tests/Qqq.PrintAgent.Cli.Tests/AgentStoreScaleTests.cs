@@ -5,11 +5,11 @@
 
 using System.Diagnostics;
 using System.Globalization;
-using System.Net;
-using System.Text;
+using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Testing;
 using Qqq.PrintAgent.Windows;
 using Xunit.Abstractions;
 
@@ -67,36 +67,69 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
 
 
    /// <summary>
-   /// Ten thousand unacknowledged events are sent at most 200 per poll, and a new job is claimed only once the outbox is empty
-   /// (the claim happens on the 50th poll, not before), so a large backlog cannot starve receipts or grow a request unboundedly.
+   /// Ten thousand unacknowledged events are sent at most 200 per pass, each as a realtime frame the server acknowledges,
+   /// and a new job is claimed only once the outbox is empty (the claim happens on the 50th pass, not before), so a large
+   /// backlog cannot starve receipts or grow a pass unboundedly.
    /// </summary>
    [Fact]
    public async Task TenThousandPendingEvents_DrainInBoundedBatchesBeforeAnotherClaim()
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-outbox-scale-" + Guid.NewGuid().ToString("N"));
+      using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+      using LoopbackWebSocketPeer peer = new();
+      using ClientWebSocket client = new();
+      client.Options.AddSubProtocol("qqq-printing.v1");
+      Task<WebSocket> accepting = peer.AcceptAsync(limit.Token);
+      await client.ConnectAsync(new Uri("ws://127.0.0.1:" + peer.Origin.Port.ToString(CultureInfo.InvariantCulture) + "/qqq/v1/qbit/printing/device/realtime"), limit.Token);
+      AcknowledgingServer server = new(await accepting);
+      using PrintingRealtimeChannel channel = new(client, new RealtimeSettings());
+      Task running = channel.RunAsync(_ => { }, limit.Token);
+      Task acknowledging = server.RunAsync(limit.Token);
       try
       {
          using AgentStore store = new(directory);
          Seed(directory, 10000, pending: true);
-         using CountingHandler handler = new();
-         using PrintApiClient api = new("http://localhost", "synthetic", handler);
-         PrintWorker worker = new(api, new NoPrinter(), store);
+         using SessionFixture.FakeSession session = new();
+         using PrintApiClient api = PrintApiClient.ForSession(session).WithRealtime(channel, new RealtimeSettings());
+         using SemaphoreSlim eventGate = new(1, 1);
+         using SemaphoreSlim claimGate = new(1, 1);
+         PrintWorker worker = new(api, new NoPrinter(), store, _ => { }, () => true, () => true, LaneOptions(directory, eventGate, claimGate));
          long start = Stopwatch.GetTimestamp();
          for(int batch = 0; batch < 50; batch++)
          {
             Assert.Equal(200, store.Pending().Count);
-            await worker.RunOnceAsync();
-            Assert.Equal((batch + 1) * 200, handler.Events);
-            Assert.Equal(batch == 49 ? 1 : 0, handler.Claims);
+            await worker.RunOnceAsync(limit.Token);
+            Assert.Equal((batch + 1) * 200, server.Events);
+            Assert.Equal(batch == 49 ? ["device/jobs/claim"] : [], session.Paths);
          }
          Assert.Empty(store.Pending());
-         output.WriteLine($"10,000 durable event acknowledgements: {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms; 200 events maximum per poll.");
+         output.WriteLine($"10,000 durable event acknowledgements: {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms; 200 events maximum per pass.");
       }
       finally
       {
+         await limit.CancelAsync();
+         await Task.WhenAll(running, acknowledging).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
          JournalFiles.Delete(directory);
       }
    }
+
+
+
+   /// <summary>The hooks a lane is given, for a worker that only drains its outbox and claims: the gates are real, and every hook a job would use fails the test, because no job is ever offered.</summary>
+   private static PrintWorkerOptions LaneOptions(string directory, SemaphoreSlim eventGate, SemaphoreSlim claimGate) => new()
+   {
+      StagingDirectory = Path.Combine(directory, "staging"),
+      Settings = new RealtimeSettings(),
+      CurrentSettings = () => new RealtimeSettings(),
+      CanSubmit = () => true,
+      EventGate = eventGate,
+      ClaimGate = claimGate,
+      ThrottleDownloadAsync = (_, _) => Task.CompletedTask,
+      CanClaim = () => true,
+      ReserveDocumentAsync = (_, _) => throw new InvalidOperationException("Scale tests must not print."),
+      AcquireSubmissionAsync = (_, _) => throw new InvalidOperationException("Scale tests must not print."),
+      ActiveJobChanged = _ => { },
+   };
 
 
 
@@ -178,27 +211,31 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
 
 
 
-   /// <summary>Fake server that counts event deliveries and claims and always answers with no job.</summary>
-   private sealed class CountingHandler : HttpMessageHandler
+   /// <summary>The server's end of the realtime connection: it counts each job event it receives and acknowledges it, so the worker's delivery completes and the journal marks the event delivered.</summary>
+   private sealed class AcknowledgingServer(WebSocket socket)
    {
-      public int Events { get; private set; }
-      public int Claims { get; private set; }
+      private int _events;
 
 
 
-      /// <summary>Increments the matching counter by URL suffix and returns an empty claim.</summary>
-      protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+      /// <summary>How many job events arrived.</summary>
+      internal int Events => Volatile.Read(ref _events);
+
+
+
+      /// <summary>Reads frames until the test stops it. An event is counted before its acknowledgement is sent, so the count is settled by the time the worker's delivery returns.</summary>
+      internal async Task RunAsync(CancellationToken token)
       {
-         string path = request.RequestUri!.AbsolutePath;
-         if(path.EndsWith("/events", StringComparison.Ordinal))
+         byte[] buffer = new byte[65536];
+         while(true)
          {
-            Events++;
+            WebSocketReceiveResult frame = await socket.ReceiveAsync(buffer, token);
+            Assert.True(frame.EndOfMessage);
+            using var message = JsonDocument.Parse(buffer.AsMemory(0, frame.Count));
+            Assert.Equal("JOB_EVENT", message.RootElement.GetProperty("type").GetString());
+            Interlocked.Increment(ref _events);
+            await LoopbackWebSocketPeer.SendAsync(socket, "ACK", new { acknowledgedMessageId = message.RootElement.GetProperty("messageId").GetString() }, token);
          }
-         if(path.EndsWith("/claim", StringComparison.Ordinal))
-         {
-            Claims++;
-         }
-         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"job\":null}", Encoding.UTF8, "application/json") });
       }
    }
 
@@ -213,6 +250,6 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
 
 
       /// <summary>Always throws: scale tests must not print.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken) => throw new InvalidOperationException("Scale tests must not print.");
+      public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken) => throw new InvalidOperationException("Scale tests must not print.");
    }
 }

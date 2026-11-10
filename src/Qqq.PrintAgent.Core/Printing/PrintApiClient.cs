@@ -3,63 +3,58 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Qqq.PrintAgent.Core.Transport;
+using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>
-/// The agent's client for the QQQ printing API. The base part holds the HTTP calls that remain (enrollment, claim, content,
-/// queued jobs and operator actions) and routes inventory, heartbeat and events over the realtime channel whenever one is
-/// attached. Other parts add the native session, downloads, realtime and control calls.
+/// The agent's client for the QQQ printing API. It is built from a signed-in session and sends every request through
+/// it. The base part holds the HTTP calls (enrollment, claim, queued jobs and operator actions) and sends inventory and
+/// job events over the realtime channel, which is the only way they travel. Other parts add the session, downloads,
+/// the channel itself and control calls.
 /// </summary>
 public sealed partial class PrintApiClient : IDisposable
 {
    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
-   private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(20);
    private readonly HttpClient _http;
    private readonly TimeProvider _time;
 
 
 
-   /// <summary>The agent's assembly version, sent with heartbeats so the server can show which build each device runs.</summary>
+   /// <summary>The agent's assembly version, sent when enrolling, in the realtime hello and with heartbeats, so the server can show which build each device runs.</summary>
    public static string AgentVersion => typeof(PrintApiClient).Assembly.GetName().Version?.ToString() ?? "unknown";
 
 
 
    /// <summary>
-   /// Creates a client for one server. The address must be HTTPS, or HTTP only on loopback for local development. Responses
-   /// are limited to 2 MiB and requests to 60 seconds, and a bearer token is attached only when one is supplied (the legacy
-   /// diagnostic path); native sessions authenticate through the session client instead. The control, download and
-   /// throttling limits are counted on the supplied clock, the system clock by default. The 60 second request limit is
-   /// not: it is <c>HttpClient.Timeout</c>, which the platform enforces on the system clock whatever clock is supplied.
+   /// Creates a client whose every request goes through the given signed-in session, to the printing extension's path on
+   /// the session's server. There is no other way to build one, so the client cannot send anything outside a session,
+   /// and it holds no credential of its own: the session adds what authenticates a request. The server address is the
+   /// session's, which the session client has already required to be HTTPS or explicitly allowed loopback HTTP. Responses
+   /// are limited to 2 MiB and requests to 60 seconds. The download limits are counted on the supplied clock, the system
+   /// clock by default. The 60 second request limit is not: it is <c>HttpClient.Timeout</c>, which the platform enforces
+   /// on the system clock whatever clock is supplied.
    /// </summary>
-   public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null)
+   private PrintApiClient(IQqqSessionClient session, TimeProvider? timeProvider)
    {
-      Uri uri = new(serverUrl.TrimEnd('/') + "/printing/v1/");
-      if(!string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && !(string.Equals(uri.Scheme, "http", StringComparison.Ordinal) && uri.IsLoopback))
-      {
-         throw new ArgumentException("Use HTTPS, or HTTP on loopback for local development.", nameof(serverUrl));
-      }
+      _session = session;
       _time = timeProvider ?? TimeProvider.System;
-      _http = handler is null ? new HttpClient() : new HttpClient(handler);
-      _http.BaseAddress = uri;
-      _http.Timeout = TimeSpan.FromSeconds(60);
-      _http.MaxResponseContentBufferSize = 2 * 1024 * 1024;
-      if(token is not null)
+      _http = new HttpClient(new PrintingSessionHandler(session))
       {
-         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-      }
+         BaseAddress = new Uri(session.Origin, PrintingSessionHandler.Prefix),
+         Timeout = TimeSpan.FromSeconds(60),
+         MaxResponseContentBufferSize = 2 * 1024 * 1024,
+      };
    }
 
 
 
-   /// <summary>Enrolls this computer with a short-lived code and returns the device identity and its secondary proof. A protocol version other than 1 is rejected rather than guessed at.</summary>
+   /// <summary>Enrolls this computer with a short-lived code, on the enrollment route of the signed-in session, and returns the device identity and its secondary proof. A protocol version other than 1 is rejected rather than guessed at.</summary>
    public async Task<EnrollmentResponse> EnrollAsync(EnrollmentRequest request, CancellationToken token = default)
    {
-      using HttpResponseMessage response = await _http.PostAsJsonAsync(_nativeSession ? "devices/enroll" : "enroll", request, JsonOptions, token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _http.PostAsJsonAsync("devices/enroll", request, JsonOptions, token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
       EnrollmentResponse result = await response.Content.ReadFromJsonAsync<EnrollmentResponse>(token).ConfigureAwait(false)
          ?? throw new InvalidDataException("Missing enrollment response.");
@@ -73,35 +68,10 @@ public sealed partial class PrintApiClient : IDisposable
 
 
 
-   /// <summary>Reports the printers this computer shares, over the realtime channel when attached (waiting for the server's acknowledgement) and otherwise over HTTP.</summary>
+   /// <summary>Reports the printers this computer shares, over the realtime channel, and waits for the server's acknowledgement.</summary>
    public async Task InventoryAsync(IReadOnlyList<PrinterInfo> printers, CancellationToken token)
    {
-      if(_realtime is not null)
-      {
-         await RealtimeChannel.SendAsync("INVENTORY", new { printers }, acknowledged: true, token: token).ConfigureAwait(false);
-         return;
-      }
-      using HttpResponseMessage response = await _http.PutAsJsonAsync("device/printers", new { printers }, JsonOptions, token).ConfigureAwait(false);
-      response.EnsureSuccessStatusCode();
-   }
-
-
-
-   /// <summary>Sends a liveness heartbeat without a device profile.</summary>
-   public Task HeartbeatAsync(CancellationToken token) => HeartbeatAsync(null, token);
-
-
-
-   /// <summary>Sends a liveness heartbeat carrying the agent version and, when given, the computer profile, over the realtime channel when attached and otherwise over HTTP.</summary>
-   public async Task HeartbeatAsync(DeviceProfile? profile, CancellationToken token)
-   {
-      if(_realtime is not null)
-      {
-         await RealtimeChannel.SendAsync("HEARTBEAT", new { agentVersion = AgentVersion, profile }, token: token).ConfigureAwait(false);
-         return;
-      }
-      using HttpResponseMessage response = await _http.PostAsJsonAsync("device/heartbeat", new { agentVersion = AgentVersion, profile }, JsonOptions, token).ConfigureAwait(false);
-      response.EnsureSuccessStatusCode();
+      await RealtimeChannel.SendAsync("INVENTORY", new { printers }, acknowledged: true, token: token).ConfigureAwait(false);
    }
 
 
@@ -123,58 +93,12 @@ public sealed partial class PrintApiClient : IDisposable
 
 
    /// <summary>
-   /// Downloads a whole document into memory, rejecting an empty or over-20 MiB declaration up front. Reading stops the moment
-   /// the data exceeds the declared length, and the result must match the declared length and SHA-256 or it is refused, so a
-   /// truncated or altered document can never be printed.
-   /// </summary>
-   public async Task<byte[]> DownloadAsync(PrintJob job, CancellationToken token)
-   {
-      if(job.ContentLength is < 1 or > 20_971_520)
-      {
-         throw new InvalidDataException("Document exceeds the 20 MiB limit or is empty.");
-      }
-
-      using var downloadTimeout = new Deadline(_time, _http.Timeout, token);
-      token = downloadTimeout.Token;
-      using HttpResponseMessage response = await _http.GetAsync($"device/jobs/{Uri.EscapeDataString(job.JobId)}/content", HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-      response.EnsureSuccessStatusCode();
-      await using Stream source = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
-      using MemoryStream output = new();
-      byte[] buffer = new byte[81920];
-      int read;
-      while((read = await source.ReadAsync(buffer, token).ConfigureAwait(false)) != 0)
-      {
-         if(output.Length + read > job.ContentLength)
-         {
-            throw new InvalidDataException("Document length mismatch.");
-         }
-
-         await output.WriteAsync(buffer.AsMemory(0, read), token);
-      }
-      byte[] content = output.ToArray();
-      if(content.LongLength != job.ContentLength || !string.Equals(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)), job.ContentSha256, StringComparison.OrdinalIgnoreCase))
-      {
-         throw new InvalidDataException("Document integrity check failed.");
-      }
-
-      return content;
-   }
-
-
-
-   /// <summary>
-   /// Delivers one job event. Over the realtime channel the message id is derived from the event id and the server must
+   /// Delivers one job event over the realtime channel. The message id is derived from the event id and the server must
    /// acknowledge it, so a replay after a lost acknowledgement carries the same identity and is not applied twice.
    /// </summary>
    public async Task EventAsync(string jobId, PrintEvent printEvent, CancellationToken token)
    {
-      if(_realtime is not null)
-      {
-         await RealtimeChannel.SendAsync("JOB_EVENT", new { jobId, @event = printEvent }, "event-" + printEvent.EventId, acknowledged: true, token: token).ConfigureAwait(false);
-         return;
-      }
-      using HttpResponseMessage response = await _http.PostAsJsonAsync($"device/jobs/{Uri.EscapeDataString(jobId)}/events", printEvent, JsonOptions, token).ConfigureAwait(false);
-      response.EnsureSuccessStatusCode();
+      await RealtimeChannel.SendAsync("JOB_EVENT", new { jobId, @event = printEvent }, "event-" + printEvent.EventId, acknowledged: true, token: token).ConfigureAwait(false);
    }
 
 

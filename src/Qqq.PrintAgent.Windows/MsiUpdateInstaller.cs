@@ -68,7 +68,7 @@ public static partial class MsiUpdateInstaller
       string helperExecutable = Path.Combine(helper, "qqq-print-agent.exe");
       if(!File.Exists(helperExecutable))
       {
-         throw new FileNotFoundException("The installed diagnostic CLI is missing. Repair the machine MSI first.");
+         throw new FileNotFoundException("The installed command line tool is missing. Repair the machine MSI first.");
       }
       using FileStream content = new(package, FileMode.Open, FileAccess.Read, FileShare.Read);
       string hash = Convert.ToHexString(SHA256.HashData(content));

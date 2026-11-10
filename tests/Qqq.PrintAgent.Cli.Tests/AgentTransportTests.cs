@@ -104,7 +104,7 @@ public sealed class AgentTransportTests
 
 
       /// <summary>Always throws: physical printing is forbidden here.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
+      public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Physical printing is forbidden in this test.");
    }
 }

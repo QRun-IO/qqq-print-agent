@@ -16,22 +16,24 @@ public sealed class PrintApiBoundsTests
    public async Task Claim_RejectsOversizedControlResponse()
    {
       using ResponseHandler handler = new(() => new ByteArrayContent(new byte[2 * 1024 * 1024 + 1]));
-      using PrintApiClient api = new("https://synthetic.invalid", handler: handler);
+      using PrintApiClient api = FakeSessionClient.ApiOver(handler);
       await Assert.ThrowsAsync<HttpRequestException>(() => api.ClaimAsync(CancellationToken.None));
    }
 
 
 
-   /// <summary>A 3 MiB document, larger than the control-reply cap, downloads and matches its hash, showing the control limit does not apply to document content.</summary>
+   /// <summary>A 3 MiB document, larger than the control-reply cap, is staged and matches its hash, showing the control limit does not apply to document content.</summary>
    [Fact]
    public async Task Download_AllowsDocumentLargerThanControlResponseLimit()
    {
       byte[] document = new byte[3 * 1024 * 1024];
       string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(document));
+      using var staging = new TempDirectory();
       using ResponseHandler handler = new(() => new ByteArrayContent(document));
-      using PrintApiClient api = new("https://synthetic.invalid", handler: handler);
+      using PrintApiClient api = FakeSessionClient.ApiOver(handler);
       PrintJob job = new("job", "printer", "Title", "PDF", hash, document.Length, new PrintOptions(), "", "CLAIMED");
-      Assert.Equal(document, await api.DownloadAsync(job, CancellationToken.None));
+      using DownloadedDocument staged = await api.DownloadFileAsync(job, staging.Path, new RealtimeSettings(), WorkerHarness.Unpaced, CancellationToken.None);
+      Assert.Equal(document.Length, new FileInfo(staged.Path).Length);
    }
 
 

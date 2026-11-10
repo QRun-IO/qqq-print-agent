@@ -6,17 +6,25 @@
 using System.Net;
 using System.Text;
 using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>
 /// A hand-written session for tests of code that sends printing requests through one. It implements only what the
 /// interface requires, so the interface's own default members (provider sign-out, the realtime socket) are the ones a
-/// test observes. Printing requests are recorded and answered from a queue.
+/// test observes. Printing requests are recorded and answered from a queue, or, when the test has a fake server of its
+/// own, passed on to it under the printing extension's path, as the real session passes them to the real server.
 /// </summary>
-internal sealed class FakeSessionClient : IQqqSessionClient
+internal sealed class FakeSessionClient(HttpMessageHandler? server = null) : IQqqSessionClient
 {
    private readonly Queue<Func<HttpResponseMessage>> _responses = new();
+   private readonly HttpMessageInvoker? _server = server is null ? null : new HttpMessageInvoker(server, disposeHandler: false);
+
+
+
+   /// <summary>The API client as the product builds it, through a session, with the session's requests answered by the test's own server. The clock is the one the client counts its limits on.</summary>
+   internal static PrintApiClient ApiOver(HttpMessageHandler server, TimeProvider? timeProvider = null) => PrintApiClient.ForSession(new FakeSessionClient(server), timeProvider);
 
 
 
@@ -49,10 +57,15 @@ internal sealed class FakeSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>Records the request and returns the next queued answer.</summary>
+   /// <summary>Records the request, then passes it to the test's server when there is one and otherwise returns the next queued answer.</summary>
    public async Task<HttpResponseMessage> SendPrintingAsync(HttpMethod method, string relativePath, HttpContent? content = null, CancellationToken cancellationToken = default)
    {
       Printing.Add((method, relativePath, content is null ? null : await content.ReadAsStringAsync(cancellationToken)));
+      if(_server is not null)
+      {
+         using var request = new HttpRequestMessage(method, new Uri(Origin, PrintingSessionHandler.Prefix + relativePath)) { Content = content };
+         return await _server.SendAsync(request, cancellationToken);
+      }
       Assert.True(_responses.Count > 0, "The client sent an unscripted printing request: " + relativePath);
       return _responses.Dequeue()();
    }
@@ -118,8 +131,6 @@ internal sealed class FakeSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>Nothing to release.</summary>
-   public void Dispose()
-   {
-   }
+   /// <summary>Releases the invoker in front of the test's server; the server itself belongs to the test.</summary>
+   public void Dispose() => _server?.Dispose();
 }

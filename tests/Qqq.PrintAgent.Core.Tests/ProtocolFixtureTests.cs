@@ -11,16 +11,15 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>Client and server share sample JSON replies. Parsing the shared samples here proves the client reads exactly what the server project says it sends, and that optional event fields are left out of what the client sends.</summary>
 public sealed class ProtocolFixtureTests
 {
-   /// <summary>The shared claim reply parses into a job with a ZPL format, one copy and a 64-character content hash.</summary>
+   /// <summary>The shared claim reply, read the way the API client reads a claim, yields a job with a ZPL format, one copy and a 64-character content hash.</summary>
    [Fact]
    public void SharedClaimFixture_Deserializes()
    {
-      string json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "claim.response.json"));
-      JobClaim claim = JsonSerializer.Deserialize<JobClaim>(json, PrintApiClient.JsonOptions)!;
-      Assert.NotNull(claim.Job);
-      Assert.Equal("ZPL", claim.Job.Format);
-      Assert.Equal(1, claim.Job.Options.Copies);
-      Assert.Equal(64, claim.Job.ContentSha256.Length);
+      PrintJob? job = PrintJobContract.ReadClaim(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "fixtures", "claim.response.json")));
+      Assert.NotNull(job);
+      Assert.Equal("ZPL", job.Format);
+      Assert.Equal(1, job.Options.Copies);
+      Assert.Equal(64, job.ContentSha256.Length);
    }
 
 

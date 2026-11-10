@@ -10,17 +10,19 @@ namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>
 /// Streaming download part of the API client: documents go straight into a protected staging file while their size and SHA-256 are
-/// checked, with total, connect and idle time limits and an optional shared bandwidth throttle. Nothing reaches the printer unless the
-/// whole file verified.
+/// checked, with total, connect and idle time limits, paced by the runtime's shared bandwidth throttle. Nothing reaches the printer
+/// unless the whole file verified.
 /// </summary>
 public sealed partial class PrintApiClient
 {
    /// <summary>
    /// Downloads a job's document into a new uniquely named file in the staging folder and returns it open for reading. The
    /// settings must be valid and the declared size within the format and staging limits before any bytes are requested; a failed
-   /// download deletes its partial file, so only a verified file is ever returned.
+   /// download deletes its partial file, so only a verified file is ever returned. The throttle is told how many bytes each read
+   /// brought and returns when the next read may start; the runtime shares one across its lanes so the bandwidth limit holds in
+   /// aggregate.
    /// </summary>
-   public async Task<DownloadedDocument> DownloadFileAsync(PrintJob job, string directory, RealtimeSettings settings, CancellationToken token, Func<int, CancellationToken, Task>? throttle = null)
+   public async Task<DownloadedDocument> DownloadFileAsync(PrintJob job, string directory, RealtimeSettings settings, Func<int, CancellationToken, Task> throttle, CancellationToken token)
    {
       settings.Validate();
       if(job.ContentLength < 1 || job.ContentLength > settings.MaximumDocumentBytes(job.Format) || job.ContentLength > settings.MaxStagedBytes)
@@ -44,18 +46,16 @@ public sealed partial class PrintApiClient
 
 
    /// <summary>
-   /// Requests the document (through the signed-in session when there is one) under a total time limit and a shorter connect limit,
+   /// Requests the document through the signed-in session, under a total time limit and a shorter connect limit,
    /// refuses a response whose declared length differs from the manifest, and copies it into the file with verification. The file is
    /// created exclusively, so an existing file can never be overwritten.
    /// </summary>
-   private async Task DownloadIntoFileAsync(PrintJob job, string path, RealtimeSettings settings, Func<int, CancellationToken, Task>? throttle, CancellationToken token)
+   private async Task DownloadIntoFileAsync(PrintJob job, string path, RealtimeSettings settings, Func<int, CancellationToken, Task> throttle, CancellationToken token)
    {
       using var total = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadTimeoutMillis), token);
       using var connect = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadConnectTimeoutMillis), total.Token);
       string route = $"device/jobs/{Uri.EscapeDataString(job.JobId)}/content";
-      using HttpResponseMessage response = _nativeSessionClient is null
-         ? await _http.GetAsync(route, HttpCompletionOption.ResponseHeadersRead, connect.Token).ConfigureAwait(false)
-         : await _nativeSessionClient.SendPrintingAsync(HttpMethod.Get, route, cancellationToken: connect.Token).ConfigureAwait(false);
+      using HttpResponseMessage response = await _session.SendPrintingAsync(HttpMethod.Get, route, cancellationToken: connect.Token).ConfigureAwait(false);
       response.EnsureSuccessStatusCode();
       if(response.Content.Headers.ContentLength is long declared && declared != job.ContentLength)
       {
@@ -71,15 +71,14 @@ public sealed partial class PrintApiClient
 
    /// <summary>
    /// Copies the stream to the file while hashing it, stopping with an error the moment more than the declared length arrives, when no
-   /// data arrives within the idle limit, or when the final length or SHA-256 does not match. A shared throttle, or else the per-download
-   /// rate limit, paces the copy so the aggregate bandwidth setting holds.
+   /// data arrives within the idle limit, or when the final length or SHA-256 does not match. The throttle paces the copy after each
+   /// read.
    /// </summary>
-   private async Task CopyVerifiedAsync(Stream source, Stream output, PrintJob job, RealtimeSettings settings, Func<int, CancellationToken, Task>? throttle, CancellationToken token)
+   private async Task CopyVerifiedAsync(Stream source, Stream output, PrintJob job, RealtimeSettings settings, Func<int, CancellationToken, Task> throttle, CancellationToken token)
    {
       using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
       byte[] buffer = new byte[81920];
       long received = 0;
-      long started = _time.GetTimestamp();
       while(true)
       {
          using var idle = new Deadline(_time, TimeSpan.FromMilliseconds(settings.DownloadIdleTimeoutMillis), token);
@@ -91,14 +90,7 @@ public sealed partial class PrintApiClient
          { throw new InvalidDataException("Document exceeds its declared length."); }
          digest.AppendData(buffer, 0, count);
          await output.WriteAsync(buffer.AsMemory(0, count), token).ConfigureAwait(false);
-         if(throttle is not null)
-         { await throttle(count, token).ConfigureAwait(false); }
-         else if(settings.MaxDownloadBytesPerSecond > 0)
-         {
-            TimeSpan remaining = TimeSpan.FromSeconds((double)received / settings.MaxDownloadBytesPerSecond) - _time.GetElapsedTime(started);
-            if(remaining > TimeSpan.Zero)
-            { await Task.Delay(remaining, _time, token).ConfigureAwait(false); }
-         }
+         await throttle(count, token).ConfigureAwait(false);
       }
       if(received != job.ContentLength || !string.Equals(Convert.ToHexString(digest.GetHashAndReset()), job.ContentSha256, StringComparison.OrdinalIgnoreCase))
       {
