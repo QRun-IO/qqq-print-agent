@@ -66,12 +66,17 @@ public sealed class QqqApiDiscovery
 
 
 
-   /// <summary>A one-line, credential-free summary for the log: API version and every advertised extension with its version and path.</summary>
+   /// <summary>
+   /// A one-line, credential-free summary for the log: API version and the advertised extensions with their versions and
+   /// paths. Everything in it is what the server sent, so each value is shown in printable, bounded form and a long list
+   /// is counted instead of spelled out; a hostile document cannot break the log line or make it long.
+   /// </summary>
    public string Describe()
    {
       string extensions = Extensions is null || Extensions.Count == 0 ? "no extensions"
-         : string.Join(", ", Extensions.Where(extension => extension is not null).Select(extension => $"{extension.Name} {extension.Version} at {extension.PathPrefix}"));
-      return $"QQQ API {(string.IsNullOrEmpty(ApiVersion) ? "(missing)" : ApiVersion)}, {Features?.Count ?? 0} feature(s), client channels [{string.Join(", ", ClientChannels ?? [])}], {extensions}.";
+         : QqqCompatibilityProblem.BoundedList(Extensions.Where(extension => extension is not null)
+            .Select(extension => $"{QqqCompatibilityProblem.Printable(extension.Name)} {QqqCompatibilityProblem.Printable(extension.Version)} at {QqqCompatibilityProblem.Printable(extension.PathPrefix)}"));
+      return $"QQQ API {QqqCompatibilityProblem.Printable(ApiVersion)}, {Features?.Count ?? 0} feature(s), client channels [{QqqCompatibilityProblem.PrintableList(ClientChannels)}], {extensions}.";
    }
 
 

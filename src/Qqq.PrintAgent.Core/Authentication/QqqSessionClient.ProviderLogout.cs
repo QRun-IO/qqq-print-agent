@@ -122,7 +122,7 @@ public sealed partial class QqqSessionClient
       {
          Query = string.Join("&", query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value))),
       };
-      _diagnostics.Info($"Provider sign-out ready: the end-session page is {QqqSessionDiagnostics.Describe(builder.Uri)} (query not logged).");
+      _diagnostics.Info($"Provider sign-out ready: the end-session page is {ShownText(QqqSessionDiagnostics.Describe(builder.Uri))} (query not logged).");
       return new QqqProviderLogout(builder.Uri, redirect, state);
    }
 
@@ -139,7 +139,7 @@ public sealed partial class QqqSessionClient
    /// </summary>
    private async Task<Uri> ProviderEndSessionEndpointAsync(QqqAuthenticationMetadata.NativeGrant grant, CancellationToken cancellationToken)
    {
-      _diagnostics.Info($"Fetching the identity provider's discovery document from {QqqSessionDiagnostics.Describe(new Uri(grant.DiscoveryUrl))} for its end-session endpoint.");
+      _diagnostics.Info($"Fetching the identity provider's discovery document from {ShownText(QqqSessionDiagnostics.Describe(new Uri(grant.DiscoveryUrl)))} for its end-session endpoint.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(grant.DiscoveryUrl), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken, providerDiscovery: true).ConfigureAwait(false);
       RequireSuccess(response);

@@ -106,7 +106,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    internal bool EvaluateCertificate(string host, X509Certificate2? certificate, SslPolicyErrors errors)
    {
       string summary = certificate is null ? "no certificate presented"
-         : $"subject '{certificate.Subject}', issuer '{certificate.Issuer}', valid {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd} to {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}, thumbprint {certificate.Thumbprint}";
+         : $"subject '{ShownText(certificate.Subject)}', issuer '{ShownText(certificate.Issuer)}', valid {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd} to {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}, thumbprint {certificate.Thumbprint}";
       if(errors == SslPolicyErrors.None)
       {
          _diagnostics.Debug(() => $"TLS certificate for {host} accepted by Windows: {summary}.");
@@ -117,7 +117,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _diagnostics.Info($"TLS certificate for {host} is NOT trusted by Windows ({errors}) but was accepted because untrusted certificates are allowed for this server: {summary}.");
          return true;
       }
-      Volatile.Write(ref _certificateRejection, new QqqCertificateRejection(errors, certificate?.Subject, certificate?.Issuer,
+      Volatile.Write(ref _certificateRejection, new QqqCertificateRejection(errors, certificate is null ? null : ShownText(certificate.Subject), certificate is null ? null : ShownText(certificate.Issuer),
          certificate?.NotBefore.ToUniversalTime(), certificate?.NotAfter.ToUniversalTime(), certificate?.Thumbprint));
       _diagnostics.Info($"TLS certificate for {host} rejected: {errors}. Certificate: {summary}. "
          + (errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors)
@@ -177,7 +177,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          QqqAuthenticationMetadata authentication = await AuthenticationCoreAsync(cancellationToken).ConfigureAwait(false);
          if(!string.Equals(authentication.Type, "TABLE_BASED", StringComparison.Ordinal))
          {
-            _diagnostics.Info($"Password sign-in refused locally: the server authenticates with {authentication.Type}, not TABLE_BASED.");
+            _diagnostics.Info($"Password sign-in refused locally: the server authenticates with {Shown(authentication.Type)}, not TABLE_BASED.");
             throw QqqApiDiscovery.Configuration();
          }
          ClearSession();
@@ -324,7 +324,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _device = credential;
          _binding = identity;
          _generation++;
-         _diagnostics.Info($"Device {credential.DeviceId} bound to principal {identity.PrincipalId} in tenant {identity.TenantId}.");
+         _diagnostics.Info($"Device {credential.DeviceId} bound to principal {Shown(identity.PrincipalId)} in tenant {Shown(identity.TenantId)}.");
          return identity;
       }
       catch(Exception exception)
@@ -420,7 +420,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       RequireSuccess(response, keepSession);
       QqqApiDiscovery discovery = Parse<QqqApiDiscovery>(response);
       _diagnostics.Info("Discovery received: " + discovery.Describe());
-      _diagnostics.Debug(() => $"Discovery features: [{string.Join(", ", discovery.Features ?? [])}]; client channels: [{string.Join(", ", discovery.ClientChannels ?? [])}].");
+      _diagnostics.Debug(() => $"Discovery features: [{ShownList(discovery.Features)}]; client channels: [{ShownList(discovery.ClientChannels)}].");
       return discovery;
    }
 
@@ -438,7 +438,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       QqqAuthenticationMetadata metadata = await FetchAuthenticationAsync(keepSession: false, cancellationToken).ConfigureAwait(false);
       if(!string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal) && !string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
       {
-         _diagnostics.Info($"Authentication type '{metadata.Type}' is not supported; only TABLE_BASED and OAUTH2 are.");
+         _diagnostics.Info($"Authentication type '{Shown(metadata.Type)}' is not supported; only TABLE_BASED and OAUTH2 are.");
          throw QqqApiDiscovery.Configuration();
       }
       if(string.Equals(metadata.Type, "OAUTH2", StringComparison.Ordinal))
@@ -463,10 +463,10 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       RequireSuccess(response, keepSession);
       QqqAuthenticationMetadata metadata = Parse<QqqAuthenticationMetadata>(response);
       QqqAuthenticationMetadata.NativeGrant? grant = metadata.Values?.NativeSessionLogin;
-      _diagnostics.Info($"Authentication metadata: type {(string.IsNullOrEmpty(metadata.Type) ? "(missing)" : metadata.Type)}, provider '{metadata.Name}', native browser sign-in {(grant is null ? "not offered" : "offered")}.");
+      _diagnostics.Info($"Authentication metadata: type {Shown(metadata.Type)}, provider '{Shown(metadata.Name)}', native browser sign-in {(grant is null ? "not offered" : "offered")}.");
       _diagnostics.Debug(() => grant is null
-         ? $"Provider values present: {metadata.Values is not null}; client id {(string.IsNullOrEmpty(metadata.Values?.ClientId) ? "(none)" : "present")}; scopes '{metadata.Values?.Scopes}'."
-         : $"Native grant: flow {grant.Flow}, challenge {grant.CodeChallengeMethod}, prompt {grant.Prompt}, issuer {grant.Issuer}, discovery {grant.DiscoveryUrl}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{string.Join(", ", grant.RedirectUris ?? [])}], scopes '{metadata.Values?.Scopes}'.");
+         ? $"Provider values present: {metadata.Values is not null}; client id {(string.IsNullOrEmpty(metadata.Values?.ClientId) ? "(none)" : "present")}; scopes '{Shown(metadata.Values?.Scopes)}'."
+         : $"Native grant: flow {Shown(grant.Flow)}, challenge {Shown(grant.CodeChallengeMethod)}, prompt {Shown(grant.Prompt)}, issuer {ShownText(grant.Issuer)}, discovery {ShownText(grant.DiscoveryUrl)}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{ShownList(grant.RedirectUris)}], scopes '{Shown(metadata.Values?.Scopes)}'.");
       return metadata;
    }
 
@@ -509,14 +509,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       string tenant = IdentityValue(root, "tenantId");
       string? device = root.TryGetProperty("deviceId", out JsonElement value) && value.ValueKind != JsonValueKind.Null ? IdentityValue(root, "deviceId") : null;
       var identity = new QqqSessionBinding(Origin, principal, tenant, device);
-      _diagnostics.Info($"Session identity: principal {principal}, tenant {tenant}, device {device ?? "(none)"}.");
+      _diagnostics.Info($"Session identity: principal {Shown(principal)}, tenant {Shown(tenant)}, device {(device is null ? "(none)" : Shown(device))}.");
       if((_binding is not null && (!string.Equals(_binding.PrincipalId, principal, StringComparison.Ordinal)
             || !string.Equals(_binding.TenantId, tenant, StringComparison.Ordinal)))
          || (credential is not null && !string.Equals(credential.DeviceId, device, StringComparison.Ordinal)))
       {
          _diagnostics.Info(_binding is not null && (!string.Equals(_binding.PrincipalId, principal, StringComparison.Ordinal) || !string.Equals(_binding.TenantId, tenant, StringComparison.Ordinal))
-            ? $"Identity changed: the session was bound to principal {_binding.PrincipalId} in tenant {_binding.TenantId}; the server now reports principal {principal} in tenant {tenant}. Session cleared."
-            : $"Device mismatch: proof was sent for device {credential!.DeviceId} but the server reports device {device ?? "(none)"}. Session cleared.");
+            ? $"Identity changed: the session was bound to principal {Shown(_binding.PrincipalId)} in tenant {Shown(_binding.TenantId)}; the server now reports principal {Shown(principal)} in tenant {Shown(tenant)}. Session cleared."
+            : $"Device mismatch: proof was sent for device {credential!.DeviceId} but the server reports device {(device is null ? "(none)" : Shown(device))}. Session cleared.");
          ClearSession();
          throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "The server returned a different principal or device binding.");
       }
@@ -556,7 +556,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
       try
       {
-         _diagnostics.Debug(() => $"HTTP {method} {route} -> {(int)response.StatusCode} {response.ReasonPhrase} in {Elapsed(started)}; content type {response.Content.Headers.ContentType?.MediaType ?? "(none)"}, length {response.Content.Headers.ContentLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown"}, Set-Cookie {(response.Headers.Contains("Set-Cookie") ? "present" : "absent")}.");
+         _diagnostics.Debug(() => $"HTTP {method} {route} -> {(int)response.StatusCode} {Shown(response.ReasonPhrase)} in {Elapsed(started)}; content type {ShownOr(response.Content.Headers.ContentType?.MediaType, "(none)")}, length {response.Content.Headers.ContentLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown"}, Set-Cookie {(response.Headers.Contains("Set-Cookie") ? "present" : "absent")}.");
          if(!providerDiscovery && _traffic is not null)
          { response.Content = new TrafficHttpContent(response.Content, _traffic.RecordDownload); }
          if((int)response.StatusCode is >= 300 and < 400)
@@ -619,7 +619,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          ? $"HTTP {method} {route} was cancelled by the caller after {Elapsed(started)}."
          : exception is OperationCanceledException
             ? $"HTTP {method} {route} timed out after {Elapsed(started)} with no response headers."
-            : $"HTTP {method} {route} could not be sent after {Elapsed(started)}: {QqqSessionDiagnostics.Describe(exception)}{(exception.InnerException is null ? "" : " (" + QqqSessionDiagnostics.Describe(exception.InnerException) + ")")}.");
+            : $"HTTP {method} {route} could not be sent after {Elapsed(started)}: {ShownText(QqqSessionDiagnostics.Describe(exception))}{(exception.InnerException is null ? "" : " (" + ShownText(QqqSessionDiagnostics.Describe(exception.InnerException)) + ")")}.");
    }
 
 
@@ -820,7 +820,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       CheckAuthorization(response, keepSession);
       if(!response.IsSuccessStatusCode)
       {
-         _diagnostics.Info($"The server answered {(int)response.StatusCode} {response.ReasonPhrase}; the request did not succeed.");
+         _diagnostics.Info($"The server answered {(int)response.StatusCode} {Shown(response.ReasonPhrase)}; the request did not succeed.");
          throw new QqqSessionException(QqqSessionException.FailureKind.TransportRefused, "The QQQ request did not succeed.");
       }
    }
@@ -866,7 +866,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       { return document.RootElement.Deserialize<T>(JsonOptions) ?? throw InvalidResponse(); }
       catch(JsonException exception)
       {
-         _diagnostics.Info($"Response rejected: the JSON did not match the expected {typeof(T).Name} shape ({exception.Message}).");
+         _diagnostics.Info($"Response rejected: the JSON did not match the expected {typeof(T).Name} shape ({ShownText(exception.Message)}).");
          throw InvalidResponse();
       }
    }
@@ -887,7 +887,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          {
             if(document.RootElement.ValueKind != JsonValueKind.Object)
             {
-               _diagnostics.Info($"Response rejected: expected a JSON object but received {document.RootElement.ValueKind} (content type {response.Content.Headers.ContentType?.MediaType ?? "none"}). A sign-in page or proxy error page in place of the API is a common cause.");
+               _diagnostics.Info($"Response rejected: expected a JSON object but received {document.RootElement.ValueKind} (content type {ShownOr(response.Content.Headers.ContentType?.MediaType, "none")}). A sign-in page or proxy error page in place of the API is a common cause.");
                throw InvalidResponse();
             }
             RejectDuplicateProperties(document.RootElement);
@@ -897,7 +897,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
       catch(JsonException exception)
       {
-         _diagnostics.Info($"Response rejected: the body is not valid JSON ({exception.Message}; content type {response.Content.Headers.ContentType?.MediaType ?? "none"}). A sign-in page or proxy error page in place of the API is a common cause.");
+         _diagnostics.Info($"Response rejected: the body is not valid JSON ({ShownText(exception.Message)}; content type {ShownOr(response.Content.Headers.ContentType?.MediaType, "none")}). A sign-in page or proxy error page in place of the API is a common cause.");
          throw InvalidResponse();
       }
    }
@@ -950,8 +950,32 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          ? operation + " was cancelled."
          : exception is QqqSessionException session
             ? $"{operation} failed ({session.Failure}): {session.Message}"
-            : $"{operation} failed: {QqqSessionDiagnostics.Describe(exception)}");
+            : $"{operation} failed: {ShownText(QqqSessionDiagnostics.Describe(exception))}");
    }
+
+
+
+   /// <summary>
+   /// A value the server supplied, as it may appear in a log line: printable and short. Every log line of this client
+   /// that carries text read from a response, a certificate or a callback passes it through here or through one of the
+   /// two helpers below, so nothing a server sends can start a new log line, reorder one or make one long.
+   /// </summary>
+   private static string Shown(string? value) => QqqCompatibilityProblem.Printable(value);
+
+
+
+   /// <summary>The same for a value that may legitimately be absent, with the words to show in its place.</summary>
+   private static string ShownOr(string? value, string absent) => value is null ? absent : Shown(value);
+
+
+
+   /// <summary>The same for longer text the server can influence: an address, a certificate name, an error description or a failure's message.</summary>
+   private static string ShownText(string? value) => QqqCompatibilityProblem.Printable(value, QqqCompatibilityProblem.TextLimit);
+
+
+
+   /// <summary>The same for a list the server supplied: each value printable, the list cut at a fixed number of values and the rest counted.</summary>
+   private static string ShownList(IEnumerable<string?>? values) => QqqCompatibilityProblem.PrintableList(values);
 
 
 

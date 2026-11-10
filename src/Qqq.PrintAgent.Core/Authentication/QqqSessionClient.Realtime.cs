@@ -32,7 +32,7 @@ public sealed partial class QqqSessionClient
          _diagnostics.Info($"Opening the realtime socket to {QqqSessionDiagnostics.Describe(request.Uri)} with subprotocol {PrintingSubProtocol} (session cookie and device proof attached; heartbeat every {heartbeatInterval.TotalSeconds:0} s, timeout {heartbeatTimeout.TotalSeconds:0} s).");
          long started = _timeProvider.GetTimestamp();
          await connector.ConnectAsync(request, cancellationToken).ConfigureAwait(false);
-         _diagnostics.Info($"Realtime socket upgraded in {Elapsed(started)}; server selected subprotocol {connector.SubProtocol ?? "(none)"}.");
+         _diagnostics.Info($"Realtime socket upgraded in {Elapsed(started)}; server selected subprotocol {ShownOr(connector.SubProtocol, "(none)")}.");
          await ConfirmSocketAsync(connector.SubProtocol, generation, cancellationToken).ConfigureAwait(false);
          return connector.Release();
       }
@@ -132,9 +132,9 @@ public sealed partial class QqqSessionClient
    {
       int status = (int)upgradeStatus;
       _diagnostics.Info(exception is WebSocketException webSocket
-         ? $"Realtime socket upgrade failed: {webSocket.WebSocketErrorCode}{(status == 0 ? "" : ", HTTP " + status.ToString(System.Globalization.CultureInfo.InvariantCulture))}: {webSocket.Message}"
+         ? $"Realtime socket upgrade failed: {webSocket.WebSocketErrorCode}{(status == 0 ? "" : ", HTTP " + status.ToString(System.Globalization.CultureInfo.InvariantCulture))}: {ShownText(webSocket.Message)}"
          : exception is OperationCanceledException ? "Realtime socket connection was cancelled or timed out."
-         : "Realtime socket connection failed: " + QqqSessionDiagnostics.Describe(exception));
+         : "Realtime socket connection failed: " + ShownText(QqqSessionDiagnostics.Describe(exception)));
    }
 
 

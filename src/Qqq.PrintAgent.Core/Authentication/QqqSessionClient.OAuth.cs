@@ -61,7 +61,7 @@ public sealed partial class QqqSessionClient
             : $"The server validates the sign-in nonce at exchange ({nonceSignal}); this attempt's nonce will be sent as expectedNonce.");
          // The per-attempt nonce is kept only when the server validates it at exchange; legacy servers keep the exact old exchange.
          _browserLogin = new QqqBrowserLogin(builder.Uri, redirectUri, state, verifier, grant.Issuer, _timeProvider.GetTimestamp(), nonceSignal is null ? null : nonce);
-         _diagnostics.Info($"Browser sign-in attempt started: the authorization page is {QqqSessionDiagnostics.Describe(builder.Uri)} (query not logged); waiting for the callback, which expires after five minutes.");
+         _diagnostics.Info($"Browser sign-in attempt started: the authorization page is {ShownText(QqqSessionDiagnostics.Describe(builder.Uri))} (query not logged); waiting for the callback, which expires after five minutes.");
          return _browserLogin;
       }
       catch(Exception exception)
@@ -84,7 +84,7 @@ public sealed partial class QqqSessionClient
       }
       if(!grant.RedirectUris.Contains(redirectUri.AbsoluteUri, StringComparer.Ordinal))
       {
-         _diagnostics.Info($"Browser sign-in refused: the server's native grant does not list the callback {redirectUri.AbsoluteUri}; it lists [{string.Join(", ", grant.RedirectUris)}]. Add this callback to the QQQ native session grant.");
+         _diagnostics.Info($"Browser sign-in refused: the server's native grant does not list the callback {redirectUri.AbsoluteUri}; it lists [{ShownList(grant.RedirectUris)}]. Add this callback to the QQQ native session grant.");
          throw QqqApiDiscovery.Configuration();
       }
    }
@@ -98,7 +98,7 @@ public sealed partial class QqqSessionClient
    /// </summary>
    private async Task<Uri> ProviderAuthorizationEndpointAsync(QqqAuthenticationMetadata.NativeGrant grant, CancellationToken cancellationToken)
    {
-      _diagnostics.Info($"Fetching the identity provider's discovery document from {QqqSessionDiagnostics.Describe(new Uri(grant.DiscoveryUrl))}.");
+      _diagnostics.Info($"Fetching the identity provider's discovery document from {ShownText(QqqSessionDiagnostics.Describe(new Uri(grant.DiscoveryUrl)))}.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(grant.DiscoveryUrl), HttpMethod.Get, null, MetadataLimit,
          null, null, null, cancellationToken, providerDiscovery: true).ConfigureAwait(false);
       RequireSuccess(response);
@@ -108,10 +108,10 @@ public sealed partial class QqqSessionClient
       string? providerAuthorization = provider.TryGetProperty("authorization_endpoint", out JsonElement authorization) && authorization.ValueKind == JsonValueKind.String ? authorization.GetString() : null;
       bool s256 = provider.TryGetProperty("code_challenge_methods_supported", out JsonElement methods) && methods.ValueKind == JsonValueKind.Array
          && methods.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && string.Equals(value.GetString(), "S256", StringComparison.Ordinal));
-      _diagnostics.Info($"Provider discovery: issuer {providerIssuer ?? "(missing)"}, authorization endpoint {providerAuthorization ?? "(missing)"}, S256 {(s256 ? "supported" : "not listed")}.");
+      _diagnostics.Info($"Provider discovery: issuer {ShownText(providerIssuer)}, authorization endpoint {ShownText(providerAuthorization)}, S256 {(s256 ? "supported" : "not listed")}.");
       if(!string.Equals(providerIssuer, grant.Issuer, StringComparison.Ordinal))
       {
-         _diagnostics.Info($"Browser sign-in refused: the provider's issuer '{providerIssuer}' does not exactly match the issuer QQQ advertises '{grant.Issuer}'.");
+         _diagnostics.Info($"Browser sign-in refused: the provider's issuer '{ShownText(providerIssuer)}' does not exactly match the issuer QQQ advertises '{ShownText(grant.Issuer)}'.");
          throw QqqApiDiscovery.Configuration();
       }
       if(!TryHttps(providerAuthorization, out Uri? authorizationUri) || !SameOrigin(authorizationUri!, new Uri(grant.Issuer)))
@@ -172,7 +172,7 @@ public sealed partial class QqqSessionClient
    private string AcceptCallback(QqqBrowserLogin? pending, QqqBrowserLogin attempt, Uri callback)
    {
       TimeSpan age = _timeProvider.GetElapsedTime(attempt.StartedAt);
-      _diagnostics.Info($"Browser callback received at {QqqSessionDiagnostics.Describe(callback)} after {age.TotalSeconds:0} s.");
+      _diagnostics.Info($"Browser callback received at {ShownText(QqqSessionDiagnostics.Describe(callback))} after {age.TotalSeconds:0} s.");
       if(!ReferenceEquals(pending, attempt))
       {
          _diagnostics.Info("Browser callback refused: it does not belong to the pending sign-in attempt (a new attempt was started, or the attempt was already used).");
@@ -190,10 +190,10 @@ public sealed partial class QqqSessionClient
          throw InvalidResponse();
       }
       Dictionary<string, string> values = CallbackValues(callback);
-      _diagnostics.Debug(() => $"Browser callback parameters: [{string.Join(", ", values.Keys)}] (values not logged).");
+      _diagnostics.Debug(() => $"Browser callback parameters: [{ShownList(values.Keys)}] (values not logged).");
       if(values.TryGetValue("error", out string? providerError))
       {
-         _diagnostics.Info($"Browser sign-in refused by the identity provider: error '{providerError}'{(values.TryGetValue("error_description", out string? description) ? " (" + description + ")" : "")}.");
+         _diagnostics.Info($"Browser sign-in refused by the identity provider: error '{Shown(providerError)}'{(values.TryGetValue("error_description", out string? description) ? " (" + ShownText(description) + ")" : "")}.");
          throw InvalidResponse();
       }
       if(!values.TryGetValue("state", out string? state) || !string.Equals(state, attempt.State, StringComparison.Ordinal))
@@ -208,7 +208,7 @@ public sealed partial class QqqSessionClient
       }
       if(values.TryGetValue("iss", out string? issuer) && !string.Equals(issuer, attempt.Issuer, StringComparison.Ordinal))
       {
-         _diagnostics.Info($"Browser callback refused: the issuer '{issuer}' differs from the expected '{attempt.Issuer}'.");
+         _diagnostics.Info($"Browser callback refused: the issuer '{ShownText(issuer)}' differs from the expected '{ShownText(attempt.Issuer)}'.");
          throw InvalidResponse();
       }
       return code;
@@ -258,7 +258,7 @@ public sealed partial class QqqSessionClient
          throw QqqApiDiscovery.Configuration();
       }
       QqqAuthenticationMetadata.NativeGrant grant = metadata.Values!.NativeSessionLogin!;
-      _diagnostics.Info($"Native browser sign-in grant accepted: issuer {grant.Issuer}, {grant.RedirectUris.Count} redirect address(es).");
+      _diagnostics.Info($"Native browser sign-in grant accepted: issuer {ShownText(grant.Issuer)}, {grant.RedirectUris.Count} redirect address(es).");
       return grant;
    }
 
@@ -315,7 +315,7 @@ public sealed partial class QqqSessionClient
       }
       string[] invalid = [.. grant.RedirectUris.Where(value => !Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) || !ValidRedirect(uri))];
       if(invalid.Length != 0)
-      { problems.Add("redirect address(es) not an HTTPS app link or dotted private scheme: " + string.Join(", ", invalid.Select(QqqCompatibilityProblem.Printable))); }
+      { problems.Add("redirect address(es) not an HTTPS app link or dotted private scheme: " + QqqCompatibilityProblem.PrintableList(invalid)); }
    }
 
 
