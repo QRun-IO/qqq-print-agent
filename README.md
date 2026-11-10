@@ -87,7 +87,7 @@ git clone https://git.kof22.com/QRun-IO/qqq-print-protocol.git
 git -C qqq-print-protocol checkout 42c0d249f81395f00408ec0f92638dcbbf5deb03
 Set-Location qqq-print-agent
 ./build/Verify.ps1
-./build/Build-Installer.ps1 -ProductVersion 1.2.1 -ReleaseVersion 1.2.1
+./build/Build-Installer.ps1
 ```
 
 Run verification only on a permitted Windows test host; host-specific restrictions remain in force. Local packaging is unsigned unless explicitly signed; stable release signing runs through the protected workflow. Neither command installs the service or sends a physical print.

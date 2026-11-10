@@ -1,5 +1,9 @@
 # TODO
 
+## Open for 2.0
+
+- [ ] CI definitions still name a literal version for branch builds: `.github/workflows/ci.yml` falls back to `1.2.1`, and so does the Gitea build file proposed in pull request 17. On `release/2.0` the source version is 2.0.0, so `Build-Installer.ps1` refuses those builds ("ProductVersion must match the reviewed source VersionPrefix"). A branch build must name no version (`./build/Build-CiRelease.ps1` then packages the source version); a tag build passes the tag's version. Removing the fallback is not enough: an empty `-ProductVersion` is refused, so the parameter must be left out, and the step that locates the MSI by the same variable needs the value from `./build/Get-SourceVersion.ps1`. Owned by the CI work; the workflow files are deliberately not changed by the 2.0 branches.
+
 ## Released: 1.2.1 — 2026-11-06
 
 Client 1.2.1 (source `3b9d75d`, GitHub release run 42223525626) is the current stable: signed generic and GG Forge installers on GitHub and, byte-identical, on Gitea. See [RELEASING](RELEASING.md).

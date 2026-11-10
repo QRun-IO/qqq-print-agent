@@ -4,8 +4,11 @@
 
 [CmdletBinding()]
 param(
-   [string] $ProductVersion = '1.2.1',
-   [string] $ReleaseVersion = '1.2.1',
+   # Left out, both are the reviewed source version (Get-SourceVersion.ps1); Build-Installer.ps1 checks them.
+   [ValidatePattern('^\d+\.\d+\.\d+$')]
+   [string] $ProductVersion,
+   [ValidatePattern('^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$')]
+   [string] $ReleaseVersion,
    # Assemble artifacts/release from an already built MSI (the signed stable flow builds and signs it in
    # separate workflow steps). With ExpectedPublisherSubject the MSI must carry that publisher's signature.
    [switch] $AssembleOnly,
@@ -17,6 +20,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if(-not $ProductVersion) { $ProductVersion = & (Join-Path $PSScriptRoot 'Get-SourceVersion.ps1') }
+if(-not $ReleaseVersion) { $ReleaseVersion = $ProductVersion }
 
 function Get-Edition
 {
