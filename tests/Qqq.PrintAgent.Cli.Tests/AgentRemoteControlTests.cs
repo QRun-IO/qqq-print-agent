@@ -292,8 +292,9 @@ public sealed class AgentRemoteControlTests
 
    /// <summary>
    /// When the server withdraws authorization on the realtime channel, printing is blocked and the service stops trying to
-   /// connect: the check the reconnect loop makes before every attempt now says no, also after an operator asks to reconnect.
-   /// The job journal is kept, and an explicit sign-in restores the connection.
+   /// connect: the check the reconnect loop makes before every attempt now says no. An operator who asks to reconnect is
+   /// told that a sign-in is required, because a reconnect cannot repair this, and the status says the same in red. The job
+   /// journal is kept, and an explicit sign-in restores the connection.
    /// </summary>
    [Fact]
    public async Task AuthorizationWithdrawnOverRealtimeBlocksPrintingUntilSignInWithoutErasingJournal()
@@ -305,10 +306,13 @@ public sealed class AgentRemoteControlTests
       Assert.Equal("AUTHORIZATION_REQUIRED", fixture.Runtime.GetTransportSnapshot().State);
       AgentSnapshot blocked = fixture.Runtime.GetSnapshot();
       Assert.False(blocked.Connected);
+      Assert.Equal("RED", blocked.Health);
+      Assert.Contains("authorization is required", blocked.Status, StringComparison.Ordinal);
       Assert.False(blocked.Authentication!.Authorized);
       Assert.Contains("authorization is required", blocked.Authentication.Message, StringComparison.Ordinal);
       Assert.False(await fixture.Runtime.EnsureAuthorizationAsync(CancellationToken.None));
-      Assert.StartsWith("Reconnect requested", await fixture.PipeAsync(new PipeRequest("reconnect")), StringComparison.Ordinal);
+      Assert.StartsWith("Sign-in is required", await fixture.PipeAsync(new PipeRequest("reconnect")), StringComparison.Ordinal);
+      Assert.DoesNotContain("Connection retry requested.", fixture.Logs, StringComparer.Ordinal);
       Assert.False(await fixture.Runtime.EnsureAuthorizationAsync(CancellationToken.None));
       Assert.Equal("AUTHORIZATION_REQUIRED", fixture.Runtime.GetTransportSnapshot().State);
       Assert.Equal("SPOOLED", fixture.State("job"));
@@ -321,55 +325,33 @@ public sealed class AgentRemoteControlTests
 
 
    /// <summary>
-   /// An authorization demand saved in the control state (only releases that polled for controls over HTTP wrote one) keeps
-   /// ordinary traffic blocked although the socket connects, survives a restart, and keeps the job journal. Enrolling under a
-   /// new device identity starts a fresh scope: the demand and the old journal are not carried over, and control is supported again.
+   /// A control state written by the polling prerelease may say that authorization is required and that the server has no
+   /// remote control. 2.0 reads such a file without failing and honors neither: the saved demand does not block traffic, the
+   /// support is shown as still being checked, and the first realtime WELCOME puts the current state in its place.
    /// </summary>
    [Fact]
-   public async Task SavedAuthorizationDemandPersistsUntilNewEnrollmentScopeWithoutErasingJournal()
+   public async Task ControlStateSavedByThePollingPrereleaseIsReadButNotHonored()
    {
-      await using RealtimeRuntimeFixture fixture = new(seed: store =>
-      {
-         RealtimeRuntimeFixture.SeedSpooledJob(store);
-         store.SaveControlState(new AgentControlState("SUPPORTED", new DeviceDesiredState(1, false, "CONNECTED"), AuthorizationRequired: true));
-      });
-      _ = await fixture.ConnectAsync(restricted: true);
-      AgentSnapshot demanded = fixture.Runtime.GetSnapshot();
-      Assert.True(demanded.Control!.AuthorizationRequired);
-      Assert.False(demanded.Connected);
-      Assert.Equal("RED", demanded.Health);
-      Assert.StartsWith("Server authorization is required", demanded.Status, StringComparison.Ordinal);
-      Assert.StartsWith("Server authorization is required", await fixture.PipeAsync(new PipeRequest("reconnect")), StringComparison.Ordinal);
-      Assert.StartsWith("Error: Server actions are unavailable", await fixture.PipeAsync(new PipeRequest("test-print", PrinterId: "printer", Format: "PDF")), StringComparison.Ordinal);
-      await fixture.RestartAsync();
-      Assert.True(fixture.Runtime.GetSnapshot().Control!.AuthorizationRequired);
-      _ = await fixture.ConnectAsync(restricted: true);
-      Assert.Equal("SPOOLED", fixture.State("job"));
-      _ = await fixture.Runtime.EnrollWithGatesAsync(new PipeRequest("enroll", fixture.Peer.Origin.AbsoluteUri, "synthetic-code"), CancellationToken.None);
+      await using RealtimeRuntimeFixture fixture = new();
       using(AgentStore store = new(fixture.DirectoryPath))
+      { store.SaveControlState(AgentControlState.Initial); }
+      using(var journal = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Path.Combine(fixture.DirectoryPath, "journal.db") }.ToString()))
       {
-         Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
-         Assert.False(store.LoadControlState().AuthorizationRequired);
-         Assert.Null(store.GetState("job"));
+         journal.Open();
+         using Microsoft.Data.Sqlite.SqliteCommand overwrite = journal.CreateCommand();
+         overwrite.CommandText = """UPDATE control_state SET json='{"support":"LEGACY","desiredState":{"revision":0,"dispatchPaused":false,"connectionState":"CONNECTED"},"authorizationRequired":true}'""";
+         Assert.Equal(1, overwrite.ExecuteNonQuery());
       }
-      _ = await fixture.ConnectAsync();
-      AgentControlState control = fixture.Runtime.GetSnapshot().Control!;
-      Assert.Equal("SUPPORTED", control.Support);
-      Assert.False(control.AuthorizationRequired);
-   }
-
-
-
-   /// <summary>A control state saved as LEGACY (a server without remote control, recorded by a release that polled over HTTP) is shown until the server answers, and is replaced by SUPPORTED as soon as a realtime WELCOME is applied.</summary>
-   [Fact]
-   public async Task SavedLegacySupportIsReplacedOnceTheServerSpeaksRealtime()
-   {
-      await using RealtimeRuntimeFixture fixture = new(seed: store => store.SaveControlState(new AgentControlState("LEGACY", new DeviceDesiredState(0, false, "CONNECTED"))));
-      Assert.Equal("LEGACY", fixture.Runtime.GetSnapshot().Control!.Support);
+      await fixture.RestartAsync();
+      AgentControlState loaded = fixture.Runtime.GetSnapshot().Control!;
+      Assert.False(loaded.AuthorizationRequired);
+      Assert.Equal("checking support", AgentControlLabels.Support(loaded.Support));
       _ = await fixture.ConnectAsync();
       AgentSnapshot connected = fixture.Runtime.GetSnapshot();
+      Assert.True(connected.Connected);
       Assert.Equal("SUPPORTED", connected.Control!.Support);
       Assert.Contains("Remote controls available.", connected.Status, StringComparison.Ordinal);
+      Assert.Equal(0, fixture.ForbiddenPolls);
    }
 
 

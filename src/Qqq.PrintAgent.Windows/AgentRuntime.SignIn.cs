@@ -26,7 +26,7 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Verifies and adopts a session from the companion. The credential is restored on a fresh candidate client and its identity read.
    /// A new pairing needs a session without device proof; an existing pairing is bound (optionally claiming a legacy device) and must
-   /// have the same identity as before, and any authorization demand is cleared. Only then is the candidate made current and the old
+   /// have the same identity as before. Only then is the candidate made current and the old
    /// session disposed; on any failure the candidate is discarded and the previous session is left as it was.
    /// </summary>
    private async Task<string> SignInCoreAsync(PipeRequest request, CancellationToken token)
@@ -59,7 +59,6 @@ public sealed partial class AgentRuntime
                WriteLog("INFO", "Comparing the new identity with the previously approved identity.");
                RequireSameIdentity(saved.Binding, binding);
             }
-            store.SaveControlState(store.LoadControlState() with { AuthorizationRequired = false });
          }
          else
          {

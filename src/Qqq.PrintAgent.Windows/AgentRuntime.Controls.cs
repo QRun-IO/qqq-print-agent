@@ -10,7 +10,7 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// Remote-control part of the runtime. It holds the server's desired state (connected, paused, authorization required)
+/// Remote-control part of the runtime. It holds the server's desired state (connected or disconnected, paused or not)
 /// as the realtime channel delivers it, decides from it whether ordinary traffic and dispatch may happen, and delivers the
 /// receipts of executed commands. A restriction is never relaxed by a failure to synchronize, so an unreachable server
 /// cannot re-enable printing.
@@ -35,8 +35,8 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// True when the service may exchange ordinary traffic with QQQ: authorized and connected over the realtime channel,
-   /// control state synchronized, no authorization demand, and the server wants the device CONNECTED. Evaluated under the
-   /// state lock so a concurrent restriction is never missed.
+   /// control state synchronized, and the server wants the device CONNECTED. Evaluated under the state lock so a concurrent
+   /// restriction is never missed.
    /// </summary>
    private bool NormalTrafficAllowed
    {
@@ -44,7 +44,7 @@ public sealed partial class AgentRuntime
       {
          lock(_stateLock)
          {
-            return _authorizationReady && _realtimeReady && _controlReady && !_controlState.AuthorizationRequired && string.Equals(_controlState.DesiredState.ConnectionState, "CONNECTED", StringComparison.Ordinal);
+            return _authorizationReady && _realtimeReady && _controlReady && string.Equals(_controlState.DesiredState.ConnectionState, "CONNECTED", StringComparison.Ordinal);
          }
       }
    }

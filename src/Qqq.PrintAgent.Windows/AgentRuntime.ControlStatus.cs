@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+using Qqq.PrintAgent.Core;
+
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
@@ -59,17 +61,19 @@ public sealed partial class AgentRuntime
 
 
    /// <summary>
-   /// Handles the operator's reconnect request. When the server demands authorization or the administrator disconnected the
-   /// device it explains why and does nothing; when not enrolled it says so; otherwise it wakes the claim loop, closes the live
-   /// socket so a fresh one is made, and requests an immediate reconnect.
+   /// Handles the operator's reconnect request. A reconnect cannot repair a missing or withdrawn authorization, so when the
+   /// service is blocked, or holds no usable sign-in, the reply says that a sign-in is required and nothing is retried. When
+   /// the administrator disconnected the device it explains that; when not enrolled it says so. Otherwise it wakes the claim
+   /// loop, closes the live socket so a fresh one is made, and requests an immediate reconnect.
    /// </summary>
    private string ReconnectLocal()
    {
+      string signInRequired = $"Sign-in is required: {AppIdentity.ServerName} authorization is missing or was withdrawn, and reconnecting cannot restore it. Open Connection settings and sign in again; pairing and job history are preserved.";
       lock(_stateLock)
       {
-         if(_controlState.AuthorizationRequired)
+         if(_authorizationBlocked)
          {
-            return "Server authorization is required. Open Connection settings to restore authorization; job history is preserved.";
+            return signInRequired;
          }
          if(string.Equals(_controlState.DesiredState.ConnectionState, "DISCONNECTED", StringComparison.Ordinal))
          {
@@ -80,6 +84,13 @@ public sealed partial class AgentRuntime
       if(store.LoadConfiguration() is null)
       {
          return "Not enrolled. Open Connection settings to connect this device.";
+      }
+      lock(_stateLock)
+      {
+         if(_transportNeedsSignIn)
+         {
+            return signInRequired;
+         }
       }
       WakePoll();
       lock(_stateLock)
@@ -95,15 +106,15 @@ public sealed partial class AgentRuntime
 
 
    /// <summary>
-   /// Overrides the health color and text when the server's controls restrict the device: authorization required is red;
-   /// disconnected or paused is orange, or red when a job needs review. Otherwise the normal status gets a short note about
-   /// remote-control support.
+   /// Overrides the health color and text when the device is restricted: blocked authorization is red and says a sign-in is
+   /// needed; disconnected or paused by the administrator is orange, or red when a job needs review. Otherwise the normal
+   /// status gets a short note about remote-control support.
    /// </summary>
    private (string Health, string Status) ControlStatus(string health, string status, bool jobFailure)
    {
-      if(_controlState.AuthorizationRequired)
+      if(_authorizationBlocked)
       {
-         return ("RED", "Server authorization is required. Open Connection settings to restore authorization. Job history is preserved.");
+         return ("RED", _authenticationMessage);
       }
       if(string.Equals(_controlState.DesiredState.ConnectionState, "DISCONNECTED", StringComparison.Ordinal))
       {
@@ -118,11 +129,12 @@ public sealed partial class AgentRuntime
 
 
 
-   /// <summary>The sentence appended to the status about remote controls: unavailable on an older server, still being checked, or available with the last remote action and its outcome.</summary>
-   private string ControlSuffix() => _controlState.Support switch
-   {
-      "LEGACY" => " Remote controls are unavailable on this server.",
-      "UNKNOWN" => " Checking remote control support.",
-      _ => _controlState.LastCommand is null ? " Remote controls available." : $" Last remote action: {AgentControlLabels.Action(_controlState.LastCommand)} — {AgentControlLabels.Outcome(_controlState.LastOutcome)}.",
-   };
+   /// <summary>
+   /// The sentence appended to the status about remote controls: available, with the last remote action and its outcome, once
+   /// the server has sent its state on the realtime channel; still being checked until then. Any other saved value, such as
+   /// one written by the polling prerelease, reads as still being checked.
+   /// </summary>
+   private string ControlSuffix() => !string.Equals(_controlState.Support, "SUPPORTED", StringComparison.Ordinal) ? " Checking remote control support."
+      : _controlState.LastCommand is null ? " Remote controls available."
+      : $" Last remote action: {AgentControlLabels.Action(_controlState.LastCommand)} — {AgentControlLabels.Outcome(_controlState.LastOutcome)}.";
 }
