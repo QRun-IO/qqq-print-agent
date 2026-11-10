@@ -3,9 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Net;
 using System.Text;
-using System.Text.Json;
 using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Core.Tests;
@@ -162,67 +160,6 @@ public sealed class PrintWorkerTests
 
 
 
-   /// <summary>If the journal shows a previous attempt got as far as SUBMITTING, the worker cannot know whether paper came out, so it records OUTCOME_UNKNOWN and does not print again.</summary>
-   [Fact]
-   public async Task RunOnce_PriorSubmittingMarksUnknownWithoutPrinting()
-   {
-      PrintJob job = new("job1", "printer1", "Test", "ZPL", new string('0', 64), 1, new PrintOptions(), "", "CLAIMED");
-      using FixtureHandler handler = new(job, [1]);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      MemoryJournal journal = new();
-      journal.Record("job1", new PrintEvent("old", "SUBMITTING"));
-      journal.Acknowledge("old");
-      FakePrinter printer = new();
-      await new PrintWorker(api, printer, journal).RunOnceAsync();
-      Assert.Equal(0, printer.PrintCount);
-      Assert.Equal("OUTCOME_UNKNOWN", journal.GetState("job1"));
-   }
-
-
-
-   /// <summary>
-   /// After a restart, an acknowledged job stuck at RECEIVED is closed as FAILED (nothing was submitted) and one stuck at
-   /// SUBMITTING as OUTCOME_UNKNOWN (it may have printed). The conclusion is reported once, with no new claim.
-   /// </summary>
-   [Theory]
-   [InlineData("RECEIVED", "FAILED")]
-   [InlineData("SUBMITTING", "OUTCOME_UNKNOWN")]
-   public async Task RunOnce_RecoversAcknowledgedInterruptedStateWithoutClaim(string previous, string expected)
-   {
-      using FixtureHandler handler = new(null, []);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      MemoryJournal journal = new();
-      journal.Record("interrupted", new PrintEvent("before-stop", previous));
-      journal.Acknowledge("before-stop");
-      FakePrinter printer = new();
-      PrintWorker worker = new(api, printer, journal);
-      await worker.RunOnceAsync();
-      await worker.RunOnceAsync();
-      Assert.Equal(0, printer.PrintCount);
-      Assert.Equal(expected, journal.GetState("interrupted"));
-      Assert.Equal(new[] { expected }, handler.Events, StringComparer.Ordinal);
-      Assert.Empty(journal.Pending());
-   }
-
-
-
-   /// <summary>Receipts the server never acknowledged are resent in their original order before the new OUTCOME_UNKNOWN conclusion, so the server's history stays in the sequence things actually happened.</summary>
-   [Fact]
-   public async Task RunOnce_RecoversUnacknowledgedSubmissionInOriginalEventOrder()
-   {
-      using FixtureHandler handler = new(null, []);
-      using PrintApiClient api = new("http://localhost", "test-device", handler);
-      MemoryJournal journal = new();
-      journal.Record("interrupted", new PrintEvent("received", "RECEIVED"));
-      journal.Record("interrupted", new PrintEvent("submitting", "SUBMITTING"));
-      FakePrinter printer = new();
-      await new PrintWorker(api, printer, journal).RunOnceAsync();
-      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "OUTCOME_UNKNOWN" }, handler.Events, StringComparer.Ordinal);
-      Assert.Equal(0, printer.PrintCount);
-   }
-
-
-
    /// <summary>Content whose hash does not match the claim is never sent to the printer; the job is marked FAILED instead, and the partial file is gone from the staging folder.</summary>
    [Fact]
    public async Task RunOnce_BadHashNeverSubmits()
@@ -273,119 +210,4 @@ public sealed class PrintWorkerTests
    {
       Assert.Throws<ArgumentException>(() => new PrintApiClient("http://example.com"));
    }
-
-
-
-   /// <summary>Fake server: requires bearer authentication, offers the single configured job once per claim, serves its bytes, and records the status of every event it receives.</summary>
-   private sealed class FixtureHandler(PrintJob? job, byte[] content) : HttpMessageHandler
-   {
-      internal int Claims { get; private set; }
-      internal int Heartbeats { get; private set; }
-      internal int Inventories { get; private set; }
-      public List<string> Events { get; } = [];
-
-
-
-      /// <summary>Counts claims, heartbeats and inventories by URL suffix, returns the content or an event acknowledgement, and answers a claim with the configured job.</summary>
-      protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-      {
-         Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
-         string path = request.RequestUri!.AbsolutePath;
-         if(path.EndsWith("/claim", StringComparison.Ordinal))
-         { Claims++; }
-         if(path.EndsWith("/heartbeat", StringComparison.Ordinal))
-         { Heartbeats++; }
-         if(path.EndsWith("/printers", StringComparison.Ordinal))
-         { Inventories++; }
-         if(path.EndsWith("/content", StringComparison.Ordinal))
-         {
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(content) };
-         }
-         if(path.EndsWith("/events", StringComparison.Ordinal))
-         {
-            PrintEvent printEvent = JsonSerializer.Deserialize<PrintEvent>(await request.Content!.ReadAsStringAsync(cancellationToken), PrintApiClient.JsonOptions)!;
-            Events.Add(printEvent.Status);
-         }
-         string json = path.EndsWith("/claim", StringComparison.Ordinal) ? JsonSerializer.Serialize(new JobClaim(job), PrintApiClient.JsonOptions) : "{}";
-         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
-      }
-   }
-
-
-
-   /// <summary>
-   /// A single ZPL queue that counts prints. It can change its media profile revision after the first inventory (discoveryDrift)
-   /// or refuse at print time with a media mismatch (nativeDrift), reproducing the two places selected media can drift.
-   /// </summary>
-   private sealed class FakePrinter(string? displayName = null, PrinterMediaProfile? profile = null, bool discoveryDrift = false, bool nativeDrift = false) : IPrinterBackend
-   {
-      private int _discoveries;
-      public int PrintCount { get; private set; }
-
-
-
-      /// <summary>Returns the queue, with its media profile revision altered from the second call onward when drift is enabled.</summary>
-      public IReadOnlyList<PrinterInfo> Discover()
-      {
-         PrinterMediaProfile? current = profile;
-         if(discoveryDrift && _discoveries++ > 0 && current is not null)
-         { current = current with { Revision = new string('b', 64) }; }
-         return [new("printer1", "Test", "Zebra", "USB", "READY", ["ZPL"], DisplayName: displayName, MediaProfiles: current is null ? null : [current])];
-      }
-
-
-
-      /// <summary>Throws a media-mismatch refusal when native drift is enabled; otherwise counts the print and returns spooler id 123.</summary>
-      public Task<string> PrintAsync(PrintJob job, byte[] content, CancellationToken cancellationToken)
-      {
-         if(nativeDrift)
-         { throw new PrinterMediaMismatchException("Fixture default changed before native submission."); }
-         PrintCount++;
-         return Task.FromResult("123");
-      }
-   }
-
-
-
-   /// <summary>In-memory stand-in for the durable job journal, with the same recording, acknowledgement and incomplete-job semantics the worker relies on.</summary>
-   private sealed class MemoryJournal : IJobJournal
-   {
-      public Dictionary<string, (PrintJob Job, string? PrinterName)> Jobs { get; } = new(StringComparer.Ordinal);
-
-
-
-      /// <summary>Remembers the job and the printer name shown for it.</summary>
-      public void TrackJob(PrintJob job, string? printerName) => Jobs[job.JobId] = (job, printerName);
-
-
-
-      private readonly List<(string JobId, PrintEvent Event)> _events = [];
-      private readonly HashSet<string> _acknowledged = new(StringComparer.Ordinal);
-
-
-
-      /// <summary>The status of the most recent event recorded for the job, or null if none.</summary>
-      public string? GetState(string jobId) => _events.LastOrDefault(e => string.Equals(e.JobId, jobId, StringComparison.Ordinal)).Event?.Status;
-
-
-
-      /// <summary>Appends an event, unacknowledged until the server confirms it.</summary>
-      public void Record(string jobId, PrintEvent printEvent) => _events.Add((jobId, printEvent));
-
-
-
-      /// <summary>Events the server has not yet acknowledged, in the order they were recorded.</summary>
-      public IReadOnlyList<(string JobId, PrintEvent Event)> Pending() => _events.Where(e => !_acknowledged.Contains(e.Event.EventId)).ToList();
-
-
-
-      /// <summary>Marks the event as delivered so it is no longer pending.</summary>
-      public void Acknowledge(string eventId) => _acknowledged.Add(eventId);
-
-
-
-      /// <summary>Jobs whose latest event is RECEIVED or SUBMITTING, meaning the agent stopped before finishing them.</summary>
-      public IReadOnlyList<(string JobId, string State)> Incomplete() => _events.GroupBy(e => e.JobId, StringComparer.Ordinal).Select(group => group.Last()).Where(e => e.Event.Status is "RECEIVED" or "SUBMITTING").Select(e => (e.JobId, e.Event.Status)).ToArray();
-   }
 }
-

@@ -34,9 +34,9 @@ internal sealed class WorkerHarness : IAsyncDisposable
       Options = new PrintWorkerOptions
       {
          StagingDirectory = Staging.Path,
+         Settings = new RealtimeSettings(),
+         CurrentSettings = () => new RealtimeSettings(),
          CanSubmit = () => true,
-         RecoverIncomplete = false,
-         SynchronizeInventory = false,
          EventGate = EventGate,
          ClaimGate = ClaimGate,
          ThrottleDownloadAsync = (_, _) => Task.CompletedTask,

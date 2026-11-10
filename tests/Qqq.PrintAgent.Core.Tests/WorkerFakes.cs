@@ -152,8 +152,8 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 /// <summary>
-/// An in-memory stand-in for the durable job journal with the recording, acknowledgement and incomplete-job semantics the
-/// worker relies on. It keeps every event in order so a test can assert the exact sequence of states a job went through.
+/// An in-memory stand-in for the durable job journal with the recording and acknowledgement semantics the worker
+/// relies on. It keeps every event in order so a test can assert the exact sequence of states a job went through.
 /// </summary>
 internal sealed class RecordingJournal : IJobJournal
 {
@@ -218,12 +218,6 @@ internal sealed class RecordingJournal : IJobJournal
 
    /// <summary>Marks the event as delivered so it is no longer pending.</summary>
    public void Acknowledge(string eventId) => _acknowledged.Add(eventId);
-
-
-
-   /// <summary>Jobs whose latest event is RECEIVED or SUBMITTING, meaning a run stopped before finishing them.</summary>
-   public IReadOnlyList<(string JobId, string State)> Incomplete() => [.. _events.GroupBy(entry => entry.JobId, StringComparer.Ordinal).Select(group => group.Last())
-      .Where(entry => entry.Event.Status is "RECEIVED" or "SUBMITTING").Select(entry => (entry.JobId, entry.Event.Status))];
 }
 
 

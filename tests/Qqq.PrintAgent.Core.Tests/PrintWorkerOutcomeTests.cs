@@ -219,31 +219,6 @@ public sealed class PrintWorkerOutcomeTests
 
 
    /// <summary>
-   /// A worker told to stage documents to files hands staged files to its backend, so one composed with a backend that
-   /// only takes in-memory content is refused when it is built, naming the backend parameter, before it can claim
-   /// anything. The same backend is fine for a worker that stages nothing, and a file backend is fine for either.
-   /// </summary>
-   [Fact]
-   public void WorkerThatStagesFilesIsRefusedAtConstructionUnlessItsBackendTakesFiles()
-   {
-      using var staging = new TempDirectory();
-      using var server = new FakePrintServer();
-      using PrintApiClient api = Api(server);
-      var journal = new RecordingJournal();
-      var staged = new PrintWorkerOptions { StagingDirectory = staging.Path };
-      ArgumentException refused = Assert.Throws<ArgumentException>(() => new PrintWorker(api, new FakePrinterBackend(), journal, options: staged));
-      Assert.Equal("printers", refused.ParamName);
-      Assert.StartsWith("A worker that stages documents to files needs a printer backend that takes files.", refused.Message, StringComparison.Ordinal);
-      Assert.NotNull(new PrintWorker(api, new FakeFilePrinterBackend(), journal, options: staged));
-      Assert.NotNull(new PrintWorker(api, new FakePrinterBackend(), journal, options: new PrintWorkerOptions()));
-      Assert.NotNull(new PrintWorker(api, new FakePrinterBackend(), journal));
-      Assert.NotNull(new PrintWorker(api, new FakeFilePrinterBackend(), journal));
-      Assert.Equal(0, server.Claims);
-   }
-
-
-
-   /// <summary>
    /// If the receipt for a newly claimed job cannot be delivered, nothing was submitted: the job is recorded FAILED with
    /// that explanation, the runtime is told the job is no longer active, the failure reaches the caller, and both gates
    /// are released so the next lane is not blocked.
@@ -600,11 +575,6 @@ public sealed class PrintWorkerOutcomeTests
       }
       return printer;
    }
-
-
-
-   /// <summary>A device-token API client over the fake server; nothing leaves the process.</summary>
-   private static PrintApiClient Api(FakePrintServer server) => new("http://localhost", "synthetic-device-token", server);
 
 
 
