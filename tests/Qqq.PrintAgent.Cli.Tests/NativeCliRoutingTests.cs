@@ -7,7 +7,7 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
-/// <summary>With the signed-in service installed, the command-line tool sends its commands to the service over the management pipe instead of using a private device token, and refuses foreground options unless legacy mode is explicitly requested.</summary>
+/// <summary>The command-line tool sends its commands to the installed service over the management pipe, and refuses the options of the removed legacy mode instead of running a script written for it against the service.</summary>
 public sealed class NativeCliRoutingTests
 {
    /// <summary>The printers, run and sign-out commands are each translated into the matching service request (printers, reconnect, sign-out) and succeed with exit code 0, so normal use goes through the service that owns the signed-in session.</summary>
@@ -29,13 +29,18 @@ public sealed class NativeCliRoutingTests
 
 
 
-   /// <summary>Foreground-only options such as running once are refused before any service call unless legacy compatibility is named, and legacy mode cannot be combined with the service flag. The compatibility check itself is true only when the legacy flag is present.</summary>
-   [Fact]
-   public async Task ForegroundOptionsRequireExplicitCompatibilityBeforeAnyServiceCall()
+   /// <summary>The legacy flag and each option that existed only for it (a separate data directory, run once, the service selector) are refused before any service call, with whatever command they accompany.</summary>
+   [Theory]
+   [InlineData("run", "--legacy-compat")]
+   [InlineData("run", "--once")]
+   [InlineData("run", "--legacy-compat", "--once", "--data-dir", "C:\\synthetic")]
+   [InlineData("printers", "--data-dir", "C:\\synthetic")]
+   [InlineData("enroll", "--service", "--server", "https://qqq.example.test")]
+   [InlineData("service-status", "--service")]
+   [InlineData("--legacy-compat")]
+   public async Task RemovedLegacyOptionsAreRefusedBeforeAnyServiceCall(params string[] args)
    {
-      await Assert.ThrowsAsync<ArgumentException>(() => Program.DispatchAsync(["run", "--once"], _ => throw new InvalidOperationException("Must not contact service.")));
-      Assert.Throws<ArgumentException>(() => Program.UseLegacyCompatibility(["run", "--legacy-compat", "--service"]));
-      Assert.True(Program.UseLegacyCompatibility(["run", "--legacy-compat"]));
-      Assert.False(Program.UseLegacyCompatibility(["run"]));
+      ArgumentException refusal = await Assert.ThrowsAsync<ArgumentException>(() => Program.DispatchAsync(args, _ => throw new InvalidOperationException("Must not contact service.")));
+      Assert.Contains("removed in 2.0", refusal.Message, StringComparison.Ordinal);
    }
 }
