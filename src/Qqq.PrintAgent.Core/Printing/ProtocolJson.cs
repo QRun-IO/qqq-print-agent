@@ -26,9 +26,21 @@ internal static class ProtocolJson
    /// <summary>
    /// The nesting a claim or queued-job response is parsed to. It is far past <see cref="ReaderDepth"/> on purpose: a
    /// job nested too deep to read must still be parsed far enough to learn which job it is, or it could not be
-   /// answered for and the server would offer it forever. The response is already limited to 2 MiB.
+   /// answered for and the server would offer it forever.
+   /// <para>
+   /// The number comes from the server, not from this client. The server accepts at most 2,000 characters of options
+   /// from a submitter and its JSON library sets no depth limit of its own. The cheapest nesting is an array inside an
+   /// array, two characters a level, so about 1,000 levels fit in that cap; the response, the job and the options
+   /// object add three. 1,024 covers that, so nothing a submitter can get past the server's cap is too deep to
+   /// identify. If the server raises its cap, this must rise with it.
+   /// </para>
+   /// <para>
+   /// The work stays bounded at this depth. The document parser and the serializer's skipping of fields a type does
+   /// not have are loops, not recursion; the one recursive walk, <see cref="NestsDeeperThan"/>, stops after the levels
+   /// it is asked about, 63 for a claimed job; and the response is already limited to 2 MiB.
+   /// </para>
    /// </summary>
-   internal const int ParseDepth = 512;
+   internal const int ParseDepth = 1024;
 
    private static readonly byte[] ByteOrderMark = [0xEF, 0xBB, 0xBF];
    private static readonly JsonSerializerOptions DeepOptions = new(PrintApiClient.JsonOptions) { MaxDepth = ParseDepth };
@@ -129,7 +141,8 @@ internal static class ProtocolJson
 
    /// <summary>
    /// True when the value nests containers more than the given number of levels deep, itself included: an empty object
-   /// is one level. The walk stops at the first branch that is too deep.
+   /// is one level. The walk stops at the first branch that is too deep, so it never recurses further than the number
+   /// of levels asked about, however deep the document goes.
    /// </summary>
    internal static bool NestsDeeperThan(JsonElement value, int levels)
    {

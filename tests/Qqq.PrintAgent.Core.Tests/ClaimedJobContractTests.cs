@@ -246,10 +246,11 @@ public sealed class ClaimedJobContractTests
 
    /// <summary>
    /// A claim response that is not the expected JSON object at all (a web page, an array, a job that is not an object,
-   /// two job members) is the same protocol violation, with no job to report against. The last row is the one case
-   /// left in which a job a submitter can cause is not answered for: a response nested past the 512 levels it is parsed
-   /// to is not JSON to the parser, so it names no job, the lane stops, and the server offers the job again until it
-   /// is cancelled there. Options that deep do not fit in the 2,000 characters the server allows a submitter.
+   /// two job members) is the same protocol violation, with no job to report against. The last two rows are the one
+   /// case left in which a job is not answered for: a response nested past the 1,024 levels it is parsed to, by objects
+   /// or by arrays, is not JSON to the parser, so it names no job, the lane stops, and the server offers the job again
+   /// until it is cancelled there. Options that deep do not fit in the 2,000 characters the server allows a submitter,
+   /// which the test after next shows; the stall is closed only as long as that cap stands.
    /// </summary>
    [Theory]
    [InlineData("<html>sign in</html>", "The claim response is not valid JSON.")]
@@ -260,11 +261,14 @@ public sealed class ClaimedJobContractTests
    [InlineData("""{"job":[]}""", "The claimed job is not a JSON object.")]
    [InlineData("""{"job":null,"job":null}""", "The claim response names more than one job.")]
    [InlineData("""{"Job":null,"JOB":null}""", "The claim response names more than one job.")]
-   [InlineData("nested-513", "The claim response is not valid JSON.")]
+   [InlineData("nested-1025", "The claim response is not valid JSON.")]
+   [InlineData("arrays-nested-1025", "The claim response is not valid JSON.")]
    public async Task MalformedClaimResponseIsAProtocolViolation(string body, string message)
    {
-      if(string.Equals(body, "nested-513", StringComparison.Ordinal))
-      { body = ClaimWithNestedOption(513); }
+      if(string.Equals(body, "nested-1025", StringComparison.Ordinal))
+      { body = ClaimWithNestedOption(1025); }
+      if(string.Equals(body, "arrays-nested-1025", StringComparison.Ordinal))
+      { body = ClaimWithOptions(OptionsNestingArrays(1022)); }
       using var server = new FakePrintServer();
       server.OfferRaw(body);
       using PrintApiClient api = Api(server);
@@ -302,14 +306,15 @@ public sealed class ClaimedJobContractTests
 
    /// <summary>
    /// A job nested one level deeper than the agent reads (65 levels counted from the response), or anywhere up to the
-   /// 512 levels the response is parsed to, is refused, and it is still identified: the response is parsed far enough
+   /// 1,024 levels the response is parsed to, is refused, and it is still identified: the response is parsed far enough
    /// to learn which job it is, so the worker can answer for it. A submitter chooses how deep a job's options nest, so
    /// without this one request could make the server offer a job the agent never answers.
    /// </summary>
    [Theory]
    [InlineData(65)]
    [InlineData(66)]
-   [InlineData(512)]
+   [InlineData(513)]
+   [InlineData(1024)]
    public async Task JobNestedDeeperThanTheAgentReadsIsRefusedAndStillIdentified(int depth)
    {
       using var server = new FakePrintServer();
@@ -327,9 +332,37 @@ public sealed class ClaimedJobContractTests
 
 
    /// <summary>
+   /// The deepest options a submitter can get past the server. The server accepts at most 2,000 characters of options
+   /// and its JSON library has no depth limit, and the cheapest way to nest is an array inside an array, two characters
+   /// a level. Each row is options of that shape: 510 arrays (1,059 characters, a claim 513 levels deep, the case that
+   /// was not identified when the response was parsed to 512), the 970 arrays that just fit the cap (1,979 characters),
+   /// and 1,021 arrays, more than the cap allows, which bring the claim to exactly the 1,024 levels it is parsed to.
+   /// Every one is identified and refused.
+   /// </summary>
+   [Theory]
+   [InlineData(510, 1059, 513)]
+   [InlineData(970, 1979, 973)]
+   [InlineData(1021, 2081, 1024)]
+   public async Task OptionsNestedByArraysAsDeepAsTheServerAllowsAreIdentifiedAndRefused(int arrays, int characters, int depth)
+   {
+      string options = OptionsNestingArrays(arrays);
+      Assert.Equal(characters, options.Length);
+      Assert.Equal(depth, 3 + arrays);
+      Assert.Equal(characters <= 2000, arrays <= 970);
+      using var server = new FakePrintServer();
+      server.OfferRaw(ClaimWithOptions(options));
+      using PrintApiClient api = Api(server);
+      PrintingProtocolException violation = await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None));
+      Assert.Equal("The claimed job is nested deeper than the agent reads.", violation.Message);
+      Assert.Equal("job-1", Assert.IsType<PrintJob>(violation.RejectedJob).JobId);
+   }
+
+
+
+   /// <summary>
    /// What the worker does at each side of the depth it parses to. A job nested deeper than it reads is refused exactly
    /// once (received, then FAILED with nothing submitted, never downloaded or printed) and the lane goes on to the job
-   /// behind it. Only a response nested past the 512 levels it is parsed to cannot be answered for: the violation
+   /// behind it. Only a response nested past the 1,024 levels it is parsed to cannot be answered for: the violation
    /// reaches the caller, nothing is recorded or reported, and the lane stops.
    /// </summary>
    [Fact]
@@ -337,7 +370,7 @@ public sealed class ClaimedJobContractTests
    {
       byte[] document = [1, 2, 3];
       using var server = new FakePrintServer();
-      server.OfferRaw(ClaimWithNestedOption(65)).Offer(FakePrintServer.Job(document, "job-2"), document).OfferRaw(ClaimWithNestedOption(513).Replace("job-1", "job-3", StringComparison.Ordinal));
+      server.OfferRaw(ClaimWithNestedOption(65)).Offer(FakePrintServer.Job(document, "job-2"), document).OfferRaw(ClaimWithNestedOption(1025).Replace("job-1", "job-3", StringComparison.Ordinal));
       using PrintApiClient api = Api(server);
       var journal = new RecordingJournal();
       var printer = new FakePrinterBackend();
@@ -684,7 +717,7 @@ public sealed class ClaimedJobContractTests
 
    /// <summary>
    /// The accepting side of the queued-job list's two limits: exactly 200 jobs are all returned, and an entry whose
-   /// unknown option nests to exactly the 512 levels the response is parsed to is read. The list is only displayed, so
+   /// unknown option nests to exactly the 1,024 levels the response is parsed to is read. The list is only displayed, so
    /// a job nested deeper than a claim may be (65 levels) is still shown until it is claimed and refused. One more of
    /// either limit is refused in the theory below.
    /// </summary>
@@ -693,7 +726,7 @@ public sealed class ClaimedJobContractTests
    {
       using var server = new ScriptedServer();
       server.Add("{\"jobs\":[" + string.Join(",", Enumerable.Range(0, 200).Select(index => $$"""{"jobId":"queued-{{index}}","printerId":"printer1"}""")) + "]}")
-         .Add(QueuedWithNestedOption(65)).Add(QueuedWithNestedOption(512));
+         .Add(QueuedWithNestedOption(65)).Add(QueuedWithNestedOption(1024));
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
       IReadOnlyList<PrintJob> full = await api.QueuedJobsAsync(CancellationToken.None);
       Assert.Equal(200, full.Count);
@@ -704,13 +737,13 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>A queued-job list that breaks the contract (not JSON, nested past the 512 levels it is parsed to, two lists, not a list, too long, an entry that is not an object, has no usable identifiers or gives one twice, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
+   /// <summary>A queued-job list that breaks the contract (not JSON, nested past the 1,024 levels it is parsed to, two lists, not a list, too long, an entry that is not an object, has no usable identifiers or gives one twice, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
    [Theory]
    [InlineData("<html></html>", "The queued jobs response is not valid JSON.")]
    [InlineData("[]", "The queued jobs response is not a JSON object.")]
    [InlineData("""{"jobs":{}}""", "The queued jobs response does not hold a list of at most 200 jobs.")]
    [InlineData("too-many", "The queued jobs response does not hold a list of at most 200 jobs.")]
-   [InlineData("nested-513", "The queued jobs response is not valid JSON.")]
+   [InlineData("nested-1025", "The queued jobs response is not valid JSON.")]
    [InlineData("""{"jobs":[null]}""", "A queued job is not a JSON object.")]
    [InlineData("""{"jobs":["queued-1"]}""", "A queued job is not a JSON object.")]
    [InlineData("""{"jobs":[{"printerId":"printer1"}]}""", "A queued job has no usable job or printer identifier.")]
@@ -723,8 +756,8 @@ public sealed class ClaimedJobContractTests
    {
       if(string.Equals(body, "too-many", StringComparison.Ordinal))
       { body = "{\"jobs\":[" + string.Join(",", Enumerable.Range(0, 201).Select(index => $$"""{"jobId":"queued-{{index}}","printerId":"printer1"}""")) + "]}"; }
-      if(string.Equals(body, "nested-513", StringComparison.Ordinal))
-      { body = QueuedWithNestedOption(513); }
+      if(string.Equals(body, "nested-1025", StringComparison.Ordinal))
+      { body = QueuedWithNestedOption(1025); }
       using var server = new ScriptedServer();
       server.Add(body).Add("{}", HttpStatusCode.InternalServerError);
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
@@ -866,6 +899,17 @@ public sealed class ClaimedJobContractTests
    /// <summary>A queued-job list of one job with one unknown option whose nesting brings the whole response to exactly the given depth: the response is level one, the list two, the job three, its options four.</summary>
    private static string QueuedWithNestedOption(int depth)
       => "{\"jobs\":[{\"jobId\":\"queued-1\",\"printerId\":\"printer1\",\"options\":{\"finishing\":" + Nested(depth - 4) + "}}]}";
+
+
+
+   /// <summary>A claim for the valid job with its options replaced by the given JSON text.</summary>
+   private static string ClaimWithOptions(string options)
+      => Claim(ValidJob()).Replace("{\"copies\":1,\"scale\":\"ACTUAL_SIZE\"}", options, StringComparison.Ordinal);
+
+
+
+   /// <summary>The valid job's options with one unknown member that nests the given number of arrays, each inside the one before: the fewest characters a level of nesting can cost.</summary>
+   private static string OptionsNestingArrays(int arrays) => "{\"copies\":1,\"scale\":\"ACTUAL_SIZE\",\"x\":" + new string('[', arrays) + new string(']', arrays) + "}";
 
 
 

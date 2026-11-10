@@ -50,7 +50,7 @@ A claimed job is checked against the contract before anything else handles it.
 Fields the client does not read are ignored wherever they appear, to the nesting
 depth the JSON reader accepts (64 levels, counted from the claim response),
 because the contract tells consumers to ignore unknown fields and the server
-relays a submitter's options unchanged. The response itself is parsed to 512
+relays a submitter's options unchanged. The response itself is parsed to 1,024
 levels, so that a job nested too deep to read can still be identified.
 
 - **Malformed job.** A job that breaks the contract (a missing or unusable
@@ -66,8 +66,13 @@ levels, so that a job nested too deep to read can still be identified.
   answered for: the lane stops with an error, the next wake-up claims again,
   and the server offers the same job until it is cancelled there. The one such
   response a submitter could in principle cause is a job nested deeper than the
-  512 levels the response is parsed to; options that deep do not fit in the
-  2,000 characters the server accepts.
+  1,024 levels the response is parsed to. That depth is derived from the
+  server's cap of 2,000 characters on a job's options: the cheapest nesting,
+  an array in an array, costs two characters a level, so about 1,000 levels fit,
+  plus the response, the job and the options. No options the server accepts
+  today can nest deeper, so this case cannot be produced through it as it
+  stands; that rests on the server's cap, and the depth must rise if the cap
+  does.
 - **Claimed job that is already submitting.** A job the journal holds as
   SUBMITTING, or in a final state, is never processed a second time when the
   server offers it again. For SUBMITTING the worker logs the job and the reason.
