@@ -18,7 +18,10 @@ public sealed class JournalFilesTests
    /// stores on another journal several thousand times. Every open must succeed. When the release cleared every pool in the
    /// process instead, an open here failed within a few thousand attempts with a disposed SQLite handle: the pool hands a
    /// connection out before marking whose it is, and a clear that runs in between takes it for abandoned and disposes it.
-   /// This is a stress loop, so it shows the fault with high likelihood, not with certainty.
+   /// This is a stress loop, so it shows the fault with high likelihood, not with certainty: with the release clearing
+   /// every pool it failed in four runs of five. The releases are not paced by the opens, because paced releases never
+   /// fell into the gap; the loop is kept to a second or two, since a thread that releases without pause slows the stores
+   /// of the tests running beside it.
    /// </summary>
    [Fact]
    public void ReleasingOneJournalsFiles_DoesNotDisturbStoresOpeningAnother()
