@@ -22,7 +22,12 @@ public sealed partial class PrintApiClient
 
 
 
-   /// <summary>Applies the same validation to a single command that arrived over the realtime channel as an HTTP poll response would get, so both transports accept exactly the same commands.</summary>
+   /// <summary>
+   /// Applies the same rule to a single command that arrived over the realtime channel as an HTTP poll response would
+   /// get, so both transports accept exactly the same commands. Only the failure differs: a realtime command that fails
+   /// the rule is a <see cref="PrintingProtocolException"/>, like any other malformed frame, while a polled batch that
+   /// fails it is an <see cref="InvalidDataException"/>, as the compatibility poll has always reported it.
+   /// </summary>
    public static void ValidateRealtimeCommand(DeviceControlCommand command)
    {
       if(!ValidControlCommand(command))
@@ -67,6 +72,7 @@ public sealed partial class PrintApiClient
    /// Checks a control response in full: version 1, a poll interval of 1 to 300 seconds, a valid desired state and server time, at
    /// most 20 commands, and for each command a safe unique identifier, a bounded action, a lifetime of at most 15 minutes, and a
    /// job identifier when the action cancels a spool job. Anything else is rejected as an invalid response, not partly applied.
+   /// The rejection is an <see cref="InvalidDataException"/>; this path is outside what <see cref="PrintingProtocolException"/> covers.
    /// </summary>
    private static void ValidateControlPoll(DeviceControlPoll poll)
    {

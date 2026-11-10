@@ -217,6 +217,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    };
 
 
+
    /// <summary>Marks the channel closed, stops the queue, fails any send still waiting so its caller replays the durable record, and disposes the socket.</summary>
    public void Dispose()
    {

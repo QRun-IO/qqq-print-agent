@@ -15,7 +15,7 @@ namespace Qqq.PrintAgent.Core.Authentication;
 /// copies the session client's request onto the socket options and connects; what the outcome means is decided by the
 /// client.
 /// </summary>
-[ExcludeFromCodeCoverage(Justification = "Constructs ClientWebSocket and SocketsHttpHandler and copies a prepared request onto them; it cannot run without a live server. The request, the policy, the certificate decision and the handling of every outcome live in QqqSessionClient and are tested through a fake IQqqSocketConnector, and the loopback upgrade test runs this class end to end.")]
+[ExcludeFromCodeCoverage(Justification = "A thin adapter over the platform network stack: it constructs ClientWebSocket and SocketsHttpHandler and copies a prepared request onto them, and decides nothing. The request, the policy, the certificate decision and the handling of every outcome live in QqqSessionClient and are tested through a fake IQqqSocketConnector. One loopback test does run this class end to end, against a peer inside the test process and over plain WebSocket, which shows the wiring works; it is still excluded because that is one accepted upgrade, and what else the class can meet (a TLS handshake, a refused upgrade, an abandoned attempt) is the platform's behavior against a real endpoint, not logic here to cover.")]
 internal sealed class QqqPlatformSocketConnector : IQqqSocketConnector
 {
    private readonly ClientWebSocket _socket = new();

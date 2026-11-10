@@ -44,6 +44,42 @@ Download/print concurrency and aggregate staging/bandwidth are bounded; jobs
 for one printer retain their submission order. Native printing runs in an
 isolated child with a configurable deadline, retaining uncertain outcomes.
 
+## Claimed jobs the worker does not print
+
+A claimed job is checked against the contract before anything else handles it.
+Fields the client does not read are ignored wherever they appear, to the nesting
+depth the JSON reader accepts (64 levels), because the contract tells consumers
+to ignore unknown fields and the server relays a submitter's options unchanged.
+
+- **Malformed job.** A job that breaks the contract (a missing or unusable
+  member, or a member the client reads given twice, in any letter case) but
+  still names itself with one usable job identifier is refused, not skipped. The
+  worker records RECEIVED and then FAILED with the reason and "No bytes were
+  submitted", delivers both events, never downloads or submits the document, and
+  the lane goes on to the next job. A claim response that names no single job
+  (not JSON, no usable identifier, the identifier given twice) cannot be
+  answered for: the lane stops with an error, and the next wake-up claims
+  again. A malformed replay of a job the journal already knows, in any state,
+  changes nothing and is logged.
+- **Claimed job that is already submitting.** A job the journal holds as
+  SUBMITTING, or in a final state, is never processed a second time when the
+  server offers it again. For SUBMITTING the worker logs the job and the reason.
+  The lane then ends its pass and the wave is marked drained, because the server
+  would only offer the same job again; the next committed notification or
+  released capacity starts a new wave. The outcome is reported by the lane that
+  is submitting the job or, after a restart, by recovery as OUTCOME_UNKNOWN.
+- **Between SUBMITTING and Windows.** If the SUBMITTING receipt cannot be
+  delivered, or the worker is stopped after it was acknowledged and before the
+  native call, Windows is never asked. The job is FAILED and its reason says
+  that no bytes were submitted.
+- **After spool acceptance.** Once a job is recorded as SPOOLED it stays
+  SPOOLED. A failure while releasing its staging reservation or printer turn
+  afterwards is logged and is not written over the record.
+- **File requirement.** A worker configured with a staging directory hands
+  staged files to its printer backend. Building such a worker with a backend
+  that does not take files fails at construction with an argument error naming
+  the backend. It is a composition error, never a job that fails part-way.
+
 ## Administrator settings
 
 In QQQ, authorized administrators use **Printing connection and limits** for

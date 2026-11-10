@@ -44,8 +44,9 @@ public sealed record RealtimeEnvelope(string Type, string MessageId, JsonElement
 
    /// <summary>
    /// Converts the payload into the contract type a message of this kind carries. A member of the wrong JSON type is
-   /// reported as a protocol violation, the same failure a malformed frame raises, so a consumer of realtime messages has
-   /// one exception type to handle for everything the server can get wrong.
+   /// reported as a protocol violation, the same failure a malformed frame raises. What the converted value means is
+   /// judged by its consumer, which may report a bad value in its own way: realtime settings, for one, are refused
+   /// with <see cref="InvalidDataException"/>.
    /// </summary>
    public T ReadPayload<T>() => Payload.ValueKind == JsonValueKind.Object
       ? ProtocolJson.Read<T>(Payload, "realtime payload")
