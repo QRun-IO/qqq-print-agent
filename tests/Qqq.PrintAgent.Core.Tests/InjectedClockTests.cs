@@ -212,25 +212,6 @@ public sealed class InjectedClockTests
 
 
 
-   /// <summary>The in-memory download used without a staging folder gives up when the request limit passes on the API client's clock.</summary>
-   [Fact]
-   public async Task InMemoryDownloadGivesUpAtTheRequestLimit()
-   {
-      var time = new ManualTimeProvider();
-      using var body = new FeedStream();
-      using var server = new ScriptedServer();
-      server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
-      Task<byte[]> download = api.DownloadAsync(Job(new byte[8]), CancellationToken.None);
-      await body.NextReadAsync();
-      time.Advance(TimeSpan.FromSeconds(60) - Tick);
-      Assert.Contains(Tick, time.DueIn);
-      time.Advance(Tick);
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
-   }
-
-
-
    /// <summary>
    /// The per-job timing line reports each phase as measured on the worker's clock: inventory, the claim with its receipt,
    /// the download, the printer recheck, the submission gate with its receipt, and the native submission.

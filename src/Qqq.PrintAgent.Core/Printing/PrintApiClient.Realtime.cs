@@ -6,8 +6,8 @@
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>
-/// Realtime part of the API client: attaches a WebSocket channel so inventory, heartbeats and events travel over it with the server's
-/// acknowledgement instead of over separate HTTP calls.
+/// Realtime part of the API client: attaches the WebSocket channel that inventory, job events and command receipts travel over, each with
+/// the server's acknowledgement. Nothing falls back to HTTP: a send made with no channel attached fails as a closed connection.
 /// </summary>
 public sealed partial class PrintApiClient
 {
@@ -16,7 +16,7 @@ public sealed partial class PrintApiClient
 
 
 
-   /// <summary>The channel to send on: the provider's current one when a provider was given (so a reconnect is picked up), otherwise the attached one; with neither it throws that the channel is closed, the failure every other "the connection is gone" raises, never silently falling back to HTTP.</summary>
+   /// <summary>The channel to send on: the provider's current one when a provider was given (so a reconnect is picked up), otherwise the attached one; with neither it throws that the channel is closed, the failure every other "the connection is gone" raises.</summary>
    private PrintingRealtimeChannel RealtimeChannel => _realtimeProvider?.Invoke() ?? _realtime ?? throw new RealtimeChannelClosedException("Realtime connection unavailable.", null);
 
 
@@ -29,9 +29,4 @@ public sealed partial class PrintApiClient
       _http.Timeout = TimeSpan.FromMilliseconds(settings.RequestTimeoutMillis);
       return this;
    }
-
-
-
-   /// <summary>True when a realtime channel is attached, which tells the worker that heartbeats and events already flow over the socket.</summary>
-   public bool UsesRealtime => _realtime is not null;
 }

@@ -13,10 +13,9 @@ namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>
 /// A hand-written fake of the device-facing print API for worker tests. It hands out the jobs a test offers (as raw
-/// JSON, so a malformed claim can be offered too), serves one document, and records every event, heartbeat and
-/// inventory it receives. Job events reach it over HTTP or, from a worker composed as the service composes one, as
-/// realtime frames the test harness passes on. A hook runs before each answer so a test can fail a request, refuse
-/// an event or move a clock at that point.
+/// JSON, so a malformed claim can be offered too) and serves one document over HTTP, and records every job event,
+/// which reaches it as a realtime frame the test harness passes on. A hook runs before each answer so a test can
+/// fail a request, refuse an event or move a clock at that point.
 /// </summary>
 internal sealed class FakePrintServer : HttpMessageHandler
 {
@@ -44,27 +43,17 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 
-   /// <summary>How many heartbeats arrived.</summary>
-   internal int Heartbeats { get; private set; }
-
-
-
-   /// <summary>How many inventory reports arrived.</summary>
-   internal int Inventories { get; private set; }
-
-
-
    /// <summary>How many document requests arrived.</summary>
    internal int Downloads { get; private set; }
 
 
 
-   /// <summary>Everything that arrived and was not a claim, a document request, a job event, a heartbeat or an inventory: the path of an HTTP request, or "frame" and the type of a realtime frame.</summary>
+   /// <summary>Everything that arrived and was not a claim, a document request or a job event: the path of an HTTP request, or "frame" and the type of a realtime frame. A worker sends none.</summary>
    internal List<string> Unexpected { get; } = [];
 
 
 
-   /// <summary>Runs before each answer with the kind of request ("claim", "content", "events", "heartbeat", "printers" or "other"); it may throw to fail that request.</summary>
+   /// <summary>Runs before each answer with the kind of request ("claim", "content" or "other") and before each job event is recorded ("events"); it may throw to fail that request or refuse that event.</summary>
    internal Func<string, CancellationToken, Task>? Arriving { get; set; }
 
 
@@ -107,15 +96,12 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
 
-   /// <summary>Counts the request by route, runs the hook, records an event, and answers a claim with the next offered body or an empty claim.</summary>
+   /// <summary>Counts the request by route, runs the hook, and answers a claim with the next offered body or an empty claim and a document request with the document.</summary>
    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
    {
       string path = request.RequestUri!.AbsolutePath;
       string kind = path.EndsWith("/claim", StringComparison.Ordinal) ? "claim"
-         : path.EndsWith("/content", StringComparison.Ordinal) ? "content"
-         : path.EndsWith("/events", StringComparison.Ordinal) ? "events"
-         : path.EndsWith("/heartbeat", StringComparison.Ordinal) ? "heartbeat"
-         : path.EndsWith("/printers", StringComparison.Ordinal) ? "printers" : "other";
+         : path.EndsWith("/content", StringComparison.Ordinal) ? "content" : "other";
       if(Arriving is not null)
       { await Arriving(kind, cancellationToken); }
       switch(kind)
@@ -126,21 +112,10 @@ internal sealed class FakePrintServer : HttpMessageHandler
          case "content":
             Downloads++;
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Document) };
-         case "events":
-            string jobId = Uri.UnescapeDataString(path.Split('/')[^2]);
-            Events.Add((jobId, JsonSerializer.Deserialize<PrintEvent>(await request.Content!.ReadAsStringAsync(cancellationToken), PrintApiClient.JsonOptions)!));
-            break;
-         case "heartbeat":
-            Heartbeats++;
-            break;
-         case "printers":
-            Inventories++;
-            break;
          default:
             Unexpected.Add(path);
-            break;
+            return Json("{}");
       }
-      return Json("{}");
    }
 
 

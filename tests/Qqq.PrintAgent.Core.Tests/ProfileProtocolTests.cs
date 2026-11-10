@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Net;
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -13,32 +12,48 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// <summary>The wire shape of operator metadata: heartbeat and printer inventory carry names, descriptions and locations in a way the server can distinguish "not set" from "cleared", without ever replacing the physical queue identity.</summary>
 public sealed class ProfileProtocolTests
 {
-   /// <summary>A heartbeat with no profile keeps the original body (no profile member at all). A profile with an empty description sends that empty value, so the server clears it, while an unset location is omitted so the server leaves it alone.</summary>
+   /// <summary>
+   /// The heartbeat frame, in the shape the service sends it. With no profile it has no profile member at all. A profile
+   /// with an empty description sends that empty value, so the server clears it, while an unset location is omitted so
+   /// the server leaves it alone.
+   /// </summary>
    [Fact]
-   public async Task HeartbeatPreservesLegacyShapeAndTransmitsExplicitClears()
+   public async Task HeartbeatOmitsAnUnsetProfileAndTransmitsExplicitClears()
    {
-      using CaptureHandler handler = new();
-      using PrintApiClient api = new("https://synthetic.invalid", "synthetic-token", handler);
-      await api.HeartbeatAsync(CancellationToken.None);
-      Assert.False(handler.Requests[0].TryGetProperty("profile", out _));
-      await api.HeartbeatAsync(new DeviceProfile("Packing station", "", null), CancellationToken.None);
-      JsonElement profile = handler.Requests[1].GetProperty("profile");
+      using var socket = new ScriptedWebSocket();
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      using var stop = new CancellationTokenSource();
+      Task run = channel.RunAsync(_ => { }, stop.Token);
+      await channel.SendAsync("HEARTBEAT", new { agentVersion = PrintApiClient.AgentVersion, profile = (DeviceProfile?)null });
+      JsonElement payload = (await socket.NextSentAsync()).GetProperty("payload");
+      Assert.Equal(PrintApiClient.AgentVersion, payload.GetProperty("agentVersion").GetString());
+      Assert.False(payload.TryGetProperty("profile", out _));
+      await channel.SendAsync("HEARTBEAT", new { agentVersion = PrintApiClient.AgentVersion, profile = new DeviceProfile("Packing station", "", null) });
+      JsonElement profile = (await socket.NextSentAsync()).GetProperty("payload").GetProperty("profile");
       Assert.Equal("Packing station", profile.GetProperty("name").GetString());
       Assert.Equal("", profile.GetProperty("description").GetString());
       Assert.False(profile.TryGetProperty("location", out _));
+      await stop.CancelAsync();
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 
 
-   /// <summary>The inventory sends the Windows queue name (up to 1,024 characters) alongside separate display name, description and location fields, and the stable printer id survives a serialization round trip, so a friendly label never replaces the identity jobs are dispatched against.</summary>
+   /// <summary>The inventory frame sends the Windows queue name (up to 1,024 characters) alongside separate display name, description and location fields, and the stable printer id survives a serialization round trip, so a friendly label never replaces the identity jobs are dispatched against.</summary>
    [Fact]
    public async Task InventoryKeepsPhysicalQueueIdentitySeparateFromFriendlyMetadata()
    {
-      using CaptureHandler handler = new();
-      using PrintApiClient api = new("https://synthetic.invalid", "synthetic-token", handler);
+      using var socket = new ScriptedWebSocket();
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      using var stop = new CancellationTokenSource();
+      Task run = channel.RunAsync(_ => { }, stop.Token);
+      using PrintApiClient api = new PrintApiClient("https://synthetic.invalid").WithRealtime(channel, new RealtimeSettings());
       PrinterInfo printer = new("stable-id", new string('q', 1024), "driver", "port", "READY", ["ZPL"], new string('n', 512), new string('d', 4096), "Dock 2");
-      await api.InventoryAsync([printer], CancellationToken.None);
-      JsonElement sent = handler.Requests[0].GetProperty("printers")[0];
+      Task inventory = api.InventoryAsync([printer], CancellationToken.None);
+      JsonElement frame = await socket.NextSentAsync();
+      socket.Deliver("ACK", "ack-1", new { acknowledgedMessageId = frame.GetProperty("messageId").GetString() });
+      await inventory.WaitAsync(TimeSpan.FromSeconds(10));
+      JsonElement sent = frame.GetProperty("payload").GetProperty("printers")[0];
       Assert.Equal(printer.Name, sent.GetProperty("name").GetString());
       Assert.Equal(printer.DisplayName, sent.GetProperty("displayName").GetString());
       Assert.Equal(printer.Description, sent.GetProperty("description").GetString());
@@ -47,23 +62,7 @@ public sealed class ProfileProtocolTests
       Assert.Equal(printer.PrinterId, roundTrip.PrinterId);
       Assert.Equal(printer.Name, roundTrip.Name);
       Assert.Equal(printer.DisplayName, roundTrip.DisplayName);
-   }
-
-
-
-   /// <summary>Fake server that records each request body as parsed JSON and replies with an empty object.</summary>
-   private sealed class CaptureHandler : HttpMessageHandler
-   {
-      internal List<JsonElement> Requests { get; } = [];
-
-
-
-      /// <summary>Clones the parsed body before the request content is disposed so tests can inspect it afterwards.</summary>
-      protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-      {
-         using var document = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
-         Requests.Add(document.RootElement.Clone());
-         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
-      }
+      await stop.CancelAsync();
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 }

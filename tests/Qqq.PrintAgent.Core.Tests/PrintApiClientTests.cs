@@ -12,8 +12,8 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>
-/// The API client's remaining calls: enrollment, the routes that move onto the realtime channel when one is attached,
-/// the HTTP control path, operator actions, and what a download refuses. Each is driven against a scripted server or
+/// The API client's calls: enrollment, what travels over the realtime channel, operator actions, and what a download
+/// refuses. Each is driven against a scripted server or
 /// socket and asserts what was sent as well as what came back.
 /// </summary>
 public sealed class PrintApiClientTests
@@ -75,12 +75,12 @@ public sealed class PrintApiClientTests
 
 
    /// <summary>
-   /// With a realtime channel attached, inventory, heartbeat, job events and command receipts travel as frames instead of
-   /// HTTP requests. Inventory, events and receipts wait for the server's ACK and carry a message identity derived from
-   /// the durable record, so a replay is recognised; a heartbeat does not wait.
+   /// Inventory, job events and command receipts travel as frames on the attached channel, never as HTTP requests. Each
+   /// waits for the server's ACK, and events and receipts carry a message identity derived from the durable record, so a
+   /// replay is recognised.
    /// </summary>
    [Fact]
-   public async Task AttachedChannelCarriesInventoryHeartbeatEventsAndReceipts()
+   public async Task AttachedChannelCarriesInventoryEventsAndReceipts()
    {
       using var socket = new ScriptedWebSocket();
       using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
@@ -88,7 +88,6 @@ public sealed class PrintApiClientTests
       Task run = channel.RunAsync(_ => { }, stop.Token);
       using var server = new ScriptedServer();
       using PrintApiClient api = new PrintApiClient("https://synthetic.invalid", handler: server).WithRealtime(channel, new RealtimeSettings());
-      Assert.True(api.UsesRealtime);
 
       Task inventory = api.InventoryAsync([new PrinterInfo("printer1", "Queue one", "Synthetic driver", "USB001", "READY", ["ZPL"])], CancellationToken.None);
       JsonElement frame = await socket.NextSentAsync();
@@ -98,18 +97,13 @@ public sealed class PrintApiClientTests
       socket.Deliver("ACK", "ack-1", new { acknowledgedMessageId = frame.GetProperty("messageId").GetString() });
       await inventory.WaitAsync(Patience);
 
-      await api.HeartbeatAsync(new DeviceProfile(Name: "Front desk"), CancellationToken.None).WaitAsync(Patience);
-      frame = await socket.NextSentAsync();
-      Assert.Equal("HEARTBEAT", frame.GetProperty("type").GetString());
-      Assert.Equal(PrintApiClient.AgentVersion, frame.GetProperty("payload").GetProperty("agentVersion").GetString());
-      Assert.Equal("Front desk", frame.GetProperty("payload").GetProperty("profile").GetProperty("name").GetString());
-
       Task jobEvent = api.EventAsync("job-1", new PrintEvent("e1", "SPOOLED", SpoolerJobId: "42"), CancellationToken.None);
       frame = await socket.NextSentAsync();
       Assert.Equal("JOB_EVENT", frame.GetProperty("type").GetString());
       Assert.Equal("event-e1", frame.GetProperty("messageId").GetString());
       Assert.Equal("job-1", frame.GetProperty("payload").GetProperty("jobId").GetString());
       Assert.Equal("SPOOLED", frame.GetProperty("payload").GetProperty("event").GetProperty("status").GetString());
+      Assert.False(jobEvent.IsCompleted);
       socket.Deliver("ACK", "ack-2", new { acknowledgedMessageId = "event-e1" });
       await jobEvent.WaitAsync(Patience);
 
@@ -119,12 +113,39 @@ public sealed class PrintApiClientTests
       Assert.Equal("receipt-r1", frame.GetProperty("messageId").GetString());
       Assert.Equal("command-1", frame.GetProperty("payload").GetProperty("commandId").GetString());
       Assert.Equal("COMPLETED", frame.GetProperty("payload").GetProperty("receipt").GetProperty("outcome").GetString());
+      Assert.False(receipt.IsCompleted);
       socket.Deliver("ACK", "ack-3", new { acknowledgedMessageId = "receipt-r1" });
       await receipt.WaitAsync(Patience);
 
       Assert.Empty(server.Requests);
       await stop.CancelAsync();
       await run.WaitAsync(TimeSpan.FromSeconds(10));
+   }
+
+
+
+   /// <summary>
+   /// With no channel attached there is nowhere for inventory, an event or a receipt to go. Each is refused as a closed
+   /// connection, the failure the runtime already treats as "send it again after reconnecting", and nothing is sent
+   /// over HTTP in its place.
+   /// </summary>
+   [Fact]
+   public async Task WithoutAChannelNothingIsSentAndNothingFallsBackToHttp()
+   {
+      using var server = new ScriptedServer();
+      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
+      Func<Task>[] sends =
+      [
+         () => api.InventoryAsync([new PrinterInfo("printer1", "Queue one", "Synthetic driver", "USB001", "READY", ["ZPL"])], CancellationToken.None),
+         () => api.EventAsync("job-1", new PrintEvent("e1", "SPOOLED", SpoolerJobId: "42"), CancellationToken.None),
+         () => api.ControlReceiptAsync("command-1", new DeviceControlReceipt("r1", "COMPLETED", "2026-01-01T00:00:00Z"), CancellationToken.None),
+      ];
+      foreach(Func<Task> send in sends)
+      {
+         RealtimeChannelClosedException closed = await Assert.ThrowsAsync<RealtimeChannelClosedException>(send);
+         Assert.Equal("Realtime connection unavailable.", closed.Message);
+      }
+      Assert.Empty(server.Requests);
    }
 
 
@@ -140,8 +161,10 @@ public sealed class PrintApiClientTests
       using var stop = new CancellationTokenSource();
       Task run = current.RunAsync(_ => { }, stop.Token);
       using PrintApiClient api = new PrintApiClient("https://synthetic.invalid").WithRealtime(stale, new RealtimeSettings(), () => current);
-      await api.HeartbeatAsync(CancellationToken.None).WaitAsync(Patience);
-      Assert.Equal("HEARTBEAT", (await currentSocket.NextSentAsync()).GetProperty("type").GetString());
+      Task jobEvent = api.EventAsync("job-1", new PrintEvent("e1", "SPOOLED"), CancellationToken.None);
+      Assert.Equal("JOB_EVENT", (await currentSocket.NextSentAsync()).GetProperty("type").GetString());
+      currentSocket.Deliver("ACK", "ack-1", new { acknowledgedMessageId = "event-e1" });
+      await jobEvent.WaitAsync(Patience);
       await stop.CancelAsync();
       await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
@@ -232,24 +255,6 @@ public sealed class PrintApiClientTests
       Assert.Equal(message, refused.Message);
       Assert.Equal(requests, server.Requests.Count);
       Assert.Empty(Directory.EnumerateFileSystemEntries(staging.Path));
-   }
-
-
-
-   /// <summary>The in-memory download refuses an empty or over-20 MiB manifest before any request and stops as soon as the body runs past the declared length.</summary>
-   [Theory]
-   [InlineData(0L, "Document exceeds the 20 MiB limit or is empty.", 0)]
-   [InlineData(20_971_521L, "Document exceeds the 20 MiB limit or is empty.", 0)]
-   [InlineData(8L, "Document length mismatch.", 1)]
-   public async Task InMemoryDownloadRefusesWhatDoesNotMatchItsManifest(long declared, string message, int requests)
-   {
-      byte[] document = new byte[16];
-      using var server = new ScriptedServer();
-      server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(document) });
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
-      InvalidDataException refused = await Assert.ThrowsAsync<InvalidDataException>(() => api.DownloadAsync(FakePrintServer.Job(document) with { ContentLength = declared }, CancellationToken.None));
-      Assert.Equal(message, refused.Message);
-      Assert.Equal(requests, server.Requests.Count);
    }
 
 
