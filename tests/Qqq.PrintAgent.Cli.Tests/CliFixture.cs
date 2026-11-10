@@ -9,7 +9,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
 /// Shared harness for the command-line tests: the real <see cref="CommandLine"/> wired to hand-written fakes for the console,
-/// the environment, the service pipe and the three helper entry points. A test scripts what the outside world answers, runs
+/// the environment, the service pipe and the two helper entry points. A test scripts what the outside world answers, runs
 /// an argument list, then reads exactly what was written, sent and started. Nothing here touches the real console, the
 /// installed service or a printer. Captured output uses "\n" line endings so expected text reads the same on every machine.
 /// </summary>
@@ -65,18 +65,13 @@ internal sealed class CliFixture : IDisposable
 
 
 
-   /// <summary>The exit code the fake printer worker and update helper report.</summary>
+   /// <summary>The exit code the fake update helper reports.</summary>
    internal int HelperExitCode { get; set; }
 
 
 
    /// <summary>When set, whichever helper entry point is started fails with this.</summary>
    internal Exception? HelperFailure { get; set; }
-
-
-
-   /// <summary>How many times this process was started as a printer worker.</summary>
-   internal int WorkerRuns { get; private set; }
 
 
 
@@ -97,7 +92,7 @@ internal sealed class CliFixture : IDisposable
 
    /// <summary>Runs one invocation of the command line against the fakes and returns its exit code.</summary>
    internal Task<int> RunAsync(params string[] args)
-      => new CommandLine(new CommandLineHost(_output, _error, ReadVariable, ReadLine, SendAsync, RunWorkerAsync, ApplyUpdateAsync, ForwardCallbackAsync)).RunAsync(args);
+      => new CommandLine(new CommandLineHost(_output, _error, ReadVariable, ReadLine, SendAsync, ApplyUpdateAsync, ForwardCallbackAsync)).RunAsync(args);
 
 
 
@@ -124,15 +119,6 @@ internal sealed class CliFixture : IDisposable
    {
       Sent.Add(request);
       return SendFailure is null ? Task.FromResult(Reply) : Task.FromException<string>(SendFailure);
-   }
-
-
-
-   /// <summary>Counts a printer-worker start and reports the scripted exit code or failure.</summary>
-   private Task<int> RunWorkerAsync()
-   {
-      WorkerRuns++;
-      return HelperFailure is null ? Task.FromResult(HelperExitCode) : Task.FromException<int>(HelperFailure);
    }
 
 

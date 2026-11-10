@@ -64,23 +64,14 @@ internal sealed class CommandLine(CommandLineHost host)
 
 
    /// <summary>
-   /// Runs one invocation and returns the process exit code. Three argument shapes are internal and fixed: the isolated
-   /// printer worker, the MSI update helper and the browser sign-in callback forwarder, each started by another part of the
-   /// product with exactly these arguments. Everything else is an operator command. A failure becomes one line on standard
-   /// error and exit code 1; a timeout or cancellation does too, so a script never mistakes an operation that did not finish
-   /// for one that succeeded.
+   /// Runs one invocation and returns the process exit code. Two argument shapes are internal and fixed: the MSI update
+   /// helper and the browser sign-in callback forwarder, each started by another part of the product with exactly these
+   /// arguments. Everything else is an operator command. This executable is not a printer worker: the service starts its
+   /// own executable for that. A failure becomes one line on standard error and exit code 1; a timeout or cancellation
+   /// does too, so a script never mistakes an operation that did not finish for one that succeeded.
    /// </summary>
    internal async Task<int> RunAsync(string[] args)
    {
-      /////////////////////////////////////////////////////////////////////////////
-      // the printer worker answers its parent with one JSON line on standard    //
-      // output and reports its own failures there, so nothing here may catch or //
-      // print for it: it runs outside the handling that the other roles share   //
-      /////////////////////////////////////////////////////////////////////////////
-      if(args is ["--printer-worker"])
-      {
-         return await host.RunPrinterWorkerAsync();
-      }
       try
       {
          return args switch

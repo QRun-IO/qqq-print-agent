@@ -57,10 +57,12 @@ public sealed class CliUsageTests
 
 
 
-   /// <summary>A first word that is not a command is refused: standard error gets the reason and the usage, standard output stays empty, nothing is sent and the exit code is 1. Command names are case-sensitive, the service's own operation names are not commands, and the option that selected the removed legacy mode is no longer a word the tool knows.</summary>
+   /// <summary>A first word that is not a command is refused: standard error gets the reason and the usage, standard output stays empty, nothing is sent and the exit code is 1. Command names are case-sensitive, the service's own operation names are not commands, the option that selected the removed legacy mode is no longer a word the tool knows, and --printer-worker is not a role of this executable: the service starts its own executable as the printer worker.</summary>
    [Theory]
    [InlineData("status")]
    [InlineData("Printers")]
+   [InlineData("--printer-worker")]
+   [InlineData("--printer-worker", "extra")]
    [InlineData("--legacy-compat")]
    [InlineData("--legacy-compat", "run", "--once")]
    [InlineData("--service")]

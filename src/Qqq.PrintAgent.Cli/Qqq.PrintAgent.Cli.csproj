@@ -5,9 +5,11 @@
 
 <Project Sdk="Microsoft.NET.Sdk">
 
-   <!-- The scriptable head over the same Core as the window. Ships as a self-contained
-        single-file exe named after the app id (qqq-print-agent.exe), so the coverage package
-        name is the assembly name, not the project name. -->
+   <!-- The command-line client of the installed service. It reaches the service through the
+        Windows layer's pipe client and holds no protocol or printing logic of its own, so it
+        references only that layer. The executable is named after the app id
+        (qqq-print-agent.exe), so the coverage package name is the assembly name, not the
+        project name. The installer publishes it self-contained for win-x64. -->
    <PropertyGroup>
       <OutputType>Exe</OutputType>
       <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -18,20 +20,11 @@
    </PropertyGroup>
 
    <ItemGroup>
-      <ProjectReference Include="..\Qqq.PrintAgent.Core\Qqq.PrintAgent.Core.csproj" />
+      <ProjectReference Include="..\Qqq.PrintAgent.Windows\Qqq.PrintAgent.Windows.csproj" />
    </ItemGroup>
 
    <ItemGroup>
       <InternalsVisibleTo Include="Qqq.PrintAgent.Cli.Tests" />
    </ItemGroup>
 
-   <ItemGroup>
-      <!-- The app's own namespaces are global usings: their sort position against other
-           usings depends on the app's name, which the template replaces. -->
-      <Using Include="Qqq.PrintAgent.Core" />
-      
-   </ItemGroup>
-
-<ItemGroup><ProjectReference Include="../Qqq.PrintAgent.Windows/Qqq.PrintAgent.Windows.csproj" /></ItemGroup></Project>
-
-
+</Project>

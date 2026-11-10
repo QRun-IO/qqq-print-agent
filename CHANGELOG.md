@@ -22,8 +22,10 @@ exit 1); an unknown command prints it on standard error and exits 1. Arguments a
 accepts exactly its own options, each once, and anything else is refused without contacting the service and
 without repeating what was typed. `service-status` and `snapshot` now exit 1 when the service replies with an
 error, as the other commands already did. State left in `%LOCALAPPDATA%\QqqPrintAgent` by the removed mode is no
-longer read; see [Administrator operations](docs/ADMINISTRATION.md#command-line). The executable's internal roles
-(printer worker, MSI update helper, browser sign-in callback) are unchanged.
+longer read; see [Administrator operations](docs/ADMINISTRATION.md#command-line). The executable is
+no longer a printer worker: `--printer-worker` is an unknown command. Only the removed mode ever started it that
+way; the service starts its own executable as the worker, in 1.x as now. Its two remaining internal roles (MSI
+update helper, browser sign-in callback) are unchanged.
 
 ## 1.2.1
 

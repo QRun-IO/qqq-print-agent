@@ -19,5 +19,5 @@ public static class Program
    /// </summary>
    public static Task<int> Main(string[] args)
       => new CommandLine(new CommandLineHost(Console.Out, Console.Error, Environment.GetEnvironmentVariable, Console.ReadLine,
-         AgentPipeClient.SendAsync, PrinterWorkerHost.RunAsync, MsiUpdateInstaller.ApplyAsync, QqqBrowserCallback.ForwardFromHandlerAsync)).RunAsync(args);
+         AgentPipeClient.SendAsync, MsiUpdateInstaller.ApplyAsync, QqqBrowserCallback.ForwardFromHandlerAsync)).RunAsync(args);
 }

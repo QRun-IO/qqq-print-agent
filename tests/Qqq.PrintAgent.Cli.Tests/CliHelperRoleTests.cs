@@ -6,46 +6,14 @@
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// The three roles other parts of the product start this executable in, each with fixed arguments: the isolated printer
-/// worker, the MSI update helper and the browser sign-in callback forwarder. These tests pin which arguments select each
-/// role, what is passed on, and how a failure is reported, with fakes standing in for the worker, the installer and the
-/// companion. CliProcessTests starts the real executable to prove the same routing in the shipped entry point.
+/// The two roles other parts of the product start this executable in, each with fixed arguments: the MSI update helper
+/// and the browser sign-in callback forwarder. These tests pin which arguments select each role, what is passed on, and
+/// how a failure is reported, with fakes standing in for the installer and the companion. The executable is not a printer
+/// worker; the service starts its own executable for that, and CliUsageTests holds --printer-worker to an unknown command.
 /// </summary>
 public sealed class CliHelperRoleTests
 {
    private const string Callback = "io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code-91&state=synthetic-state-17";
-
-
-
-   /// <summary>Exactly --printer-worker runs the printer worker once and returns its exit code unchanged. The command line itself writes nothing, because the worker's standard output is a one-line protocol its parent parses.</summary>
-   [Theory]
-   [InlineData(0)]
-   [InlineData(1)]
-   public async Task PrinterWorker_RunsTheWorkerAndReturnsItsExitCode(int workerExitCode)
-   {
-      using CliFixture cli = new() { HelperExitCode = workerExitCode };
-
-      int exitCode = await cli.RunAsync("--printer-worker");
-
-      Assert.Equal(workerExitCode, exitCode);
-      Assert.Equal(1, cli.WorkerRuns);
-      Assert.Equal("", cli.Everything);
-      Assert.Empty(cli.Sent);
-   }
-
-
-
-   /// <summary>A failure inside the printer worker is not caught or printed by the command line: the worker reports its own failures to its parent, and anything else must surface as a crash, not as a line the parent would try to parse.</summary>
-   [Fact]
-   public async Task PrinterWorker_FailureIsNotCaughtOrPrinted()
-   {
-      using CliFixture cli = new() { HelperFailure = new InvalidOperationException("Synthetic worker failure.") };
-
-      InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() => cli.RunAsync("--printer-worker"));
-
-      Assert.Equal("Synthetic worker failure.", failure.Message);
-      Assert.Equal("", cli.Everything);
-   }
 
 
 
@@ -63,7 +31,6 @@ public sealed class CliHelperRoleTests
       Assert.Equal(helperExitCode, exitCode);
       Assert.Equal("C:\\synthetic\\updates\\request.json", Assert.Single(cli.UpdateRequests));
       Assert.Equal("", cli.Everything);
-      Assert.Equal(0, cli.WorkerRuns);
       Assert.Empty(cli.Sent);
    }
 
@@ -134,14 +101,12 @@ public sealed class CliHelperRoleTests
 
    /// <summary>The role arguments are exact. One argument too many or too few does not start a helper: the command line is refused as an unknown command, and what was typed, which may be a callback address, is not repeated.</summary>
    [Theory]
-   [InlineData("--printer-worker", "extra")]
-   [InlineData("--printer-worker", "--printer-worker")]
-   [InlineData("--Printer-Worker")]
    [InlineData("--apply-update")]
    [InlineData("--apply-update", "C:\\synthetic\\updates\\request.json", "extra")]
+   [InlineData("--Apply-Update", "C:\\synthetic\\updates\\request.json")]
    [InlineData("--auth-callback")]
    [InlineData("--auth-callback", Callback, "extra")]
-   [InlineData("run", "--printer-worker")]
+   [InlineData("run", "--apply-update", "C:\\synthetic\\updates\\request.json")]
    public async Task InexactRoleArguments_StartNoHelperAndAreRefused(params string[] args)
    {
       using CliFixture cli = new();
@@ -149,7 +114,6 @@ public sealed class CliHelperRoleTests
       int exitCode = await cli.RunAsync(args);
 
       Assert.Equal(1, exitCode);
-      Assert.Equal(0, cli.WorkerRuns);
       Assert.Empty(cli.UpdateRequests);
       Assert.Empty(cli.Callbacks);
       Assert.Empty(cli.Sent);
