@@ -204,7 +204,7 @@ public sealed class PrintWorker(PrintApiClient api, IFilePrinterBackend printers
          throw new InvalidDataException("Copies exceed the effective printing policy.");
       }
       await using IAsyncDisposable reservation = await options.ReserveDocumentAsync(job, token).ConfigureAwait(false);
-      using DownloadedDocument file = await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, token, options.ThrottleDownloadAsync).ConfigureAwait(false);
+      using DownloadedDocument file = await api.DownloadFileAsync(job, options.StagingDirectory, options.Settings, options.ThrottleDownloadAsync, token).ConfigureAwait(false);
       attempt.Download = attempt.Lap();
       RequireCurrentPrinter(job);
       attempt.Revalidate = attempt.Lap();

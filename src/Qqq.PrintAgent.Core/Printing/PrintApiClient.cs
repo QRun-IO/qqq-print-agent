@@ -30,8 +30,8 @@ public sealed partial class PrintApiClient : IDisposable
    /// <summary>
    /// Creates a client for one server. The address must be HTTPS, or HTTP only on loopback for local development. Responses
    /// are limited to 2 MiB and requests to 60 seconds, and a bearer token is attached only when one is supplied (the legacy
-   /// diagnostic path); native sessions authenticate through the session client instead. The control, download and
-   /// throttling limits are counted on the supplied clock, the system clock by default. The 60 second request limit is
+   /// diagnostic path); native sessions authenticate through the session client instead. The download limits are
+   /// counted on the supplied clock, the system clock by default. The 60 second request limit is
    /// not: it is <c>HttpClient.Timeout</c>, which the platform enforces on the system clock whatever clock is supplied.
    /// </summary>
    public PrintApiClient(string serverUrl, string? token = null, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null)

@@ -25,6 +25,11 @@ internal sealed class WorkerHarness : IAsyncDisposable
 
 
 
+   /// <summary>A download throttle that never makes a download wait, for a test that is not about pacing.</summary>
+   internal static Task Unpaced(int bytes, CancellationToken token) => Task.CompletedTask;
+
+
+
    /// <summary>Builds the composition on the given clock, the system clock by default, and connects it.</summary>
    internal WorkerHarness(TimeProvider? time = null)
    {
@@ -39,7 +44,7 @@ internal sealed class WorkerHarness : IAsyncDisposable
          CanSubmit = () => true,
          EventGate = EventGate,
          ClaimGate = ClaimGate,
-         ThrottleDownloadAsync = (_, _) => Task.CompletedTask,
+         ThrottleDownloadAsync = Unpaced,
          CanClaim = () => true,
          ReserveDocumentAsync = (_, _) => Task.FromResult<IAsyncDisposable>(new FreeLease()),
          AcquireSubmissionAsync = (_, _) => Task.FromResult<IAsyncDisposable>(new FreeLease()),

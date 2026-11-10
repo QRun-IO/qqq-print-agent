@@ -251,7 +251,7 @@ public sealed class PrintApiClientTests
       server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = string.Equals(fault, "overrun", StringComparison.Ordinal) ? new StreamContent(body) : new ByteArrayContent(document) });
       body.Feed(document);
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
-      InvalidDataException refused = await Assert.ThrowsAsync<InvalidDataException>(() => api.DownloadFileAsync(job, staging.Path, settings, CancellationToken.None));
+      InvalidDataException refused = await Assert.ThrowsAsync<InvalidDataException>(() => api.DownloadFileAsync(job, staging.Path, settings, WorkerHarness.Unpaced, CancellationToken.None));
       Assert.Equal(message, refused.Message);
       Assert.Equal(requests, server.Requests.Count);
       Assert.Empty(Directory.EnumerateFileSystemEntries(staging.Path));

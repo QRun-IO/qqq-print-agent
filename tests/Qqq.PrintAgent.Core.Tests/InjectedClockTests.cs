@@ -4,7 +4,6 @@
  */
 
 using System.Net;
-using System.Security.Cryptography;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -12,7 +11,7 @@ namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>
 /// The limits Core enforces itself are counted on an injected clock: the acknowledgement wait, the session client's
-/// request limit, the control limits, the three download limits, the bandwidth pacing and the worker's phase timings.
+/// request limit, the three download limits and the worker's phase timings.
 /// The one limit that is not is <c>HttpClient.Timeout</c> on the API client's HTTP client, which the platform counts
 /// on the system clock; it is not tested here. These tests move the injected clock by hand and check that each limit
 /// fires at exactly its configured time and not a millisecond earlier. "Not earlier" is read off the clock itself:
@@ -114,7 +113,7 @@ public sealed class InjectedClockTests
       using var server = new ScriptedServer();
       server.AddStalled(arrived);
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
-      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), CancellationToken.None);
+      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), WorkerHarness.Unpaced, CancellationToken.None);
       await arrived.Task.WaitAsync(Patience);
       time.Advance(TimeSpan.FromSeconds(2) - Tick);
       Assert.Contains(Tick, time.DueIn);
@@ -135,7 +134,7 @@ public sealed class InjectedClockTests
       using var server = new ScriptedServer();
       server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
-      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), CancellationToken.None);
+      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), WorkerHarness.Unpaced, CancellationToken.None);
       await body.NextReadAsync();
       time.Advance(TimeSpan.FromSeconds(2));
       body.Feed([1, 2, 3, 4]);
@@ -159,7 +158,7 @@ public sealed class InjectedClockTests
       using var server = new ScriptedServer();
       server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
-      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), CancellationToken.None);
+      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(new byte[8]), staging.Path, Limits(), WorkerHarness.Unpaced, CancellationToken.None);
       for(int chunk = 0; chunk < 3; chunk++)
       {
          await body.NextReadAsync();
@@ -173,41 +172,6 @@ public sealed class InjectedClockTests
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
       Assert.Equal(TimeSpan.FromSeconds(7), time.Elapsed);
       Assert.Empty(Directory.EnumerateFileSystemEntries(staging.Path));
-   }
-
-
-
-   /// <summary>
-   /// With a per-download rate limit and no shared throttle, each chunk is followed by exactly the pause that keeps the
-   /// average at the limit: 2,500 bytes at 1,000 bytes per second take 2.5 seconds on the client's clock, and the next
-   /// read does not start until its pause has passed.
-   /// </summary>
-   [Fact]
-   public async Task RateLimitPausesExactlyLongEnoughToHoldTheAverage()
-   {
-      var time = new ManualTimeProvider();
-      byte[] document = RandomNumberGenerator.GetBytes(2_500);
-      using var staging = new TempDirectory();
-      using var body = new FeedStream();
-      using var server = new ScriptedServer();
-      server.AddResponse(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
-      Task<DownloadedDocument> download = api.DownloadFileAsync(Job(document), staging.Path, Limits() with { MaxDownloadBytesPerSecond = 1_000 }, CancellationToken.None);
-      await body.NextReadAsync();
-      body.Feed(document[..1_000]);
-      await time.WhenDueInAsync(TimeSpan.FromSeconds(1));
-      Assert.Equal(1, body.Reads);
-      time.Advance(TimeSpan.FromSeconds(1));
-      await body.NextReadAsync();
-      body.Feed(document[1_000..]);
-      await time.WhenDueInAsync(TimeSpan.FromSeconds(1.5));
-      Assert.Equal(2, body.Reads);
-      time.Advance(TimeSpan.FromSeconds(1.5));
-      await body.NextReadAsync();
-      body.End();
-      using DownloadedDocument downloaded = await download.WaitAsync(Patience);
-      Assert.Equal(document, await File.ReadAllBytesAsync(downloaded.Path));
-      Assert.Equal(TimeSpan.FromSeconds(2.5), time.Elapsed);
    }
 
 

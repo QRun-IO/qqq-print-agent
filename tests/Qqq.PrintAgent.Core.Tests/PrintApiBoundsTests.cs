@@ -32,7 +32,7 @@ public sealed class PrintApiBoundsTests
       using ResponseHandler handler = new(() => new ByteArrayContent(document));
       using PrintApiClient api = new("https://synthetic.invalid", handler: handler);
       PrintJob job = new("job", "printer", "Title", "PDF", hash, document.Length, new PrintOptions(), "", "CLAIMED");
-      using DownloadedDocument staged = await api.DownloadFileAsync(job, staging.Path, new RealtimeSettings(), CancellationToken.None);
+      using DownloadedDocument staged = await api.DownloadFileAsync(job, staging.Path, new RealtimeSettings(), WorkerHarness.Unpaced, CancellationToken.None);
       Assert.Equal(document.Length, new FileInfo(staged.Path).Length);
    }
 

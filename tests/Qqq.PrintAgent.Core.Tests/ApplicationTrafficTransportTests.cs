@@ -47,7 +47,7 @@ public sealed class ApplicationTrafficTransportTests
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
       string staging = Path.Combine(Path.GetTempPath(), "qqq-traffic-" + Guid.NewGuid().ToString("N"));
       var job = new PrintJob("job", "printer", "Synthetic", "PDF", Convert.ToHexString(SHA256.HashData(document)), document.Length, new PrintOptions(), "", "CLAIMED");
-      Task<DownloadedDocument> download = api.DownloadFileAsync(job, staging, new RealtimeSettings(), timeout.Token);
+      Task<DownloadedDocument> download = api.DownloadFileAsync(job, staging, new RealtimeSettings(), WorkerHarness.Unpaced, timeout.Token);
       try
       {
          await content.Paused.Task.WaitAsync(timeout.Token);
