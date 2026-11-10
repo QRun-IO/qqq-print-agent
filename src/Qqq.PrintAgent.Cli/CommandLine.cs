@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli;
@@ -37,8 +38,8 @@ internal sealed class CommandLine(CommandLineHost host)
 
       Every command is carried out by the installed print service, which owns the sign-in, the pairing and all printing.
       Run from an administrator prompt, and sign in through the companion app first.
-      The enrollment code is read from the QQQ_PRINT_ENROLLMENT_CODE environment variable, or typed at a prompt;
-      it is never accepted on the command line.
+      The enrollment code is read from the QQQ_PRINT_ENROLLMENT_CODE environment variable, or else from standard input:
+      typed at a prompt, where it is not shown, or piped in. It is never accepted on the command line.
       Exit code: 0 on success; 1 when the arguments are wrong, the service cannot be reached or the service reports an error.
       """;
 
@@ -196,17 +197,50 @@ internal sealed class CommandLine(CommandLineHost host)
 
 
    /// <summary>
-   /// Reads the one-time enrollment code from the environment, or prompts for it, so the code never appears in the command
-   /// line or shell history. It is passed to the service and nowhere else: this class never prints it.
+   /// Reads the one-time enrollment code from the environment, or else from standard input, so the code never appears in
+   /// the command line or shell history. It is passed to the service and nowhere else: this class never prints it.
+   /// Surrounding white space is dropped, because a code never has any and a shell can add it (cmd's "echo CODE | ..."
+   /// sends a trailing space).
    /// </summary>
    private string ReadEnrollmentCode()
    {
       string? code = host.ReadEnvironmentVariable(EnrollmentCodeVariable);
       if(string.IsNullOrWhiteSpace(code))
       {
-         host.Output.Write("Enrollment code: ");
-         code = host.ReadLine();
+         ///////////////////////////////////////////////////////////////////////////
+         // the prompt goes to standard error, so a script that pipes the code in //
+         // and captures standard output gets the service's reply and nothing     //
+         // else. neither way of reading echoes the line end, so the prompt line  //
+         // is ended here, before the reply or an error message is written        //
+         ///////////////////////////////////////////////////////////////////////////
+         host.Error.Write("Enrollment code: ");
+         code = host.IsInputRedirected() ? host.ReadLine() : ReadWithoutEcho();
+         host.Error.WriteLine();
       }
-      return !string.IsNullOrWhiteSpace(code) ? code : throw new InvalidOperationException("Enrollment code is required.");
+      return !string.IsNullOrWhiteSpace(code) ? code.Trim() : throw new InvalidOperationException("Enrollment code is required.");
+   }
+
+
+
+   /// <summary>
+   /// Reads one line from the console key by key without showing it, so a code typed at the prompt is not left on the
+   /// screen or in a terminal recording. Enter ends the line, Backspace removes the last character typed, and keys that
+   /// produce no character (arrows, function keys) are ignored.
+   /// </summary>
+   private string ReadWithoutEcho()
+   {
+      StringBuilder typed = new();
+      for(ConsoleKeyInfo key = host.ReadKey(true); key.Key != ConsoleKey.Enter; key = host.ReadKey(true))
+      {
+         if(key.Key == ConsoleKey.Backspace)
+         {
+            typed.Length = Math.Max(0, typed.Length - 1);
+         }
+         else if(!char.IsControl(key.KeyChar))
+         {
+            typed.Append(key.KeyChar);
+         }
+      }
+      return typed.ToString();
    }
 }

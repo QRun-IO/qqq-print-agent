@@ -18,6 +18,11 @@ public static class Program
    /// is no code here that a test cannot reach: asking for help exercises this whole composition without touching the service.
    /// </summary>
    public static Task<int> Main(string[] args)
-      => new CommandLine(new CommandLineHost(Console.Out, Console.Error, Environment.GetEnvironmentVariable, Console.ReadLine,
+      => new CommandLine(new CommandLineHost(Console.Out, Console.Error, Environment.GetEnvironmentVariable, IsInputRedirected, Console.ReadLine, Console.ReadKey,
          AgentPipeClient.SendAsync, MsiUpdateInstaller.ApplyAsync, QqqBrowserCallback.ForwardFromHandlerAsync)).RunAsync(args);
+
+
+
+   /// <summary>Says whether standard input is a file or a pipe instead of a console. It exists only because a property cannot be passed as a method reference.</summary>
+   internal static bool IsInputRedirected() => Console.IsInputRedirected;
 }

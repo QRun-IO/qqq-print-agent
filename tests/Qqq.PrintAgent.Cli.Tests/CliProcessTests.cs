@@ -74,6 +74,28 @@ public sealed class CliProcessTests
 
 
 
+   /// <summary>The real executable, with no enrollment code in its environment and standard input closed, reads redirected input as a line, finds none, and stops there: the prompt and the reason are on standard error, standard output is empty and the exit code is 1. It fails before any request would be sent, so the service is not contacted.</summary>
+   [Fact]
+   public async Task Enroll_WithNoCodeAndClosedInput_FailsBeforeContactingTheService()
+   {
+      (int exitCode, string output, string error) = await RunAsync(input: null, "enroll", "--server", "https://qqq.example.test");
+
+      Assert.Equal(1, exitCode);
+      Assert.Equal("", output);
+      Assert.Equal("Enrollment code: \nEnrollment code is required.\n", error);
+   }
+
+
+
+   /// <summary>The real binding for "is standard input redirected" reports the console's own answer for input, not for output or error.</summary>
+   [Fact]
+   public void InputRedirectionBinding_ReportsTheConsoleState()
+   {
+      Assert.Equal(Console.IsInputRedirected, Program.IsInputRedirected());
+   }
+
+
+
    /// <summary>
    /// Starts the executable with the given arguments and waits for it to end, returning its exit code and what it wrote, with
    /// line endings normalized. Standard input carries the given line, if any, and is then closed. The enrollment code

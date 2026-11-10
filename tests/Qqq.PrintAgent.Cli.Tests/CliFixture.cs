@@ -40,13 +40,33 @@ internal sealed class CliFixture : IDisposable
 
 
 
-   /// <summary>The lines an operator would type, in order; when they run out, standard input is at its end.</summary>
+   /// <summary>Whether standard input is a file or a pipe (the default here, as in a script) or a console an operator types at.</summary>
+   internal bool InputRedirected { get; set; } = true;
+
+
+
+   /// <summary>The lines redirected standard input holds, in order; when they run out, standard input is at its end.</summary>
    internal Queue<string?> TypedLines { get; } = new();
 
 
 
    /// <summary>How many times a line was asked for from standard input.</summary>
    internal int LinesRead { get; private set; }
+
+
+
+   /// <summary>The keys an operator presses at the console, in order.</summary>
+   internal Queue<ConsoleKeyInfo> Keys { get; } = new();
+
+
+
+   /// <summary>How many keys were read from the console.</summary>
+   internal int KeysRead { get; private set; }
+
+
+
+   /// <summary>How many of those keys were read in a way that would have shown them on the screen.</summary>
+   internal int KeysShown { get; private set; }
 
 
 
@@ -92,7 +112,24 @@ internal sealed class CliFixture : IDisposable
 
    /// <summary>Runs one invocation of the command line against the fakes and returns its exit code.</summary>
    internal Task<int> RunAsync(params string[] args)
-      => new CommandLine(new CommandLineHost(_output, _error, ReadVariable, ReadLine, SendAsync, ApplyUpdateAsync, ForwardCallbackAsync)).RunAsync(args);
+      => new CommandLine(new CommandLineHost(_output, _error, ReadVariable, () => InputRedirected, ReadLine, ReadKey, SendAsync, ApplyUpdateAsync, ForwardCallbackAsync)).RunAsync(args);
+
+
+
+   /// <summary>Queues the keys for typing the given text at the console, without the Enter that ends the line.</summary>
+   internal void Type(string text)
+   {
+      foreach(char character in text)
+      {
+         Keys.Enqueue(new ConsoleKeyInfo(character, ConsoleKey.None, shift: false, alt: false, control: false));
+      }
+   }
+
+
+
+   /// <summary>Queues one key that produces the given character, such as Enter ('\r') or Backspace ('\b'), or none ('\0') for an arrow or function key.</summary>
+   internal void Press(ConsoleKey key, char character = '\0')
+      => Keys.Enqueue(new ConsoleKeyInfo(character, key, shift: false, alt: false, control: false));
 
 
 
@@ -110,6 +147,16 @@ internal sealed class CliFixture : IDisposable
    {
       LinesRead++;
       return TypedLines.Count > 0 ? TypedLines.Dequeue() : null;
+   }
+
+
+
+   /// <summary>Hands out the next pressed key and notes whether it was asked for without echo. Running out of keys is a failure, so a read loop that never sees Enter fails the test instead of hanging it.</summary>
+   private ConsoleKeyInfo ReadKey(bool intercept)
+   {
+      KeysRead++;
+      KeysShown += intercept ? 0 : 1;
+      return Keys.Count > 0 ? Keys.Dequeue() : throw new InvalidOperationException("The fixture has no more keys to press.");
    }
 
 

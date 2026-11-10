@@ -28,8 +28,8 @@ public sealed class CliUsageTests
 
       Every command is carried out by the installed print service, which owns the sign-in, the pairing and all printing.
       Run from an administrator prompt, and sign in through the companion app first.
-      The enrollment code is read from the QQQ_PRINT_ENROLLMENT_CODE environment variable, or typed at a prompt;
-      it is never accepted on the command line.
+      The enrollment code is read from the QQQ_PRINT_ENROLLMENT_CODE environment variable, or else from standard input:
+      typed at a prompt, where it is not shown, or piped in. It is never accepted on the command line.
       Exit code: 0 on success; 1 when the arguments are wrong, the service cannot be reached or the service reports an error.
       """;
 
