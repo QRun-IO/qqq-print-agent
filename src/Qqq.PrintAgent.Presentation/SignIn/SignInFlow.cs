@@ -43,6 +43,7 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
    private SignInReadiness? _readiness;
    private FeedbackMessage? _feedback;
    private ServerTrust _trust = new();
+   private bool _trustKnown = true;
 
 
 

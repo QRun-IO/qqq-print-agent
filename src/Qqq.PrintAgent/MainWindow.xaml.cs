@@ -298,6 +298,11 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
          }
          ApplyStatus(result);
+         if(result.Succeeded)
+         {
+            // The service is answering: a certificate exception whose save could not be confirmed is read again now.
+            await _signIn.ReadUnconfirmedTrustAsync();
+         }
       }
       catch(Exception exception) when(exception is InvalidOperationException or KeyNotFoundException)
       {

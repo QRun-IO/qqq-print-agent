@@ -344,18 +344,24 @@ public sealed class SignInFlowEnrollmentTests
 
 
 
-   /// <summary>When the service refuses to save, its reply is shown and the saved state is announced again unchanged; when it gives no usable answer, the caller is told and the reason is logged with the full exception as debug detail.</summary>
+   /// <summary>
+   /// When the service refuses to save, its reply is shown and the saved state is announced again unchanged. When the save
+   /// never left this computer, nothing was changed either: the caller is told (the window shows the service as
+   /// unavailable), the reason is logged with the full exception as debug detail, and the checkbox goes back. In both
+   /// cases the flow still knows what the service holds.
+   /// </summary>
    [Theory]
    [InlineData(true)]
    [InlineData(false)]
    public async Task UnsavedException_LeavesTheSavedStateInForce(bool answered)
    {
-      SignInFixture fixture = new() { Service = _ => answered ? Task.FromResult("Error: Only an administrator may change this.") : Task.FromException<string>(new IOException("Service connection closed.")) };
+      SignInFixture fixture = new() { Service = _ => answered ? Task.FromResult("Error: Only an administrator may change this.") : Task.FromException<string>(new AgentPipeNotSentException(new IOException("The pipe could not be opened."))) };
 
       bool reachable = await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com");
 
       Assert.Equal(answered, reachable);
       Assert.Equal(new ServerTrust(), fixture.Flow.Trust);
+      Assert.True(fixture.Flow.TrustKnown);
       Assert.Equal(1, fixture.TrustAnnouncements);
       Assert.False(fixture.Flow.IsBusy);
       if(answered)
@@ -365,8 +371,85 @@ public sealed class SignInFlowEnrollmentTests
       else
       {
          Assert.Empty(fixture.Shown);
-         Assert.Contains("ERROR Server trust setting could not be saved: Service connection closed.", fixture.Log.Entries, StringComparer.Ordinal);
-         Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("DEBUG Service request 'set-server-trust' failure detail: System.IO.IOException", StringComparison.Ordinal));
+         Assert.Contains("ERROR Server trust setting could not be saved: The pipe could not be opened.", fixture.Log.Entries, StringComparer.Ordinal);
+         Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("DEBUG Service request 'set-server-trust' failure detail: Qqq.PrintAgent.Windows.AgentPipeNotSentException", StringComparison.Ordinal));
       }
+   }
+
+
+
+   /// <summary>
+   /// A save that left this computer and got no usable answer may have been carried out, so the service may hold the old
+   /// value or the new one. That is not "service unavailable" and not "could not be saved": the operator is told the
+   /// change could not be confirmed, with what really happened. The flow no longer claims to know the setting: the
+   /// checkbox is to be shown in neither state, the label says so, and until the setting has been read again the flow
+   /// itself applies no exception, here not even the one that was in force before the unconfirmed attempt to remove it.
+   /// </summary>
+   [Theory]
+   [MemberData(nameof(UnconfirmedFailures))]
+   public async Task SaveThatLeftWithoutAnAnswer_IsUnconfirmedAndTheSettingBecomesUnknown(Exception failure, string cause)
+   {
+      SignInFixture fixture = new();
+      Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com"));
+      fixture.Forget();
+      fixture.Service = _ => Task.FromException<string>(failure);
+
+      bool reachable = await fixture.Flow.SetTrustAsync(allow: false, null);
+
+      Assert.True(reachable);
+      Assert.False(fixture.Flow.TrustKnown);
+      Assert.Equal(new ServerTrust(), fixture.Flow.Trust);
+      Assert.Equal(2, fixture.TrustAnnouncements);
+      Assert.Equal(new FeedbackMessage("Certificate exception could not be confirmed", cause + " The service may have saved the change. The setting is read again as soon as the service answers; until then it is shown as undetermined and the companion applies no exception. The activity log has the full detail.", FeedbackSeverity.Warning), Assert.Single(fixture.Shown));
+      Assert.Contains("ERROR The certificate exception could not be confirmed, so the service may or may not have saved the change: " + cause, fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("could not be saved", StringComparison.Ordinal));
+      Assert.Equal("Allow untrusted server certificate (development only): the last change was not confirmed; the saved setting is being read again", SignInMessages.TrustLabel(fixture.Flow.Trust, fixture.Flow.TrustKnown));
+
+      fixture.AnswerAsTheRealService();
+      await fixture.Flow.DiscoverAsync("https://dev.example.com");
+      Assert.False(fixture.Sessions[0].AllowUntrustedCertificate);
+   }
+
+
+
+   /// <summary>
+   /// An unconfirmed setting is read again when the view says the service is answering. An answer makes it known and shows
+   /// what the service really holds, whichever way the unconfirmed save went; a read that fails leaves it unknown, so the
+   /// checkbox never falls back to a state the service may not hold. Asking again while the setting is known, or while
+   /// another operation is running, sends nothing and says nothing, so a view can ask on every status refresh.
+   /// </summary>
+   [Fact]
+   public async Task UnconfirmedSetting_IsReadAgainWhenTheServiceAnswers()
+   {
+      SignInFixture fixture = new();
+      await fixture.Flow.ReadUnconfirmedTrustAsync();
+      Assert.Empty(fixture.Requests);
+      fixture.Service = _ => Task.FromException<string>(new OperationCanceledException("The reply did not arrive in time."));
+      Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com"));
+      Assert.False(fixture.Flow.TrustKnown);
+
+      fixture.Service = _ => Task.FromException<string>(new AgentPipeNotSentException(new IOException("The pipe could not be opened.")));
+      await fixture.Flow.ReadUnconfirmedTrustAsync();
+      Assert.False(fixture.Flow.TrustKnown);
+      Assert.Equal(new ServerTrust(), fixture.Flow.Trust);
+
+      (Task reached, TaskCompletionSource<string> reply) = fixture.HoldService();
+      Task<EnrollmentResult> enrolling = fixture.Flow.EnrollAsync(SignInFixture.Server, "code-123");
+      await reached;
+      int requests = fixture.Requests.Count;
+      fixture.Forget();
+      await fixture.Flow.ReadUnconfirmedTrustAsync();
+      Assert.Equal(requests, fixture.Requests.Count);
+      Assert.Empty(fixture.Shown);
+      Assert.Empty(fixture.Log.Entries);
+      reply.SetResult(SignInFixture.Enrolled);
+      await SignInFixture.EndsAsync(enrolling);
+
+      fixture.Service = _ => Task.FromResult("""{"allowUntrustedCertificate":true,"origin":"https://dev.example.com"}""");
+      await fixture.Flow.ReadUnconfirmedTrustAsync();
+      Assert.True(fixture.Flow.TrustKnown);
+      Assert.Equal(new ServerTrust(true, "https://dev.example.com"), fixture.Flow.Trust);
+      Assert.Equal("get-server-trust", fixture.Requests[^1].Operation);
+      Assert.Equal("Allow untrusted server certificate for https://dev.example.com (development only)", SignInMessages.TrustLabel(fixture.Flow.Trust, fixture.Flow.TrustKnown));
    }
 }

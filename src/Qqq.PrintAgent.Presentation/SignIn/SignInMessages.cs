@@ -172,16 +172,33 @@ public static class SignInMessages
 
 
 
+   /// <summary>
+   /// The change to the certificate exception left for the service and no usable answer came back, so the service may
+   /// hold the old value or the new one. The operator is told that neither is shown until the setting has been read again.
+   /// </summary>
+   public static FeedbackMessage TrustUnconfirmed(string cause)
+      => new("Certificate exception could not be confirmed", cause + " The service may have saved the change. The setting is read again as soon as the service answers; until then it is shown as undetermined and the companion applies no exception." + LogHint, FeedbackSeverity.Warning);
+
+
+
    /// <summary>The certificate exception was saved for one server, with the warning that any certificate from it is now accepted.</summary>
    public static FeedbackMessage TrustAllowed(string? origin)
       => new("Untrusted certificate allowed for " + origin, "The service and companion will accept any certificate from this one server until this is turned off. Other servers keep normal validation. Use only with a development server.", FeedbackSeverity.Warning);
 
 
 
-   /// <summary>The label of the certificate-exception checkbox, which names the server a saved exception is bound to, so an exception saved for another server is visibly not in force for the one being entered.</summary>
-   public static string TrustLabel(ServerTrust trust)
+   /// <summary>
+   /// The label of the certificate-exception checkbox, which names the server a saved exception is bound to, so an exception
+   /// saved for another server is visibly not in force for the one being entered. While the setting is not known (a change
+   /// was sent and not confirmed) the label says so, because the checkbox then shows neither state.
+   /// </summary>
+   public static string TrustLabel(ServerTrust trust, bool known = true)
    {
       ArgumentNullException.ThrowIfNull(trust);
+      if(!known)
+      {
+         return "Allow untrusted server certificate (development only): the last change was not confirmed; the saved setting is being read again";
+      }
       return trust.AllowUntrustedCertificate
          ? "Allow untrusted server certificate for " + trust.Origin + " (development only)"
          : "Allow untrusted server certificate for this server (development only)";

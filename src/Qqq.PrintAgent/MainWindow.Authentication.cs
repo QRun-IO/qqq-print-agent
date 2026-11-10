@@ -59,16 +59,16 @@ public sealed partial class MainWindow
 
 
 
-   /// <summary>Reflects the saved exception in the checkbox and names the server it is bound to, so an exception saved for another server is visibly not in force for the one being entered.</summary>
+   /// <summary>Reflects the saved exception in the checkbox and names the server it is bound to, so an exception saved for another server is visibly not in force for the one being entered. While a change is unconfirmed the box is shown undetermined (neither checked nor unchecked) and the label says so.</summary>
    private void ShowServerTrust()
    {
-      AllowUntrustedCertificateBox.IsChecked = _signIn.Trust.AllowUntrustedCertificate;
-      AllowUntrustedCertificateLabel.Text = SignInMessages.TrustLabel(_signIn.Trust);
+      AllowUntrustedCertificateBox.IsChecked = _signIn.TrustKnown ? _signIn.Trust.AllowUntrustedCertificate : null;
+      AllowUntrustedCertificateLabel.Text = SignInMessages.TrustLabel(_signIn.Trust, _signIn.TrustKnown);
    }
 
 
 
-   /// <summary>Saves the checkbox through the flow so the service's own sessions honor it; a save that did not happen puts the box back, and an unreachable service is shown as such.</summary>
+   /// <summary>Saves the checkbox through the flow so the service's own sessions honor it; a save that did not happen puts the box back, a service the request never reached is shown as unavailable, and a save that was sent and not confirmed leaves the box undetermined until the setting has been read again.</summary>
    private async void AllowUntrustedCertificate_Click(object sender, RoutedEventArgs e)
    {
       if(!await _signIn.SetTrustAsync(AllowUntrustedCertificateBox.IsChecked == true, ServerBox.Text))
