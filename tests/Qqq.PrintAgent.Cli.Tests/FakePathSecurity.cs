@@ -36,12 +36,12 @@ internal sealed class FakePathSecurity : IPathSecurity
 
 
 
-   /// <summary>Descriptors the test set for particular folders.</summary>
+   /// <summary>Descriptors the test set for particular folders or files.</summary>
    internal Dictionary<string, FileSystemSecurity> Descriptors { get; } = new(StringComparer.OrdinalIgnoreCase);
 
 
 
-   /// <summary>Every folder whose descriptor was read, in order.</summary>
+   /// <summary>Every folder or file whose descriptor was read, in order.</summary>
    internal List<string> Reads { get; } = [];
 
 
@@ -70,6 +70,17 @@ internal sealed class FakePathSecurity : IPathSecurity
    {
       Reads.Add(directory);
       return Descriptors.TryGetValue(directory, out FileSystemSecurity? descriptor) ? descriptor : Descriptor();
+   }
+
+
+
+   /// <summary>Returns the descriptor the test set for the file, or a trusted one; a file that does not exist cannot be read, as on a real disk.</summary>
+   public FileSystemSecurity ReadFileSecurity(string file)
+   {
+      Reads.Add(file);
+      if(!File.Exists(file))
+      { throw new FileNotFoundException("Synthetic: no such file to read a security descriptor from.", file); }
+      return Descriptors.TryGetValue(file, out FileSystemSecurity? descriptor) ? descriptor : Descriptor();
    }
 
 

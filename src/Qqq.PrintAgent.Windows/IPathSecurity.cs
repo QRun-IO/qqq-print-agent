@@ -29,6 +29,11 @@ internal interface IPathSecurity
 
 
 
+   /// <summary>The owner and access list of an existing file.</summary>
+   FileSystemSecurity ReadFileSecurity(string file);
+
+
+
    /// <summary>Creates a folder that has the given owner and access list from the moment it exists.</summary>
    void CreateDirectory(string directory, DirectorySecurity security);
 }
