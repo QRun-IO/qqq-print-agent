@@ -108,7 +108,7 @@ public sealed class RealtimeProtocolTests
       Assert.Equal(payload, envelope.Payload.GetRawText());
       Assert.True(channel.IsOpen);
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 
@@ -138,7 +138,7 @@ public sealed class RealtimeProtocolTests
       Assert.Equal("Realtime operation was rejected: " + longestCode, rejection.Message);
       Assert.True(channel.IsOpen);
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 
@@ -242,7 +242,7 @@ public sealed class RealtimeProtocolTests
       Assert.Equal("JOB_AVAILABLE", wake.Type);
       Assert.Equal(first.Length + wake.WireLength, meter.GetSnapshot().DownloadedBytes);
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 
@@ -273,7 +273,7 @@ public sealed class RealtimeProtocolTests
       Assert.True(channel.IsOpen);
       Assert.True(meter.GetSnapshot().UploadedBytes > 0);
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 
@@ -306,7 +306,7 @@ public sealed class RealtimeProtocolTests
       RealtimeEnvelope next = await received.Reader.ReadAsync(stop.Token).AsTask().WaitAsync(Patience);
       Assert.Equal(forwarded ? "ERROR" : "PONG", next.Type);
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 
@@ -325,7 +325,7 @@ public sealed class RealtimeProtocolTests
       Assert.Equal("ERROR", error.Type);
       Assert.Equal("PERMISSION_DENIED", error.Payload.GetProperty("code").GetString());
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 

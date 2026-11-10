@@ -124,7 +124,7 @@ public sealed class PrintApiClientTests
 
       Assert.Empty(server.Requests);
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 
@@ -143,7 +143,7 @@ public sealed class PrintApiClientTests
       await api.HeartbeatAsync(CancellationToken.None).WaitAsync(Patience);
       Assert.Equal("HEARTBEAT", (await currentSocket.NextSentAsync()).GetProperty("type").GetString());
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 

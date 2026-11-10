@@ -216,7 +216,7 @@ public sealed class PrintingSupportTests
 
       Assert.False(waiting.IsCompleted);
       channel.Dispose();
-      Assert.Equal("Realtime connection was disposed.", (await Assert.ThrowsAsync<IOException>(() => waiting)).Message);
+      Assert.Equal("Realtime connection was disposed.", (await Assert.ThrowsAsync<RealtimeChannelClosedException>(() => waiting)).Message);
       Assert.True(socket.Disposed);
       Assert.False(channel.IsOpen);
    }

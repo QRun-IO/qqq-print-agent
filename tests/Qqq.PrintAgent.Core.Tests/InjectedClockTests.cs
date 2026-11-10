@@ -52,7 +52,7 @@ public sealed class InjectedClockTests
       socket.Deliver("ACK", "ack-1", new { acknowledgedMessageId = "event-1" });
       await replay.WaitAsync(Patience);
       await stop.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+      await run.WaitAsync(TimeSpan.FromSeconds(10));
    }
 
 

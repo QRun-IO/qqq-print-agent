@@ -25,6 +25,7 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    private long _queuedBytes;
    private int _queuedFrames;
    private int _closed;
+   private int _disposed;
 
 
 
@@ -47,30 +48,47 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    /// outgoing queue, cancel both loops, abort the socket, and fail every send still waiting for an acknowledgement so its
    /// caller replays the durable record instead of waiting forever. When the reader or writer ended with a failure, each of
    /// those failed sends carries it as its cause, so whoever reports the send also reports why the channel closed.
+   /// <para>
+   /// How the method ends says why the channel ended. It returns normally when the channel was ended on purpose: the
+   /// caller cancelled the token it passed in, or the channel was disposed while it ran. It throws when the channel ended
+   /// by itself, with what the reader failed with (a frame it rejected, a socket the server closed, a callback that
+   /// threw) or, when the reader did not fail, what the writer failed with. A callback that gives up by throwing a
+   /// cancellation while the caller's token is not cancelled ends the method as that cancellation, because it was not
+   /// the caller who asked to stop.
+   /// </para>
    /// </summary>
    public async Task RunAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
       using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
       Task reader = ReadAsync(received, lifetime.Token);
       Task writer = WriteAsync(lifetime.Token);
-      Task ended = reader;
-      try
+      Task ended = await Task.WhenAny(reader, writer).ConfigureAwait(false);
+
+      ////////////////////////////////////////////////////////////////////////
+      // read before the teardown below, so a channel that failed first and //
+      // was disposed a moment later still reports its failure              //
+      ////////////////////////////////////////////////////////////////////////
+      bool disposed = Volatile.Read(ref _disposed) != 0;
+      Interlocked.Exchange(ref _closed, 1);
+      _outgoing.Writer.TryComplete();
+      await lifetime.CancelAsync().ConfigureAwait(false);
+      socket.Abort();
+      Exception? cause = ended.Exception?.InnerException;
+      foreach(TaskCompletionSource pending in _pending.Values)
       {
-         ended = await Task.WhenAny(reader, writer).ConfigureAwait(false);
+         pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
       }
-      finally
-      {
-         Interlocked.Exchange(ref _closed, 1);
-         _outgoing.Writer.TryComplete();
-         await lifetime.CancelAsync().ConfigureAwait(false);
-         socket.Abort();
-         Exception? cause = ended.Exception?.InnerException;
-         foreach(TaskCompletionSource pending in _pending.Values)
-         {
-            pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
-         }
-         await Task.WhenAll(reader, writer).ConfigureAwait(false);
-      }
+      var both = Task.WhenAll(reader, writer);
+      await both.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+      /////////////////////////////////////////////////////////////////////////
+      // ended on purpose: disposed (whatever the loops met on a socket that //
+      // was disposed under them is the dispose itself), or cancelled by the //
+      // caller with neither loop having failed. anything else is rethrown:  //
+      // a failure, the reader's first, or a cancellation nobody asked for   //
+      /////////////////////////////////////////////////////////////////////////
+      if(!disposed && !(both.IsCanceled && token.IsCancellationRequested))
+      { await both.ConfigureAwait(false); }
    }
 
 
@@ -114,6 +132,9 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    /// <summary>
    /// Adds a frame to the bounded outgoing queue, counting bytes and frames against the negotiated limits. Exceeding a limit
    /// aborts the socket and throws, which forces a reconnect, because dropping a frame silently would lose a durable event.
+   /// A frame is also refused when the channel closed after the send was let in, while the frame was being serialized:
+   /// the queue no longer takes anything then, and the send is told the channel is closed, which is what happened,
+   /// instead of that the queue is full, which would be reported as the reason the connection dropped.
    /// </summary>
    private void Queue(byte[] bytes)
    {
@@ -218,13 +239,19 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
 
 
 
-   /// <summary>Marks the channel closed, stops the queue, fails any send still waiting so its caller replays the durable record, and disposes the socket.</summary>
+   /// <summary>
+   /// Marks the channel disposed and closed, stops the queue, fails any send still waiting so its caller replays the
+   /// durable record, and disposes the socket. A run that is still going ends normally: disposing is its owner ending
+   /// it on purpose. The waiting sends are told the channel is closed, the same failure a send gets when the channel
+   /// closes for any other reason.
+   /// </summary>
    public void Dispose()
    {
+      Interlocked.Exchange(ref _disposed, 1);
       Interlocked.Exchange(ref _closed, 1);
       _outgoing.Writer.TryComplete();
       foreach(TaskCompletionSource pending in _pending.Values)
-      { pending.TrySetException(new IOException("Realtime connection was disposed.")); }
+      { pending.TrySetException(new RealtimeChannelClosedException("Realtime connection was disposed.", null)); }
       socket.Dispose();
    }
 }
