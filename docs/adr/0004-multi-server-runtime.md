@@ -111,17 +111,22 @@ Requests and replies are JSON objects on the existing framing.
 | Code | Meaning |
 | --- | --- |
 | `unsupported_version` | The service does not speak this `v`. |
-| `unknown_operation`, `invalid_request` | The operation does not exist, or its arguments are missing or malformed. |
+| `unknown_operation`, `invalid_request` | The operation does not exist, or its arguments are missing or malformed. A test print in a format the printer does not offer is `invalid_request`. |
 | `server_not_found`, `server_ambiguous` | No server has this identifier; or (command line only) a name matches more than one. |
 | `server_limit`, `server_exists` | Eight servers already exist; or this origin is already a server. |
+| `server_removing` | The operation names a server that is being removed. Reads still answer for it; every change is refused with this code. |
 | `busy` | Another operation that changes this server's session or pairing is running. |
 | `not_signed_in`, `not_paired` | The operation needs a session, or a pairing, that this server does not have. |
+| `not_connected` | This server's connection is not ready for the action: its administrator disconnected this device, or the connection is still waiting for authorization or for the control state to be agreed. |
 | `server_incompatible`, `certificate_untrusted` | The compatibility check failed; `details` carries its stages and, for the second, a description of the certificate that was presented. |
-| `sign_in_refused`, `bind_refused`, `identity_changed` | The server refused the session; refused to bind the pairing; or bound it for a different account than the approved one. |
+| `server_unreachable` | The QQQ server could not be reached or did not answer in time (`session.signIn`, `servers.add`, `pairing.enroll` before the code is sent, `printers.testPrint`, `jobs.retry`, `jobs.cancel`). |
+| `server_refused` | The QQQ server refused the action; `message` carries its reason in the printable, bounded form Core produces. |
+| `sign_in_refused`, `bind_refused`, `identity_changed` | The server refused the session; refused to bind the pairing; or bound it for a different account than the approved one, in which case `details` names the approved principal and tenant, printable and bounded. |
 | `enrollment_refused`, `enrollment_unconfirmed` | The server refused the code; or the outcome is not known and `details` says what was left behind. |
-| `printer_not_found`, `job_not_found`, `job_not_current` | No such printer or job for this server; or the job belongs to an earlier pairing and is history. |
+| `printer_not_found`, `job_not_found`, `job_not_current` | No such printer or job for this server (a test print on a printer that is not shared with that server is `printer_not_found`); or the job belongs to an earlier pairing and is history. |
 | `duplicate_risk_unconfirmed` | A retry could print twice and the request did not confirm that. |
-| `state_unreadable` | Stored state for this server cannot be read; the message says which. |
+| `cancel_refused` | Windows refused to cancel a document in the spooler; `details` carries the `reason`, `documentGone` or `ownershipMismatch`. Nothing in the Windows queue was changed. |
+| `state_unreadable` | Stored state for this server cannot be read. The message names the file; there are no details. |
 | `state_newer`, `migration_incomplete` | The whole service is not running connections: a newer build wrote the state, or the upgrade from 1.x could not finish. The snapshot says which and why. |
 | `update_in_progress` | The service is prepared for an update and is not accepting this. |
 | `internal_error` | Anything else; the detail is in the service log, never in the reply. |
@@ -136,15 +141,17 @@ Access, as the code has it:
 
 - The service authenticates a client by the pipe's access list only: LocalSystem and Administrators. It checks nothing else about a client.
 - The client verifies, before it sends anything, that the process serving the pipe is the installed service.
-- Replies never carry a session credential, a device token or document content. One reply is an exception and is named here so it stays one: `session.signOut` returns the identity provider's sign-out request, which includes the provider's ID-token hint, for the companion to open in the browser. It is never logged.
+- Replies never carry a session credential, a device token or document content. One reply is an exception and is named here so it stays one: `session.signOut` returns the identity provider's sign-out request, which includes the provider's ID-token hint, for the companion to open in the browser. It is never logged. The same reply says whether the session was also ended on the server (`serverSessionEnded`): sign-out always finishes on this computer, and when the server could not be told, the operator is asked to revoke the session there.
 
 The snapshot is one aggregated document, so the companion asks once for everything instead of once per server and per view:
 
 - Once: the computer's printers, service state, update state, log settings, and the state of the stored data (ready, upgrade incomplete with the file it stopped at, or written by a newer build).
-- Per server: identifier, name, address, position; health and its status text; the attention count that drives health; authentication (signed in, as whom, authorization blocked and why); paired flag and device identifier; transport state and the realtime meter; control state (desired state, last command); shared printers with each one's server-side approval; whether the certificate exception is on and the two origins it covers; and whether stored state is unreadable.
+- Per server: identifier, name, address, position; health and its status text; the attention count that drives health; authentication (signed in, as whom, authorization blocked and why); paired flag and device identifier; transport state and the realtime meter; when the server last answered this computer (`lastContact`; the control state has its own, which is the control channel's alone); control state (desired state, last command); shared printers with each one's server-side approval; whether the certificate exception is on and the two origins it covers; and whether stored state is unreadable.
 - Jobs stay paged and are queried per server.
+- The snapshot never starts printer discovery, and never contacts a server. It reports the printers the host last discovered; the host refreshes that list on its own schedule. A snapshot is therefore always cheap, whatever a printer driver is doing.
+- While the stored data is not ready, the list of servers is empty and the computer's part says why.
 
-The companion keeps polling the snapshot, every five seconds as today. A change notification pushed by the service is not part of 2.0: one aggregated request already removes the cost that made polling a problem, and a push channel is a second protocol to secure and test.
+The companion keeps polling the snapshot, every five seconds as today. Between snapshots it draws the traffic meter from `transport.get`, a light read it repeats every second as it does in 1.x: for each server its identifier, its transport state with the meter, and `lastContact`, and nothing else. A change notification pushed by the service is not part of 2.0: one aggregated request already removes the cost that made polling a problem, and a push channel is a second protocol to secure and test.
 
 Clients older than the service:
 
@@ -154,7 +161,7 @@ Clients older than the service:
 
 Operations:
 
-- On the computer or the list of servers (no `server`): `snapshot`, `servers.list`, `servers.check`, `servers.add`, `servers.reorder` (the identifiers in their new order, in `args`), `computer.getProfile`, `computer.setProfile`, `logs.getSettings`, `logs.setSettings`, `logs.clear`, `update.prepare`, `update.resume`.
+- On the computer or the list of servers (no `server`): `snapshot`, `transport.get`, `servers.list`, `servers.check`, `servers.add`, `servers.reorder` (the identifiers in their new order, in `args`), `computer.getProfile`, `computer.setProfile`, `logs.getSettings`, `logs.setSettings`, `logs.clear`, `update.prepare`, `update.resume`.
 - On one server (`server` required): `servers.rename`, `servers.remove`, `session.signIn`, `session.signOut`, `pairing.enroll`, `connection.reconnect`, `trust.get`, `trust.set`, `printers.share`, `printers.setProfile`, `printers.testPrint`, `jobs.query`, `jobs.details`, `jobs.retry`, `jobs.cancel`, `jobs.acknowledge`.
 
 When a server comes to exist:
@@ -167,7 +174,7 @@ Certificate exception:
 
 - It stays what it is in 1.x, a development-only switch that accepts a certificate Windows does not trust, and it gets a boundary it lacks today. In 1.x, once switched on, it applies to every host the client contacts. In 2.0 it applies to two origins and no others: the server's own, and the sign-in provider that server names. Both are recorded with the server and shown to the operator in the warning.
 - Pinning the accepted certificate's fingerprint was considered and rejected. The exception exists for self-signed certificates and private authorities such as a local Caddy root, and a private authority reissues its certificates on a short cycle; a pin would stop matching at each renewal and unattended printing would stop with it. The durable way to trust a private authority is to install its root in the Local Machine trusted root store, which needs no exception at all. The wizard and the Connection page say so wherever the exception is offered.
-- When the trust stage fails, `servers.check` returns a description of the presented certificate (subject, issuer, expiry, fingerprint, and why Windows refused it), so the operator sees what the exception would accept. `trust.get` returns the same for an existing server, together with the two origins the exception covers.
+- When the trust stage fails, `servers.check` returns a description of the presented certificate (subject, issuer, expiry, fingerprint, and why Windows refused it), so the operator sees what the exception would accept. `trust.get` returns, for an existing server, the two origins the exception covers and the certificate from the last refusal the service remembers, with the address that presented it and when. It never probes: it contacts no server, and returns no certificate when the service has seen no refusal since it started.
 - A server with the exception switched on says so in the snapshot, and the companion shows it on the server's node and its Connection page for as long as it is on, so a development setting is not forgotten.
 - If a server later names a different sign-in provider, the exception does not follow it: sign-in fails as untrusted and the operator accepts the new origin or does not.
 - An exception carried over from 1.x covers the server's origin. The provider's origin is recorded from the first sign-in description the service reads after the upgrade, and logged. The companion's sign-in uses the same exception for the same two origins, from the snapshot, so the two cannot disagree about what is accepted.
@@ -219,6 +226,22 @@ A planning pass over the code on 2026-11-10 found places where this record was s
 - **Who names the sign-in provider.** `servers.check` returns the provider's origin whenever it could read the sign-in description, so the re-check after the operator accepts the exception can name both addresses. `servers.add` carries only that the operator accepted. The service derives and stores the provider's origin from its own read and never takes it from a client.
 - **The snapshot carries no recent jobs and no log lines.** Jobs come from `jobs.query`; the service's in-memory log ring is removed. The command line's `snapshot` prints the aggregated document.
 - **Ambiguous names are the command line's business.** The service takes a full server identifier only. The command line resolves a prefix or a name after listing the servers, and reports an ambiguous one itself.
+
+## Resolved while reviewing the pipe contract
+
+The contract was built as types and reviewed on 2026-11-10 before anything served it. The review found outcomes and readings that version 1 has and this record had no place for. They were settled as follows and are written into the sections above.
+
+- **Outcomes version 1 explains in text.** Five codes were added so that none of them becomes `internal_error`: `not_connected`, `server_unreachable`, `server_refused`, `cancel_refused` (with the reason in `details`) and `server_removing`. `identity_changed` carries the approved account in `details`. A sign-out reply says whether the server session was ended.
+- **Test prints.** A printer that is not shared with the server is `printer_not_found`; a format the printer does not offer is `invalid_request`.
+- **Unreadable state.** `state_unreadable` names the file in its message and has no details.
+- **The remembered certificate.** `trust.get` returns the certificate from the last refusal the service remembers, with the address that presented it and when, and never probes.
+- **Last contact and the traffic meter.** Each server's snapshot has a `lastContact`, and `transport.get` is the light read for the meter, so the companion keeps its one-second meter without asking for the whole snapshot each second.
+- **A snapshot is always cheap.** It reports the printers the host last discovered and never starts a discovery.
+- **Repeated members.** A request or a reply in which any object has the same member twice is refused whole, in the envelope and at any depth beneath it, because two readers can disagree about which value counts.
+- **Arguments that are left out.** A request without `args` is read as one with empty arguments, so it is valid exactly when every argument of the operation is optional. `update.prepare` and `update.resume` take none today; if either ever gains arguments, a request without them stays accepted, because the update helper is always one version behind.
+- **What a reply must contain.** A reply that lacks a member its type requires, or has a null inside a list, is an unreadable reply and not a record with a hole in it; a member the reader does not know is still skipped. A vocabulary value the reader does not know (a health, a stage, an outcome) is treated as unknown, never as a failure to read.
+- **Dates.** A date on the wire is ISO 8601 with a trailing `Z` or an offset, and nothing else is read. The times inside the reused job, printer-catalog and control records are carried as the text the service stored; they are not converted.
+- **The version of a reply.** A reply carries the version of the request it answers.
 
 ## Decisions taken while working, per the owner's direction
 
