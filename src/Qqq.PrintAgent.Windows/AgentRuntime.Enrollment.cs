@@ -15,16 +15,34 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public sealed partial class AgentRuntime
 {
+   /// <summary>How far an enrollment got, which decides what a failure has to report and whether the live session can still be trusted.</summary>
+   private enum EnrollmentProgress
+   {
+      /// <summary>Nothing on the server or on disk refers to a new device yet, or the server refused it.</summary>
+      NothingChanged,
+
+      /// <summary>The server bound the new device to the live session; the stored pairing and session still describe the old one.</summary>
+      DeviceBound,
+
+      /// <summary>The new pairing is stored; the session may not be stored or active yet.</summary>
+      PairingSaved,
+
+      /// <summary>The new pairing and session are stored and the session is active.</summary>
+      Activated,
+   }
+
+
+
    /// <summary>
    /// Exchanges the enrollment code for a device credential using the live user session on the selected server, binds the
-   /// new device to that session and checks the identity again. Only then is the stored pairing replaced and the connection
-   /// state reset, so a refused or interrupted bind leaves the previous pairing and session exactly as they were.
-   /// Authentication changes are serialized by a gate.
+   /// new device to that session and checks the identity again. Only then are the stored pairing and stored session replaced,
+   /// one straight after the other, and the connection state reset, so a refused or interrupted bind leaves both files as they
+   /// were. Authentication changes are serialized by a gate.
    /// </summary>
    private async Task<string> EnrollNativeAsync(PipeRequest request, CancellationToken token)
    {
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);
-      bool pairingSaved = false;
+      EnrollmentProgress progress = EnrollmentProgress.NothingChanged;
       try
       {
          WriteLog("INFO", $"Enrollment requested on {request.ServerUrl ?? "(no server)"} with a {(request.EnrollmentCode ?? "").Length}-character enrollment code (never logged), computer name {Environment.MachineName}, agent {PrintApiClient.AgentVersion}.");
@@ -43,18 +61,21 @@ public sealed partial class AgentRuntime
          QqqSessionBinding expected = identity with { DeviceId = response.DeviceId };
          WriteLog("INFO", "Step 3 of 4: binding the new device to the session and confirming the identity.");
          QqqSessionBinding actual = await session.BindDeviceAsync(new QqqDeviceCredential(response.DeviceId, response.DeviceToken), cancellationToken: token).ConfigureAwait(false);
+         progress = EnrollmentProgress.DeviceBound;
          RequireSameIdentity(expected, actual);
-         ////////////////////////////////////////////////////////////////////////////
-         // the stored pairing is replaced only after the server bound the device //
-         // and the identity matched: until here a failure costs the operator one //
-         // enrollment code, never the pairing that was already working           //
-         ////////////////////////////////////////////////////////////////////////////
+         ///////////////////////////////////////////////////////////////////////
+         // the stored pairing and session are replaced only after the server //
+         // bound the device and the identity matched; a failure before this  //
+         // point costs one enrollment code and leaves both files untouched   //
+         ///////////////////////////////////////////////////////////////////////
          WriteLog("INFO", "Step 4 of 4: saving the pairing to protected storage and activating the session for printing.");
          using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
          store.SaveConfiguration(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds));
-         pairingSaved = true;
+         progress = EnrollmentProgress.PairingSaved;
+         store.SaveAuthentication(new AgentAuthentication(actual, session.ExportCredential()));
          ResetConnectionState();
          ActivateSession(session, actual, store);
+         progress = EnrollmentProgress.Activated;
          lock(_stateLock)
          {
             _queuedJobs = [];
@@ -63,13 +84,32 @@ public sealed partial class AgentRuntime
          WakePoll();
          return $"Enrolled device {response.DeviceId}";
       }
-      catch(Exception exception) when(exception is not InvalidOperationException)
+      catch(Exception exception) when(progress != EnrollmentProgress.NothingChanged || exception is not InvalidOperationException)
       {
-         WriteFailure(pairingSaved ? "Enrollment failed after the new pairing was saved; sign in again to finish activating it"
-            : "Enrollment failed; any existing pairing is unchanged", exception);
+         ReportEnrollmentFailure(progress, exception);
          throw;
       }
       finally { _authenticationGate.Release(); }
+   }
+
+
+
+   /// <summary>
+   /// Says what a failed enrollment left behind, and stops the live session being used once the server has bound it to the new
+   /// device while this computer has not finished switching to it: that session no longer matches the stored pairing or the
+   /// state the runtime holds, so printing waits for a sign-in instead of running on a mismatch until the next renewal finds it.
+   /// </summary>
+   private void ReportEnrollmentFailure(EnrollmentProgress progress, Exception exception)
+   {
+      WriteFailure(progress switch
+      {
+         EnrollmentProgress.NothingChanged => "Enrollment failed; the stored pairing and session are unchanged",
+         EnrollmentProgress.DeviceBound => "Enrollment failed after the server bound the new device; the stored pairing and session are unchanged, and printing is blocked until you sign in again",
+         EnrollmentProgress.PairingSaved => "Enrollment failed after the new pairing was saved; printing is blocked until you sign in again, which finishes activating it",
+         _ => "Enrollment completed, but a later step failed",
+      }, exception);
+      if(progress is EnrollmentProgress.DeviceBound or EnrollmentProgress.PairingSaved)
+      { BlockAuthorization(); }
    }
 
 

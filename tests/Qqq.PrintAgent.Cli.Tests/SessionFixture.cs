@@ -66,6 +66,8 @@ internal sealed class SessionFixture : IDisposable
       internal bool ClaimedLegacy;
       internal bool DenyBinding;
       internal bool FailBindingTransport;
+      internal bool BindAsAnotherPrincipal;
+      internal bool FailExport;
       internal string? RevokedDeviceId;
       internal HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
       internal bool DelayUnauthorizedPoll { get; set; }
@@ -90,8 +92,8 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-      /// <summary>Returns a fixed synthetic cookie credential for this origin.</summary>
-      public QqqSessionCredential ExportCredential() => new(Origin, "synthetic-qqq-cookie");
+      /// <summary>Returns a fixed synthetic cookie credential for this origin, or fails as a lost connection when scripted to.</summary>
+      public QqqSessionCredential ExportCredential() => FailExport ? throw new IOException("Synthetic failure while exporting the session.") : new(Origin, "synthetic-qqq-cookie");
 
 
 
@@ -146,7 +148,7 @@ internal sealed class SessionFixture : IDisposable
 
 
 
-      /// <summary>Fails as a lost connection when scripted to, refuses with permission-denied when binding is denied or the device was revoked; otherwise checks the device id matches and records whether a legacy device was claimed.</summary>
+      /// <summary>Fails as a lost connection when scripted to, refuses with permission-denied when binding is denied or the device was revoked; otherwise checks the device id matches, records whether a legacy device was claimed and returns the binding (as another principal when scripted to).</summary>
       public Task<QqqSessionBinding> BindDeviceAsync(QqqDeviceCredential credential, bool claimLegacyDevice = false, CancellationToken cancellationToken = default)
       {
          if(FailBindingTransport)
@@ -159,7 +161,7 @@ internal sealed class SessionFixture : IDisposable
          }
          Assert.Equal(Binding.DeviceId, credential.DeviceId);
          ClaimedLegacy = claimLegacyDevice;
-         return Task.FromResult(Binding);
+         return Task.FromResult(BindAsAnotherPrincipal ? Binding with { PrincipalId = "someone-else" } : Binding);
       }
 
 
