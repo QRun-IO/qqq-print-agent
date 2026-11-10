@@ -3,9 +3,12 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json;
 using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Presentation.SignIn;
 using Qqq.PrintAgent.Presentation.Tests.Fakes;
+using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 
@@ -52,12 +55,18 @@ public sealed class SignInFlowThreadingTests
       Assert.Contains(nameof(SignInFlow.BrowserPending), announced, StringComparer.Ordinal);
       Assert.Contains(nameof(SignInFlow.Trust), announced, StringComparer.Ordinal);
       Assert.Contains(nameof(SignInFlow.Readiness), announced, StringComparer.Ordinal);
-      Assert.Equal("Sign-in options ready > Signing in > Signed in > Sign-in options ready > Waiting for the browser > Signed in > Account sign-out > Connecting > Device connected > Untrusted certificates refused", fixture.Titles);
+      Assert.Equal("Sign-in options ready > Signing in > Signed in > Sign-in options ready > Waiting for the browser > Signed in > Account sign-out > Account sign-out > Connecting > Device connected > Untrusted certificates refused", fixture.Titles);
+      Assert.Equal(FeedbackSeverity.Success, fixture.Shown[7].Severity);
    }
 
 
 
-   /// <summary>Discovers, signs in by password, discovers again, signs in through the browser, signs out, enrolls and reads and saves the certificate exception, completing every wait from another thread.</summary>
+   /// <summary>
+   /// Discovers, signs in by password, discovers again, signs in through the browser, signs out, enrolls and reads and saves
+   /// the certificate exception, completing every wait from another thread. The sign-out is answered with the identity
+   /// provider's own sign-out, and the provider's callback is delivered from another thread too, so the messages after
+   /// that wait are held to the calling thread as well.
+   /// </summary>
    private static async Task RunEveryOperationAsync(SignInFixture fixture)
    {
       SignInFlow flow = fixture.Flow;
@@ -82,10 +91,19 @@ public sealed class SignInFlowThreadingTests
       await Task.Run(() => reply.SetResult(SignInFixture.SignedInAndPrinting));
       await browser;
 
-      await AnswerOffThreadAsync(fixture, () => flow.SignOutAsync(), "Signed out of QQQ.");
+      QqqProviderLogout logout = new(new Uri("https://id.example.com/logout?id_token_hint=secret-hint"), new Uri(SignInFixture.Callback), "state-1");
+      Task<FakeInbox> providerInbox = fixture.NextInboxAsync();
+      (reached, reply) = fixture.HoldService();
+      Task<bool> signOut = flow.SignOutAsync();
+      await reached;
+      await Task.Run(() => reply.SetResult(JsonSerializer.Serialize(new PipeSignOutResult(SignInFixture.SignedOut, logout), PrintApiClient.JsonOptions)));
+      FakeInbox inbox = await providerInbox;
+      await Task.Run(() => inbox.Deliver(new Uri(SignInFixture.Callback + "?state=state-1")));
+      await signOut;
+
       await AnswerOffThreadAsync(fixture, () => flow.EnrollAsync(SignInFixture.Server, "code-123"), "Enrolled device device-42");
       await AnswerOffThreadAsync(fixture, flow.LoadTrustAsync, """{"allowUntrustedCertificate":false}""");
-      await AnswerOffThreadAsync(fixture, () => flow.SetTrustAsync(allow: false, null), "Saved.");
+      await AnswerOffThreadAsync(fixture, () => flow.SetTrustAsync(allow: false, null), """{"allowUntrustedCertificate":false}""");
    }
 
 
