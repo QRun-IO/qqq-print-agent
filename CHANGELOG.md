@@ -6,9 +6,10 @@ Removed the code the service never runs (2.0). The installed product behaves as 
 libraries lose every path that existed only for the polling transport and the `--legacy-compat` mode.
 
 - The API client can be built only from a signed-in session. Its device-token parameter and bearer header, the
-  device enrollment route, the control poll, the HTTP command receipt and the HTTP fallbacks for inventory,
-  heartbeat and job events are gone. Inventory, job events and command receipts travel only over the realtime
-  channel.
+  control poll, the HTTP command receipt and the HTTP fallbacks for inventory, heartbeat and job events are gone.
+  Enrollment is unchanged: it posts to the session's `devices/enroll` route, as the service always did; only the
+  `enroll` route a client without a session used is gone. Inventory, job events and command receipts travel only
+  over the realtime channel.
 - The print worker is the lane the service runs: it no longer has a mode that recovers the journal, sends its own
   heartbeat and inventory, or downloads and submits a document from memory. Everything the runtime hands it is
   required.
