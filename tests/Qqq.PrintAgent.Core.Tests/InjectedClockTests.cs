@@ -104,29 +104,6 @@ public sealed class InjectedClockTests
 
 
 
-   /// <summary>The control poll and the HTTP command receipt each give up after twenty seconds on the API client's clock, so a stalled control request can never hold the control loop for longer.</summary>
-   [Theory]
-   [InlineData("poll")]
-   [InlineData("receipt")]
-   public async Task ControlRequestsTimeOutAfterTwentySeconds(string operation)
-   {
-      var time = new ManualTimeProvider();
-      var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-      using var server = new ScriptedServer();
-      server.AddStalled(arrived);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server, timeProvider: time);
-      Task request = string.Equals(operation, "poll", StringComparison.Ordinal)
-         ? api.ControlPollAsync(0, CancellationToken.None)
-         : api.ControlReceiptAsync("command-1", new DeviceControlReceipt("receipt-1", "COMPLETED", "2026-01-01T00:00:00Z"), CancellationToken.None);
-      await arrived.Task.WaitAsync(Patience);
-      time.Advance(TimeSpan.FromSeconds(20) - Tick);
-      Assert.Contains(Tick, time.DueIn);
-      time.Advance(Tick);
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
-   }
-
-
-
    /// <summary>A document request that gets no response headers is abandoned at the connect limit, well before the total limit, and leaves nothing in the staging folder.</summary>
    [Fact]
    public async Task DownloadGivesUpAtTheConnectLimit()

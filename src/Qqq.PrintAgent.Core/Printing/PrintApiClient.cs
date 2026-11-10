@@ -18,7 +18,6 @@ namespace Qqq.PrintAgent.Core.Printing;
 public sealed partial class PrintApiClient : IDisposable
 {
    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
-   private static readonly TimeSpan ControlLimit = TimeSpan.FromSeconds(20);
    private readonly HttpClient _http;
    private readonly TimeProvider _time;
 

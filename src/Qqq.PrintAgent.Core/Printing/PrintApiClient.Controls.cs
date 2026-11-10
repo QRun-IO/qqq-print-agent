@@ -4,29 +4,19 @@
  */
 
 using System.Globalization;
-using System.Net;
-using System.Net.Http.Json;
-using System.Text.Json;
-using Qqq.PrintAgent.Core.Transport;
 
 namespace Qqq.PrintAgent.Core.Printing;
 
 /// <summary>
-/// Device control part of the API client: polling for desired state and commands over HTTP (the compatibility path), the
-/// strict validation applied to every command whatever its transport, and delivery of command receipts. Responses are
-/// bounded and every command's identity, action, lifetime and target are checked before anything acts on it.
+/// Device control part of the API client: the strict validation applied to every command the realtime channel delivers,
+/// and delivery of command receipts over that channel. A command's identity, action, lifetime and target are checked
+/// before anything acts on it.
 /// </summary>
 public sealed partial class PrintApiClient
 {
-   private static readonly string[] ControlCapabilities = ["REFRESH_INVENTORY", "CANCEL_SPOOL"];
-
-
-
    /// <summary>
-   /// Applies the same rule to a single command that arrived over the realtime channel as an HTTP poll response would
-   /// get, so both transports accept exactly the same commands. Only the failure differs: a realtime command that fails
-   /// the rule is a <see cref="PrintingProtocolException"/>, like any other malformed frame, while a polled batch that
-   /// fails it is an <see cref="InvalidDataException"/>, as the compatibility poll has always reported it.
+   /// Checks a command that arrived over the realtime channel before anything acts on it. A command that fails the rule
+   /// is a <see cref="PrintingProtocolException"/>, like any other malformed frame.
    /// </summary>
    public static void ValidateRealtimeCommand(DeviceControlCommand command)
    {
@@ -36,68 +26,10 @@ public sealed partial class PrintApiClient
 
 
 
-   /// <summary>A 404 means legacy only before this connection has negotiated control support.</summary>
-   public async Task<DeviceControlPoll?> ControlPollAsync(long revision, CancellationToken token)
-   {
-      using var timeout = new Deadline(_time, ControlLimit, token);
-      using HttpResponseMessage response = await _http.PostAsJsonAsync("device/control/poll", new
-      {
-         controlVersion = 1,
-         agentVersion = AgentVersion,
-         capabilities = ControlCapabilities,
-         lastAppliedRevision = revision,
-      }, JsonOptions, timeout.Token).ConfigureAwait(false);
-      if(response.StatusCode == HttpStatusCode.NotFound)
-      {
-         if(_nativeSession)
-         {
-            throw new InvalidDataException("The advertised native printing control endpoint is unavailable.");
-         }
-         return null;
-      }
-      response.EnsureSuccessStatusCode();
-      byte[] bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
-      if(bytes.Length > 65_536)
-      {
-         throw new InvalidDataException("Device control response exceeded its bound.");
-      }
-      DeviceControlPoll poll = JsonSerializer.Deserialize<DeviceControlPoll>(bytes, JsonOptions) ?? throw new InvalidDataException("Missing device control response.");
-      ValidateControlPoll(poll);
-      return poll;
-   }
-
-
-
-   /// <summary>
-   /// Checks a control response in full: version 1, a poll interval of 1 to 300 seconds, a valid desired state and server time, at
-   /// most 20 commands, and for each command a safe unique identifier, a bounded action, a lifetime of at most 15 minutes, and a
-   /// job identifier when the action cancels a spool job. Anything else is rejected as an invalid response, not partly applied.
-   /// The rejection is an <see cref="InvalidDataException"/>; this path is outside what <see cref="PrintingProtocolException"/> covers.
-   /// </summary>
-   private static void ValidateControlPoll(DeviceControlPoll poll)
-   {
-      if(poll.ControlVersion != 1 || poll.PollIntervalSeconds is < 1 or > 300 || poll.DesiredState is null
-         || poll.DesiredState.Revision < 0 || poll.DesiredState.ConnectionState is not ("CONNECTED" or "DISCONNECTED")
-         || poll.Commands is null || poll.Commands.Count > 20 || !DateTimeOffset.TryParse(poll.ServerTime, CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
-      {
-         throw new InvalidDataException("Invalid device control response.");
-      }
-      var identifiers = new HashSet<string>(StringComparer.Ordinal);
-      foreach(DeviceControlCommand command in poll.Commands)
-      {
-         if(!ValidControlCommand(command) || !identifiers.Add(command.CommandId))
-         {
-            throw new InvalidDataException("Invalid device control command.");
-         }
-      }
-   }
-
-
-
    /// <summary>
    /// True for a command that is safe to act on: present, with safe command and request identifiers, a bounded action, a
    /// creation and expiry time that parse, a lifetime of at most 15 minutes, and a job identifier when the action cancels
-   /// a spool job. The same rule serves a polled batch and a single realtime command, so both transports agree.
+   /// a spool job.
    /// </summary>
    private static bool ValidControlCommand(DeviceControlCommand? command)
       => command is not null && ValidControlId(command.CommandId) && ValidControlId(command.RequestId)
@@ -115,24 +47,12 @@ public sealed partial class PrintApiClient
 
 
    /// <summary>
-   /// Delivers one command receipt: over the realtime channel with a stable message identity and the server's acknowledgement
-   /// when attached, otherwise by HTTP, where the server must answer that it accepted the receipt. A receipt the server did not
-   /// accept throws, so the caller keeps it pending and sends it again instead of treating it as delivered.
+   /// Delivers one command receipt over the realtime channel, with a message identity derived from the receipt and the
+   /// server's acknowledgement. A receipt that is not acknowledged, or a channel that is gone, throws, so the caller
+   /// keeps the receipt pending and sends it again instead of treating it as delivered.
    /// </summary>
    public async Task ControlReceiptAsync(string commandId, DeviceControlReceipt receipt, CancellationToken token)
    {
-      if(_realtime is not null)
-      {
-         await RealtimeChannel.SendAsync("COMMAND_RECEIPT", new { commandId, receipt }, "receipt-" + receipt.ReceiptId, acknowledged: true, token: token).ConfigureAwait(false);
-         return;
-      }
-      using var timeout = new Deadline(_time, ControlLimit, token);
-      using HttpResponseMessage response = await _http.PostAsJsonAsync($"device/control/commands/{Uri.EscapeDataString(commandId)}/receipt", receipt, JsonOptions, timeout.Token).ConfigureAwait(false);
-      response.EnsureSuccessStatusCode();
-      using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
-      if(!body.RootElement.TryGetProperty("accepted", out JsonElement accepted) || accepted.ValueKind != JsonValueKind.True)
-      {
-         throw new InvalidDataException("Control receipt was not accepted.");
-      }
+      await RealtimeChannel.SendAsync("COMMAND_RECEIPT", new { commandId, receipt }, "receipt-" + receipt.ReceiptId, acknowledged: true, token: token).ConfigureAwait(false);
    }
 }

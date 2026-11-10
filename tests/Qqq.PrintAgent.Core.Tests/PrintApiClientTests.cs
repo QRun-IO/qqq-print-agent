@@ -149,66 +149,6 @@ public sealed class PrintApiClientTests
 
 
    /// <summary>
-   /// A 404 on the control poll means a legacy server only for a device-token client; a signed-in native session was
-   /// promised the endpoint, so its absence is an error. An oversized reply, and a batch holding an invalid or repeated
-   /// command, are refused whole.
-   /// </summary>
-   [Theory]
-   [InlineData("legacy-404", null)]
-   [InlineData("native-404", "The advertised native printing control endpoint is unavailable.")]
-   [InlineData("oversized", "Device control response exceeded its bound.")]
-   [InlineData("invalid-command", "Invalid device control command.")]
-   [InlineData("repeated-command", "Invalid device control command.")]
-   public async Task ControlPollTreatsAMissingEndpointByTransportAndRefusesBadReplies(string fault, string? message)
-   {
-      const string command = """{"commandId":"c-1","requestId":"r-1","action":"REFRESH_INVENTORY","createdAt":"2026-01-01T00:00:00Z","expiresAt":"2026-01-01T00:05:00Z"}""";
-      string poll = """{"controlVersion":1,"serverTime":"2026-01-01T00:00:00Z","pollIntervalSeconds":5,"desiredState":{"revision":1,"dispatchPaused":false,"connectionState":"CONNECTED"},"commands":[COMMANDS]}""";
-      (string body, HttpStatusCode status) = fault switch
-      {
-         "legacy-404" or "native-404" => ("{}", HttpStatusCode.NotFound),
-         "oversized" => (poll.Replace("COMMANDS", new string(' ', 65_537), StringComparison.Ordinal), HttpStatusCode.OK),
-         "invalid-command" => (poll.Replace("COMMANDS", command.Replace("c-1", "c/1", StringComparison.Ordinal), StringComparison.Ordinal), HttpStatusCode.OK),
-         _ => (poll.Replace("COMMANDS", command + "," + command, StringComparison.Ordinal), HttpStatusCode.OK),
-      };
-      using var server = new ScriptedServer();
-      using var session = new FakeSessionClient();
-      server.Add(body, status);
-      session.Answer(body, status);
-      using PrintApiClient api = string.Equals(fault, "native-404", StringComparison.Ordinal) ? PrintApiClient.ForSession(session) : new PrintApiClient("https://synthetic.invalid", handler: server);
-      if(message is null)
-      { Assert.Null(await api.ControlPollAsync(3, CancellationToken.None)); }
-      else
-      { Assert.Equal(message, (await Assert.ThrowsAsync<InvalidDataException>(() => api.ControlPollAsync(3, CancellationToken.None))).Message); }
-   }
-
-
-
-   /// <summary>Over HTTP a command receipt counts as delivered only when the server says it accepted it; any other answer throws, so the receipt stays pending and is sent again.</summary>
-   [Theory]
-   [InlineData("""{"accepted":true}""", true)]
-   [InlineData("""{"accepted":false}""", false)]
-   [InlineData("""{"accepted":"true"}""", false)]
-   [InlineData("{}", false)]
-   public async Task HttpReceiptIsDeliveredOnlyWhenTheServerAcceptsIt(string body, bool accepted)
-   {
-      using var server = new ScriptedServer();
-      server.Add(body);
-      using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
-      var receipt = new DeviceControlReceipt("r1", "COMPLETED", "2026-01-01T00:00:00Z", "Done.");
-      if(accepted)
-      { await api.ControlReceiptAsync("command 1", receipt, CancellationToken.None); }
-      else
-      { Assert.Equal("Control receipt was not accepted.", (await Assert.ThrowsAsync<InvalidDataException>(() => api.ControlReceiptAsync("command 1", receipt, CancellationToken.None))).Message); }
-      ScriptedRequest request = Assert.Single(server.Requests);
-      Assert.Equal("/printing/v1/device/control/commands/command%201/receipt", request.Uri.AbsolutePath);
-      using var sent = JsonDocument.Parse(request.Body!);
-      Assert.Equal("r1", sent.RootElement.GetProperty("receiptId").GetString());
-      Assert.Equal("Done.", sent.RootElement.GetProperty("message").GetString());
-   }
-
-
-
-   /// <summary>
    /// An operator action goes to its own route with a fresh request identifier; only a test print carries a test profile,
    /// and a retry states that the operator accepted the duplicate risk. The new job identifier is returned when the server
    /// gives one.
