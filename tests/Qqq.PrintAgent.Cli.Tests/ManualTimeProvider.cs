@@ -96,8 +96,12 @@ internal sealed class ManualTimeProvider : TimeProvider
    /// <summary>One wait on the manual clock: the moment it is due (null when it is not armed) and its repeat interval, if any.</summary>
    private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state) : ITimer
    {
+      /// <summary>The manual time at which the timer fires next, or null while it is not armed.</summary>
       internal DateTimeOffset? Due { get; set; }
 
+
+
+      /// <summary>The interval at which the timer fires again after its first time, or null when it fires once.</summary>
       internal TimeSpan? Period { get; private set; }
 
 

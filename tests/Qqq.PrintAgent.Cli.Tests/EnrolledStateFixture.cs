@@ -17,7 +17,12 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 internal sealed class EnrolledStateFixture : IDisposable
 {
+   /// <summary>The temporary folder that holds the enrolled state, removed when the fixture is disposed.</summary>
    internal string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "qqq-enrolled-" + Guid.NewGuid().ToString("N"));
+
+
+
+   /// <summary>The one shared queue; a runtime built on this state is given it as its printer backend.</summary>
    internal SyntheticPrinter Printer { get; } = new();
 
 
