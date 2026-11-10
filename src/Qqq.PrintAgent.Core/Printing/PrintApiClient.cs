@@ -109,7 +109,8 @@ public sealed partial class PrintApiClient : IDisposable
    /// Asks the server for the next job for this device, or null when none is waiting. The server replays a claimed job
    /// until its RECEIVED event commits, so the caller must record it. The job is checked against the contract before it
    /// is returned: one that breaks it throws <see cref="PrintingProtocolException"/>, carrying a stand-in when the job
-   /// named itself, so nothing later ever handles a job with a missing member or an unsafe identifier.
+   /// named itself, so nothing later ever handles a job with a missing member or an unsafe identifier. Fields the agent
+   /// does not read are ignored, and a byte-order mark in front of the body is accepted.
    /// </summary>
    public async Task<PrintJob?> ClaimAsync(CancellationToken token)
    {
@@ -185,7 +186,9 @@ public sealed partial class PrintApiClient : IDisposable
    /// <summary>
    /// Lists jobs the server is holding for this device but this computer has not received. A server without the endpoint
    /// (404) is treated as having none, so an older server only loses the preview. Each entry must name its job and
-   /// printer with usable identifiers; a list that breaks the contract throws <see cref="PrintingProtocolException"/>.
+   /// printer once, with usable identifiers; a list that breaks the contract throws
+   /// <see cref="PrintingProtocolException"/>. Fields the agent does not read are ignored, and a byte-order mark in
+   /// front of the body is accepted.
    /// </summary>
    public async Task<IReadOnlyList<PrintJob>> QueuedJobsAsync(CancellationToken token)
    {

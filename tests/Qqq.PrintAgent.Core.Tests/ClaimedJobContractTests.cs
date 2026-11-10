@@ -64,7 +64,7 @@ public sealed class ClaimedJobContractTests
    /// <summary>
    /// Every malformed member of a claimed job is refused with the one protocol-violation failure and a fixed message
    /// naming the member. When the job still named itself with a usable identifier the failure carries a stand-in for
-   /// it; when the identifier itself is unusable, or a repeated field makes it untrustworthy, it does not.
+   /// it; when the identifier itself is unusable it does not.
    /// </summary>
    [Theory]
    [InlineData("jobId-missing", "The claimed job has no usable job identifier.", false)]
@@ -72,7 +72,6 @@ public sealed class ClaimedJobContractTests
    [InlineData("jobId-path", "The claimed job has no usable job identifier.", false)]
    [InlineData("jobId-long", "The claimed job has no usable job identifier.", false)]
    [InlineData("jobId-number", "The claimed job does not have the expected fields.", false)]
-   [InlineData("jobId-repeated", "The claim response repeats a field.", false)]
    [InlineData("printerId-missing", "The claimed job has no usable printer identifier.", true)]
    [InlineData("printerId-path", "The claimed job has no usable printer identifier.", true)]
    [InlineData("title-missing", "The claimed job has no title, or one that is too long.", true)]
@@ -103,11 +102,8 @@ public sealed class ClaimedJobContractTests
    {
       JsonObject job = ValidJob();
       Faults[fault](job);
-      string body = string.Equals(fault, "jobId-repeated", StringComparison.Ordinal)
-         ? Claim(job).Replace("\"printerId\"", "\"JOBID\":\"hostile-marker\",\"printerId\"", StringComparison.Ordinal)
-         : Claim(job);
       using var server = new FakePrintServer();
-      server.OfferRaw(body);
+      server.OfferRaw(Claim(job));
       using PrintApiClient api = Api(server);
       PrintingProtocolException violation = await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None));
       Assert.Equal(message, violation.Message);
@@ -123,7 +119,7 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>A claim response that is not the expected JSON object at all (a web page, an array, a job that is not an object, nesting beyond the limit, a repeated job member) is the same protocol violation, with no job to report against.</summary>
+   /// <summary>A claim response that is not the expected JSON object at all (a web page, an array, a job that is not an object, nesting beyond what the JSON reader accepts, two job members) is the same protocol violation, with no job to report against.</summary>
    [Theory]
    [InlineData("<html>sign in</html>", "The claim response is not valid JSON.")]
    [InlineData("", "The claim response is not valid JSON.")]
@@ -131,16 +127,167 @@ public sealed class ClaimedJobContractTests
    [InlineData("\"job\"", "The claim response is not a JSON object.")]
    [InlineData("""{"job":7}""", "The claimed job is not a JSON object.")]
    [InlineData("""{"job":[]}""", "The claimed job is not a JSON object.")]
-   [InlineData("""{"job":null,"Job":null}""", "The claim response repeats a field.")]
-   [InlineData("""{"job":{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":{"m":{"n":{"o":{}}}}}}}}}}}}}}}}}""", "The claim response is not valid JSON.")]
+   [InlineData("""{"job":null,"job":null}""", "The claim response names more than one job.")]
+   [InlineData("""{"Job":null,"JOB":null}""", "The claim response names more than one job.")]
+   [InlineData("nested-65", "The claim response is not valid JSON.")]
    public async Task MalformedClaimResponseIsAProtocolViolation(string body, string message)
    {
+      if(string.Equals(body, "nested-65", StringComparison.Ordinal))
+      { body = ClaimWithNestedOption(65); }
       using var server = new FakePrintServer();
       server.OfferRaw(body);
       using PrintApiClient api = Api(server);
       PrintingProtocolException violation = await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None));
       Assert.Equal(message, violation.Message);
       Assert.Null(violation.RejectedJob);
+   }
+
+
+
+   /// <summary>
+   /// The contract tells consumers to ignore fields they do not know, and the server relays a submitter's options
+   /// unchanged, so a job is accepted whatever else it carries: unknown members beside the job, in the job and in its
+   /// options, unknown names that repeat or differ only in case, and an unknown option nested as deep as the JSON
+   /// reader itself accepts (64 levels counted from the response). None of it reaches the job the worker sees.
+   /// </summary>
+   [Theory]
+   [InlineData("""{"serverTime":"2026-01-01T00:00:00Z","job":JOB}""")]
+   [InlineData("""{"job":JOB,"Job":null}""")]
+   [InlineData("""{"job":{"deviceId":"device-1","message":"relayed","Message":"relayed again","message":7,JOB-MEMBERS}}""")]
+   [InlineData("""{"job":{JOB-MEMBERS-WITHOUT-OPTIONS,"options":{"copies":1,"scale":"ACTUAL_SIZE","duplex":true,"Duplex":false,"duplex":"LONG_EDGE","tray":{"id":"upper","ID":"lower"}}}}""")]
+   [InlineData("""{"job":{JOB-MEMBERS-WITHOUT-OPTIONS,"options":{"copies":1,"scale":"ACTUAL_SIZE","finishing":{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":{"m":{"n":{}}}}}}}}}}}}}}}}}}""")]
+   [InlineData("nested-64")]
+   public async Task FieldsTheAgentDoesNotReadAreIgnoredAtAnyDepthTheReaderAccepts(string body)
+   {
+      body = string.Equals(body, "nested-64", StringComparison.Ordinal) ? ClaimWithNestedOption(64) : Expand(body);
+      using var server = new FakePrintServer();
+      server.OfferRaw(body);
+      using PrintApiClient api = Api(server);
+      Assert.Equal(new PrintJob("job-1", "printer1", "Synthetic", "ZPL", Hash, 3, new PrintOptions(), "2026-01-01T00:00:00Z", "CLAIMED"), await api.ClaimAsync(CancellationToken.None));
+   }
+
+
+
+   /// <summary>
+   /// The agent matches member names without regard to case, so a job that gives a member the agent reads twice (in the
+   /// job, in its options or in its media selection) could be printed with a value the server did not mean. Such a job
+   /// is refused, and it is still identified: the stand-in carries the identifier the server spelled as the contract
+   /// spells it, so the worker can answer for the job instead of being offered it forever. Only a job whose identifier
+   /// is itself given twice in the contract's spelling cannot be answered for.
+   /// </summary>
+   [Theory]
+   [InlineData("""{JOB-MEMBERS,"JOBID":"hostile-marker"}""", true)]
+   [InlineData("""{"Title":"hostile-marker",JOB-MEMBERS}""", true)]
+   [InlineData("""{JOB-MEMBERS,"options":{"copies":3}}""", true)]
+   [InlineData("""{JOB-MEMBERS-WITHOUT-OPTIONS,"options":{"copies":1,"Copies":2}}""", true)]
+   [InlineData("""{JOB-MEMBERS-WITHOUT-OPTIONS,"options":{"copies":1,"copies":1}}""", true)]
+   [InlineData("""{JOB-MEMBERS-WITHOUT-OPTIONS,"options":{"scale":"FIT","SCALE":"ACTUAL_SIZE"}}""", true)]
+   [InlineData("""{JOB-MEMBERS-WITHOUT-OPTIONS,"options":{"mediaProfile":{"id":"default","revision":"HASH","Id":"other"}}}""", true)]
+   [InlineData("""{JOB-MEMBERS-WITHOUT-OPTIONS,"options":{"mediaProfile":{"id":"default","revision":"HASH","revision":"HASH"}}}""", true)]
+   [InlineData("""{JOB-MEMBERS,"jobId":"job-2"}""", false)]
+   public async Task JobThatRepeatsAMemberTheAgentReadsIsRefusedAndStillIdentified(string job, bool identified)
+   {
+      using var server = new FakePrintServer();
+      server.OfferRaw("{\"job\":" + Expand(job) + "}");
+      using PrintApiClient api = Api(server);
+      PrintingProtocolException violation = await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None));
+      Assert.Equal("The claimed job repeats a member the agent reads.", violation.Message);
+      Assert.Equal(identified, violation.RejectedJob is not null);
+      if(identified)
+      {
+         Assert.Equal("job-1", violation.RejectedJob!.JobId);
+         Assert.Equal("printer1", violation.RejectedJob.PrinterId);
+         Assert.Equal("Synthetic", violation.RejectedJob.Title);
+         Assert.Equal(new PrintOptions(), violation.RejectedJob.Options);
+         Assert.DoesNotContain("hostile-marker", JsonSerializer.Serialize(violation.RejectedJob), StringComparison.Ordinal);
+      }
+   }
+
+
+
+   /// <summary>
+   /// A server that spells a member in another case, and gives it once, is read as it was before this boundary existed:
+   /// the job is claimed. This is looser than the contract's camelCase and deliberate, because the agent has always
+   /// matched names this way and a job that printed must not start to be silently passed over.
+   /// </summary>
+   [Fact]
+   public async Task MemberSpelledInAnotherCaseOnceIsStillRead()
+   {
+      using var server = new FakePrintServer();
+      server.OfferRaw(Claim(ValidJob()).Replace("\"job\"", "\"Job\"", StringComparison.Ordinal).Replace("\"jobId\"", "\"JobId\"", StringComparison.Ordinal).Replace("\"copies\":1", "\"COPIES\":2", StringComparison.Ordinal));
+      using PrintApiClient api = Api(server);
+      PrintJob job = Assert.IsType<PrintJob>(await api.ClaimAsync(CancellationToken.None));
+      Assert.Equal("job-1", job.JobId);
+      Assert.Equal(2, job.Options.Copies);
+   }
+
+
+
+   /// <summary>A UTF-8 byte-order mark in front of the claim or the queued-job list is skipped, as it was before the contract checks; one anywhere else is still not JSON.</summary>
+   [Fact]
+   public async Task ByteOrderMarkBeforeTheResponseIsAccepted()
+   {
+      using var server = new FakePrintServer();
+      server.OfferRaw("﻿" + Claim(ValidJob())).OfferRaw("﻿").OfferRaw(" ﻿" + Claim(ValidJob()));
+      using PrintApiClient api = Api(server);
+      Assert.Equal("job-1", Assert.IsType<PrintJob>(await api.ClaimAsync(CancellationToken.None)).JobId);
+      Assert.Equal("The claim response is not valid JSON.", (await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None))).Message);
+      Assert.Equal("The claim response is not valid JSON.", (await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None))).Message);
+
+      using var queue = new ScriptedServer();
+      queue.Add("﻿" + """{"jobs":[{"jobId":"queued-1","printerId":"printer1"}]}""");
+      using var queued = new PrintApiClient("https://synthetic.invalid", handler: queue);
+      Assert.Equal("queued-1", Assert.Single(await queued.QueuedJobsAsync(CancellationToken.None)).JobId);
+   }
+
+
+
+   /// <summary>
+   /// The lists of members the repeated-name rule covers are exactly the members the job, options and media selection
+   /// records have, so a member added to a record cannot be left out of the rule without this test failing.
+   /// </summary>
+   [Fact]
+   public void RepeatedNameRuleCoversExactlyTheMembersTheRecordsRead()
+   {
+      static string[] Names(Type record) => [.. record.GetProperties().Select(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name)).Order(StringComparer.Ordinal)];
+      Assert.Equal(Names(typeof(PrintJob)), PrintJobContract.JobMembers.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Equal(Names(typeof(PrintOptions)), PrintJobContract.OptionMembers.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Equal(Names(typeof(PrinterMediaSelection)), PrintJobContract.MediaMembers.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The blocker this boundary once caused: a job whose options repeat a member the agent reads used to be rejected
+   /// before its identifier was read, so it was never answered and the server offered it again forever. It is now
+   /// refused exactly once (received, then FAILED with nothing submitted, never downloaded or printed), the lane counts
+   /// it as processed, and the next claim takes the job behind it.
+   /// </summary>
+   [Fact]
+   public async Task JobWithARepeatedOptionIsRefusedOnceAndTheNextJobIsClaimed()
+   {
+      byte[] document = [1, 2, 3];
+      using var server = new FakePrintServer();
+      server.OfferRaw(Claim(ValidJob()).Replace("\"copies\":1", "\"copies\":1,\"Copies\":2", StringComparison.Ordinal)).Offer(FakePrintServer.Job(document, "job-2"), document);
+      using PrintApiClient api = Api(server);
+      var journal = new RecordingJournal();
+      var printer = new FakePrinterBackend();
+      var worker = new PrintWorker(api, printer, journal, options: new PrintWorkerOptions { RecoverIncomplete = false, SynchronizeInventory = false });
+
+      Assert.True(await worker.RunOnceAsync());
+      Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal("The claimed job repeats a member the agent reads. No bytes were submitted.", journal.Last("job-1").Message);
+      Assert.Equal(new[] { ("job-1", "RECEIVED"), ("job-1", "FAILED") }, server.Events.Select(entry => (entry.JobId, entry.Event.Status)));
+      Assert.Equal(0, server.Downloads);
+      Assert.Equal(0, printer.Submissions);
+
+      Assert.True(await worker.RunOnceAsync());
+      Assert.Equal("SPOOLED", journal.GetState("job-2"));
+      Assert.Equal(1, printer.Submissions);
+      Assert.False(await worker.RunOnceAsync());
+      Assert.Equal(3, server.Claims);
+      Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal(2, server.Events.Count(entry => string.Equals(entry.JobId, "job-1", StringComparison.Ordinal)));
    }
 
 
@@ -295,13 +442,18 @@ public sealed class ClaimedJobContractTests
 
 
 
-   /// <summary>The queued-job list is accepted from a server that offers it, treated as empty from one that does not (404) or that sends no list, and its display-only members may be missing.</summary>
+   /// <summary>
+   /// The queued-job list is accepted from a server that offers it, treated as empty from one that does not (404) or
+   /// that sends no list, and its display-only members may be missing. Nothing is printed from this list, so fields the
+   /// agent does not read, and a display member given twice, do not cost the operator the whole preview.
+   /// </summary>
    [Fact]
    public async Task QueuedJobsAreReadLenientlyForDisplay()
    {
       using var server = new ScriptedServer();
       server.Add("{}", HttpStatusCode.NotFound).Add("{}").Add("""{"jobs":null}""")
-         .Add("""{"jobs":[{"jobId":"queued-1","printerId":"printer1"},{"jobId":"queued-2","printerId":"printer1","title":"Second","format":"PDF","contentSha256":"unused","contentLength":5,"options":{"copies":2},"createdAt":"2026-01-01T00:00:00Z","status":"QUEUED"}]}""");
+         .Add("""{"jobs":[{"jobId":"queued-1","printerId":"printer1"},{"jobId":"queued-2","printerId":"printer1","title":"Second","format":"PDF","contentSha256":"unused","contentLength":5,"options":{"copies":2},"createdAt":"2026-01-01T00:00:00Z","status":"QUEUED"}]}""")
+         .Add("""{"nextCursor":null,"Jobs":"ignored","jobs":[{"jobId":"queued-3","printerId":"printer1","title":"Third","Title":"Third again","deviceId":"device-1","options":{"copies":1,"Copies":2,"finishing":{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":{"m":{"n":{}}}}}}}}}}}}}}}}}]}""");
       using var api = new PrintApiClient("https://synthetic.invalid", handler: server);
       Assert.Empty(await api.QueuedJobsAsync(CancellationToken.None));
       Assert.Empty(await api.QueuedJobsAsync(CancellationToken.None));
@@ -310,12 +462,15 @@ public sealed class ClaimedJobContractTests
       Assert.Equal(new PrintJob("queued-1", "printer1", "", "", "", 0, new PrintOptions(), "", ""), jobs[0]);
       Assert.Equal(new PrintJob("queued-2", "printer1", "Second", "PDF", "unused", 5, new PrintOptions(Copies: 2), "2026-01-01T00:00:00Z", "QUEUED"), jobs[1]);
       Assert.Equal(2, jobs.Count);
+      PrintJob tolerated = Assert.Single(await api.QueuedJobsAsync(CancellationToken.None));
+      Assert.Equal("queued-3", tolerated.JobId);
+      Assert.Equal("printer1", tolerated.PrinterId);
       Assert.All(server.Requests, request => Assert.Equal("/printing/v1/device/jobs/queued", request.Uri.AbsolutePath));
    }
 
 
 
-   /// <summary>A queued-job list that breaks the contract (not JSON, not a list, too long, an entry that is not an object or has no usable identifiers, a repeated field, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
+   /// <summary>A queued-job list that breaks the contract (not JSON, two lists, not a list, too long, an entry that is not an object, has no usable identifiers or gives one twice, a member of the wrong type) is a protocol violation, and a server error is still reported as an HTTP failure.</summary>
    [Theory]
    [InlineData("<html></html>", "The queued jobs response is not valid JSON.")]
    [InlineData("[]", "The queued jobs response is not a JSON object.")]
@@ -325,7 +480,9 @@ public sealed class ClaimedJobContractTests
    [InlineData("""{"jobs":["queued-1"]}""", "A queued job is not a JSON object.")]
    [InlineData("""{"jobs":[{"printerId":"printer1"}]}""", "A queued job has no usable job or printer identifier.")]
    [InlineData("""{"jobs":[{"jobId":"queued-1","printerId":"a b"}]}""", "A queued job has no usable job or printer identifier.")]
-   [InlineData("""{"jobs":[{"jobId":"queued-1","JobId":"queued-2","printerId":"printer1"}]}""", "The queued jobs response repeats a field.")]
+   [InlineData("""{"jobs":[],"jobs":[]}""", "The queued jobs response holds more than one list.")]
+   [InlineData("""{"jobs":[{"jobId":"queued-1","JobId":"queued-2","printerId":"printer1"}]}""", "A queued job has no usable job or printer identifier.")]
+   [InlineData("""{"jobs":[{"jobId":"queued-1","printerId":"printer1","printerId":"printer2"}]}""", "A queued job has no usable job or printer identifier.")]
    [InlineData("""{"jobs":[{"jobId":"queued-1","printerId":"printer1","contentLength":"five"}]}""", "The queued job does not have the expected fields.")]
    public async Task MalformedQueuedJobListIsAProtocolViolation(string body, string message)
    {
@@ -350,7 +507,6 @@ public sealed class ClaimedJobContractTests
       ["jobId-path"] = job => job["jobId"] = "../../hostile-marker",
       ["jobId-long"] = job => job["jobId"] = new string('j', 201),
       ["jobId-number"] = job => job["jobId"] = 7,
-      ["jobId-repeated"] = _ => { },
       ["printerId-missing"] = job => job.Remove("printerId"),
       ["printerId-path"] = job => job["printerId"] = "hostile-marker/..\\x",
       ["title-missing"] = job => job.Remove("title"),
@@ -398,6 +554,31 @@ public sealed class ClaimedJobContractTests
 
    /// <summary>Wraps a job in a claim response.</summary>
    private static string Claim(JsonObject job) => new JsonObject { ["job"] = job.DeepClone() }.ToJsonString();
+
+
+
+   /// <summary>
+   /// Fills a hand-written body with the valid job, so a test row shows only what it adds: JOB is the whole job,
+   /// JOB-MEMBERS its members without the braces, JOB-MEMBERS-WITHOUT-OPTIONS the same less the options, and HASH a
+   /// well-formed SHA-256.
+   /// </summary>
+   private static string Expand(string body)
+   {
+      string members = ValidJob().ToJsonString()[1..^1];
+      string withoutOptions = members.Replace(""","options":{"copies":1,"scale":"ACTUAL_SIZE"}""", "", StringComparison.Ordinal);
+      Assert.NotEqual(members, withoutOptions, StringComparer.Ordinal);
+      return body.Replace("JOB-MEMBERS-WITHOUT-OPTIONS", withoutOptions, StringComparison.Ordinal).Replace("JOB-MEMBERS", members, StringComparison.Ordinal)
+         .Replace("JOB}", "{" + members + "}}", StringComparison.Ordinal).Replace("JOB,", "{" + members + "},", StringComparison.Ordinal).Replace("HASH", Hash, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>A claim for the valid job with one unknown option whose nesting brings the whole response to exactly the given depth: the response is level one, the job two, its options three.</summary>
+   private static string ClaimWithNestedOption(int depth)
+   {
+      string nested = string.Concat(Enumerable.Repeat("{\"deeper\":", depth - 4)) + "{}" + new string('}', depth - 4);
+      return Claim(ValidJob()).Replace("\"scale\":\"ACTUAL_SIZE\"", "\"scale\":\"ACTUAL_SIZE\",\"finishing\":" + nested, StringComparison.Ordinal);
+   }
 
 
 

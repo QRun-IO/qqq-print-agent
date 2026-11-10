@@ -12,6 +12,7 @@ public sealed record RealtimeEnvelope(string Type, string MessageId, JsonElement
 {
    private const int TypeLimit = 64;
    private const int MessageIdLimit = 200;
+   private const int DepthLimit = 24;
 
 
 
@@ -28,7 +29,8 @@ public sealed record RealtimeEnvelope(string Type, string MessageId, JsonElement
    /// </summary>
    internal static RealtimeEnvelope Parse(ReadOnlyMemory<byte> frame)
    {
-      using JsonDocument document = ProtocolJson.ParseObject(frame, "realtime frame", 24);
+      using JsonDocument document = ProtocolJson.ParseObject(frame, "realtime frame", DepthLimit);
+      ProtocolJson.RejectRepeatedFields(document.RootElement, "realtime frame");
       RealtimeEnvelope envelope = ProtocolJson.Read<RealtimeEnvelope>(document.RootElement, "realtime frame");
       if(string.IsNullOrEmpty(envelope.Type) || envelope.Type.Length > TypeLimit || string.IsNullOrEmpty(envelope.MessageId) || envelope.MessageId.Length > MessageIdLimit
          || envelope.Payload.ValueKind != JsonValueKind.Object)
