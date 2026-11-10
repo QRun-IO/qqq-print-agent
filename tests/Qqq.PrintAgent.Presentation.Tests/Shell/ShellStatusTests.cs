@@ -124,7 +124,6 @@ public sealed class ShellStatusTests
 
 
 
-
    /// <summary>Each navigation choice maps to a page name and a one-sentence description; the built-in settings item is Settings and a choice without a tag is Printers.</summary>
    [Fact]
    public void Pages_HaveANameAndADescription()

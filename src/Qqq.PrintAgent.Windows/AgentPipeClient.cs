@@ -87,4 +87,3 @@ public static class AgentPipeClient
    internal static NamedPipeClientStream CreateClient(string pipeName)
       => new(".", pipeName, PipeAccessRights.ReadWrite, PipeOptions.Asynchronous, TokenImpersonationLevel.Anonymous, HandleInheritability.None);
 }
-
