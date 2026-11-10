@@ -62,6 +62,32 @@ public sealed class ClaimedJobContractTests
 
 
    /// <summary>
+   /// The contract limits a title to 1,024 code points, as JSON Schema counts length, not to 1,024 UTF-16 units. A
+   /// title of 1,024 characters from outside the basic plane, two units each, is therefore accepted whole, and one more
+   /// such character is refused, with a stand-in that does not carry the over-long title.
+   /// </summary>
+   [Fact]
+   public async Task TitleLimitCountsCodePointsNotUtf16Units()
+   {
+      string atLimit = string.Concat(Enumerable.Repeat("🖨", 1024));
+      JsonObject accepted = ValidJob();
+      accepted["title"] = atLimit;
+      JsonObject refused = ValidJob();
+      refused["title"] = atLimit + "🖨";
+      using var server = new FakePrintServer();
+      server.OfferRaw(Claim(accepted)).OfferRaw(Claim(refused));
+      using PrintApiClient api = Api(server);
+      PrintJob job = Assert.IsType<PrintJob>(await api.ClaimAsync(CancellationToken.None));
+      Assert.Equal(atLimit, job.Title);
+      Assert.Equal(2048, job.Title.Length);
+      PrintingProtocolException violation = await Assert.ThrowsAsync<PrintingProtocolException>(() => api.ClaimAsync(CancellationToken.None));
+      Assert.Equal("The claimed job has no title, or one that is too long.", violation.Message);
+      Assert.Equal("", violation.RejectedJob!.Title);
+   }
+
+
+
+   /// <summary>
    /// Every malformed member of a claimed job is refused with the one protocol-violation failure and a fixed message
    /// naming the member. When the job still named itself with a usable identifier the failure carries a stand-in for
    /// it; when the identifier itself is unusable it does not.

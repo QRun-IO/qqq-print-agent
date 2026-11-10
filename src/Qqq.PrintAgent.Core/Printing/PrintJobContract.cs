@@ -133,7 +133,7 @@ internal static class PrintJobContract
       { return "The claimed job has no usable job identifier."; }
       if(!PrintApiClient.ValidControlId(job.PrinterId))
       { return "The claimed job has no usable printer identifier."; }
-      if(job.Title is null || job.Title.Length > TitleLimit)
+      if(job.Title is null || !WithinTitleLimit(job.Title))
       { return "The claimed job has no title, or one that is too long."; }
       if(!IsToken(job.Format))
       { return "The claimed job has no usable document format."; }
@@ -169,6 +169,15 @@ internal static class PrintJobContract
 
 
 
+   /// <summary>
+   /// True for a title within the contract's limit. The contract counts Unicode code points, as JSON Schema does, so a
+   /// title is measured that way and not in UTF-16 units: 1,024 characters from outside the basic plane, which take two
+   /// units each, are as acceptable as 1,024 letters.
+   /// </summary>
+   private static bool WithinTitleLimit(string title) => title.EnumerateRunes().Count() <= TitleLimit;
+
+
+
    /// <summary>True for a short token of ASCII letters, digits and underscores, the form a format or scale name takes.</summary>
    private static bool IsToken([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value) => value is { Length: >= 1 and <= TokenLimit } && value.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
 
@@ -192,7 +201,7 @@ internal static class PrintJobContract
    {
       if(!PrintApiClient.ValidControlId(jobId))
       { return null; }
-      return new PrintJob(jobId, PrintApiClient.ValidControlId(printerId) ? printerId : "", title is { Length: <= TitleLimit } ? title : "", IsToken(format) ? format : "",
+      return new PrintJob(jobId, PrintApiClient.ValidControlId(printerId) ? printerId : "", title is not null && WithinTitleLimit(title) ? title : "", IsToken(format) ? format : "",
          "", 0, new PrintOptions(), createdAt is { Length: <= TimestampLimit } ? createdAt : "", PrintJobState.Claimed);
    }
 
