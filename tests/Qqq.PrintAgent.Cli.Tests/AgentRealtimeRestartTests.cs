@@ -40,7 +40,7 @@ public sealed class AgentRealtimeRestartTests
       await connection.SendAsync("JOB_AVAILABLE", new { });
       // Claims are made one at a time, so a later claim means the replayed one has been fully handled.
       await fixture.WaitAsync(() => fixture.Claims > claims);
-      Assert.Equal(0, fixture.Printer.Prints);
+      Assert.Equal(0, fixture.Printer.Submissions);
       Assert.Equal("OUTCOME_UNKNOWN", fixture.State("submitting"));
       Assert.Equal(1, fixture.Messages.Count(message => message.Type is "JOB_EVENT" && message.Payload.GetProperty("jobId").GetString() is "submitting"));
       Assert.Equal(0, fixture.ForbiddenPolls);
@@ -51,7 +51,8 @@ public sealed class AgentRealtimeRestartTests
    /// <summary>
    /// A submission is inside the printer when the service is stopped. SUBMITTING had been recorded and acknowledged by the
    /// server before the printer was called, and the stop turns it into OUTCOME_UNKNOWN, not FAILED and not a silent retry. After
-   /// the restart the outcome is reported, and when the server hands the job out again the service does not print it.
+   /// the restart the outcome is reported, and when the server hands the job out again the service does not print it. The
+   /// printer no longer holds submissions after the restart, so a second submission would be counted, not merely stall.
    /// </summary>
    [Fact]
    public async Task SubmissionInterruptedByAServiceStopIsOutcomeUnknownAndNeverPrintedAgain()
@@ -64,6 +65,7 @@ public sealed class AgentRealtimeRestartTests
       await fixture.WaitAsync(fixture.Printer.Entered.Task);
       Assert.Equal("SUBMITTING", fixture.State("job"));
       Assert.Contains(fixture.Messages, message => IsEvent(message, "job", "SUBMITTING"));
+      fixture.Printer.BlockPrint = false;
       await fixture.RestartAsync();
       Assert.Equal("OUTCOME_UNKNOWN", fixture.State("job"));
       int claims = fixture.Claims;
@@ -74,6 +76,7 @@ public sealed class AgentRealtimeRestartTests
       await second.SendAsync("JOB_AVAILABLE", new { });
       // Claims are made one at a time, so a second claim means the replayed one has been fully handled.
       await fixture.WaitAsync(() => fixture.Claims > claims + 1);
+      Assert.Equal(1, fixture.Printer.Submissions);
       Assert.Equal(0, fixture.Printer.Prints);
       Assert.Equal("OUTCOME_UNKNOWN", fixture.State("job"));
       Assert.DoesNotContain(fixture.Messages, message => IsEvent(message, "job", "SPOOLED") || IsEvent(message, "job", "FAILED"));

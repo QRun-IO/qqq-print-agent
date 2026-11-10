@@ -21,6 +21,9 @@ internal sealed partial class RealtimeRuntimeFixture
    {
       internal int Prints;
       internal int Cancellations;
+
+      /// <summary>How many submissions reached the printer, including one that is held inside it or was interrupted there; <see cref="Prints"/> counts only those that finished.</summary>
+      internal int Submissions;
       internal TimeSpan LastSubmissionTimeout;
       internal ConcurrentQueue<string> Order { get; } = new();
 
@@ -70,6 +73,7 @@ internal sealed partial class RealtimeRuntimeFixture
       public async Task<string> PrintFileAsync(PrintJob job, string path, CancellationToken cancellationToken)
       {
          Assert.Equal(job.ContentLength, new FileInfo(path).Length);
+         Interlocked.Increment(ref Submissions);
          Entered.TrySetResult();
          if(BlockPrint)
          { await Release.Task.WaitAsync(cancellationToken); }
