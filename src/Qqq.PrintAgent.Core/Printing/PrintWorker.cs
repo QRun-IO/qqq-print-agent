@@ -8,15 +8,17 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// <summary>
 /// Serial happy-path worker. A locally ambiguous submission is never automatically printed again. A worker whose
 /// options name a staging directory hands staged files to its backend, so it is refused at construction, with an
-/// <see cref="ArgumentException"/> naming the backend parameter, unless that backend takes files.
+/// <see cref="ArgumentException"/> naming the backend parameter, unless that backend declares that it takes files.
 /// </summary>
 public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJobJournal journal, Action<string>? log = null,
    Func<bool>? canDispatch = null, Func<bool>? canSynchronize = null, PrintWorkerOptions? options = null)
 {
    /// <summary>
-   /// The backend as one that takes staged files; null for a worker that stages nothing and submits from memory. Whether
-   /// the backend can take files is settled here, when the worker is built, so it is a composition error raised to
-   /// whoever composed it and never a job that fails part-way.
+   /// The backend as one that takes staged files; null for a worker that stages nothing and submits from memory. The
+   /// check made here, when the worker is built, is that the backend handed to the worker declares the file interface;
+   /// a backend that does not is a composition error raised to whoever composed it. It proves nothing about a backend
+   /// that declares the interface and forwards to another: a wrapper around a backend without file support passes
+   /// this check and still fails when a staged file is handed to it.
    /// </summary>
    private readonly IFilePrinterBackend? _filePrinters = options?.StagingDirectory is null ? null
       : printers as IFilePrinterBackend ?? throw new ArgumentException("A worker that stages documents to files needs a printer backend that takes files.", nameof(printers));
@@ -216,7 +218,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// released when this method returns, after SPOOLED is recorded, exactly as when the same steps ran inline. The
    /// attempt records how far the job got so the caller can tell a refusal before any bytes from an uncertain submission.
    /// Between recording SUBMITTING and calling Windows nothing has been sent, so the two things that can stop the job
-   /// there (the receipt not being delivered, and cancellation) say in their own words that no bytes were submitted.
+   /// there (delivery of the receipt not being confirmed, and cancellation) say in their own words that no bytes were
+   /// submitted.
    /// </summary>
    private async Task SubmitJobAsync(PrintJob job, JobAttempt attempt, CancellationToken token)
    {
@@ -240,11 +243,14 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
       {
          ///////////////////////////////////////////////////////////////////////////
          // SUBMITTING is on record but Windows has not been asked, so this is a  //
-         // plain refusal. the transport's own message ("connection reset") would //
-         // leave an operator who reads SUBMITTING then FAILED unsure whether     //
-         // anything printed, so the refusal states it                            //
+         // plain refusal. the flush sends every pending event, so it may have    //
+         // failed on another job's event, on a lost acknowledgement or on the    //
+         // journal; all that is known is that delivery of this receipt was not   //
+         // confirmed. the failure's own message ("connection reset") would leave //
+         // an operator who reads SUBMITTING then FAILED unsure whether anything  //
+         // printed, so the refusal states that nothing was                       //
          ///////////////////////////////////////////////////////////////////////////
-         throw new IOException("The submitting receipt could not be delivered, so the document was not sent to the printer; no bytes were submitted.", exception);
+         throw new IOException("Delivery of the submitting receipt could not be confirmed, so the document was not sent to the printer; no bytes were submitted.", exception);
       }
       attempt.Gate = attempt.Lap();
       RequireSubmitAllowed("Dispatch stopped before native submission; no bytes were submitted.");
@@ -295,8 +301,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// <summary>
    /// Hands the verified staged file to the file backend, or the in-memory content to a worker that stages nothing, and
    /// returns its spooler receipt. This is the only step after which an outcome is uncertain. A staged file exists only
-   /// for a worker built with a staging directory, and such a worker was required to have a file backend when it was
-   /// built, so there is nothing left to decide here.
+   /// for a worker built with a staging directory, and such a worker was required, when it was built, to have a backend
+   /// that declares the file interface, so the staged file always has somewhere to go from here.
    /// </summary>
    private Task<string> SubmitNativeAsync(PrintJob job, DownloadedDocument? file, byte[]? content, RealtimeSettings submissionSettings, CancellationToken token)
    {

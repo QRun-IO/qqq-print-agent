@@ -394,8 +394,8 @@ public sealed class PrintWorkerOutcomeTests
 
 
    /// <summary>
-   /// When the SUBMITTING receipt cannot be delivered, Windows is never asked: the job is FAILED with nothing
-   /// submitted, in those words and not the transport's, and the failure reaches the caller. Both events stay in the
+   /// When delivery of the SUBMITTING receipt cannot be confirmed, Windows is never asked: the job is FAILED with
+   /// nothing submitted, in those words and not the transport's, and the failure reaches the caller. Both events stay in the
    /// journal and the next run delivers them in order, each under the identifier it was recorded with, so the server
    /// can tell a replay from a new event.
    /// </summary>
@@ -416,7 +416,7 @@ public sealed class PrintWorkerOutcomeTests
 
       await Assert.ThrowsAsync<HttpRequestException>(() => worker.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
-      Assert.Equal("The submitting receipt could not be delivered, so the document was not sent to the printer; no bytes were submitted.", journal.Last("job-1").Message);
+      Assert.Equal("Delivery of the submitting receipt could not be confirmed, so the document was not sent to the printer; no bytes were submitted.", journal.Last("job-1").Message);
       Assert.Equal(0, printer.Submissions);
       Assert.Equal(new[] { "RECEIVED" }, server.States, StringComparer.Ordinal);
       Assert.Equal(new[] { "SUBMITTING", "FAILED" }, journal.Pending().Select(entry => entry.Event.Status), StringComparer.Ordinal);

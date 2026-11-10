@@ -75,17 +75,20 @@ levels, so that a job nested too deep to read can still be identified.
   would only offer the same job again; the next committed notification or
   released capacity starts a new wave. The outcome is reported by the lane that
   is submitting the job or, after a restart, by recovery as OUTCOME_UNKNOWN.
-- **Between SUBMITTING and Windows.** If the SUBMITTING receipt cannot be
-  delivered, or the worker is stopped after it was acknowledged and before the
-  native call, Windows is never asked. The job is FAILED and its reason says
-  that no bytes were submitted.
+- **Between SUBMITTING and Windows.** If delivery of the SUBMITTING receipt
+  cannot be confirmed, or the worker is stopped after it was acknowledged and
+  before the native call, Windows is never asked. The job is FAILED and its
+  reason says that no bytes were submitted.
 - **After spool acceptance.** Once a job is recorded as SPOOLED it stays
   SPOOLED. A failure while releasing its staging reservation or printer turn
   afterwards is logged and is not written over the record.
 - **File requirement.** A worker configured with a staging directory hands
   staged files to its printer backend. Building such a worker with a backend
-  that does not take files fails at construction with an argument error naming
-  the backend. It is a composition error, never a job that fails part-way.
+  that does not declare file support fails at construction with an argument
+  error naming the backend. The check sees only the backend the worker is
+  given: the Windows runtime's wrappers always declare file support and forward
+  to the backend inside them, so a wrapped backend without it passes the check
+  and the job fails when the staged file is handed over.
 
 ## Administrator settings
 
