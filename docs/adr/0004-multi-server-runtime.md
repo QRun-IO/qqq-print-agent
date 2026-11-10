@@ -18,7 +18,7 @@ The limit is eight, and adding a ninth is refused with a message that says so. E
 
 ### What is per-server and what is per-computer
 
-Per server: the pairing, the session, the certificate exception, which printers are shared, each shared printer's display name, description and location, the job journal, control state, realtime settings and the staging directory.
+Per server: the pairing, the session, the certificate exception, which printers are shared, each shared printer's display name, description and location, the job journal, control state, realtime settings and the staging directory. ADR-0003 also lists media choices; nothing of that kind is stored today (the server picks media per job from what the printer advertises), so there is nothing to make per-server.
 
 Per computer: the Windows printers that exist, the computer's own name, description and location, log settings, the Windows service, updates and appearance. The computer details describe this machine, so every server receives the same ones.
 
@@ -26,25 +26,28 @@ A printer may be shared with several servers.
 
 ### Stored state
 
-Secrets move from the state directory's root to `servers/<serverId>/`: `connection.dpapi`, `qqq-session.dpapi`, the staged session of a pairing change in progress (`qqq-session.staged.dpapi`), sessions set aside as unreadable (`qqq-session.recovery-*.dpapi`) and `staging/`. All are still protected with DPAPI under the service identity. Staging a pairing and resolving a staged one work inside that folder exactly as they do in the root today, including the rule that the order of the stored and staged session is their last-write time.
+Secrets move from the state directory's root to `servers/<serverId>/`: `connection.dpapi`, `qqq-session.dpapi`, the staged session of a pairing change in progress (`qqq-session.staged.dpapi`), pairings and sessions set aside as unreadable (`connection.recovery-*.dpapi`, `qqq-session.recovery-*.dpapi`) and `staging/`. All are still protected with DPAPI under the service identity. Staging a pairing and resolving a staged one work inside that folder exactly as they do in the root today, including the rule that the order of the stored and staged session is their last-write time.
 
-The journal stays one SQLite database. One file gives one transaction across the registry and the per-server tables, one retention pass and one thing to back up, and the volume (eight writers, a few rows per job) is far inside what SQLite's write-ahead log handles. Isolation between servers is by key, and a store is opened for one explicit server, so no query can be written without one.
+The journal stays one SQLite database. One file gives one transaction across the registry and the per-server tables, one retention pass and one thing to back up, and the volume (eight writers, a few rows per job) is far inside what SQLite's write-ahead log handles. Isolation between servers is by key, and a connection's store is opened for one explicit server, so nothing a connection does can be written without one. Only the host works across servers: migration, the registry and retention.
 
 The connection scope (a hash of origin and device) stays the key for events, jobs, control state and realtime settings, so a new pairing on the same server still starts a clean scope and nothing recorded under an old pairing can be sent with a new credential. What is new is the relation between a server and its scopes:
 
-- A `server_scopes` table (`server_id`, `connection_id`, first used, last used, current flag) records every scope a server has used. The row is written when a pairing is saved, so no reader ever has to derive a scope from a pairing file that may be unreadable. The 1.x fallback that invents a new "unreadable" scope on every open is removed.
-- Delivery to a server uses its current scope only. The Jobs page and `jobs.query` read all of a server's scopes, so history survives a new pairing; a job from an earlier pairing is marked as such. This is a change from 1.x, where a new pairing hides the earlier history.
-- A scope that belongs to no server (a removed server, or 1.x rows whose pairing could not be read) is shown nowhere. Its events can never be delivered, because the credential is gone.
+- A `server_scopes` table (`connection_id`, `server_id`, first used, last used, current flag, removed time) has one row for every scope in the journal. The row is written before the pairing file it belongs to, so a pairing on disk always has its row and no reader ever has to derive a scope from a pairing file that may be unreadable. The 1.x fallback that invents a new "unreadable" scope on every open is removed.
+- "Last used" is written by the connection that owns the scope, when it starts and when it stops. Removing a server keeps its rows and stamps them removed. The migration creates a row with no server for every scope it finds in the 1.x journal that is not the first server's; its last use is the newest time recorded in that scope, or the time of the migration when its rows carry no time, as the oldest 1.x rows do not.
+- A server's current scope is the live one: events are delivered from it, its unreviewed failures count toward the server's attention count, and its jobs can be acknowledged, retried and cancelled.
+- A server's earlier scopes are history and nothing else. The Jobs page and `jobs.query` show them, marked as from an earlier pairing, so history survives a new pairing; this is a change from 1.x, where a new pairing hides it. Their failures do not count toward attention, and acknowledge, retry and cancel are refused (`job_not_current`). Their undelivered events can never be delivered, because they belong to a credential that has been replaced.
+- A scope with no server, or with a removed one, is shown nowhere.
 
 Retention is one pass run by the host, not by each store:
 
-- For a server's scopes, as today: details go after the retention period or beyond the detail limit, never while an event is undelivered; summaries stay.
-- For a scope with no server: everything (events, summaries, control state, realtime settings) is deleted once the retention period has passed since its last use. Undelivered events do not hold it back.
+- Current scope, as today: details go after the retention period or beyond the detail limit, never while an event is undelivered; summaries stay.
+- Earlier scope of a server that still exists: the same, except that an undelivered event does not hold anything back.
+- Scope with no server or a removed one: everything (events, summaries, control state, realtime settings and the `server_scopes` row) is deleted once the retention period has passed since its last use.
 - Control-state cleanup and its limits become per server. Today a store deletes other scopes' control state after 30 days, refuses to save when 128 other scopes exist and refuses a command when 4,096 receipts exist in the whole table, so with several servers one could erase or block another's. In 2.0 a store touches only its own server's scopes, and both limits count that server's rows.
 
 Printer sharing and printer profiles get new tables keyed by `server_id` (`server_printers`, `server_printer_profiles`). The old machine-wide tables are not reused under a new meaning: an older build that somehow ran against this directory would otherwise read every server's sharing as its own.
 
-The schema carries a version (`PRAGMA user_version`) and is migrated once, when the service starts, in a transaction. Opening a store no longer creates or alters tables. A service that finds a version newer than it knows does not start its connections and does not touch the state: it reports that a newer build wrote this state and that the newer build must be reinstalled. It never migrates down. This matters between release candidates, because the installer allows any build with the same numeric version to replace another (`AllowSameVersionUpgrades`), so an older candidate can be installed over a newer one.
+The schema carries a version (`PRAGMA user_version`) and is migrated once, when the service starts, in a transaction. Opening a store no longer creates or alters tables. A service that finds a version newer than it knows does not start its connections and does not touch the state. It keeps serving the pipe: the snapshot says that a newer build wrote this state and that the newer build must be reinstalled, the update operations work so that it can be, and everything else is answered `state_newer`. It never migrates down. This matters between release candidates, because the installer allows any build with the same numeric version to replace another (`AllowSameVersionUpgrades`), so an older candidate can be installed over a newer one.
 
 ### Upgrade from 1.x
 
@@ -52,8 +55,20 @@ The first start of 2.0 turns the existing connection into the first server. In o
 
 1. Any staged pairing is resolved in place by the existing rules, so a pairing change that 1.x left half-finished is completed or discarded before anything moves.
 2. In one transaction: the schema is migrated; the `servers` row is created; the pairing's scope is recorded in `server_scopes`; sharing and printer profiles are copied to the server's tables; the certificate exception is copied if it is for the server's origin; and one row per file to move is written to a `pending_moves` table (source, destination).
-3. Each move is carried out and its row deleted. A move whose source is gone and whose destination exists is already done. The protected files, a staged session that could not be resolved in step 1 and any set-aside recovery files are moved; a move within the state directory keeps the last-write time that the staged-session rules depend on. Temporary files (`*.tmp`) are deleted, because nothing ever reads one. The staging directory is not moved: its leftovers are deleted at every start anyway.
+3. Each move is carried out and its row deleted. The protected files, a staged session that could not be resolved in step 1 and any set-aside recovery files are moved; a move within the state directory keeps the last-write time that the staged-session rules depend on. Temporary files (`*.tmp`) are deleted, because nothing ever reads one. The staging directory is not moved: its leftovers are deleted at every start anyway.
 4. No connection starts while a `pending_moves` row exists. An interrupted upgrade continues at step 3 on the next start.
+
+Every move ends, so step 4 cannot hold the service forever:
+
+| Source | Destination | What happens |
+| --- | --- | --- |
+| Present | Absent | Moved; row deleted. |
+| Absent | Present | Already done; row deleted. |
+| Present | Present | Something other than the upgrade wrote the destination. The destination is kept, the source is moved beside it under a recovery name, the row is deleted and the event is logged. |
+| Absent | Absent | The file is gone. The row is deleted and logged; the server then simply lacks that file, and shows as needing a sign-in or a new pairing. |
+| A move fails (in use, access denied) | | Tried three times in that start. Then the service starts without connections, the snapshot reports the upgrade as incomplete and names the file, and per-server operations are answered `migration_incomplete`. The next start tries again. |
+
+The service is first started by the installer before the installation commits. If the installer then rolls back, 1.x is left on state that 2.0 has already moved, and shows no pairing. This is accepted: nothing has been deleted, reinstalling 2.0 picks up where it stopped, and keeping a second copy of the secrets in the root to cover it would leave credentials behind that nothing maintains. It is read from the installer's authoring and is checked during upgrade qualification.
 
 The cases:
 
@@ -61,9 +76,11 @@ The cases:
 | --- | --- |
 | Pairing and session readable | One server, paired and signed in. |
 | Session only (signed in, never enrolled) | One server named by the session's origin, signed in, not paired. |
+| A pairing for one server and a session for another (1.x allows it, and treats the computer as not signed in) | One server, from the pairing, needing a sign-in. The other server's session is moved into that server's folder under a recovery name and never used. |
 | Pairing unreadable, session readable | One server named by the session's origin; the unreadable pairing is moved with it and reported; the journal rows of the unknown scope belong to no server. |
 | Pairing readable, session missing or unreadable | One server, paired, needing a sign-in. |
 | Neither readable | No servers; the files stay where they are, untouched, and the computer says why. |
+| A certificate exception for the server's origin | Carried over as an exception that is not yet pinned; see "Certificate exception" below. |
 | A certificate exception for another origin than the server's | Not copied, and logged: it cannot apply to this server. |
 | Journal scopes from earlier pairings or other servers | Belong to no server; removed by retention. They were already invisible in 1.x. |
 
@@ -73,7 +90,7 @@ Nothing but temporary files is deleted by the upgrade. Going back to 1.x means u
 
 - **Host.** Owns the pipe server, the server registry, the per-printer queues, retention and one connection per server. It supervises them: a connection that faults is restarted with backoff, and neither a faulting connection nor a faulting pipe client stops anything else.
 - **Server connection.** One per server: the session client, the realtime channel, authorization state, control state, settings and its claim pipeline. This is what the per-connection fields of `AgentRuntime` become.
-- **Printer queue.** One per Windows printer, shared by all servers. A job is identified by server and job together. The queue hands the device to one submission at a time. A job joins the queue when its document is staged and verified; when more than one server has a job waiting for the same printer, the queue takes them in turn, one server after another, so one server's backlog cannot hold another's job until its deadline. Each server's own policy (concurrency, bandwidth, deadlines) still applies inside its connection, and a job whose deadline passes while it waits fails before SUBMITTING, as it does today.
+- **Printer queue.** One per Windows printer, shared by all servers. A job is identified by server and job together. The queue hands the device to one submission at a time. Within one server nothing changes: a job takes its place in that server's line for the printer when it is claimed, so a server's jobs for one printer are submitted in claim order. Across servers, the queue takes the job at the head of each server's line in turn, skipping a server whose head job is not yet staged, so one server's backlog cannot keep another's job waiting behind all of it. Waiting for the printer has no deadline of its own, as today: the limits that exist are the download timeout before the wait and the native submission timeout after SUBMITTING. Each server's own policy (concurrency, bandwidth) still applies inside its connection.
 
 The spooler document name stays `QQQ <jobId>`. A server tag in it was considered and rejected: verified cancellation matches that name exactly, so changing it would make jobs spooled by 1.x impossible to cancel after the upgrade. The Jobs page already says which server a job came from.
 
@@ -86,10 +103,10 @@ Requests and replies are JSON objects on the existing framing.
 ```json
 { "v": 2, "op": "printers.share", "server": "<serverId>", "args": { "printerId": "...", "shared": true } }
 { "v": 2, "ok": true, "result": { } }
-{ "v": 2, "ok": false, "error": { "code": "server_not_found", "message": "..." } }
+{ "v": 2, "ok": false, "error": { "code": "server_not_found", "message": "...", "details": { } } }
 ```
 
-`server` is required for per-server operations and absent for per-computer ones. `message` is for people; no client decides anything by matching text. Clients switch on `code`, which is one of:
+`server` names the server an operation acts on, and is absent when the operation acts on the computer or on the list of servers. `message` is for people; no client decides anything by matching text. `details` is present only for the codes that say so below, and is typed per code. Clients switch on `code`, which is one of:
 
 | Code | Meaning |
 | --- | --- |
@@ -99,12 +116,13 @@ Requests and replies are JSON objects on the existing framing.
 | `server_limit`, `server_exists` | Eight servers already exist; or this origin is already a server. |
 | `busy` | Another operation that changes this server's session or pairing is running. |
 | `not_signed_in`, `not_paired` | The operation needs a session, or a pairing, that this server does not have. |
-| `server_incompatible`, `certificate_untrusted` | The compatibility check failed; the result carries its stages. |
+| `server_incompatible`, `certificate_untrusted` | The compatibility check failed; `details` carries its stages and, for the second, the certificate that was presented. |
 | `sign_in_refused`, `bind_refused`, `identity_changed` | The server refused the session; refused to bind the pairing; or bound it for a different account than the approved one. |
-| `enrollment_refused`, `enrollment_unconfirmed` | The server refused the code; or the outcome is not known and the result says what was left behind. |
-| `printer_not_found`, `job_not_found` | No such printer or job for this server. |
+| `enrollment_refused`, `enrollment_unconfirmed` | The server refused the code; or the outcome is not known and `details` says what was left behind. |
+| `printer_not_found`, `job_not_found`, `job_not_current` | No such printer or job for this server; or the job belongs to an earlier pairing and is history. |
 | `duplicate_risk_unconfirmed` | A retry could print twice and the request did not confirm that. |
 | `state_unreadable` | Stored state for this server cannot be read; the message says which. |
+| `state_newer`, `migration_incomplete` | The whole service is not running connections: a newer build wrote the state, or the upgrade from 1.x could not finish. The snapshot says which and why. |
 | `update_in_progress` | The service is prepared for an update and is not accepting this. |
 | `internal_error` | Anything else; the detail is in the service log, never in the reply. |
 
@@ -122,7 +140,7 @@ Access, as the code has it:
 
 The snapshot is one aggregated document, so the companion asks once for everything instead of once per server and per view:
 
-- Once: the computer's printers, service state, update state and log settings.
+- Once: the computer's printers, service state, update state, log settings, and the state of the stored data (ready, upgrade incomplete with the file it stopped at, or written by a newer build).
 - Per server: identifier, name, address, position; health and its status text; the attention count that drives health; authentication (signed in, as whom, authorization blocked and why); paired flag and device identifier; transport state and the realtime meter; control state (desired state, last command); shared printers with each one's server-side approval; and whether stored state is unreadable.
 - Jobs stay paged and are queried per server.
 
@@ -136,20 +154,27 @@ Clients older than the service:
 
 Operations:
 
-- Per computer: `snapshot`, `servers.list`, `servers.check`, `servers.add`, `servers.rename`, `servers.reorder`, `servers.remove`, `computer.getProfile`, `computer.setProfile`, `logs.getSettings`, `logs.setSettings`, `logs.clear`, `update.prepare`, `update.resume`.
-- Per server: `session.signIn`, `session.signOut`, `pairing.enroll`, `connection.reconnect`, `trust.get`, `trust.set`, `printers.share`, `printers.setProfile`, `printers.testPrint`, `jobs.query`, `jobs.details`, `jobs.retry`, `jobs.cancel`, `jobs.acknowledge`.
+- On the computer or the list of servers (no `server`): `snapshot`, `servers.list`, `servers.check`, `servers.add`, `servers.reorder` (the identifiers in their new order, in `args`), `computer.getProfile`, `computer.setProfile`, `logs.getSettings`, `logs.setSettings`, `logs.clear`, `update.prepare`, `update.resume`.
+- On one server (`server` required): `servers.rename`, `servers.remove`, `session.signIn`, `session.signOut`, `pairing.enroll`, `connection.reconnect`, `trust.get`, `trust.set`, `printers.share`, `printers.setProfile`, `printers.testPrint`, `jobs.query`, `jobs.details`, `jobs.retry`, `jobs.cancel`, `jobs.acknowledge`.
 
 When a server comes to exist:
 
-- `servers.check` takes an address and, optionally, a certificate the operator has accepted for it. The service runs the compatibility check itself, under its own identity and certificate store, and returns the typed stages. This is the check that matters, because the service is what connects; in 1.x the companion checked under the user's certificate store while the service validated as LocalSystem, so the two could disagree.
-- `servers.add` takes the address, the name, the accepted certificate if any, and the session credential from a completed sign-in. It is atomic: the server, its certificate exception and its session are stored together, or nothing is. There is no server without a session, and no provisional server to clean up.
+- `servers.check` takes an address and, optionally, the fingerprint of a certificate the operator has accepted for it. The service runs the compatibility check itself, under its own identity and certificate store, and returns the typed stages. This is the check that matters, because the service is what connects; in 1.x the companion checked under the user's certificate store while the service validated as LocalSystem, so the two could disagree.
+- `servers.add` takes the address, the name, the accepted certificate's fingerprint if any, and the session credential from a completed sign-in. It is atomic: the server, its certificate exception and its session are stored together, or nothing is. `servers.add` never creates a server without a session, so there is no provisional server to clean up. A server can lose its session later (sign-out, expiry, an upgrade that found only a pairing); that is what `not_signed_in` is for.
 - `trust.set` and `session.signIn` are for servers that already exist.
+
+Certificate exception:
+
+- In 1.x the development exception means "accept any certificate from this origin", and it also applies when the service fetches from the identity provider. In 2.0 it is a pin: the SHA-256 fingerprint of the one certificate the operator accepted, checked for connections to that server's own origin and nowhere else. A different certificate from the same origin is refused and shown to the operator like any untrusted one.
+- When the trust stage fails, `servers.check` returns the presented certificate's fingerprint, subject, issuer and expiry, so the wizard can show what the operator is accepting.
+- An exception carried over from 1.x has no fingerprint. The service pins the first certificate that origin presents after the upgrade and logs its fingerprint; from then on it is a pin like any other. This is no weaker than what 1.x did on every connection, and it lets an upgraded development setup keep working without a visit to the companion.
+- Core needs the fingerprint check and the binding to the server's origin; that closes audit finding C9.
 
 Removing a server:
 
 1. Its connection stops claiming. A submission already handed to Windows finishes and is recorded, bounded by the print deadline; jobs claimed but not yet submitted are reported back as not printed.
 2. The service ends the session with the server, as sign-out does, without waiting on a server that does not answer.
-3. Its protected files and staged documents are deleted, and its rows in the registry, sharing and profile tables. Its scopes stay in the journal, belonging to no server, until retention removes them. Events that were not delivered stay undelivered.
+3. Its protected files and staged documents are deleted, and its rows in the registry, sharing and profile tables. Its scopes stay in the journal, stamped removed, until retention deletes them. Events that were not delivered stay undelivered.
 4. Its device record on the server is not touched.
 
 ### Command line
@@ -193,4 +218,4 @@ About the process:
 - Pull requests merge into `release/2.0` by squash (K22-REPO-22), so the branch gets one commit per reviewed change.
 - Until Gitea runs checks for this repository, a pull request merges into `release/2.0` on full local verification plus an independent review with no blocker or unresolved should-fix item (owner's rule, 2026-11-10).
 - The owner approved, on 2026-11-10, running the 1.2.x upgrade install and the elevated desktop tests from the working session; Windows' own consent prompt is still answered by the owner each time.
-- The workflow files under `.github` and `.gitea` are not changed by the 2.0 branches; what they need (no literal version for branch builds) is recorded in `docs/TODO.md` for the CI work.
+- The workflow files under `.github` and `.gitea` are not changed by the 2.0 branches; what they need (no literal version for branch builds) is recorded in `docs/TODO.md` by the change that sets the version, for the CI work.
