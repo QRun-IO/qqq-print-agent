@@ -100,17 +100,18 @@ public sealed class ProviderSignOutTests
 
    /// <summary>
    /// When the provider does not come back within two minutes, the browser cannot be opened, the inbox cannot be
-   /// opened or breaks, or the caller stops waiting, the sign-out is not confirmed, and the log says so with the kind
-   /// of failure. Windows names what it could not start in its failure, which is the whole sign-out address with the
-   /// token hint; none of that reaches the log.
+   /// opened or breaks, or the caller stops waiting, the sign-out is not confirmed. A failure is logged as a warning
+   /// with its kind. The caller's own cancellation is not a failure: it is logged as information, in fixed words,
+   /// without the text of the cancellation. Windows names what it could not start in its failure, which is the
+   /// whole sign-out address with the token hint; none of that reaches the log.
    /// </summary>
    [Theory]
-   [InlineData("limit", "TaskCanceledException: A task was canceled.")]
-   [InlineData("token", "TaskCanceledException: A task was canceled.")]
-   [InlineData("browser", "IOException: " + BrowserStartFailure.WindowsReport)]
-   [InlineData("no inbox", "UnauthorizedAccessException: synthetic open failure")]
-   [InlineData("inbox", "IOException: synthetic pipe failure")]
-   public async Task ProviderThatDoesNotReturn_IsNotConfirmed(string ending, string cause)
+   [InlineData("limit", "WARN Identity provider sign-out was not confirmed: TaskCanceledException: A task was canceled.")]
+   [InlineData("token", "INFO Identity provider sign-out was stopped by its caller before the provider confirmed.")]
+   [InlineData("browser", "WARN Identity provider sign-out was not confirmed: IOException: " + BrowserStartFailure.WindowsReport)]
+   [InlineData("no inbox", "WARN Identity provider sign-out was not confirmed: UnauthorizedAccessException: synthetic open failure")]
+   [InlineData("inbox", "WARN Identity provider sign-out was not confirmed: IOException: synthetic pipe failure")]
+   public async Task ProviderThatDoesNotReturn_IsNotConfirmed(string ending, string entry)
    {
       SignInWorld world = new()
       {
@@ -134,7 +135,8 @@ public sealed class ProviderSignOutTests
       }
 
       Assert.False(await SignInWorld.EndsAsync(running));
-      Assert.Equal("WARN Identity provider sign-out was not confirmed: " + cause, world.Log.Entries[^1]);
+      Assert.Equal(entry, world.Log.Entries[^1]);
+      Assert.Equal(string.Equals(ending, "token", StringComparison.Ordinal), !world.Log.Entries.Exists(line => line.StartsWith("WARN", StringComparison.Ordinal)));
       Assert.All(world.Inboxes, inbox => Assert.True(inbox.Disposed));
       Assert.Equal(string.Equals(ending, "browser", StringComparison.Ordinal) || string.Equals(ending, "no inbox", StringComparison.Ordinal) ? 0 : 1, world.Opened.Count);
       Assert.DoesNotContain(world.Log.Entries, entry => entry.Contains(Hint, StringComparison.Ordinal) || entry.Contains(State, StringComparison.Ordinal));

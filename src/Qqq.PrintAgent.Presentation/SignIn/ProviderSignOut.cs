@@ -46,7 +46,8 @@ public sealed class ProviderSignOut
    /// first, which opens the inbox, so a fast redirect is not lost. It returns whether the provider confirmed: false
    /// when it did not come back in time, when the callback with this state is not on the registered address, when
    /// the browser or the inbox failed, and when the caller's token ended the wait. Only the provider's host is
-   /// logged.
+   /// logged. A failure is logged as a warning with its kind and text; the caller's own cancellation is a
+   /// deliberate stop, and is logged as information in fixed words.
    /// </summary>
    public async Task<bool> CompleteAsync(QqqProviderLogout logout, CancellationToken cancellationToken = default)
    {
@@ -62,6 +63,11 @@ public sealed class ProviderSignOut
          bool matched = logout.Matches(callback);
          _log.Info(matched ? "Identity provider sign-out callback matched." : "Identity provider sign-out callback did not match this sign-out.");
          return matched;
+      }
+      catch(OperationCanceledException) when(cancellationToken.IsCancellationRequested)
+      {
+         _log.Info("Identity provider sign-out was stopped by its caller before the provider confirmed.");
+         return false;
       }
       catch(Exception exception) when(exception is OperationCanceledException or IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or InvalidOperationException or ArgumentException)
       {
