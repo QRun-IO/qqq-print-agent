@@ -214,6 +214,29 @@ public sealed class PrinterWorkerHostTests
 
 
    /// <summary>
+   /// A watch that fails instead of watching does not stop the helper: the operation is carried out with nobody watching
+   /// the parent and its answer is written, and only then, when the helper waits for the watch to stop, does the watch's
+   /// failure come out, in place of the exit code. This is what the helper did before the watch was moved behind
+   /// <see cref="IParentWatch"/>; the test records it, so a change to it is a decision and not an accident.
+   /// </summary>
+   [Fact]
+   public async Task WatchThatFailsLeavesTheOperationUnwatchedAndSurfacesWhenTheHelperEnds()
+   {
+      InvalidOperationException fault = new("Synthetic: the parent could not be waited for.");
+      using StringReader input = new("{\"operation\":\"discover\"}\n");
+      using StringWriter output = new();
+      RecordingPrinters printers = new();
+
+      InvalidOperationException thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => PrinterWorkerHost.RunAsync(printers, new FakeSpoolerJobs(), new FailingWatch(fault), "4242", input, output));
+
+      Assert.Same(fault, thrown);
+      Assert.Equal(1, printers.Discoveries);
+      Assert.True(Read(output).Success);
+   }
+
+
+
+   /// <summary>
    /// The entry point the service's executable calls takes the parent's process id from the environment. In a process that
    /// was not started as a helper there is none, so it refuses with exit code 1 before it reads the console or asks Windows
    /// anything; this is the only path of it a test may run.
@@ -285,5 +308,14 @@ public sealed class PrinterWorkerHostTests
          Prints++;
          return OnPrint(job, path, submissionTimeout, cancellationToken);
       }
+   }
+
+
+
+   /// <summary>A parent watch whose wait has already failed when it is started, as a wait on a process that cannot be waited for would; it watches nothing and ends no process.</summary>
+   private sealed class FailingWatch(Exception fault) : IParentWatch
+   {
+      /// <summary>Returns a task that has already failed with the given exception.</summary>
+      public Task WatchAsync(int parentId, CancellationToken token) => Task.FromException(fault);
    }
 }

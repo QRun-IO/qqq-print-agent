@@ -130,6 +130,42 @@ public sealed class PrinterWorkerIsolationTests
 
 
 
+   /// <summary>
+   /// A worker whose parent is already gone when it starts exits with code 2 at once, before it reads a request: nothing is
+   /// sent to it here and its input stays open, so only the parent watch can have ended it, and it writes no answer. The
+   /// parent is a process that has exited and whose handle this test still holds, so Windows cannot have given its
+   /// process id to another process.
+   /// </summary>
+   [Fact]
+   public async Task WorkerExitsAtOnceWhenItsParentIsAlreadyGone()
+   {
+      ProcessStartInfo gone = new(Path.Combine(Environment.SystemDirectory, "cmd.exe")) { UseShellExecute = false, CreateNoWindow = true };
+      gone.ArgumentList.Add("/c");
+      gone.ArgumentList.Add("exit 0");
+      using Process parent = Process.Start(gone) ?? throw new InvalidOperationException("The process that stands for the parent did not start.");
+      using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(15));
+      await parent.WaitForExitAsync(timeout.Token);
+
+      ProcessStartInfo start = new(FixtureExecutable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true };
+      start.Environment[PrinterWorkerHost.ParentEnvironmentVariable] = parent.Id.ToString(CultureInfo.InvariantCulture);
+      using Process worker = Process.Start(start) ?? throw new InvalidOperationException("Fixture launch failed.");
+      try
+      {
+         await worker.WaitForExitAsync(timeout.Token);
+         Assert.Equal(2, worker.ExitCode);
+         Assert.Equal("", await worker.StandardOutput.ReadToEndAsync(timeout.Token));
+      }
+      finally
+      {
+         if(!worker.HasExited)
+         {
+            worker.Kill(entireProcessTree: true);
+         }
+      }
+   }
+
+
+
    /// <summary>True when the process has exited or no longer exists; a missing process id counts as exited.</summary>
    private static bool ProcessExited(int processId)
    {
