@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+The server tree, the footer and the tray for several servers exist as models (2.0). The window does not use them
+yet, so nothing an operator sees changes: it still shows the one connection of 1.x. The window is rebuilt on these
+models, and on the connection wizard, in a later change.
+
+- **The tree.** One node for every server, in the service's order, each with Printers, Jobs and Connection; then
+  Add server, Computer, Logs and Settings. A server keeps its node from one snapshot to the next, so what is
+  selected and what is expanded stay put. When the server on screen is removed, its neighbour is shown and a
+  message says which server went. A server that is being removed stays in the tree, says so and offers no command.
+  Add server is disabled, with the reason, at eight servers and while the service is not available.
+- **Health in words.** Every server shows its health as a glyph and words as well as a colour. A health this
+  version does not know is shown as unknown, never as healthy, and so is every server while the local service is
+  not answering.
+- **The footer.** The worst health across the servers, how many servers are in each state, and a link to the first
+  one that needs attention. With one server it is that server's own sentence, which is the sentence the 1.x footer
+  shows. With no server it is red and says to add one. It is announced to a screen reader once per change.
+- **The tray.** The tooltip stays within the 127 characters Windows shows: the count in each state, as many
+  servers as fit, and how many were left out. The menu lists every server.
+- **The local service.** Not reached, an older or a newer service, an upgrade from 1.x that did not finish (with
+  the file it stopped at), data written by a newer build (with both versions) and an update's pause each have
+  their own sentence and guidance, on the Computer page. The wizard is shown only when the service answered and
+  its stored data is ready.
+- **One command at a time per server.** A second command on a server that is busy is refused with a message that
+  says what is still running; a command on another server is not affected, and refreshing never stops. A
+  snapshot that is older than a change made from the window is not shown for the server that changed.
+- **Messages.** A message is shown on the page that caused it and is gone when that page is left.
+
 Every control an operator acts on in the companion's own views now has an automation identifier, and the
 identifiers are recorded with the control each is on (2.0). Nothing an operator sees or hears changes. Fourteen
 controls that had no identifier were given one: the navigation pane (`Navigation`) and the Settings page's support
