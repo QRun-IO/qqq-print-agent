@@ -136,6 +136,60 @@ public sealed class ChangeSignalTests
 
 
 
+   /// <summary>
+   /// Changes raised from several threads at once never strand a waiter. A raise must put the fresh task in and take the
+   /// old one out in one step. Were it a read followed by a write, two raises could read the same task; the first would
+   /// put in a fresh one, a waiter could take it, and the second would overwrite it, so nobody would ever complete the
+   /// task the waiter holds. Here several raisers step one counter at the same time while followers use the take, look,
+   /// wait pattern. Every follower must reach the last step; one holding such an orphaned task never would, and because
+   /// each wait is bounded that is a failed test, not a hung run. Each raiser has a thread of its own, so the raises
+   /// really overlap and the thread pool stays free for the followers.
+   /// </summary>
+   [Fact]
+   public async Task ConcurrentRaisers_NeverStrandAWaiter()
+   {
+      ChangeSignal signal = new();
+      const int raisers = 4;
+      const int steps = 50_000;
+      const int last = raisers * steps;
+      int counter = 0;
+      using ManualResetEventSlim start = new();
+
+      async Task<int> FollowAsync()
+      {
+         while(true)
+         {
+            Task changed = signal.NextChange;
+            int now = Volatile.Read(ref counter);
+            if(now == last)
+            { return now; }
+            await changed.WaitAsync(s_limit);
+         }
+      }
+
+      void RaiseSteps()
+      {
+         start.Wait(s_limit);
+         for(int step = 0; step < steps; step++)
+         {
+            Interlocked.Increment(ref counter);
+            signal.Raise();
+         }
+      }
+
+      Task<int>[] followers = Enumerable.Range(0, 8).Select(_ => Task.Run(FollowAsync)).ToArray();
+      Task[] raising = Enumerable.Range(0, raisers).Select(_ => Task.Factory.StartNew(RaiseSteps, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+      start.Set();
+      await Task.WhenAll(raising).WaitAsync(s_limit);
+      int[] reached = await Task.WhenAll(followers).WaitAsync(s_limit);
+
+      Assert.Equal(last, Volatile.Read(ref counter));
+      Assert.All(reached, step => Assert.Equal(last, step));
+      Assert.False(signal.NextChange.IsCompleted);
+   }
+
+
+
    /// <summary>Changes raised from several threads at once complete a task taken before them, and leave a fresh task behind.</summary>
    [Fact]
    public async Task ConcurrentChanges_CompleteTheTakenTask()
