@@ -92,10 +92,12 @@ public sealed partial class AgentActivityLog : IAgentLog
 
    /// <summary>
    /// Redacts credential-shaped diagnostics; callers must still never log documents or credential payloads. What it
-   /// recognises: a bearer credential, a named secret written as name and value, a user name and password inside a web
-   /// address, the value of a cookie header line, and the one-time code and the state of a sign-in callback in the
-   /// query or fragment of an address. It is a second line of defense, not a parser: a secret in a shape it does not
-   /// know passes through.
+   /// recognises: a bearer credential; a named secret written as name and value, which includes the identity
+   /// provider's ID-token hint, the PKCE code verifier and the session cookie under the product's own two names
+   /// wherever they stand; a user name and password inside a web address; the value of a cookie header line and of an
+   /// authorization header line of any scheme; and the one-time code and the state of a sign-in callback in the query
+   /// or fragment of an address, quoted or percent-encoded. It is a second line of defense, not a parser: a secret in
+   /// a shape it does not know passes through.
    /// </summary>
    public static string Redact(string message)
    {
@@ -106,6 +108,7 @@ public sealed partial class AgentActivityLog : IAgentLog
          redacted = NamedCredential().Replace(redacted, "${prefix}[REDACTED]");
          redacted = UrlCredential().Replace(redacted, "${scheme}[REDACTED]@");
          redacted = CookieHeader().Replace(redacted, "${prefix}[REDACTED]");
+         redacted = AuthorizationHeader().Replace(redacted, "${prefix}[REDACTED]");
          redacted = CallbackParameter().Replace(redacted, "${prefix}[REDACTED]");
          // Continuations cannot forge another timestamped AppKit log entry.
          return redacted.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\n  ", StringComparison.Ordinal);
@@ -124,8 +127,14 @@ public sealed partial class AgentActivityLog : IAgentLog
 
 
 
-   /// <summary>Matches a named secret such as a token, password, enrollment code, API key or document payload field written as name and value, keeping the name so the log still shows which field was hidden.</summary>
-   [GeneratedRegex("""(?<prefix>["']?(?:deviceToken|enrollmentCode|access_token|refresh_token|api[_-]?key|token|password|secret|contentBase64)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&]+)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   /// <summary>
+   /// Matches a named secret such as a token, password, enrollment code, API key or document payload field written as
+   /// name and value, keeping the name so the log still shows which field was hidden. Three names are values the
+   /// product itself handles and must never show: <c>id_token_hint</c>, which the identity provider's sign-out request
+   /// carries; <c>code_verifier</c>, the secret half of a browser sign-in; and <c>sessionUUID</c> and <c>sessionId</c>,
+   /// the two names of the session cookie, which are redacted wherever they stand and not only inside a cookie header.
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>["']?(?:deviceToken|enrollmentCode|access_token|refresh_token|id_token_hint|code_verifier|sessionUUID|sessionId|api[_-]?key|token|password|secret|contentBase64)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&]+)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex NamedCredential();
 
 
@@ -147,12 +156,26 @@ public sealed partial class AgentActivityLog : IAgentLog
 
 
    /// <summary>
+   /// Matches the value of an <c>Authorization:</c> or <c>Proxy-Authorization:</c> header line, to the end of the line,
+   /// keeping the header's name. The whole value goes, whatever the scheme (Basic, Digest, Negotiate, a bare key),
+   /// because the scheme decides where the credential is and a new scheme must not need a new pattern; whatever follows
+   /// on the same line is hidden with it, which errs on the safe side, as it does for a cookie header. A quote between
+   /// the name and the colon is allowed, so the header as a member of a JSON object is covered too.
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>\b(?:Proxy-)?Authorization["']?[ \t]*:[ \t]*)[^\r\n]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex AuthorizationHeader();
+
+
+
+   /// <summary>
    /// Matches the one-time authorization code and the state of a sign-in callback where they are parameters of an
    /// address: <c>code=</c> or <c>state=</c> straight after the <c>?</c>, <c>&amp;</c> or <c>#</c> that starts a
    /// parameter, keeping the name. The separator is required on purpose. "code" and "state" are ordinary words in a
    /// log ("status code: 401", "exit code=1", "state=Paused"), so neither is a keyword on its own the way "token" is.
+   /// The value may be quoted, and the separator, the equals sign and the end of the value may be percent-encoded
+   /// (<c>%3F</c>, <c>%26</c>, <c>%23</c>, <c>%3D</c>), which is how a callback looks inside another address.
    /// </summary>
-   [GeneratedRegex("""(?<prefix>[?&#](?:code|state)=)[^\s&#"'<>]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   [GeneratedRegex("""(?<prefix>(?:[?&#]|%3F|%26|%23)(?:code|state)(?:=|%3D))(?:"[^"\r\n]*"|'[^'\r\n]*'|(?:(?!%26|%23)[^\s&#"'<>])+)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex CallbackParameter();
 
 
