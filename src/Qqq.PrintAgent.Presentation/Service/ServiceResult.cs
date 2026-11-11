@@ -4,6 +4,7 @@
  */
 
 using System.Diagnostics.CodeAnalysis;
+using Qqq.PrintAgent.Windows.Management;
 
 namespace Qqq.PrintAgent.Presentation.Service;
 
@@ -11,12 +12,19 @@ namespace Qqq.PrintAgent.Presentation.Service;
 /// The typed answer to one request to the local service: a payload when it succeeded, the service's message when it refused,
 /// the cause when no usable answer arrived, or a note that the caller stopped waiting. It replaces matching reply text by
 /// prefix and catching pipe exceptions in every caller, so each caller decides what to show from <see cref="Outcome"/> and
-/// <see cref="Unconfirmed"/> alone.
+/// <see cref="Unconfirmed"/> alone. A refusal from a service that speaks version 2 of the management pipe also carries
+/// the contract's error code (<see cref="Code"/>) and, for the codes that have them, typed details
+/// (<see cref="TryReadDetails"/>), so no caller decides anything by a message's text.
 /// </summary>
 public sealed class ServiceResult<T>
 {
+   /// <summary>The refusal as the contract carried it, kept for its details only. It is private, and its details have a fixed text form, so nothing shows them by reaching through a result.</summary>
+   private readonly ManagementError? _error;
+
+
+
    /// <summary>Records one outcome; the factory methods below are the only callers, so the shapes stay consistent.</summary>
-   private ServiceResult(ServiceOutcome outcome, T? payload, string message, string? reply, ServiceFailure failure, bool unconfirmed)
+   private ServiceResult(ServiceOutcome outcome, T? payload, string message, string? reply, ServiceFailure failure, bool unconfirmed, string? code = null, ManagementError? error = null)
    {
       Outcome = outcome;
       Payload = payload;
@@ -24,6 +32,8 @@ public sealed class ServiceResult<T>
       Reply = reply;
       Failure = failure;
       Unconfirmed = unconfirmed;
+      Code = code;
+      _error = error;
    }
 
 
@@ -43,8 +53,23 @@ public sealed class ServiceResult<T>
 
 
 
-   /// <summary>The reply exactly as the service sent it, for the few messages that show it whole; null when nothing arrived.</summary>
+   /// <summary>
+   /// The reply exactly as a version 1 service sent it, for the few messages that show it whole; null when nothing arrived.
+   /// It is always null for a result of <see cref="ManagementClient"/>: a version 2 reply is never kept as text, because
+   /// one of them carries the identity provider's sign-out request.
+   /// </summary>
    public string? Reply { get; }
+
+
+
+   /// <summary>
+   /// Why a version 2 service refused, as one of the <see cref="ManagementErrorCode"/> values; null unless
+   /// <see cref="Outcome"/> is <see cref="ServiceOutcome.Rejected"/>, and null for a refusal from a version 1 service,
+   /// which has no codes. It is always a code this version knows: a refusal that came with any other code carries
+   /// <see cref="ManagementErrorCode.InternalError"/> here and the service's own message in <see cref="Message"/>, which
+   /// is how the contract says an unknown code is handled. Callers decide by this and never by the message.
+   /// </summary>
+   public string? Code { get; }
 
 
 
@@ -57,7 +82,10 @@ public sealed class ServiceResult<T>
    /// True when the request left this process and no usable answer came back (a reply time limit, a pipe that closed
    /// mid-reply, an oversize or unreadable reply, or a wait the caller ended), so the service may have carried it out and
    /// the operator must check before repeating it. False when the service answered and when nothing was sent at all,
-   /// which includes a wait that had already ended before the request was made.
+   /// which includes a wait that had already ended before the request was made and a read that was skipped. It is also
+   /// false when the answer came from a service that does not speak this client's version of the pipe
+   /// (<see cref="ServiceFailure.OlderService"/>, <see cref="ServiceFailure.NewerService"/>): that service did not
+   /// know the request, so it carried nothing out.
    /// </summary>
    public bool Unconfirmed { get; }
 
@@ -66,6 +94,42 @@ public sealed class ServiceResult<T>
    /// <summary>True when the request succeeded, which also tells the compiler the payload is present.</summary>
    [MemberNotNullWhen(true, nameof(Payload))]
    public bool Succeeded => Outcome == ServiceOutcome.Success;
+
+
+
+   /// <summary>
+   /// Reads the details a refusal carries into the record the contract names for its code
+   /// (<see cref="ManagementErrorCode.DetailsType"/>). It is false, with nothing read, when the request was not refused,
+   /// when the code carries no details, when the type asked for is not the one the code's details have (so details
+   /// can never be read as another code's record that happens to accept them), and when the details are missing or do
+   /// not fit that record. A caller that gets false shows the message alone.
+   /// </summary>
+   public bool TryReadDetails<TDetails>([NotNullWhen(true)] out TDetails? details)
+      where TDetails : class
+   {
+      details = null;
+      return _error is not null && ManagementErrorCode.DetailsType(Code!) == typeof(TDetails) && ManagementJson.TryReadDetails(_error, out details);
+   }
+
+
+
+   /// <summary>A successful answer from a version 2 service carrying its result record. The reply's text is not kept.</summary>
+   internal static ServiceResult<T> Success(T payload) => new(ServiceOutcome.Success, payload, string.Empty, null, ServiceFailure.None, unconfirmed: false);
+
+
+
+   /// <summary>
+   /// A refusal with one of the contract's codes and the message to show: the service's own refusal, with the error it
+   /// sent so its details can be read, or (without one) a request the client did not send because the service would
+   /// have refused it. Either way the service did not act.
+   /// </summary>
+   internal static ServiceResult<T> Refusal(string code, string message, ManagementError? error = null)
+      => new(ServiceOutcome.Rejected, default, message, null, ServiceFailure.None, unconfirmed: false, code, error);
+
+
+
+   /// <summary>The request was not sent because too many were already in flight; nothing happened.</summary>
+   internal static ServiceResult<T> Skipped() => new(ServiceOutcome.Skipped, default, string.Empty, null, ServiceFailure.None, unconfirmed: false);
 
 
 

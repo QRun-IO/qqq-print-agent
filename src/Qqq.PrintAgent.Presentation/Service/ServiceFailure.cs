@@ -32,4 +32,18 @@ public enum ServiceFailure
 
    /// <summary>A reply arrived but was not the data this version expects, which usually means the companion and service versions differ.</summary>
    UnreadableReply,
+
+   /// <summary>
+   /// A service that speaks version 1 of the management pipe answered a version 2 request: its reply was not JSON, or had no
+   /// version. That service knows none of version 2's operations, so it carried nothing out; the service has to be updated
+   /// to this companion's version.
+   /// </summary>
+   OlderService,
+
+   /// <summary>
+   /// The reply was in a version of the management pipe newer than this companion speaks. The one reply a service gives in
+   /// another version than it was asked in is its refusal of the version, so it carried nothing out; the companion has to
+   /// be updated to the service's version.
+   /// </summary>
+   NewerService,
 }

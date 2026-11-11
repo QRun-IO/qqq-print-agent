@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+The companion has a client for version 2 of the management pipe (2.0). The window does not use it yet: it still
+talks to the service through the version 1 client, and no service answers version 2 yet, so nothing an operator
+sees changes. The connection wizard and the server tree are built on it.
+
+- **One method for each operation.** The client sends the 26 operations the companion sends, each through one
+  method that takes plain values and returns the contract's own result record; nothing above it spells an
+  operation's name or reads a reply. The other four are not the companion's to send: `servers.list` and
+  `computer.getProfile`, because the snapshot carries both, and `update.prepare` and `update.resume`, which the
+  update service sends itself. What each method sends is held to the contract's golden files.
+- **A refusal carries the contract's code.** A result says why the service refused as one of the contract's
+  codes, with typed details for the codes that have them, so nothing is decided by a message's text. A code this
+  version does not know is handled as `internal_error` and shows the service's message.
+- **An older and a newer service are told apart.** A reply from a service that speaks version 1, and one in a
+  later version, each say which side has to be updated, and neither is reported as a request that may have been
+  carried out. A reply of this version that cannot be read still is.
+- **The sign-in provider's address has to be stated.** Adding a server and switching a certificate exception on
+  take the provider's address that the check showed the operator, as an argument that cannot be left out; giving
+  none says that the check named none.
+- **Limits.** The client has at most twelve requests in flight, of the sixteen clients the pipe serves at once.
+  Over that, the three reads the window repeats on a timer (the snapshot, the transport read, a page of jobs) are
+  skipped and asked again on the next tick, and every other request waits its turn. The snapshot and the
+  transport read are single-flight: a second caller shares the answer of the one in flight.
+- **Logging.** A log entry names the operation, the server's identifier and the kind of failure. It holds
+  nothing from a request's arguments and, of a reply, at most the code of a refusal this version does not know,
+  so a session credential, an enrollment code and the identity provider's sign-out request reach no log line.
+
 A failed browser start no longer writes the sign-in address to the companion log or the dialog (2.0). When Windows
 could not start the default browser for a browser sign-in, the companion's log entry and the dialog's "Browser
 sign-in not completed" message repeated Windows' own error text, and that text names what it could not start: the
