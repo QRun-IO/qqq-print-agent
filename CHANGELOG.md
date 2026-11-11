@@ -11,10 +11,12 @@ token hint. Both now say only that the default browser could not be opened, with
 to check: that a default browser is set in Windows Settings under Apps, Default apps. After a sign-out whose
 provider page could not be opened, the dialog used to say that the provider's sign-out "was opened in your browser
 but did not confirm"; it now says that the page could not be opened, that the provider's session may therefore
-still be there, and what to check. Sign-in and sign-out are otherwise unchanged. Every release from 0.2.0-rc.1 to
-1.2.1 has the sign-in case (0.1.x has no browser sign-in). The sign-out case is in no release. Both cases are in the
-development snapshot `snapshot-2.0.0-rc.1`, which was not installed anywhere, and on the unreleased `release/1.2.2`
-branch; 2.0 builds after that snapshot have neither ([audit](docs/AUDIT-2026-11-10.md), U22).
+still be there, and what to check. Sign-in and sign-out are otherwise unchanged. Releases 1.1.0, 1.1.1, 1.2.0 and
+1.2.1 have the sign-in case. The seven from 0.2.0-rc.1 to 1.0.1 start the browser the same way but neither log nor
+show the address: a failed start is answered with a fixed text (0.1.x has no browser sign-in). The sign-out case is
+in no release. Both cases are in the development snapshot `snapshot-2.0.0-rc.1`, which was not installed anywhere,
+and on the unreleased `release/1.2.2` branch; 2.0 builds after that snapshot have neither
+([audit](docs/AUDIT-2026-11-10.md), U22).
 
 An unexpected failure of the browser callback inbox no longer leaves the connection dialog's browser sign-in as an
 unhandled error (2.0). The inbox gives an argument error when the process that sent a callback has already exited,

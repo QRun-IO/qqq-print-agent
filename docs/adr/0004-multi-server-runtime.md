@@ -196,7 +196,7 @@ Every per-server command takes `--server`, which always selects and never names 
 
 ### Companion
 
-The left pane is a tree: one node per server showing its name and health, with Printers, Jobs and Connection beneath it; then Add server, which opens the wizard; then the per-computer items (Computer, Logs, Settings). The footer and the tray icon show the worst health across servers, and the tooltip names each server. Busy state is per server, so a sign-in on one does not freeze the others. [ADR-0005](0005-connection-wizard-and-server-tree.md) has the detail.
+The left pane is a tree: one node per server showing its name and health, with Printers, Jobs and Connection beneath it; then Add server, which opens the wizard; then the per-computer items (Computer, Logs, Settings). The footer and the tray icon show the worst health across servers, and the tooltip names each server. *Made exact on 2026-11-11: the tooltip names as many servers as fit in what Windows shows of it and then says how many are left out; the tray menu lists every server ([ADR-0005](0005-connection-wizard-and-server-tree.md), G15).* Busy state is per server, so a sign-in on one does not freeze the others. [ADR-0005](0005-connection-wizard-and-server-tree.md) has the detail.
 
 Browser sign-in has one callback inbox and one redirect address per Windows user, so it cannot be per server. One dispatcher in the companion owns the inbox and hands each callback to the sign-in whose OAuth state it carries; a callback for a sign-in that has ended is dropped. Sign-ins to different servers can then run at once.
 
