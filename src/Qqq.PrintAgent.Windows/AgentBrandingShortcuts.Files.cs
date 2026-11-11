@@ -17,7 +17,13 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 internal sealed partial class AgentBrandingShortcuts
 {
+   /// <summary>The description every shortcut of ours carries; with the program and the empty arguments it is what marks a shortcut as ours.</summary>
    private const string OwnershipDescription = "QQQ Print Agent companion";
+
+
+
+   /// <summary>What a run says when a file that is not ours has the name the new shortcut needs.</summary>
+   private const string NameTaken = "A different shortcut already uses the requested brand name.";
 
 
 
@@ -36,17 +42,34 @@ internal sealed partial class AgentBrandingShortcuts
 
 
    /// <summary>
-   /// Writes the shortcut to a temporary file in the same folder and moves it over the destination, so a failure never leaves a
+   /// Writes the shortcut to a temporary file in the same folder and moves it to the destination, so a failure never leaves a
    /// half-written shortcut under the real name. It points only at the installed companion and carries the ownership
    /// description. Whatever the shell left under the temporary name is removed, also when the shell failed part way.
+   /// <para>
+   /// The destination is looked at again immediately before the move, because a file could have appeared or been
+   /// replaced there since the first look. When nothing was there at the first look, the move never overwrites: a file
+   /// that has appeared since is someone else's and the run is refused. When a shortcut of ours was there, it is
+   /// replaced only if the second look still finds a shortcut of ours; a read-only mark on it is cleared first, since
+   /// it would otherwise fail this and every later run. A file that is not ours is never overwritten or changed.
+   /// </para>
    /// </summary>
-   private void WriteShortcut(string path, string? icon)
+   private void WriteShortcut(string path, string? icon, bool replacingOurs)
    {
       string temporary = Path.Combine(ShortcutDirectory, ".qqq-" + Guid.NewGuid().ToString("N") + ".lnk");
       try
       {
          shell.Write(temporary, new ShortcutLink(places.InstalledExecutable, "", OwnershipDescription, Path.GetDirectoryName(places.InstalledExecutable)!, (icon ?? places.InstalledExecutable) + ",0"));
-         MsiUpdateInstaller.ValidateNoReparseComponents(path);
+         MsiUpdateInstaller.ValidateNoReparseComponents(ShortcutDirectory);
+         if(!File.Exists(path))
+         {
+            File.Move(temporary, path, overwrite: false);
+            return;
+         }
+         if(!replacingOurs || !IsOwnedShortcut(path))
+         {
+            throw new InvalidOperationException(NameTaken);
+         }
+         ClearReadOnly(path);
          File.Move(temporary, path, overwrite: true);
       }
       finally
@@ -85,6 +108,21 @@ internal sealed partial class AgentBrandingShortcuts
          throw new IOException($"The shortcut \"{Path.GetFileName(path)}\" could not be read, so it cannot be known whether it belongs to this application: {exception.Message}", exception);
       }
       return link is not null && MatchesOwnedShortcut(link.Target, link.Arguments, link.Description);
+   }
+
+
+
+   /// <summary>
+   /// Clears the read-only mark of a file that has just been found to be a shortcut of ours, so that it can be replaced
+   /// or deleted. It is never called for a file that is not ours.
+   /// </summary>
+   private static void ClearReadOnly(string path)
+   {
+      FileAttributes attributes = File.GetAttributes(path);
+      if(attributes.HasFlag(FileAttributes.ReadOnly))
+      {
+         File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+      }
    }
 
 

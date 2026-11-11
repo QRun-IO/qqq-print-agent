@@ -208,6 +208,33 @@ public sealed class AgentBrandingRemovalTests
 
 
    /// <summary>
+   /// A read-only mark on a shortcut of ours does not fail the uninstall: the mark is cleared once the file has been
+   /// found to be ours, and the shortcut is removed. A read-only file recorded beside it that is someone else's keeps
+   /// its mark and its content and is left behind, noted and forgotten.
+   /// </summary>
+   [Fact]
+   public void RemovalDeletesAReadOnlyShortcutOfOursAndLeavesSomeoneElsesMarked()
+   {
+      using var setup = new BrandingSetup();
+      string ours = setup.PlantShortcut(Acme, setup.OurLink);
+      string theirs = setup.PlantShortcut(Old, new ShortcutLink(setup.Installed, "--other", BrandingSetup.Ours));
+      string theirsBefore = File.ReadAllText(theirs);
+      File.SetAttributes(ours, FileAttributes.ReadOnly);
+      File.SetAttributes(theirs, FileAttributes.ReadOnly);
+      setup.Record.Name = Acme;
+      setup.Record.Pending.Add(Old);
+      setup.Rules.RemoveInstalledShortcut();
+      Assert.Equal(new[] { theirs }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.True(File.GetAttributes(theirs).HasFlag(FileAttributes.ReadOnly));
+      Assert.Equal(theirsBefore, File.ReadAllText(theirs));
+      Assert.Null(setup.Record.Name);
+      Assert.Empty(setup.Record.Pending);
+      _ = Assert.Single(setup.Notes);
+   }
+
+
+
+   /// <summary>
    /// Each shortcut is looked at again immediately before it is deleted. Here another program replaces the first
    /// recorded shortcut with one of its own after removal has judged both: the replacement is left untouched with a
    /// note, the other shortcut is removed, and the record is forgotten.

@@ -147,6 +147,40 @@ public sealed class AgentBrandingRealShellTests
 
 
 
+   /// <summary>
+   /// A real shortcut of ours that is marked read-only is replaced by a same-brand run, removed by a rename, and removed
+   /// by an uninstall. Each of these used to fail, at the move or at the delete, until someone cleared the mark by hand.
+   /// </summary>
+   [Theory]
+   [InlineData("same-brand")]
+   [InlineData("rename")]
+   [InlineData("uninstall")]
+   public void ReadOnlyShortcutOfOursDoesNotStopARun(string run)
+   {
+      using BrandingSetup setup = RealShellSetup();
+      setup.Rules.ApplyInstalledBranding();
+      File.SetAttributes(setup.Shortcut(Acme), FileAttributes.ReadOnly);
+      if(run is "uninstall")
+      {
+         setup.Rules.RemoveInstalledShortcut();
+         Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
+         Assert.Null(setup.Record.Name);
+      }
+      else
+      {
+         string wanted = run is "rename" ? "Globex Connector.lnk" : Acme;
+         setup.Branding = new RuntimeBranding(DisplayName: Path.GetFileNameWithoutExtension(wanted));
+         setup.Rules.ApplyInstalledBranding();
+         Assert.Equal(new[] { setup.Shortcut(wanted) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+         Assert.False(File.GetAttributes(setup.Shortcut(wanted)).HasFlag(FileAttributes.ReadOnly));
+         Assert.Equal(wanted, setup.Record.Name);
+      }
+      Assert.Empty(setup.Record.Pending);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
    /// <summary>The rules in temporary folders with the real shortcut shell; the test fails clearly when the machine has no shortcut automation.</summary>
    private static BrandingSetup RealShellSetup()
    {

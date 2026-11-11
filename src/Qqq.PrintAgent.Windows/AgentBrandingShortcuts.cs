@@ -37,7 +37,8 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
    /// longer ours is left alone and forgotten. The new shortcut's name then joins the record, next to the earlier
    /// shortcuts that are to be removed, before its file is written, so the shortcut is never on the Start menu
    /// unrecorded; the file is written and the name recorded as the current shortcut; and only then are the earlier
-   /// ones removed. When writing fails and no shortcut is under the new name, the record is put back as it was found.
+   /// ones removed. When writing fails, the record is put back as it was found, unless a shortcut of ours was already
+   /// under the new name: then the name stays on record, because that shortcut is still there.
    /// </summary>
    internal void ApplyInstalledBranding()
    {
@@ -58,20 +59,21 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
       record.RequireChangeable();
       string? last = record.ReadLastShortcutName();
       IReadOnlyList<string> pending = record.ReadPendingShortcutNames();
-      if(File.Exists(destination) && !IsOwnedShortcut(destination))
+      bool replacingOurs = File.Exists(destination);
+      if(replacingOurs && !IsOwnedShortcut(destination))
       {
-         throw new InvalidOperationException("A different shortcut already uses the requested brand name.");
+         throw new InvalidOperationException(NameTaken);
       }
       List<string> notes = [];
       List<string> leaving = StillOurs(Names(last, pending).Where(name => !SameName(name, filename)), notes);
       RecordPending(SameName(last, filename) ? leaving : [.. leaving, filename]);
       try
       {
-         WriteShortcut(destination, branding.IconPath);
+         WriteShortcut(destination, branding.IconPath, replacingOurs);
       }
       catch
       {
-         if(!File.Exists(destination))
+         if(!replacingOurs)
          {
             RecordPending(pending);
          }
@@ -205,8 +207,10 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
 
    /// <summary>
    /// Deletes one recorded shortcut, looking at it again immediately before the delete, because the file could have been
-   /// replaced since it was first judged. A file that is gone needs nothing; one that has become someone else's is left
-   /// alone with a note. A shortcut that cannot be read or deleted throws, and the caller decides what that means.
+   /// replaced since it was first judged. A file that is gone needs nothing; one that is not ours any more is left
+   /// alone with a note. A shortcut of ours is deleted even when it is marked read-only: the mark is cleared first,
+   /// since it would otherwise fail this and every later run. A file that cannot be opened or deleted throws, and the
+   /// caller decides what that means.
    /// </summary>
    private void RemoveIfStillOurs(string name, List<string> notes)
    {
@@ -220,6 +224,7 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
          notes.Add(NoLongerOurs(name));
          return;
       }
+      ClearReadOnly(path);
       File.Delete(path);
    }
 

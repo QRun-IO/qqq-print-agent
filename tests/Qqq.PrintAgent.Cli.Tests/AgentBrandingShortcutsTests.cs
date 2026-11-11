@@ -762,6 +762,129 @@ public sealed class AgentBrandingShortcutsTests
 
 
 
+   /// <summary>
+   /// The destination is looked at again immediately before the new shortcut is moved into place. A shortcut of ours
+   /// that another program replaced with its own while the new one was being written is not overwritten: the run is
+   /// refused, the other program's file is exactly as it left it, and no temporary file stays behind.
+   /// </summary>
+   [Fact]
+   public void ShortcutOfOursReplacedBySomeoneElsesBeforeTheMoveIsNotOverwritten()
+   {
+      using var setup = new BrandingSetup();
+      string destination = setup.PlantShortcut(Acme, setup.OurLink);
+      setup.Record.Name = Acme;
+      var theirs = new ShortcutLink(Path.Combine(setup.Root, "other.exe"), "", "Somebody's shortcut");
+      setup.Shell.BeforeWrite = () => FakeShortcutShell.Plant(destination, theirs);
+      Assert.Equal("A different shortcut already uses the requested brand name.", Assert.Throws<InvalidOperationException>(setup.Rules.ApplyInstalledBranding).Message);
+      Assert.Equal(theirs, new FakeShortcutShell().Read(destination));
+      Assert.Equal(new[] { destination }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(new[] { destination, destination }, setup.Shell.Reads, StringComparer.Ordinal);
+      Assert.DoesNotContain(setup.Record.Operations, operation => operation.StartsWith("last=", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// When nothing had the wanted name at the first look, the new shortcut is moved into place without ever
+   /// overwriting. A file that appeared there while the shortcut was being written is someone else's: the run is
+   /// refused, that file is exactly as it was put there, no temporary file stays behind, and the record is as it was found.
+   /// </summary>
+   [Fact]
+   public void FileThatAppearedUnderTheWantedNameBeforeTheMoveIsNotOverwritten()
+   {
+      using var setup = new BrandingSetup();
+      Directory.CreateDirectory(setup.Rules.ShortcutDirectory);
+      var theirs = new ShortcutLink(Path.Combine(setup.Root, "other.exe"), "", "Somebody's shortcut");
+      setup.Shell.BeforeWrite = () => FakeShortcutShell.Plant(setup.Shortcut(Acme), theirs);
+      Assert.Equal("A different shortcut already uses the requested brand name.", Assert.Throws<InvalidOperationException>(setup.Rules.ApplyInstalledBranding).Message);
+      Assert.Equal(theirs, new FakeShortcutShell().Read(setup.Shortcut(Acme)));
+      Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(new[] { "pending=" + Acme, "clear-pending" }, setup.Record.Changes, StringComparer.Ordinal);
+      Assert.Null(setup.Record.Name);
+      Assert.Empty(setup.Record.Pending);
+   }
+
+
+
+   /// <summary>
+   /// When another program takes hold of our current shortcut while its replacement is being written, the second look
+   /// cannot open it, so it is not replaced: the run fails saying the shortcut could not be read, the shortcut is as it
+   /// was, no temporary file stays behind, and its name is still on record.
+   /// </summary>
+   [Fact]
+   public void CurrentShortcutHeldAtTheSecondLookIsNotReplaced()
+   {
+      using var setup = new BrandingSetup();
+      string destination = setup.PlantShortcut(Acme, setup.OurLink);
+      setup.Record.Name = Acme;
+      FileStream? held = null;
+      setup.Shell.BeforeWrite = () => held = new FileStream(destination, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+      try
+      {
+         IOException refused = Assert.Throws<IOException>(setup.Rules.ApplyInstalledBranding);
+         Assert.StartsWith("The shortcut \"Acme Print Connector.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
+      }
+      finally
+      {
+         held?.Dispose();
+      }
+      Assert.Equal(setup.OurLink, new FakeShortcutShell().Read(destination));
+      Assert.Equal(new[] { destination }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(Acme, setup.Record.Name);
+   }
+
+
+
+   /// <summary>
+   /// A read-only mark on a shortcut of ours does not stop a run: the mark is cleared once the file has been found to
+   /// be ours, and then the shortcut is replaced by a same-brand run, or removed by a rename. Without that, every later
+   /// install, upgrade and repair would fail until someone cleared the mark by hand.
+   /// </summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public void ReadOnlyShortcutOfOursIsReplacedOrRemoved(bool sameBrand)
+   {
+      using var setup = new BrandingSetup();
+      string existing = setup.PlantShortcut(sameBrand ? Acme : Old, setup.OurLink);
+      File.SetAttributes(existing, FileAttributes.ReadOnly);
+      setup.Record.Name = sameBrand ? Acme : Old;
+      setup.Rules.ApplyInstalledBranding();
+      Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.False(File.GetAttributes(setup.Shortcut(Acme)).HasFlag(FileAttributes.ReadOnly));
+      Assert.Equal(setup.Installed + ",0", Assert.IsType<ShortcutLink>(new FakeShortcutShell().Read(setup.Shortcut(Acme))).IconLocation);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Empty(setup.Record.Pending);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
+   /// <summary>
+   /// The read-only mark is cleared only on a file that is ours. A read-only file that is someone else's keeps its mark
+   /// and its content, whether it sits under the wanted name, where it refuses the run, or under a recorded earlier
+   /// name, where it is left alone and forgotten.
+   /// </summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public void ReadOnlyFileThatIsNotOursKeepsItsMark(bool underTheWantedName)
+   {
+      using var setup = new BrandingSetup();
+      string theirs = setup.PlantShortcut(underTheWantedName ? Acme : Old, new ShortcutLink(setup.Installed, "--other", BrandingSetup.Ours));
+      string before = File.ReadAllText(theirs);
+      File.SetAttributes(theirs, FileAttributes.ReadOnly);
+      setup.Record.Name = underTheWantedName ? Acme : Old;
+      if(underTheWantedName)
+      { _ = Assert.Throws<InvalidOperationException>(setup.Rules.ApplyInstalledBranding); }
+      else
+      { setup.Rules.ApplyInstalledBranding(); }
+      Assert.True(File.GetAttributes(theirs).HasFlag(FileAttributes.ReadOnly));
+      Assert.Equal(before, File.ReadAllText(theirs));
+   }
+
+
+
    /// <summary>A note that cannot be written (the log refuses, or its disk fails) never fails a run that has done its work.</summary>
    [Theory]
    [InlineData(true)]
