@@ -19,7 +19,8 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// file declares the receiver with; and without a kind where the file does not say. The contract fails on every one
 /// that is not known to be something else than an element. Left alone are a value that is a plain string literal,
 /// which is a fixed name as an <c>x:Name</c> in markup is; the declaration of a field or a local that is itself
-/// called <c>Name</c>; an anonymous object; and a <c>with</c> expression, which copies a record.
+/// called <c>Name</c>; an anonymous object; a <c>with</c> expression, which copies a record; and a member of an
+/// <c>enum</c> that is called <c>Name</c> and given a value.
 /// </para>
 /// </summary>
 internal static partial class CodeBehind
@@ -95,14 +96,14 @@ internal static partial class CodeBehind
    /// <summary>
    /// What a bare <c>Name = ...</c> names, by the braces around it: the object a <c>new</c> creates when they are its
    /// initializer; the class the line is in when they are a block of statements; nothing that can be named when they
-   /// initialize a member of something else (<c>Header = { Name = ... }</c>). Null for an anonymous object and for a
-   /// <c>with</c> expression, which name no element.
+   /// initialize a member of something else (<c>Header = { Name = ... }</c>). Null for an anonymous object, for a
+   /// <c>with</c> expression and for the members of an <c>enum</c>, which name no element.
    /// </summary>
    private static (string On, string? Kind)? Initialized(SourceFile file, int index)
    {
       int open = CSharpText.BlockAround(file.Bare, index).Open;
       string head = open < 0 ? string.Empty : file.Bare[..open].TrimEnd();
-      if(WithAtTheEnd().IsMatch(head))
+      if(WithOrAnEnumAtTheEnd().IsMatch(head))
       {
          return null;
       }
@@ -157,8 +158,8 @@ internal static partial class CodeBehind
 
 
 
-   /// <summary>A plain string literal given as the whole value: what follows it ends the statement, the item or the line.</summary>
-   [GeneratedRegex("""\G\s*"[^"\\]*"\s*([;,})]|$)""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.Multiline, 1000)]
+   /// <summary>A plain string literal given as the whole value: what follows it ends the statement, the item or the initializer. The end of a line does not, because a sum may go on in the next.</summary>
+   [GeneratedRegex("""\G\s*"[^"\\]*"\s*[;,})]""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex LiteralGiven();
 
 
@@ -175,7 +176,7 @@ internal static partial class CodeBehind
 
 
 
-   /// <summary>The word <c>with</c> at the end.</summary>
-   [GeneratedRegex("""(?<!\w)with$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
-   private static partial Regex WithAtTheEnd();
+   /// <summary>The word <c>with</c> at the end, or the head of an <c>enum</c>: its name, and its underlying type when it has one.</summary>
+   [GeneratedRegex("""(?<!\w)(with|enum\s+[A-Za-z_]\w*(\s*:\s*[\w.]+)?)$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex WithOrAnEnumAtTheEnd();
 }

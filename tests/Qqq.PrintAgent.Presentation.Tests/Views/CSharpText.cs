@@ -32,7 +32,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// semicolon that ends an expression body; a local function lies inside the method it is in. What stands between
 /// declarations (a property's accessor, a field's initializer) is in no method: nothing there is a parameter of the
 /// method before it. A local is matched within the innermost pair of braces around it, which is the block that
-/// declares it, so the two branches of an <c>if</c> are two places and an accessor's body is its own. Both rest on
+/// creates it, so the two branches of an <c>if</c> are two places and an accessor's body is its own. Both rest on
 /// the braces of the file being balanced; code that a preprocessor directive leaves out is read as if it were there.
 /// </para>
 /// </summary>
@@ -229,7 +229,7 @@ internal static partial class CSharpText
    /// <summary>
    /// The innermost pair of braces around a position: where the opening brace is and where the closing one is. Before
    /// the first brace it is the whole text (-1 and the length). Give it text without comments and without the inside
-   /// of literals, so that a brace in a string is not one. For a local this is the block that declares it; for
+   /// of literals, so that a brace in a string is not one. For a local this is the block that creates it; for
    /// anything else it is the nearest braces, which may be an initializer's.
    /// </summary>
    internal static (int Open, int Close) BlockAround(string bare, int index)

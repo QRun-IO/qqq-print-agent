@@ -21,7 +21,10 @@ public sealed partial class XamlContractTests
    /// way a failure of <c>GeneratedIdentifiers_AreMadeOnlyWhereTheTableSays</c> reports that place. Nothing produces
    /// any of them yet (the tree and the rows by position come with the view step), so each place is null, which the
    /// same test holds: the companion writes no such identifier and no suite looks one up. The view step fills in the
-   /// places; it does not change a rule.
+   /// places; it does not change a rule. An identifier of one of these forms is set with
+   /// <c>AutomationProperties.SetAutomationId</c> directly at the place its form names: a helper that forwards its
+   /// parameter to <c>SetAutomationId</c> carries written identifiers only, and a call of one that passes anything
+   /// else is reported at the call.
    /// </summary>
    private static readonly GeneratedForm[] s_generatedForms =
    [

@@ -126,7 +126,7 @@ internal static partial class CodeBehind
    /// Reads the identifiers passed to a helper that forwards its parameter to <c>SetAutomationId</c>: one from each call
    /// of that name in any file. Null when nothing calls it. A call is found by the helper's name alone, so a call that
    /// passes no literal at the helper's position may be a call of another method of that name. It is added to
-   /// <paramref name="unreadable"/> with its own place and both ways out, and the calls that do pass a literal are
+   /// <paramref name="unreadable"/> with its own place and the three ways out, and the calls that do pass a literal are
    /// still read, so that the one cause is reported once and not a second time as identifiers that are no longer set.
    /// </summary>
    private static List<Identifier>? Forwarded(IReadOnlyList<SourceFile> files, IReadOnlyList<CSharpText.Method>[] methods, (string Name, int Position, string SetAt) helper, string target, List<string> unreadable)
@@ -140,7 +140,7 @@ internal static partial class CodeBehind
             called = true;
             if(caller.Arguments.Count <= helper.Position || !CSharpText.TryReadLiteral(caller.Arguments[helper.Position], out string argument))
             {
-               unreadable.Add($"{files[index].At(caller.Index)}: {Flat($"{helper.Name}({string.Join(", ", caller.Arguments)})")} does not pass a string literal as argument {helper.Position + 1}, and a method called {helper.Name} forwards that argument to SetAutomationId at {helper.SetAt}. The contract finds the calls of such a helper by its name alone, in every file of the companion. If this is a call of that helper, write the identifier here as a string literal. If it is a call of another method that is also called {helper.Name}, rename one of the two: a helper that forwards an identifier needs a name no other method in the companion has.");
+               unreadable.Add($"{files[index].At(caller.Index)}: {Flat($"{helper.Name}({string.Join(", ", caller.Arguments)})")} does not pass a string literal as argument {helper.Position + 1}, and a method called {helper.Name} forwards that argument to SetAutomationId at {helper.SetAt}. The contract finds the calls of such a helper by its name alone, in every file of the companion. If this is a call of that helper, write the identifier here as a string literal. If it is a call of another method that is also called {helper.Name}, rename one of the two: a helper that forwards an identifier needs a name no other method in the companion has. If the identifier is one of the generated forms, set it with AutomationProperties.SetAutomationId directly at the place the table of generated forms names; a forwarding helper carries written identifiers only.");
                continue;
             }
             IEnumerable<string> others = caller.Arguments.Where((other, at) => at != helper.Position && CSharpText.TryReadLiteral(other, out _));

@@ -458,6 +458,8 @@ public sealed class ViewContractMarkupAndSuiteReaderTests
    [InlineData("public void Test() { window.FindFirstDescendant(row.Id.ToString()); }")]
    [InlineData("public void Test() { window.FindFirstDescendant(string.Concat(prefix, suffix)); }")]
    [InlineData("public void Test() { window.FindFirstChild(\"No=>SuchThing\" + suffix); }")]
+   [InlineData("public void Test() { window.FindFirstChild(s_stem + Position(2)); }")]
+   [InlineData("public void Test(int position) { window.FindFirstDescendant(position.ToString(CultureInfo.InvariantCulture)); }")]
    public void FlaUiLookup_ThatMayBeGivenAStringThatCannotBeRead_IsReported(string source)
    {
       List<string> unreadable = [];

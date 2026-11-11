@@ -109,7 +109,7 @@ public sealed class ViewContractReaderTests
 
    /// <summary>
    /// A call of a forwarding helper that passes no literal is reported at the call, with the place the helper sets
-   /// the identifier and both ways out, because the call may be of another method of the same name; and the calls
+   /// the identifier and the three ways out, because the call may be of another method of the same name; and the calls
    /// that do pass a literal are still read, so that the one cause is one message and not also a list of identifiers
    /// that are no longer set.
    /// </summary>
@@ -150,7 +150,8 @@ public sealed class ViewContractReaderTests
       Assert.Equal(
          "PrinterRow.cs:3: AddAction(actions, _settings) does not pass a string literal as argument 3, and a method called AddAction forwards that argument to SetAutomationId at JobRow.cs:12. "
          + "The contract finds the calls of such a helper by its name alone, in every file of the companion. If this is a call of that helper, write the identifier here as a string literal. "
-         + "If it is a call of another method that is also called AddAction, rename one of the two: a helper that forwards an identifier needs a name no other method in the companion has.",
+         + "If it is a call of another method that is also called AddAction, rename one of the two: a helper that forwards an identifier needs a name no other method in the companion has. "
+         + "If the identifier is one of the generated forms, set it with AutomationProperties.SetAutomationId directly at the place the table of generated forms names; a forwarding helper carries written identifiers only.",
          Assert.Single(reading.Unreadable));
       Assert.Empty(passedOn.Identifiers);
       Assert.Empty(passedOn.NotWrittenOut);
@@ -398,9 +399,10 @@ public sealed class ViewContractReaderTests
 
    /// <summary>
    /// A name code gives at run time is read with what it names: the class the line is in, a field or a parameter by
-   /// its declared type, a local by what it was created as, the object an initializer belongs to. A literal, a
-   /// comparison, the declaration of something called Name, an anonymous object and a <c>with</c> expression are not
-   /// names given to an element at run time.
+   /// its declared type, a local by what it was created as, the object an initializer belongs to. A literal that is
+   /// the whole value, a comparison, the declaration of something called Name, an anonymous object, a <c>with</c>
+   /// expression and a member of an <c>enum</c> are not names given to an element at run time; a literal that a sum
+   /// continues on the next line is one.
    /// </summary>
    [Fact]
    public void NamesGivenAtRunTime_AreReadWithWhatTheyName()
@@ -429,7 +431,14 @@ public sealed class ViewContractReaderTests
                Func<string> later = () => Name = job.Title;
                Name += job.JobId;
                Name ??= job.Title;
+               Name = "JobRow"
+                  + job.JobId;
             }
+         }
+
+         internal enum Column
+         {
+            Name = 1,
          }
          """);
 
@@ -437,7 +446,7 @@ public sealed class ViewContractReaderTests
 
       Assert.Equal(
          ["Sample.cs:6 this Row", "Sample.cs:7 this Row", "Sample.cs:9 _late Button", "Sample.cs:10 profile Profile", "Sample.cs:11 an expression ", "Sample.cs:12 a new TextBlock TextBlock", "Sample.cs:13 cell TextBlock",
-            "Sample.cs:14 a new object Border", "Sample.cs:17 the member an initializer fills ", "Sample.cs:21 this Row", "Sample.cs:22 this Row", "Sample.cs:23 this Row"],
+            "Sample.cs:14 a new object Border", "Sample.cs:17 the member an initializer fills ", "Sample.cs:21 this Row", "Sample.cs:22 this Row", "Sample.cs:23 this Row", "Sample.cs:24 this Row"],
          names.Select(name => $"{name.Where} {name.On} {name.Kind}"), StringComparer.Ordinal);
       Assert.Equal("$\"JobRow{job.JobId}\"", names[0].Value);
    }

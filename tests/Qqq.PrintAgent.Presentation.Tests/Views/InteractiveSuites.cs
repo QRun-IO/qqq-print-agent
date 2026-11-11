@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Qqq.PrintAgent.Presentation.Tests.Views;
@@ -27,9 +28,19 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// and is read as any other lookup's argument is (a loop's variable, a forwarding helper's parameter), or reported.
 /// A lambda, a call (<c>cf.ByName("...")</c>, a <c>new</c>) and a name the method declares with another type are
 /// conditions, and are left to the lookups inside them. What is none of these (a name the method does not declare,
-/// or declares with <c>var</c>; a member of something; an element of an array; a sum; a cast) cannot be told apart
-/// and is reported, and so is a call that is known to give a string (<c>nameof</c>, <c>ToString()</c>, a method of
-/// <c>string</c>). So the only string these four are given unseen is one that some other call returns.
+/// or declares with <c>var</c>; a member of something; an element of an array; a sum; a choice; a cast) cannot be
+/// told apart and is reported. A sum, a choice and an element of an array are reported with a call in them too: a
+/// <c>+</c>, a <c>?</c> or a <c>[</c> outside the argument's brackets makes it no condition, and only a
+/// <c>=&gt;</c> outside them makes it a lambda. A call that is known to give a string is reported as well:
+/// <c>nameof</c>, a method of <c>string</c>, and what ends in <c>ToString</c>, with or without arguments.
+/// </para>
+/// <para>
+/// What is still unseen follows from that. An argument with a round bracket that is inside no other bracket (a
+/// call, a <c>new</c>), which starts with neither a quote nor a bracket, has none of those three marks outside its
+/// brackets and is none of the calls known to give a string, is taken for a condition whatever it gives. So a
+/// string written that way goes unread (<c>Position(2)</c>, <c>row.Id()</c>, <c>Rows.First().Id</c>,
+/// <c>await Pick()</c>, <c>new string('x', 2)</c>), and so does a name the method declares with a type that is a
+/// string under another name (an alias, or a type that converts to one).
 /// </para>
 /// <para>
 /// Every other place where a suite's source says <c>AutomationId</c> is reported: an XPath, a comparison of an
@@ -180,16 +191,20 @@ internal static partial class InteractiveSuites
    /// True when the one argument of a FlaUI lookup is written as a condition: a lambda, a call, or a name the method
    /// it is in declares with a type that is not <c>string</c>. False for everything else, which is then read as an
    /// identifier or reported: what starts as a string does, and what cannot be told from one (a bracketed expression
-   /// or a cast among them).
+   /// or a cast among them, and a sum, a choice or an indexing even when there is a call in it). What makes a lambda,
+   /// a call or one of those three is looked for outside the argument's brackets, so that a sum inside a condition's
+   /// own arguments does not count and a lambda inside a sum's does not either.
    /// </summary>
    private static bool IsACondition(SourceFile file, IReadOnlyList<CSharpText.Method> methods, CSharpText.Call call)
    {
       string argument = call.Arguments[0];
-      if(StartsAString().IsMatch(argument) || argument.StartsWith('(') || GivesAString().IsMatch(argument))
+      string outside = OutsideBrackets(argument);
+      bool lambda = outside.Contains("=>", StringComparison.Ordinal);
+      if(StartsAString().IsMatch(argument) || argument.StartsWith('(') || GivesAString().IsMatch(outside))
       {
-         return argument.StartsWith('(') && argument.Contains("=>", StringComparison.Ordinal);
+         return argument.StartsWith('(') && lambda;
       }
-      if(argument.Contains("=>", StringComparison.Ordinal) || argument.Contains('(', StringComparison.Ordinal))
+      if(lambda || (outside.Contains('(', StringComparison.Ordinal) && outside.IndexOfAny(['+', '?', '[']) < 0))
       {
          return true;
       }
@@ -198,6 +213,25 @@ internal static partial class InteractiveSuites
          .Where(match => string.Equals(match.Groups["name"].Value, argument, StringComparison.Ordinal) && !s_notTypes.Contains(match.Groups["type"].Value))
          .Select(match => match.Groups["type"].Value.TrimEnd('?'))];
       return types.Length > 0 && !types.Any(type => type is "string" or "String" or "System.String" or "var");
+   }
+
+
+
+   /// <summary>The argument without what stands inside its brackets (round, square or curly) and inside its literals. The brackets and the quotes themselves are kept, so a call still shows as one.</summary>
+   private static string OutsideBrackets(string argument)
+   {
+      StringBuilder outside = new();
+      int depth = 0;
+      foreach(char current in CSharpText.WithoutLiterals(argument))
+      {
+         depth -= current is ')' or ']' or '}' ? 1 : 0;
+         if(depth <= 0)
+         {
+            outside.Append(current);
+         }
+         depth += current is '(' or '[' or '{' ? 1 : 0;
+      }
+      return outside.ToString();
    }
 
 
@@ -263,7 +297,7 @@ internal static partial class InteractiveSuites
 
 
 
-   /// <summary>A call that gives a string whatever it is given: <c>nameof(...)</c>, a method of <c>string</c>, and anything that ends in <c>ToString()</c>.</summary>
+   /// <summary>A call that gives a string whatever it is given: <c>nameof(...)</c>, a method of <c>string</c>, and anything that ends in <c>ToString()</c>. It is matched against the argument without what stands inside its brackets, so <c>ToString</c> may have arguments.</summary>
    [GeneratedRegex("""^nameof\s*\(|^(string|String)\s*\.|\.\s*ToString\s*\(\s*\)$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex GivesAString();
 

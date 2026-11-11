@@ -177,7 +177,7 @@ public sealed partial class XamlContractTests
 
    /// <summary>
    /// The stretch of a file in which a control created in code is one control: the whole file for a field or a
-   /// property, and for a local the innermost braces around its creation, which is the block that declares it. A
+   /// property, and for a local the innermost braces around its creation, which is the block that creates it. A
    /// local of the same name in another block (the other branch of an <c>if</c>, another method, an accessor) is
    /// another control, and a <c>SetAutomationId</c> there does not name this one.
    /// </summary>
