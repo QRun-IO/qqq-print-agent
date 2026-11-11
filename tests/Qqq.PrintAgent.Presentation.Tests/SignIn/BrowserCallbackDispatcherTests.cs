@@ -530,6 +530,42 @@ public sealed class BrowserCallbackDispatcherTests
 
 
    /// <summary>
+   /// Whoever waits on a ticket continues on a thread of its own, never inside the dispatcher, which completes
+   /// tickets from the thread a callback arrived on. The waiter here asks to be continued inside the very call that
+   /// ends the ticket, which is what an awaiting method without a synchronization context does, and it is not: when
+   /// it runs, the call that gave the ticket its callback, or its failure, is not running on that thread.
+   /// </summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public async Task TicketsWaiter_IsNotContinuedInsideTheCallThatEndsTheTicket(bool callback)
+   {
+      SignInWorld world = new();
+      using BrowserCallbackTicket ticket = world.Dispatcher.Register("synthetic-state-a");
+      int ending = Environment.CurrentManagedThreadId;
+      bool inside = false;
+      bool? continuedInside = null;
+      Task waiter = ticket.Callback.ContinueWith(_ => continuedInside = inside && Environment.CurrentManagedThreadId == ending, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+      inside = true;
+      if(callback)
+      {
+         ticket.Complete(CallbackFor("synthetic-state-a"));
+      }
+      else
+      {
+         ticket.Fail(new IOException("synthetic pipe failure"));
+      }
+      inside = false;
+
+      await waiter.WaitAsync(TimeSpan.FromSeconds(10));
+      Assert.False(continuedInside);
+      Assert.Equal(callback, ticket.Callback.IsCompletedSuccessfully);
+   }
+
+
+
+   /// <summary>
    /// An inbox can fail after an exchange has stopped waiting and before it has disposed its ticket. The ticket is
    /// then failed and never looked at. The runtime reports a failed task nobody looked at as an unobserved error
    /// when the task is collected, and a ticket must not be the cause of one. The test fails a ticket, lets it go

@@ -145,6 +145,34 @@ public sealed class CompanionSignInTests
 
 
    /// <summary>
+   /// A table-based server names no sign-in provider, by the rule the service's check applies: it takes a user name
+   /// and password and nothing else. Its description can still carry a native session grant with an issuer, which
+   /// is not a provider anybody is sent to. The check reported none for it, and the read agrees: the grant's issuer
+   /// is not taken for a provider that changed, and the password is offered.
+   /// </summary>
+   [Fact]
+   public async Task Prepare_TableBasedServerWithANativeGrant_NamesNoProvider()
+   {
+      QqqAuthenticationMetadata description = new()
+      {
+         Type = "TABLE_BASED",
+         Values = new QqqAuthenticationMetadata.ProviderValues { NativeSessionLogin = new QqqAuthenticationMetadata.NativeGrant { Issuer = SignInWorld.Provider, RedirectUris = [SignInWorld.Callback] } },
+      };
+      SignInWorld world = new() { ConfigureSession = session => session.Metadata = description };
+      using CompanionSignIn signIn = world.NewSignIn();
+      Assert.Equal(new Uri(SignInWorld.Provider), description.ProviderOrigin);
+
+      SignInOffer? offer = await signIn.PrepareAsync(new Uri(SignInWorld.Server), SignInWorld.PasswordCheck, QqqCertificateExceptionOrigins.None);
+
+      Assert.Equal(new SignInOffer(true, false), offer);
+      Assert.Equal(CompanionSignInState.Ready, signIn.State);
+      Assert.True(signIn.HasSession);
+      Assert.Equal([Reading, "INFO Sign-in methods for print.example.com: password."], world.Log.Entries);
+   }
+
+
+
+   /// <summary>
    /// The provider is compared as an origin. The check's address and the description's issuer are the same provider
    /// when their scheme, host and port are: whatever the letter case, an explicit default port or a path on either
    /// side, and whether a name outside ASCII is written in Unicode or in its "xn--" form.
