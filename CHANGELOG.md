@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+The journal has a schema version (2.0). Printing, pairing and history are unchanged.
+
+- The service brings the journal up to date once, when it starts, in one transaction: either every pending change
+  is made or none is, and a failed start leaves the journal as it was. Until now each part of the service that
+  opened the journal created and altered tables as it went. A journal left by any 1.x release, and by the
+  prereleases before it, is brought to the same schema; no row is changed, except that job events written before
+  events recorded which pairing they belong to are given the saved pairing's, as 1.x did each time it started.
+- An older version installed over data that a newer version wrote no longer runs on it. This can happen between
+  release candidates, which share a version number. The service leaves the data exactly as it found it, contacts
+  no server, and reports "A newer version of this application wrote the print data on this computer, and this
+  version cannot use it. Nothing was changed. Install the newer version again to continue printing." Status, log
+  settings and updates stay available, so the newer version can be installed again; every other operation is
+  refused with that sentence.
+
 Servers that run as several nodes (2.0; the 1.2.x fix carried over). A load balancer in front of such a server
 names the node it chose in a cookie; the client attached only the session cookie, so its realtime socket could open
 on one node while its claims and downloads went to another, and a server whose claim gate needs the socket on the
