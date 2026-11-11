@@ -27,8 +27,9 @@ internal sealed class AgentPipePeer : IDisposable
 
    /// <summary>
    /// The check of the installed product: the real Windows facts and the service program at its fixed machine-wide
-   /// install path. The two entry points for the installed product go through it and pass nothing of their own, so what
-   /// the installed product trusts is this one value, which a test reads.
+   /// install path. The pipe client authenticates with this value itself, and no member stands between the two that
+   /// could pass facts or a program of its own, so what the installed product trusts is this one value, which a test
+   /// reads.
    /// </summary>
    internal static Check Installed { get; } = new(new WindowsPipePeerFacts(), InstalledService);
 
@@ -55,11 +56,6 @@ internal sealed class AgentPipePeer : IDisposable
 
    /// <summary>The service executable at its fixed machine-wide install path; a process running any other program is not the service.</summary>
    internal static string InstalledService => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent", "Service", "Qqq.PrintAgent.Service.exe");
-
-
-
-   /// <summary>Proves that the far end of the pipe is the print service installed on this computer; see the overload for what is checked.</summary>
-   internal static AgentPipePeer Authenticate(SafePipeHandle pipe) => Installed.Authenticate(pipe);
 
 
 

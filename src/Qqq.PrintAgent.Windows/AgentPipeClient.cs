@@ -76,7 +76,7 @@ public static class AgentPipeClient
       using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
       connectTimeout.CancelAfter(connectLimit ?? s_connectLimit);
       await pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
-      using IDisposable peer = (verify ?? AgentPipePeer.Authenticate)(pipe.SafePipeHandle);
+      using IDisposable peer = (verify ?? AgentPipePeer.Installed.Authenticate)(pipe.SafePipeHandle);
       writing?.Invoke();
       await AgentPipeFraming.WriteAsync(pipe, command, AgentPipeFraming.MaximumCommandCharacters, timeout.Token).ConfigureAwait(false);
       return await AgentPipeFraming.ReadAsync(pipe, AgentPipeFraming.MaximumResponseCharacters, timeout.Token).ConfigureAwait(false);
