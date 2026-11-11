@@ -7,7 +7,6 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Qqq.PrintAgent.Core.Printing;
-using Windows.Data.Pdf;
 
 namespace Qqq.PrintAgent.Windows;
 
@@ -48,7 +47,7 @@ public sealed partial class WindowsPrinters
          return PrintRawStream(printer, job, input, cancellationToken);
       }
       using global::Windows.Storage.Streams.IRandomAccessStream random = input.AsRandomAccessStream();
-      PdfDocument document = await PdfDocument.LoadFromStreamAsync(random).AsTask(cancellationToken).ConfigureAwait(false);
+      IPdfDocument document = await _pdf.LoadAsync(random, cancellationToken).ConfigureAwait(false);
       return await PrintPdfDocumentAsync(printer, job, document, cancellationToken).ConfigureAwait(false);
    }
 
@@ -57,29 +56,32 @@ public sealed partial class WindowsPrinters
    /// <summary>Spools a staged file as one RAW document, rechecking the selected media just before it starts, and aborts the document if anything fails after it began so no partial label stays queued.</summary>
    private string PrintRawStream(PrinterInfo selectedPrinter, PrintJob job, Stream input, CancellationToken token)
    {
-      Check(Native.OpenPrinter(selectedPrinter.Name, out IntPtr printer, IntPtr.Zero));
+      Check(_spooler.OpenPrinter(selectedPrinter.Name, out IntPtr printer));
       try
       {
          _ = RequireCurrentMedia(selectedPrinter, job);
-         Native.DocInfo1 info = new() { DocumentName = $"QQQ {job.JobId}", DataType = "RAW" };
-         uint id = Native.StartDocPrinter(printer, 1, ref info);
+         uint id = _spooler.StartDocPrinter(printer, $"QQQ {job.JobId}", "RAW");
          if(id == 0)
          { throw new Win32Exception(Marshal.GetLastWin32Error()); }
          try
          {
             WriteRawCopies(printer, job.Options.Copies, input, token);
-            Check(Native.EndDocPrinter(printer));
+            Check(_spooler.EndDocPrinter(printer));
             return id.ToString(System.Globalization.CultureInfo.InvariantCulture);
          }
-         catch { Native.AbortPrinter(printer); throw; }
+         catch
+         {
+            _ = _spooler.AbortPrinter(printer);
+            throw;
+         }
       }
-      finally { Native.ClosePrinter(printer); }
+      finally { _ = _spooler.ClosePrinter(printer); }
    }
 
 
 
    /// <summary>Writes the staged bytes once per copy in 64 KiB pieces, continuing after partial spooler writes and refusing an impossible byte count, with cancellation checked between writes.</summary>
-   private static void WriteRawCopies(IntPtr printer, int copies, Stream input, CancellationToken token)
+   private void WriteRawCopies(IntPtr printer, int copies, Stream input, CancellationToken token)
    {
       byte[] buffer = new byte[65536];
       for(int copy = 0; copy < copies; copy++)
@@ -93,7 +95,7 @@ public sealed partial class WindowsPrinters
             {
                token.ThrowIfCancellationRequested();
                byte[] remaining = buffer.AsSpan(offset, count - offset).ToArray();
-               Check(Native.WritePrinter(printer, remaining, remaining.Length, out int written));
+               Check(_spooler.WritePrinter(printer, remaining, remaining.Length, out int written));
                if(written <= 0 || written > remaining.Length)
                { throw new IOException("Printer returned an invalid byte count."); }
                offset += written;

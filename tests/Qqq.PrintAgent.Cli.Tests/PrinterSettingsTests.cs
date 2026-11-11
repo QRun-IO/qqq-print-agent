@@ -556,7 +556,7 @@ public sealed class PrinterSettingsTests
    {
       FakeWindowsPrinting windows = new();
       FakeQueue queue = windows.Add(new FakeQueue(Queue, Driver, Port) { MachineDefaults = defaults ?? SyntheticDevMode.Label() }.WithContext(1200, 1800));
-      return (new WindowsPrinters(windows, windows, windows), windows, queue);
+      return (new WindowsPrinters(windows, windows, windows, new FakePdfRenderer(windows.Calls)), windows, queue);
    }
 
 
