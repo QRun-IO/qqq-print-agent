@@ -71,7 +71,7 @@ The QQQ server supplies assigned document bytes over HTTPS. The Windows LocalSys
 
 ## Data handling
 
-The service owns `connection.dpapi`, `journal.db` and its WAL. The MSI retains state through uninstall/reinstall. Revoke/decommission the device and resolve pending jobs before deliberately deleting retained state. Only delivered terminal detail whose failures were reviewed is pruned; final-state evidence is retained. Never publish raw state or customer documents.
+The service owns `connection.dpapi`, `journal.db` and its WAL. The journal carries a schema version, and only the service changes its schema: once, at start, in one transaction, before anything else opens it. A build that finds a version newer than it knows (an older release candidate installed over a newer one) does not open the journal for writing, contacts no server and reads no protected file; it serves its pipe so that an administrator can see why and install the newer build again. The MSI retains state through uninstall/reinstall. Revoke/decommission the device and resolve pending jobs before deliberately deleting retained state. Only delivered terminal detail whose failures were reviewed is pruned; final-state evidence is retained. Never publish raw state or customer documents.
 
 Service and companion persist serialized, credential-redacted AppKit logs with 30-day retention, rolling a day's file over to numbered segments at a configurable size (default 100 MiB, at most 10 segments kept per day) rather than suppressing entries; recent job snapshots come from durable connection-scoped metadata. Tray colors describe observed connectivity/queue state, not a guarantee of physical printer readiness or completed output.
 

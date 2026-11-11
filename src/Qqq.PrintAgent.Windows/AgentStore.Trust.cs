@@ -19,7 +19,7 @@ public sealed partial class AgentStore
    public ServerTrust LoadServerTrust()
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "CREATE TABLE IF NOT EXISTS server_trust(scope TEXT PRIMARY KEY,json TEXT NOT NULL); SELECT json FROM server_trust WHERE scope='machine'";
+      command.CommandText = "SELECT json FROM server_trust WHERE scope='machine'";
       try
       { return command.ExecuteScalar() is string json ? JsonSerializer.Deserialize<ServerTrust>(json, PrintApiClient.JsonOptions) ?? new() : new(); }
       catch(JsonException)
@@ -33,7 +33,7 @@ public sealed partial class AgentStore
    {
       ArgumentNullException.ThrowIfNull(trust);
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "CREATE TABLE IF NOT EXISTS server_trust(scope TEXT PRIMARY KEY,json TEXT NOT NULL); INSERT INTO server_trust(scope,json) VALUES('machine',$json) ON CONFLICT(scope) DO UPDATE SET json=$json";
+      command.CommandText = "INSERT INTO server_trust(scope,json) VALUES('machine',$json) ON CONFLICT(scope) DO UPDATE SET json=$json";
       command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(trust, PrintApiClient.JsonOptions));
       command.ExecuteNonQuery();
    }

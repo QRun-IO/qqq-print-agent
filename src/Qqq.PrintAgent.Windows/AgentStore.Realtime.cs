@@ -19,7 +19,7 @@ public sealed partial class AgentStore
    public RealtimeSettings LoadRealtimeSettings()
    {
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "CREATE TABLE IF NOT EXISTS realtime_settings(connection_id TEXT PRIMARY KEY,json TEXT NOT NULL); SELECT json FROM realtime_settings WHERE connection_id=$scope";
+      command.CommandText = "SELECT json FROM realtime_settings WHERE connection_id=$scope";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       RealtimeSettings settings = command.ExecuteScalar() is string json ? JsonSerializer.Deserialize<RealtimeSettings>(json, PrintApiClient.JsonOptions) ?? new() : new();
       settings.Validate();
@@ -33,7 +33,7 @@ public sealed partial class AgentStore
    {
       settings.Validate();
       using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = "CREATE TABLE IF NOT EXISTS realtime_settings(connection_id TEXT PRIMARY KEY,json TEXT NOT NULL); INSERT INTO realtime_settings(connection_id,json) VALUES($scope,$json) ON CONFLICT(connection_id) DO UPDATE SET json=$json";
+      command.CommandText = "INSERT INTO realtime_settings(connection_id,json) VALUES($scope,$json) ON CONFLICT(connection_id) DO UPDATE SET json=$json";
       command.Parameters.AddWithValue("$scope", _connectionScope);
       command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(settings, PrintApiClient.JsonOptions));
       command.ExecuteNonQuery();

@@ -44,10 +44,9 @@ public sealed partial class AgentStore
 
 
 
-   /// <summary>Reads one stored profile by key as JSON, creating the table first when this is a store from before profiles existed; a missing key yields the default.</summary>
+   /// <summary>Reads one stored profile by key as JSON; a missing key yields the default.</summary>
    private T? ReadProfile<T>(string key)
    {
-      EnsureMetadataTable();
       using SqliteCommand command = _database.CreateCommand();
       command.CommandText = "SELECT json FROM local_metadata WHERE profile_key=$key";
       command.Parameters.AddWithValue("$key", key);
@@ -59,25 +58,11 @@ public sealed partial class AgentStore
    /// <summary>Inserts or replaces one profile as JSON in a single statement, so a save is all-or-nothing.</summary>
    private void WriteProfile<T>(string key, T profile)
    {
-      EnsureMetadataTable();
       using SqliteCommand command = _database.CreateCommand();
       command.CommandText = "INSERT INTO local_metadata(profile_key,json) VALUES($key,$json) ON CONFLICT(profile_key) DO UPDATE SET json=excluded.json";
       command.Parameters.AddWithValue("$key", key);
       command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(profile, PrintApiClient.JsonOptions));
       command.ExecuteNonQuery();
-   }
-
-
-
-   /// <summary>Creates the profile table on first use under this journal's schema lock, so concurrent stores of the same journal cannot race creating it.</summary>
-   private void EnsureMetadataTable()
-   {
-      lock(SchemaLock)
-      {
-         using SqliteCommand command = _database.CreateCommand();
-         command.CommandText = "CREATE TABLE IF NOT EXISTS local_metadata(profile_key TEXT PRIMARY KEY,json TEXT NOT NULL)";
-         command.ExecuteNonQuery();
-      }
    }
 
 

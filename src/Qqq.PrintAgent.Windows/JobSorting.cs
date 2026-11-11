@@ -11,6 +11,12 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>One whitelisted order for SQLite pages and the bounded in-memory cloud queue merge.</summary>
 internal static class JobSorting
 {
+   /// <summary>
+   /// The fields the job list can be sorted by. The journal has one index for each, named <c>jobs_display_</c> plus the
+   /// field and built on the expression <see cref="SqlColumn"/> returns for it. Those indexes are written out in the
+   /// journal's first migration step, so a field added here, or an expression changed below, needs a new migration step
+   /// that creates or replaces its index; a test compares the two and fails until it does.
+   /// </summary>
    internal static readonly string[] Fields = ["createdAt", "title", "printerName", "status", "format"];
 
 

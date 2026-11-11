@@ -9,7 +9,7 @@ using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
-/// <summary>The job list sorts by when the server created each job. These tests pin how that creation time is stored: normalized to UTC, kept stable when a job is replayed or changes status, and filled in for journals written before the column existed.</summary>
+/// <summary>The job list sorts by when the server created each job. These tests pin how that creation time is stored: normalized to UTC, kept stable when a job is replayed or changes status, and filled in by the migration for journals written before the column existed.</summary>
 public sealed class JobCreationTimeTests
 {
    /// <summary>A server creation time with an offset is stored as UTC and never replaced by a later claim carrying a different time, nor by status updates (which change the updated time only). Sorting by creation then orders the jobs by their server creation times in both directions.</summary>
@@ -43,9 +43,10 @@ public sealed class JobCreationTimeTests
 
 
    /// <summary>
-   /// For a journal created before the creation-time column existed, opening the store fills it from the job's first event, or from
-   /// the last-updated time when its events were pruned. The fill happens once: changing every timestamp afterwards and reopening
-   /// leaves the earlier values alone, so the migration is not repeated on each open.
+   /// For a journal created before the creation-time column existed, the migration fills it from the job's first event, or from
+   /// the last-updated time when its events were pruned. Such a journal carries no schema version, which is what makes the
+   /// migration run on it; the test takes the version away together with the column. The fill happens once: changing every
+   /// timestamp afterwards and reopening leaves the earlier values alone, because a migrated journal is not migrated again.
    /// </summary>
    [Fact]
    public void LegacyBackfill_UsesFirstEventThenSummaryFallbackAndRunsOnlyOnce()
@@ -66,6 +67,7 @@ public sealed class JobCreationTimeTests
             UPDATE local_jobs SET updated_at='2021-01-01T00:00:00.0000000+00:00' WHERE job_id='pruned';
             DROP INDEX jobs_display_createdAt;
             ALTER TABLE local_jobs DROP COLUMN created_at;
+            PRAGMA user_version=0;
             """);
          using(JournalStore migrated = TestState.OpenStore(directory))
          {

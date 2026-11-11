@@ -30,6 +30,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private DateTimeOffset? _lastServerContact;
    private IReadOnlyList<JobSnapshot> _queuedJobs = [];
    private long _queueGeneration;
+   private StateStatus _storedState = new StateStatus.Ready();
    private TimeProvider Clock => timeProvider ?? TimeProvider.System;
    private DateTimeOffset ObservationTime => Clock.GetUtcNow();
 
@@ -52,13 +53,47 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
-   /// <summary>Owns the data directory until Windows requests shutdown.</summary>
+   /// <summary>
+   /// Owns the data directory until Windows requests shutdown. The journal is migrated first, once, before anything opens
+   /// a store. When the stored state cannot be used (a newer build wrote it), it is left exactly as it was found, no
+   /// connection to a server is started, and only the management pipe is served, so that an operator can see why and the
+   /// newer build can be installed again.
+   /// </summary>
    public async Task RunAsync(CancellationToken token)
    {
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
       _log.Write("INFO", "Print service started.");
+      _storedState = MigrateJournal();
+      if(_storedState.Refusal is string refusal)
+      {
+         _log.Write("ERROR", refusal + (_storedState is StateStatus.NewerBuild newer ? $" The journal is at schema version {newer.FoundVersion}; this version supports up to {newer.SupportedVersion}." : string.Empty)
+            + " No server connection is started; status, log settings and updates stay available.");
+         await ServePipeAsync(token).ConfigureAwait(false);
+         return;
+      }
       await RunRealtimeAsync(token).ConfigureAwait(false);
+   }
+
+
+
+   /// <summary>
+   /// Brings the journal up to date, which is the first thing the service does with its stored state. A failure stops
+   /// the service from starting, as a failed first open of the store did before there was a migration. Before the
+   /// failure is passed on, one line is logged for the operator: which journal it was, that it was not changed, and
+   /// what to check.
+   /// </summary>
+   private StateStatus MigrateJournal()
+   {
+      try
+      {
+         return JournalSchema.Migrate(directory);
+      }
+      catch(Exception exception)
+      {
+         _log.Write("ERROR", JournalSchema.StartFailureText(directory, exception));
+         throw;
+      }
    }
 
 
@@ -67,9 +102,12 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// Opens the journal and the protected files of the state directory for one unit of work. Every part of the runtime
    /// opens its store here, so what a store is opened for is decided in one place. With <paramref name="recover"/> a saved
    /// connection that can no longer be read is set aside instead of failing the open, which the paths that must keep
-   /// working without a readable pairing (status, sign-in, enrollment, settings) ask for.
+   /// working without a readable pairing (status, sign-in, enrollment, settings) ask for. While the stored state cannot be
+   /// used no store is opened at all, whatever asked for one: that state belongs to another build.
    /// </summary>
-   private AgentStore OpenStore(bool recover) => new(directory, recoverUnreadableConfiguration: recover);
+   private AgentStore OpenStore(bool recover) => _storedState.Refusal is string refusal
+      ? throw new InvalidOperationException(refusal)
+      : new(directory, recoverUnreadableConfiguration: recover);
 
 
 
@@ -117,9 +155,16 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
-   /// <summary>Current local observations, with no token or document content.</summary>
+   /// <summary>
+   /// Current local observations, with no token or document content. While the stored state cannot be used the snapshot
+   /// is built without it: red, with the reason as its status, no pairing, no printers and no jobs.
+   /// </summary>
    public AgentSnapshot GetSnapshot()
    {
+      if(_storedState.Refusal is string refusal)
+      {
+         return new AgentSnapshot(Enrolled: false, Connected: false, "RED", refusal, ServerUrl: null, DeviceId: null, LastSuccessfulPoll: null, [], [], _log.Entries(), Transport: GetTransportSnapshot());
+      }
       using AgentStore store = OpenStore(recover: true);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
@@ -228,10 +273,16 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
    /// <summary>
    /// Dispatches one management-pipe operation by name to its handler and returns the text sent back to the caller. An
-   /// unknown operation is refused, and exposure changes validate their arguments before touching the store.
+   /// unknown operation is refused, and exposure changes validate their arguments before touching the store. While the
+   /// stored state cannot be used, only the operations that need none of it are dispatched and every other one is refused
+   /// with the reason.
    /// </summary>
    private async Task<string> HandleCommandAsync(PipeRequest request, CancellationToken token)
    {
+      if(_storedState.Refusal is string refusal && !AnsweredWithoutStoredState(request.Operation))
+      {
+         return RefuseWithoutStoredState(request.Operation, refusal);
+      }
       switch(request.Operation)
       {
          case "set-device-profile":
@@ -286,5 +337,28 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             throw new InvalidOperationException("Unknown command.");
       }
    }
-}
 
+
+
+   /// <summary>
+   /// Answers an operation that is refused because the stored state cannot be used. The caller gets the reason as an
+   /// error, in the form a failed command has. The reason was logged once, as an error, when the service started; each
+   /// refusal is logged as debug detail only, to the file and only while debug logging is on. A companion that keeps
+   /// asking would otherwise add an error line for every request and push the reason out of the entries it shows.
+   /// </summary>
+   private string RefuseWithoutStoredState(string operation, string refusal)
+   {
+      _log.Write("DEBUG", $"Refused '{operation}': the stored state cannot be used.");
+      return "Error: " + refusal;
+   }
+
+
+
+   /// <summary>
+   /// The operations the service still answers while the stored state cannot be used: what it is doing and why (status,
+   /// snapshot, and the transport read the companion repeats every second), the log operations, and the two update
+   /// operations, without which the build that can use the state could not be installed. None of them opens a store.
+   /// </summary>
+   private static bool AnsweredWithoutStoredState(string operation)
+      => operation is "status" or "snapshot" or "transport" or "get-log-settings" or "set-log-settings" or "clear-logs" or "prepare-update" or "resume-after-update";
+}

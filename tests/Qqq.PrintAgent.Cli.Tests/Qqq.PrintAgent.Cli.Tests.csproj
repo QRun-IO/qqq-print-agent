@@ -24,6 +24,9 @@
            failure reply per error code that carries details. -->
       <None Remove="Fixtures\management\*.json" />
       <Content Include="Fixtures\management\*.json" CopyToOutputDirectory="PreserveNewest" />
+      <!-- Journals in the shapes earlier releases left, as SQL scripts LegacyStateBuilder runs to build a state folder. -->
+      <None Remove="Fixtures\*.sql" />
+      <Content Include="Fixtures\*.sql" CopyToOutputDirectory="PreserveNewest" />
    </ItemGroup>
 
    <ItemGroup>
@@ -42,4 +45,3 @@
       <Copy SourceFiles="@(WorkerFixtureRuntime)" DestinationFolder="$(OutDir)" />
    </Target>
 </Project>
-
