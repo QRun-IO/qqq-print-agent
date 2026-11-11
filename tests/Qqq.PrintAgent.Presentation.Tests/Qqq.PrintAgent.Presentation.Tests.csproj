@@ -34,13 +34,13 @@
    </ItemGroup>
 
    <!-- The view contract (Views\XamlContractTests.cs) reads the companion's markup and code-behind, and the two
-        interactive suites that find controls by identifier, as text. They are copied beside the tests, never
+        interactive suites that find controls by identifier (every folder of each, not bin or obj), as text. They are copied beside the tests, never
         compiled and never referenced: this project must stay free of WinUI and of the companion (ArchitectureTests).
         IfDifferent, not PreserveNewest: a file put back to an earlier version is older than its copy and must still replace it. -->
    <ItemGroup>
       <ViewContractSource Include="..\..\src\Qqq.PrintAgent\**\*.xaml;..\..\src\Qqq.PrintAgent\**\*.cs" Exclude="..\..\src\Qqq.PrintAgent\bin\**;..\..\src\Qqq.PrintAgent\obj\**" Link="Companion\%(RecursiveDir)%(Filename)%(Extension)" />
-      <ViewContractSource Include="..\Qqq.PrintAgent.UiTests\*.cs" Link="InteractiveTests\UiTests\%(Filename)%(Extension)" />
-      <ViewContractSource Include="..\Qqq.PrintAgent.LayoutTests\*.cs" Link="InteractiveTests\LayoutTests\%(Filename)%(Extension)" />
+      <ViewContractSource Include="..\Qqq.PrintAgent.UiTests\**\*.cs" Exclude="..\Qqq.PrintAgent.UiTests\bin\**;..\Qqq.PrintAgent.UiTests\obj\**" Link="InteractiveTests\UiTests\%(RecursiveDir)%(Filename)%(Extension)" />
+      <ViewContractSource Include="..\Qqq.PrintAgent.LayoutTests\**\*.cs" Exclude="..\Qqq.PrintAgent.LayoutTests\bin\**;..\Qqq.PrintAgent.LayoutTests\obj\**" Link="InteractiveTests\LayoutTests\%(RecursiveDir)%(Filename)%(Extension)" />
       <Content Include="@(ViewContractSource)" CopyToOutputDirectory="IfDifferent" />
       <None Remove="Views\*.txt" />
       <Content Include="Views\*.txt" CopyToOutputDirectory="IfDifferent" />

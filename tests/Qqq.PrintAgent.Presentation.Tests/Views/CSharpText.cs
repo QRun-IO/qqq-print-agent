@@ -10,10 +10,20 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 
 /// <summary>
 /// The little reading of C# that the view contract needs, done on text so that this project needs neither a compiler
-/// package nor a reference to what it reads. It is not a parser: it blanks comments, splits a bracketed list at its
-/// commas, recognises a plain string literal, and finds where methods are declared and called. Where it cannot follow
-/// the source it says so through what it returns, and the caller reports the place: an unusual construct fails a test
-/// and is never skipped.
+/// package nor a reference to what it reads. It is not a parser: it blanks comments and the inside of literals, splits
+/// a bracketed list at its commas, recognises a plain string literal, and finds where methods are declared and called.
+/// Where it cannot follow the source it says so through what it returns, and the caller reports the place.
+/// <para>
+/// What that covers, and what it does not. The readers built on this report every form they know of and cannot
+/// read: an identifier that is not written out, a <c>new(</c> whose type is written somewhere else, a mention of an
+/// automation identifier outside the one call that sets it, a lookup in a form the suites' reader does not know. They
+/// do not see what has no word of its own to look for: a control that is made without <c>new</c> in the companion
+/// (by a factory of another assembly, or by reflection), and code inside the holes of an interpolated string, which
+/// is blanked with the string. A declaration is
+/// found by its shape (a name, a bracketed list of typed names, a body), so a method's extent is "up to the next
+/// declaration"; a local function therefore ends the method it is in, which makes a rule about "the same method"
+/// stricter, never looser.
+/// </para>
 /// </summary>
 internal static partial class CSharpText
 {
@@ -25,13 +35,13 @@ internal static partial class CSharpText
 
 
 
-   /// <summary>A method (or constructor, or local function) declaration: its name, its parameter names in order, and where its name starts.</summary>
-   internal sealed record Method(string Name, IReadOnlyList<string> Parameters, int Index);
+   /// <summary>A method (or constructor, or local function) declaration: its name, its parameter names in order, where its name starts, and where the bracket of its parameters closes.</summary>
+   internal sealed record Method(string Name, IReadOnlyList<string> Parameters, int Index, int Close);
 
 
 
-   /// <summary>A call: the name called, its arguments as written, and where the name starts.</summary>
-   internal sealed record Call(string Name, IReadOnlyList<string> Arguments, int Index);
+   /// <summary>A call: the name called, its arguments as written, where the name starts, and where the bracket of its arguments closes.</summary>
+   internal sealed record Call(string Name, IReadOnlyList<string> Arguments, int Index, int Close);
 
 
 
@@ -63,6 +73,33 @@ internal static partial class CSharpText
          }
       }
       return code.ToString();
+   }
+
+
+
+   /// <summary>
+   /// Returns code (already without comments) with the inside of every string and character literal replaced by spaces
+   /// too, the quotes kept. Keywords and names are looked for in this, so that a sentence in a string ("start a new
+   /// File") is never read as code. The holes of an interpolated string are blanked with it.
+   /// </summary>
+   internal static string WithoutLiterals(string code)
+   {
+      StringBuilder bare = new(code);
+      int index = 0;
+      while(index < code.Length)
+      {
+         if(code[index] is '"' or '\'')
+         {
+            int end = EndOfLiteral(code, index);
+            Blank(bare, index + 1, Math.Max(index + 1, end - 1));
+            index = end;
+         }
+         else
+         {
+            index++;
+         }
+      }
+      return bare.ToString();
    }
 
 
@@ -146,7 +183,7 @@ internal static partial class CSharpText
          Match[] names = [.. parameters.Select(parameter => ParameterName().Match(parameter))];
          if(names.All(parameter => parameter.Success) && StartsABody(code, close + 1))
          {
-            methods.Add(new Method(name, [.. names.Select(parameter => parameter.Groups["name"].Value)], match.Index));
+            methods.Add(new Method(name, [.. names.Select(parameter => parameter.Groups["name"].Value)], match.Index, close));
          }
       }
       return methods;
@@ -163,7 +200,45 @@ internal static partial class CSharpText
    internal static IReadOnlyList<Call> Calls(string code, string name)
       => [.. NameBeforeBracket().Matches(code)
          .Where(match => string.Equals(match.Groups["name"].Value, name, StringComparison.Ordinal))
-         .Select(match => new Call(name, Items(code, match.Index + match.Length - 1, declaration: false, out _), match.Index))];
+         .Select(match => new Call(name, Items(code, match.Index + match.Length - 1, declaration: false, out int close), match.Index, close))];
+
+
+
+   /// <summary>Every call of the name that is not that name's own declaration.</summary>
+   internal static IEnumerable<Call> CallsOnly(string code, string name, IReadOnlyList<Method> methods)
+      => Calls(code, name).Where(call => !methods.Any(method => method.Index == call.Index));
+
+
+
+   /// <summary>The stretch of the file a declaration covers: from its name to the name of the next declaration, or to the end.</summary>
+   internal static string BodyOf(string code, IReadOnlyList<Method> methods, Method method)
+   {
+      Method? next = methods.FirstOrDefault(other => other.Index > method.Index);
+      return code[method.Index..(next?.Index ?? code.Length)];
+   }
+
+
+
+   /// <summary>True when two positions are in the same declaration, or both before the first.</summary>
+   internal static bool InTheSameMethod(IReadOnlyList<Method> methods, int first, int second) => Enclosing(methods, first)?.Index == Enclosing(methods, second)?.Index;
+
+
+
+   /// <summary>The word a position is in: the letters, digits and underscores around it.</summary>
+   internal static string WordAt(string text, int index)
+   {
+      int start = index;
+      while(start > 0 && IsWordCharacter(text[start - 1]))
+      {
+         start--;
+      }
+      int end = index;
+      while(end < text.Length && IsWordCharacter(text[end]))
+      {
+         end++;
+      }
+      return text[start..end];
+   }
 
 
 

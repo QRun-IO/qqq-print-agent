@@ -19,6 +19,11 @@ internal sealed record SourceFile(string Name, string Text)
 
 
 
+   /// <summary>The code with the inside of every string and character literal blanked as well, so a sentence in a string is never read as a keyword or a name. Positions are those of the text. Markup is returned as it is.</summary>
+   internal string Bare { get; } = Name.EndsWith(".cs", StringComparison.Ordinal) ? CSharpText.WithoutLiterals(CSharpText.WithoutComments(Text)) : Text;
+
+
+
    /// <summary>The file and line of a position in the text, as "MainWindow.xaml.cs:168".</summary>
    internal string At(int index) => string.Create(CultureInfo.InvariantCulture, $"{Name}:{CSharpText.LineOf(Text, index)}");
 }

@@ -22,7 +22,7 @@ internal static class CompanionSources
 
 
 
-   /// <summary>The C# files of the UI tests and of the layout harness, named "UiTests/AppTests.cs" and the like.</summary>
+   /// <summary>The C# files of the UI tests and of the layout harness, in every folder of theirs, named "UiTests/AppTests.cs" and the like.</summary>
    internal static IReadOnlyList<SourceFile> InteractiveSuites() => Read("InteractiveTests/", ".cs");
 
 
