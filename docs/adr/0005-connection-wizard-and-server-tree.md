@@ -49,7 +49,7 @@ Printers and Jobs are the pages 1.2.x has, scoped to the selected server. Connec
 
 A server's context menu offers reconnect, sign out, rename and remove. Removing asks first and says what it does: printing from that server stops, its pairing and session are deleted from this computer, its job history is no longer shown and is deleted after the retention period, and its device record on the server is not touched.
 
-After an upgrade from 1.x the existing connection is the first server, named after its host, and the wizard is not shown.
+After an upgrade from 1.x the existing connection is the first server, named after its host (or, where the host breaks the name rule of ADR-0004, "Server names", after a name made from it that passes), and the wizard is not shown.
 
 ### One status at a time, per place
 

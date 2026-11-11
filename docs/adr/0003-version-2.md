@@ -43,13 +43,15 @@ The owner agreed on 2026-11-10 to two checks on real printers on the development
 - **Early check.** After the printing seams step merges (the step that puts the native printing calls behind adapters; it is in review and not merged). It runs without installing anything, by driving the built print helper executable. Its purpose is what the unit tests of that step cannot judge, because they run against fakes: the marshaling of the real calls, what real drivers answer, the real spooler's errors and the geometry of the output.
 - **Final check.** On the release candidate, through the installed service (session 0, LocalSystem).
 - "Ready to merge to `main`" is held until the final check is recorded in [ACCEPTANCE.md](../ACCEPTANCE.md), with the Windows version, driver and model, format, and paper or label size.
+- The steps headed "No paper" that submit a job (2 and 3 below) put real jobs in the Windows spooler. They count as prints for the owner's approval, and the owner confirms that the queue is paused before each is sent. If the queue is not paused, paper comes out.
+- The 1.2.1 values that steps 1 and 3 compare with are captured before the candidate is installed. Installing the candidate is the upgrade-qualification run, and it uses up the only 1.2.1 baseline on that PC, because the installer does not go back to a lower version.
 - Each record keeps two statements apart: that the spooler accepted the job (the job is recorded SPOOLED with its spooler job number), and that paper came out, with what the owner saw on it. The first never stands in for the second.
 
 A proposed order, from the reviewer of the printing seams step. It is a proposal: the owner has not agreed to it, and the reviewer wrote it without the author's own list. It was written for a run through the installed service, so it describes the final check; the early check drives the helper and can take only the steps that need no service, and which those are is decided when the early check is prepared.
 
-1. No paper: discovery compared with 1.2.1 on the same machine. Identifiers, formats, and media profile identifiers and revision hashes must be equal. Leave it refreshing for a while and look for helper crashes.
+1. No paper: discovery compared with 1.2.1 on the same machine, against values captured from 1.2.1 before the candidate was installed. Identifiers, formats, and media profile identifiers and revision hashes must be equal. Leave it refreshing for a while and look for helper crashes.
 2. No paper, with the ZT411 queue paused: submit one ZPL job and inspect its name (`QQQ <jobId>`), its data type (RAW) and its size; cancel it from the product. Then delete a second job by hand and cancel it; the expected answer is ALREADY_ABSENT.
-3. No paper, with the Canon queue paused: submit the same PDF from 1.2.1 and from the build under test, compare pages and size, and cancel both.
+3. No paper, with the Canon queue paused: submit the same PDF from 1.2.1 (before the candidate is installed, keeping its pages and size) and from the build under test, compare pages and size, and cancel both.
 4. One ZPL label.
 5. A PDF ruler page on the Canon at actual size.
 6. A PDF with selected media on the ZT411; scan a barcode.
