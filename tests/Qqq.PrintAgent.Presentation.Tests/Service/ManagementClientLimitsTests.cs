@@ -12,9 +12,10 @@ namespace Qqq.PrintAgent.Presentation.Tests.Service;
 
 /// <summary>
 /// The two limits the version 2 client puts on itself: at most twelve requests in flight, and one snapshot and one
-/// transport read at a time. Each test decides the order of events itself: the pipe holds every request until the
-/// test answers it, a request that is sent at once is sent before the call returns, and a request that waited its
-/// turn is awaited by its arrival at the pipe. Nothing here sleeps, and no time passes that a test depends on.
+/// transport read at a time; and the snapshot a caller can ask for that is sent after its call. Each test decides
+/// the order of events itself: the pipe holds every request until the test answers it, a request that is sent at
+/// once is sent before the call returns, and a request that waited its turn is awaited by its arrival at the pipe.
+/// Nothing here sleeps, and no time passes that a test depends on.
 /// </summary>
 public sealed class ManagementClientLimitsTests
 {
@@ -227,7 +228,7 @@ public sealed class ManagementClientLimitsTests
       ManagementClient client = new(pipe.SendAsync, log);
       using CancellationTokenSource leaving = new();
 
-      Task<ServiceResult<ServiceSnapshot>> leaver = client.SnapshotAsync(leaving.Token);
+      Task<ServiceResult<ServiceSnapshot>> leaver = client.SnapshotAsync(cancellationToken: leaving.Token);
       Task<ServiceResult<ServiceSnapshot>> stayer = client.SnapshotAsync();
       await leaving.CancelAsync();
       ServiceResult<ServiceSnapshot> left = await leaver.WaitAsync(s_guard);
@@ -265,6 +266,275 @@ public sealed class ManagementClientLimitsTests
       Assert.Equal(13, pipe.Sent.Count);
       Assert.Equal(ManagementOperations.TransportGet, pipe.Sent[12].Op);
       Assert.False(underIt.IsCompleted);
+   }
+
+
+
+   /// <summary>
+   /// A snapshot asked for after a change was answered must show that change, so it cannot be the one that was
+   /// already in flight when the change was made. Asked for as "sent after the call", it waits out the snapshot in
+   /// flight and is then a second request, sent after the change's answer; a call that arrives while it waits shares
+   /// that second request and not the first. The timer's call, made at the same moment, still shares the snapshot in
+   /// flight. A call made once the second snapshot is in flight is not served by it either: it waits that one out
+   /// and is a third.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotSentAfterTheCall_WaitsOutTheOneInFlight_AndIsARequestSentAfterTheCall()
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new();
+      TaskCompletionSource<ManagementReplyParse> tick = pipe.Hold();
+      pipe.Answer(Replies.Golden("servers.rename.reply.json"));
+      ManagementClient client = new(pipe.SendAsync, log);
+
+      Task<ServiceResult<ServiceSnapshot>> timer = client.SnapshotAsync();
+      ServiceResult<ServerSummary> renamed = await client.RenameServerAsync(Server, "Warehouse east");
+      Task<ServiceResult<ServiceSnapshot>> afterTheChange = client.SnapshotAsync(sentAfterTheCall: true);
+      Task<ServiceResult<ServiceSnapshot>> alsoAfterIt = client.SnapshotAsync(sentAfterTheCall: true);
+      Task<ServiceResult<ServiceSnapshot>> nextTick = client.SnapshotAsync();
+      Assert.True(renamed.Succeeded);
+      Assert.False(afterTheChange.IsCompleted || alsoAfterIt.IsCompleted || nextTick.IsCompleted);
+      Assert.Equal([ManagementOperations.Snapshot, ManagementOperations.ServersRename], pipe.Sent.Select(request => request.Op), StringComparer.Ordinal);
+
+      TaskCompletionSource<ManagementReplyParse> second = pipe.Hold();
+      tick.SetResult(Replies.Golden("snapshot.reply.json"));
+      await pipe.Arrived(3);
+      ServiceResult<ServiceSnapshot> fromBeforeTheChange = await timer;
+      Assert.Same(fromBeforeTheChange, await nextTick);
+      Assert.False(afterTheChange.IsCompleted || alsoAfterIt.IsCompleted);
+      Assert.Equal([ManagementOperations.Snapshot, ManagementOperations.ServersRename, ManagementOperations.Snapshot], pipe.Sent.Select(request => request.Op), StringComparer.Ordinal);
+
+      Task<ServiceResult<ServiceSnapshot>> later = client.SnapshotAsync(sentAfterTheCall: true);
+      TaskCompletionSource<ManagementReplyParse> third = pipe.Hold();
+      second.SetResult(Replies.Golden("snapshot.healthy.reply.json"));
+      ServiceResult<ServiceSnapshot> fromAfterTheChange = await afterTheChange.WaitAsync(s_guard);
+      await pipe.Arrived(4);
+      Assert.False(later.IsCompleted);
+      third.SetResult(Replies.Golden("snapshot.degraded.reply.json"));
+
+      Assert.True(fromAfterTheChange.Succeeded);
+      Assert.NotSame(fromBeforeTheChange, fromAfterTheChange);
+      Assert.Same(fromAfterTheChange, await alsoAfterIt.WaitAsync(s_guard));
+      Assert.NotSame(fromAfterTheChange, await later.WaitAsync(s_guard));
+      Assert.Equal(4, pipe.Sent.Count);
+      Assert.Equal(3, pipe.Sent.Count(request => string.Equals(request.Op, ManagementOperations.Snapshot, StringComparison.Ordinal)));
+      Assert.Empty(log.Entries);
+   }
+
+
+
+   /// <summary>
+   /// With no snapshot in flight, a snapshot asked for as "sent after the call" is sent at once, and it is the flight
+   /// the timer's calls share while it is in the air. A call made after it was answered is another request: an
+   /// answer that has landed serves only those who asked before it was sent.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotSentAfterTheCall_WithNoneInFlight_IsSentAtOnce_AndIsTheFlightOthersShare()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+
+      Task<ServiceResult<ServiceSnapshot>> asked = client.SnapshotAsync(sentAfterTheCall: true);
+      Assert.Single(pipe.Sent);
+      Task<ServiceResult<ServiceSnapshot>> tick = client.SnapshotAsync();
+      Assert.Single(pipe.Sent);
+      pipe.Held[0].SetResult(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> answer = await asked;
+      Task<ServiceResult<ServiceSnapshot>> again = client.SnapshotAsync(sentAfterTheCall: true);
+
+      Assert.True(answer.Succeeded);
+      Assert.Same(answer, await tick);
+      Assert.Equal(2, pipe.Sent.Count);
+      Assert.False(again.IsCompleted);
+   }
+
+
+
+   /// <summary>
+   /// At the ceiling a snapshot asked for as "sent after the call" waits its turn and is not skipped: its caller needs
+   /// the answer to decide something, and "skipped" would be none. The timer's call is still skipped meanwhile, as it
+   /// always is at the ceiling. When a request in flight is done the snapshot is sent and answered.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotSentAfterTheCall_AtTheCeiling_WaitsItsTurn_AndIsNotSkipped()
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, log);
+      for(int index = 0; index < 12; index++)
+      {
+         _ = client.AcknowledgeJobAsync(Server, "job-" + index);
+      }
+
+      Task<ServiceResult<ServiceSnapshot>> asked = client.SnapshotAsync(sentAfterTheCall: true);
+      ServiceResult<ServiceSnapshot> tick = await AtOnce(client.SnapshotAsync());
+      Assert.False(asked.IsCompleted);
+      Assert.Equal(12, pipe.Sent.Count);
+      pipe.Held[0].SetResult(Replies.Success(new NoResult()));
+      await pipe.Arrived(13);
+      pipe.Held[12].SetResult(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> answer = await asked.WaitAsync(s_guard);
+
+      Assert.Equal(ServiceOutcome.Skipped, tick.Outcome);
+      Assert.Equal((ServiceOutcome.Success, false), (answer.Outcome, answer.Unconfirmed));
+      Assert.Equal(ManagementOperations.Snapshot, pipe.Sent[12].Op);
+      Assert.Equal(
+      [
+         "DEBUG Management request snapshot on the computer waits its turn: 12 requests are already in flight.",
+         "DEBUG Management request snapshot on the computer was skipped: 12 requests are already in flight. It is asked again on its next tick.",
+      ], log.Entries);
+   }
+
+
+
+   /// <summary>
+   /// A snapshot asked for as "sent after the call" has sent nothing while it waits, and a caller that leaves then
+   /// ends it with nothing sent and nothing to check: while it waits its turn at the ceiling, and while it waits out
+   /// the snapshot in flight. The turn it would have had goes to the next in line, and no second snapshot follows
+   /// the one that was in flight.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotSentAfterTheCall_WhoseCallerLeavesWhileItWaits_SendsNothing()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      using CancellationTokenSource leavingTheQueue = new();
+      using CancellationTokenSource leavingTheFlight = new();
+      Task<ServiceResult<ServiceSnapshot>> inFlight = client.SnapshotAsync();
+      Task<ServiceResult<ServiceSnapshot>> waitingOutTheFlight = client.SnapshotAsync(sentAfterTheCall: true, leavingTheFlight.Token);
+      for(int index = 1; index < 12; index++)
+      {
+         _ = client.AcknowledgeJobAsync(Server, "job-" + index);
+      }
+      await leavingTheFlight.CancelAsync();
+      ServiceResult<ServiceSnapshot> leftTheFlight = await waitingOutTheFlight.WaitAsync(s_guard);
+      pipe.Held[0].SetResult(Replies.Golden("snapshot.reply.json"));
+      Assert.True((await inFlight).Succeeded);
+      _ = client.AcknowledgeJobAsync(Server, "job-12");
+      Assert.Equal(13, pipe.Sent.Count);
+
+      Task<ServiceResult<ServiceSnapshot>> waitingItsTurn = client.SnapshotAsync(sentAfterTheCall: true, leavingTheQueue.Token);
+      Task<ServiceResult<ReconnectResult>> next = client.ReconnectAsync(Server);
+      await leavingTheQueue.CancelAsync();
+      ServiceResult<ServiceSnapshot> leftTheQueue = await waitingItsTurn.WaitAsync(s_guard);
+      pipe.Held[1].SetResult(Replies.Success(new NoResult()));
+      await pipe.Arrived(14);
+
+      Assert.Equal((ServiceOutcome.Canceled, false), (leftTheFlight.Outcome, leftTheFlight.Unconfirmed));
+      Assert.Equal((ServiceOutcome.Canceled, false), (leftTheQueue.Outcome, leftTheQueue.Unconfirmed));
+      Assert.Equal(ManagementOperations.ConnectionReconnect, pipe.Sent[13].Op);
+      Assert.Equal(14, pipe.Sent.Count);
+      Assert.Single(pipe.Sent, request => string.Equals(request.Op, ManagementOperations.Snapshot, StringComparison.Ordinal));
+      Assert.False(next.IsCompleted);
+   }
+
+
+
+   /// <summary>
+   /// Two snapshots asked for as "sent after the call" that both wait their turn at the ceiling cost one request and
+   /// one place. The first to get a turn sends the snapshot. The second, when its turn comes, finds a snapshot that
+   /// was sent after it asked, shares it, and gives its place back, so the place is not lost: once the snapshot is
+   /// answered, ten requests are in flight and two more leave at once.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotSentAfterTheCall_ThatFindsOneToShareWhenItsTurnComes_GivesItsPlaceBack()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      for(int index = 0; index < 12; index++)
+      {
+         _ = client.AcknowledgeJobAsync(Server, "job-" + index);
+      }
+
+      Task<ServiceResult<ServiceSnapshot>> first = client.SnapshotAsync(sentAfterTheCall: true);
+      Task<ServiceResult<ServiceSnapshot>> second = client.SnapshotAsync(sentAfterTheCall: true);
+      pipe.Held[0].SetResult(Replies.Success(new NoResult()));
+      await pipe.Arrived(13);
+      pipe.Held[1].SetResult(Replies.Success(new NoResult()));
+      pipe.Held[12].SetResult(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> answer = await first.WaitAsync(s_guard);
+      ServiceResult<ServiceSnapshot> shared = await second.WaitAsync(s_guard);
+      _ = client.ReconnectAsync(Server);
+      _ = client.GetTrustAsync(Server);
+
+      Assert.True(answer.Succeeded);
+      Assert.Same(answer, shared);
+      Assert.Equal(ManagementOperations.Snapshot, pipe.Sent[12].Op);
+      Assert.Equal([ManagementOperations.ConnectionReconnect, ManagementOperations.TrustGet], pipe.Sent.Skip(13).Select(request => request.Op), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// A change whose turn comes at the very moment its caller leaves is not sent either. The place is handed over
+   /// first, so the wait ends with a place taken and a token that is cancelled; the client then gives the place back
+   /// and reports that nothing was sent. Here the cancellation itself releases the request whose place is handed
+   /// over: a token runs its callbacks newest first, so the callback registered here runs before the waiter's own,
+   /// and the turn is handed over while the token is already cancelled and before the waiter is told. The place
+   /// that was given back is free: the next request leaves at once.
+   /// </summary>
+   [Fact]
+   public async Task ChangeWhoseTurnComesAsItsCallerLeaves_IsNotSent_AndItsPlaceIsGivenBack()
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, log);
+      using CancellationTokenSource leaving = new();
+      for(int index = 0; index < 12; index++)
+      {
+         _ = client.AcknowledgeJobAsync(Server, "job-" + index);
+      }
+
+      Task<ServiceResult<ServerRemoveResult>> left = client.RemoveServerAsync(Server, leaving.Token);
+      using CancellationTokenRegistration turnComes = leaving.Token.Register(() => pipe.Held[0].SetResult(Replies.Success(new NoResult())));
+      await leaving.CancelAsync();
+      ServiceResult<ServerRemoveResult> result = await left.WaitAsync(s_guard);
+      _ = client.ReconnectAsync(Server);
+
+      Assert.Equal((ServiceOutcome.Canceled, false), (result.Outcome, result.Unconfirmed));
+      Assert.DoesNotContain(pipe.Sent, request => string.Equals(request.Op, ManagementOperations.ServersRemove, StringComparison.Ordinal));
+      Assert.Equal(13, pipe.Sent.Count);
+      Assert.Equal(ManagementOperations.ConnectionReconnect, pipe.Sent[12].Op);
+      Assert.Contains($"DEBUG Management request servers.remove on {Server} was not sent: its wait had ended before it was.", log.Entries, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// A request that waited its turn goes on outside the call that gave it the place, never inside it: the place is
+   /// handed over under the ceiling's lock, and if the waiter went on there, its whole send would run while the lock
+   /// is held, on the thread of the request that was just answered. So the waiting request is not handed to the pipe
+   /// while the answer that freed its place is still being delivered on the test's thread.
+   /// </summary>
+   [Fact]
+   public async Task RequestThatWaitedItsTurn_GoesOnOutsideTheCallThatGaveItItsPlace()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      for(int index = 0; index < 12; index++)
+      {
+         _ = client.AcknowledgeJobAsync(Server, "job-" + index);
+      }
+      int deliveringOnThread = 0;
+      int sentWhileDelivering = 0;
+      Task<ServiceResult<ReconnectResult>> waiting = client.ReconnectAsync(Server);
+      pipe.Then(() =>
+      {
+         if(Volatile.Read(ref deliveringOnThread) == Environment.CurrentManagedThreadId)
+         {
+            Interlocked.Increment(ref sentWhileDelivering);
+         }
+         return Task.FromResult(Replies.Success(new ReconnectResult(ReconnectResult.Requested)));
+      });
+
+      Volatile.Write(ref deliveringOnThread, Environment.CurrentManagedThreadId);
+      pipe.Held[0].SetResult(Replies.Success(new NoResult()));
+      Volatile.Write(ref deliveringOnThread, 0);
+      ServiceResult<ReconnectResult> result = await waiting.WaitAsync(s_guard);
+
+      Assert.True(result.Succeeded);
+      Assert.Equal(13, pipe.Sent.Count);
+      Assert.Equal(0, Volatile.Read(ref sentWhileDelivering));
    }
 
 

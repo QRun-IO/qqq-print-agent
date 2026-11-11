@@ -19,21 +19,34 @@ namespace Qqq.PrintAgent.Presentation.Service;
 public sealed partial class ManagementClient
 {
    /// <summary>
-   /// Reads the whole aggregated state: the computer once and every server once. It is single-flight: a call made
-   /// while one is in flight shares that one's result. It is repeated on a timer, so over the ceiling it is skipped
-   /// (<see cref="ServiceOutcome.Skipped"/>) and asked again on the next tick.
+   /// Reads the whole aggregated state: the computer once and every server once. It is single-flight: one snapshot
+   /// is at the pipe at a time.
+   /// <para>
+   /// Called as the timer calls it, with <paramref name="sentAfterTheCall"/> false, a call made while a snapshot is
+   /// in flight shares that one's result, and over the ceiling the call is skipped
+   /// (<see cref="ServiceOutcome.Skipped"/>) and asked again on the next tick. The answer may therefore be that of a
+   /// request sent before the call, and so may not show a change the caller has just made.
+   /// </para>
+   /// <para>
+   /// With <paramref name="sentAfterTheCall"/> true, the answer is that of a snapshot sent after this call was made
+   /// and never an earlier one, which is what a caller needs that reads the state to learn the outcome of a change:
+   /// the "check" after an add or an enrollment whose outcome is not known, and a page refreshed after a change. The
+   /// call waits out a snapshot that is in flight and then sends another; several such calls that wait together
+   /// share that one. Over the ceiling it waits its turn and is not skipped. A token cancelled while it waits ends
+   /// it with nothing sent.
+   /// </para>
    /// </summary>
-   public Task<ServiceResult<ServiceSnapshot>> SnapshotAsync(CancellationToken cancellationToken = default)
-      => ShareAsync(_snapshot, ManagementOperations.Snapshot, cancellationToken);
+   public Task<ServiceResult<ServiceSnapshot>> SnapshotAsync(bool sentAfterTheCall = false, CancellationToken cancellationToken = default)
+      => ShareAsync(_snapshot, ManagementOperations.Snapshot, sentAfterTheCall, cancellationToken);
 
 
 
    /// <summary>
    /// Reads each server's transport state, traffic meter and last contact, for the meter between snapshots. It is
-   /// single-flight and skipped over the ceiling, as <see cref="SnapshotAsync"/> is.
+   /// single-flight and skipped over the ceiling, as <see cref="SnapshotAsync"/> is when the timer calls it.
    /// </summary>
    public Task<ServiceResult<TransportResult>> TransportAsync(CancellationToken cancellationToken = default)
-      => ShareAsync(_transport, ManagementOperations.TransportGet, cancellationToken);
+      => ShareAsync(_transport, ManagementOperations.TransportGet, sentAfterTheCall: false, cancellationToken);
 
 
 

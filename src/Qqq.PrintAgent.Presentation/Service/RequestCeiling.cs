@@ -47,8 +47,12 @@ internal sealed class RequestCeiling(int limit)
 
    /// <summary>
    /// Takes a place, waiting for one when none is free. The task is already complete when a place was free. Cancelling
-   /// the token ends the wait without a place, as a cancelled task; a place that had already been handed over stays
-   /// taken, and the caller must give it back.
+   /// the token ends the wait without a place, as a cancelled task. A turn can come at the moment the token is
+   /// cancelled: whichever of the two reaches the waiter first decides. When the turn was first the task completes
+   /// with the place taken although the token is cancelled, so a caller that must not go on with a cancelled token
+   /// looks at its token after the wait and gives the place back (<see cref="Leave"/>). A cancelled task never holds
+   /// a place. The waiter goes on from here on another thread than the one that gave the place back, never inside
+   /// <see cref="Leave"/> and so never while the lock is held.
    /// </summary>
    internal Task EnterAsync(CancellationToken cancellationToken)
    {

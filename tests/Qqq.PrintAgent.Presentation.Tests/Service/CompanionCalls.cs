@@ -30,7 +30,7 @@ internal static class CompanionCalls
    /// <summary>The operations the companion sends, each with the one method that sends it.</summary>
    internal static IReadOnlyList<CompanionCall> All { get; } =
    [
-      Call(ManagementOperations.Snapshot, nameof(ManagementClient.SnapshotAsync), (client, _, stop) => client.SnapshotAsync(stop)),
+      Call(ManagementOperations.Snapshot, nameof(ManagementClient.SnapshotAsync), (client, _, stop) => client.SnapshotAsync(cancellationToken: stop)),
       Call(ManagementOperations.TransportGet, nameof(ManagementClient.TransportAsync), (client, _, stop) => client.TransportAsync(stop)),
       Call(ManagementOperations.ServersCheck, nameof(ManagementClient.CheckServerAsync), (client, values, stop) => client.CheckServerAsync(values.Address, acceptCertificateException: true, stop)),
       Call(ManagementOperations.ServersAdd, nameof(ManagementClient.AddServerAsync),

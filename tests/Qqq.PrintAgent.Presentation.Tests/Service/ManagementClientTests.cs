@@ -491,7 +491,8 @@ public sealed class ManagementClientTests
    /// <summary>
    /// A token that is already cancelled means the caller left before the request was made. Nothing is sent, so the
    /// service cannot have acted and there is nothing to check: the result is "canceled" and not "unconfirmed". That
-   /// holds for a request of its own and for a read that would have joined a shared one.
+   /// holds for a request of its own, for a read that would have joined a shared one, and for a snapshot that was to
+   /// be sent after the call.
    /// </summary>
    [Fact]
    public async Task WaitThatHadEndedBeforeTheRequest_SendsNothing()
@@ -503,14 +504,17 @@ public sealed class ManagementClientTests
       await cancellation.CancelAsync();
 
       ServiceResult<EnrollResult> change = await client.EnrollAsync(Server, "code", cancellation.Token);
-      ServiceResult<ServiceSnapshot> read = await client.SnapshotAsync(cancellation.Token);
+      ServiceResult<ServiceSnapshot> read = await client.SnapshotAsync(cancellationToken: cancellation.Token);
+      ServiceResult<ServiceSnapshot> readAfterTheCall = await client.SnapshotAsync(sentAfterTheCall: true, cancellation.Token);
 
       Assert.Empty(pipe.Sent);
       Assert.Equal((ServiceOutcome.Canceled, false), (change.Outcome, change.Unconfirmed));
       Assert.Equal((ServiceOutcome.Canceled, false), (read.Outcome, read.Unconfirmed));
+      Assert.Equal((ServiceOutcome.Canceled, false), (readAfterTheCall.Outcome, readAfterTheCall.Unconfirmed));
       Assert.Equal(
       [
          $"DEBUG Management request pairing.enroll on {Server} was not sent: its wait had ended before it was.",
+         "DEBUG Management request snapshot on the computer was not sent: its wait had ended before it was.",
          "DEBUG Management request snapshot on the computer was not sent: its wait had ended before it was.",
       ], log.Entries);
    }

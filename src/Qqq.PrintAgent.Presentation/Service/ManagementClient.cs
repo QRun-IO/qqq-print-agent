@@ -118,12 +118,12 @@ public sealed partial class ManagementClient
 
 
 
-   /// <summary>The one <see cref="ManagementOperations.Snapshot"/> that is in flight, shared by everyone who asks meanwhile.</summary>
+   /// <summary>The <see cref="ManagementOperations.Snapshot"/> flights: one at the pipe at a time, shared by everyone it can serve.</summary>
    private readonly SingleFlight<ServiceResult<ServiceSnapshot>> _snapshot = new();
 
 
 
-   /// <summary>The one <see cref="ManagementOperations.TransportGet"/> that is in flight, shared by everyone who asks meanwhile.</summary>
+   /// <summary>The <see cref="ManagementOperations.TransportGet"/> flights: one at the pipe at a time, shared by everyone who asks meanwhile.</summary>
    private readonly SingleFlight<ServiceResult<TransportResult>> _transport = new();
 
 
@@ -165,13 +165,12 @@ public sealed partial class ManagementClient
 
    /// <summary>
    /// Sends one request and turns whatever happens into a result. The request is built first: values the contract
-   /// refuses (a name that breaks the name rule, text that is no server identifier or no origin) are answered here as
-   /// the service would answer them, and nothing is sent. A token that is already cancelled means the caller is gone
-   /// before anything happened, so nothing is sent either. Then the request takes its place under the ceiling
-   /// (<see cref="TakePlaceAsync"/>) and is sent. Cancelling the token after that ends the wait, not the request: it is
-   /// the caller's decision and not a failure, so it is a result of its own and is not counted against the service.
-   /// A read that is <paramref name="repeated"/> on a timer is skipped when the ceiling is reached; every other
-   /// request waits its turn.
+   /// refuses are answered here as the service would answer them, and nothing is sent (<see cref="TryBuild"/>). A
+   /// token that is already cancelled means the caller is gone before anything happened, so nothing is sent either.
+   /// Then the request takes its place under the ceiling (<see cref="TakePlaceAsync"/>) and is sent
+   /// (<see cref="ExchangeAsync"/>). A read that is <paramref name="repeated"/> on a timer is skipped when the ceiling
+   /// is reached; every other request waits its turn. A result that <paramref name="fits"/> refuses is a reply for
+   /// another subject than the one that was asked about, and is unreadable.
    /// </summary>
    private async Task<ServiceResult<TResult>> AskAsync<TResult>(string operation, Func<string, ManagementRequest> build, CancellationToken cancellationToken,
       Func<TResult, bool>? fits = null, bool repeated = false)
@@ -189,6 +188,20 @@ public sealed partial class ManagementClient
       {
          return notSent;
       }
+      return await ExchangeAsync(request, fits, cancellationToken).ConfigureAwait(false);
+   }
+
+
+
+   /// <summary>
+   /// Sends a request whose place under the ceiling is taken, and reads what comes back. Cancelling the token ends
+   /// the wait, not the request: it is the caller's decision and not a failure, so it is a result of its own and is
+   /// not counted against the service. A pipe failure is a result too; an exception the send function's contract does
+   /// not allow is left to propagate.
+   /// </summary>
+   private async Task<ServiceResult<TResult>> ExchangeAsync<TResult>(ManagementRequest request, Func<TResult, bool>? fits, CancellationToken cancellationToken)
+      where TResult : class
+   {
       Task<ManagementReplyParse> pending = SendAsync(request);
       try
       {
@@ -196,7 +209,7 @@ public sealed partial class ManagementClient
       }
       catch(OperationCanceledException) when(cancellationToken.IsCancellationRequested)
       {
-         return Abandoned<TResult>(operation, request.Server, pending);
+         return Abandoned<TResult>(request.Op, request.Server, pending);
       }
       catch(Exception exception) when(Classify(exception) is { Failure: not ServiceFailure.None } kind)
       {
@@ -207,18 +220,56 @@ public sealed partial class ManagementClient
 
 
    /// <summary>
-   /// Sends a read that takes no arguments single-flight: while one is in flight, everyone who asks joins it and gets
-   /// its result, and only the first costs a request. The flight belongs to no caller, so one caller ending its wait
-   /// leaves the others their answer. Over the ceiling the read is skipped, as every read repeated on a timer is.
+   /// Sends a read that takes no arguments single-flight: one such request is at the pipe at a time, and callers
+   /// share it. The flight belongs to no caller, so one caller ending its wait leaves the others their answer.
+   /// <para>
+   /// By default a caller joins the flight that is in the air and gets its result, and only the first costs a
+   /// request; with none in the air and the ceiling reached the read is skipped, as every read repeated on a timer
+   /// is. The answer can therefore be that of a request sent before the call was made.
+   /// </para>
+   /// <para>
+   /// A caller that needs an answer <paramref name="sentAfterTheCall"/> is never given one that was sent earlier. It
+   /// waits out the flight that is in the air, then shares a flight that started after it asked, if there is one,
+   /// and otherwise starts one; at the ceiling it waits its turn and is not skipped. While it waits, for the flight
+   /// in the air or for its turn, nothing has been sent for it, and a token cancelled then ends the call with
+   /// nothing sent.
+   /// </para>
+   /// <para>
+   /// A flight is started only by a caller that holds a place under the ceiling, and the flight keeps that place
+   /// until the pipe is done with it. So every flight was handed to the pipe, and a flight counted later was handed
+   /// over later. A caller that took a place and then found a flight to share gives the place back.
+   /// </para>
    /// </summary>
-   private async Task<ServiceResult<TResult>> ShareAsync<TResult>(SingleFlight<ServiceResult<TResult>> flight, string operation, CancellationToken cancellationToken)
+   private async Task<ServiceResult<TResult>> ShareAsync<TResult>(SingleFlight<ServiceResult<TResult>> flight, string operation, bool sentAfterTheCall, CancellationToken cancellationToken)
       where TResult : class
    {
       if(cancellationToken.IsCancellationRequested)
       {
          return NotStarted<TResult>(operation, server: null);
       }
-      Task<ServiceResult<TResult>> shared = flight.Join(() => AskAsync<TResult>(operation, static name => ManagementRequest.For(name), CancellationToken.None, repeated: true));
+      long? startedAfter = null;
+      if(sentAfterTheCall)
+      {
+         startedAfter = flight.Started(out Task? inTheAir);
+         await (inTheAir ?? Task.CompletedTask).WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+         if(cancellationToken.IsCancellationRequested)
+         {
+            return NotStarted<TResult>(operation, server: null);
+         }
+      }
+      var request = ManagementRequest.For(operation);
+      if(!flight.TryShare(startedAfter, out Task<ServiceResult<TResult>>? shared))
+      {
+         if(await TakePlaceAsync<TResult>(request, repeated: !sentAfterTheCall, cancellationToken).ConfigureAwait(false) is { } notSent)
+         {
+            return notSent;
+         }
+         shared = flight.ShareOrStart(startedAfter, () => ExchangeAsync<TResult>(request, fits: null, CancellationToken.None), out bool started);
+         if(!started)
+         {
+            _ceiling.Leave();
+         }
+      }
       try
       {
          return await shared.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -299,7 +350,8 @@ public sealed partial class ManagementClient
    /// Takes the request's place under the ceiling and returns null, or returns the result of a request that is not
    /// sent. A repeated read never waits: with no place free it is skipped. Any other request waits its turn, and when
    /// its caller's token is cancelled meanwhile it is not sent, so a change nobody waits for any more is never made
-   /// later.
+   /// later. That holds at the last moment too: a turn that comes as the token is cancelled is given back, and the
+   /// request is not sent.
    /// </summary>
    private async Task<ServiceResult<TResult>?> TakePlaceAsync<TResult>(ManagementRequest request, bool repeated, CancellationToken cancellationToken)
    {
@@ -320,12 +372,17 @@ public sealed partial class ManagementClient
       try
       {
          await turn.ConfigureAwait(false);
-         return null;
       }
       catch(OperationCanceledException)
       {
          return NotStarted<TResult>(request.Op, request.Server);
       }
+      if(cancellationToken.IsCancellationRequested)
+      {
+         _ceiling.Leave();
+         return NotStarted<TResult>(request.Op, request.Server);
+      }
+      return null;
    }
 
 
