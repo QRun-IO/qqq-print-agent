@@ -13,8 +13,13 @@ namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 /// <summary>The companion's browser sign-in: the exchange through the default browser and the one callback dispatcher, its time limit and cancellation, what is reported when it does not complete, and the thread everything is announced on.</summary>
 public sealed class CompanionSignInBrowserTests
 {
+   /// <summary>The first entry of every browser sign-in to the first server.</summary>
    private const string Requested = "INFO Browser sign-in requested for print.example.com; this application's callback is io.qrun.qqq-print-agent:/oauth/callback.";
+
+   /// <summary>What the log says when an attempt that ended without a result had already handed its callback to the session, which is then discarded.</summary>
    private const string Discarded = "INFO The browser sign-in ended without a result after its callback had been handed to the session, so the session is discarded: the server may have signed it in, and nothing here waits for that. The next attempt reads the sign-in description again.";
+
+   /// <summary>What the log says when a page was opened and the protocol handler recorded nothing.</summary>
    private const string NeverLaunched = "WARN The browser never launched the sign-in protocol handler in the last 10 minutes (no entries in trace/auth-callback.log). Either the identity provider did not redirect to io.qrun.qqq-print-agent:/oauth/callback (check the provider's allowed redirect URIs and any error page it showed), or the browser blocked opening the QQQ Print Agent sign-in link.";
 
 

@@ -19,7 +19,10 @@ namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 /// </summary>
 public sealed class BrowserCallbackDispatcherTests
 {
+   /// <summary>The whole of what the log says about a callback that was dropped.</summary>
    private const string Dropped = "WARN A browser callback that belongs to no waiting sign-in or sign-out was dropped. Nothing of it is logged.";
+
+   /// <summary>What the log says each time an inbox is opened.</summary>
    private const string InboxOpen = "INFO Browser callback inbox open.";
 
 

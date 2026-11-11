@@ -13,6 +13,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// </summary>
 internal sealed class NoContext : IDisposable
 {
+   /// <summary>The context the thread had, to put back.</summary>
    private readonly SynchronizationContext? _before = SynchronizationContext.Current;
 
 

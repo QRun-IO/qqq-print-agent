@@ -17,8 +17,13 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// </summary>
 internal sealed class FakeInbox(bool answersInline = false) : IBrowserCallbackInbox
 {
+   /// <summary>What the wait ends with: the callback a test delivers, or the failure it injects.</summary>
    private readonly TaskCompletionSource<Uri> _callback = new(answersInline ? TaskCreationOptions.None : TaskCreationOptions.RunContinuationsAsynchronously);
+
+   /// <summary>Completed when the flow starts waiting.</summary>
    private readonly TaskCompletionSource _listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+   /// <summary>The flow's wait, once it has started.</summary>
    private Task<Uri>? _wait;
 
 

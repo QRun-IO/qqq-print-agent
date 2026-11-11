@@ -15,6 +15,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 /// <summary>The companion's own sign-in: reading a server's sign-in description as the signed-in user, signing in by password, and what it holds, announces and logs. Browser sign-in has its own file.</summary>
 public sealed class CompanionSignInTests
 {
+   /// <summary>The first entry of every read of the first server's description under no certificate exception.</summary>
    private const string Reading = "INFO Reading the sign-in description of print.example.com as this Windows account; an untrusted certificate is accepted from none.";
 
 

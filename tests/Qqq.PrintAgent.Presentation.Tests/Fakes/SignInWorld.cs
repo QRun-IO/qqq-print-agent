@@ -33,6 +33,7 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
    /// <summary>The marked text of an inbox failure of a kind no exchange lists, so a test can show that nothing of it is logged or shown.</summary>
    internal const string UnlistedFailureText = "synthetic-inbox-failure-text";
 
+   /// <summary>Completed with the next inbox that is opened, for a test that waits for it (see <see cref="NextInboxAsync"/>).</summary>
    private volatile TaskCompletionSource<FakeInbox>? _awaitedInbox;
 
 

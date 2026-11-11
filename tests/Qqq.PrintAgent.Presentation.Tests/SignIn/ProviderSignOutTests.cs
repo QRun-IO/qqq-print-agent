@@ -13,7 +13,10 @@ namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 /// <summary>The identity provider's half of a sign-out: its page is opened, its return is recognized by this sign-out's own state within two minutes, the result says how it ended, and nothing of the request reaches the log.</summary>
 public sealed class ProviderSignOutTests
 {
+   /// <summary>The marked ID token hint of the synthetic sign-out address, which must reach no log line.</summary>
    private const string Hint = "synthetic-id-token-hint";
+
+   /// <summary>The state of the synthetic sign-out, which must reach no log line.</summary>
    private const string State = "synthetic-sign-out-state";
 
 
