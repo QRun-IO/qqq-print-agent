@@ -298,6 +298,164 @@ public sealed class AgentBrandingHeldShortcutTests
 
 
    /// <summary>
+   /// An install, upgrade or repair while another program holds the recorded shortcut of the wanted name from
+   /// beginning to end finishes without replacing it. The shortcut is exactly as it was, nothing new is written under
+   /// its name and no temporary file stays behind; its name is still the current one on record, and the shortcut of
+   /// an earlier brand recorded beside it is neither removed nor forgotten, so the next run does all of it. One note
+   /// names the file and the kind of the failure. That holds whether the file cannot be opened for the first look
+   /// (nothing shared, or its content locked) or can be read and then not replaced (shared for reading).
+   /// </summary>
+   [Theory]
+   [InlineData("nothing-shared", "opened", "sharing violation")]
+   [InlineData("reading-shared", "replaced", "sharing violation")]
+   [InlineData("content-locked", "opened", "lock violation")]
+   public void InstallWhileTheRecordedShortcutIsHeldThroughoutLeavesItAsItIsAndFinishes(string held, string what, string violation)
+   {
+      using var setup = new BrandingSetup();
+      string current = setup.PlantShortcut(Acme, setup.OurLink);
+      string earlier = setup.PlantShortcut(Old, setup.OurLink);
+      string before = File.ReadAllText(current);
+      setup.Record.Name = Acme;
+      setup.Record.Pending.Add(Old);
+      using(Hold(current, held))
+      {
+         setup.Rules.ApplyInstalledBranding();
+      }
+      Assert.Equal(before, File.ReadAllText(current));
+      Assert.Equal(new[] { current, earlier }, Directory.GetFiles(setup.Rules.ShortcutDirectory).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
+      Assert.DoesNotContain(setup.Record.Operations, operation => operation.StartsWith("last=", StringComparison.Ordinal));
+      Assert.Equal(8, setup.Waits.Count);
+      Assert.Equal(new[] { "The shortcut \"Acme Print Connector.lnk\" could not be " + what + " (in use by another program: " + violation + "). It was left as it is and stays recorded: it still starts the companion, and the next install, upgrade or repair replaces it." }, setup.Notes, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The recorded shortcut of the wanted name that another program lets go of while the run is still trying is
+   /// replaced like any other: the new shortcut is in place with what this run was to write, the earlier brand's
+   /// shortcut is removed, and nothing is noted.
+   /// </summary>
+   [Theory]
+   [InlineData("nothing-shared")]
+   [InlineData("reading-shared")]
+   [InlineData("content-locked")]
+   public void InstallReplacesTheRecordedShortcutThatIsLetGoWhileItIsStillTrying(string held)
+   {
+      using var setup = new BrandingSetup();
+      string current = setup.PlantShortcut(Acme, setup.OurLink);
+      _ = setup.PlantShortcut(Old, setup.OurLink);
+      setup.Record.Name = Acme;
+      setup.Record.Pending.Add(Old);
+      setup.Branding = setup.Branding with { IconPath = Path.Combine(setup.State, "brand.ico") };
+      using IDisposable holder = Hold(current, held);
+      setup.OnWait = pauses =>
+      {
+         if(pauses == 2)
+         { holder.Dispose(); }
+      };
+      setup.Rules.ApplyInstalledBranding();
+      Assert.Equal(2, setup.Waits.Count);
+      Assert.Equal(new[] { current }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(Path.Combine(setup.State, "brand.ico") + ",0", Assert.IsType<ShortcutLink>(new FakeShortcutShell().Read(current)).IconLocation);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Empty(setup.Record.Pending);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
+   /// <summary>
+   /// The recorded shortcut of the wanted name that cannot be opened for a reason other than being in use does not
+   /// fail the run either, and is not waited for: it is left as it is with a note that gives the kind of the failure
+   /// and not the failure's own text.
+   /// </summary>
+   [Theory]
+   [InlineData(true, "access denied")]
+   [InlineData(false, "IOException 0x80131620")]
+   public void InstallOverTheRecordedShortcutThatCannotBeOpenedAtAllLeavesItWithoutWaiting(bool denied, string kind)
+   {
+      using var setup = new BrandingSetup();
+      string current = setup.PlantShortcut(Acme, setup.OurLink);
+      setup.Record.Name = Acme;
+      setup.Shell.ReadFailure = denied
+         ? new UnauthorizedAccessException("Synthetic: access to C:\\Users\\somebody\\Acme Print Connector.lnk is denied.")
+         : new IOException("Synthetic: the device at C:\\Users\\somebody is not ready.");
+      setup.Rules.ApplyInstalledBranding();
+      Assert.Empty(setup.Shell.Written);
+      Assert.Equal(new[] { current }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(new[] { "require", "read-last", "read-pending" }, setup.Record.Operations, StringComparer.Ordinal);
+      Assert.Empty(setup.Waits);
+      Assert.Equal(new[] { "The shortcut \"Acme Print Connector.lnk\" could not be opened (" + kind + "). It was left as it is and stays recorded: it still starts the companion, and the next install, upgrade or repair replaces it." }, setup.Notes, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// A file under the wanted name that nothing records and that cannot be opened still refuses the run, after the
+   /// tries a file in use is given: nothing says it is ours, it cannot be judged, and it must not be overwritten. The
+   /// failure names the file and the kind, says that the file was not replaced and what the operator can do, and
+   /// carries no path. Nothing is written or recorded. Once the file is free the same run looks at it: here it is a
+   /// shortcut of ours, which the run takes over.
+   /// </summary>
+   [Theory]
+   [InlineData("nothing-shared", "sharing violation")]
+   [InlineData("content-locked", "lock violation")]
+   public void HeldFileUnderTheWantedNameThatNothingRecordsRefusesTheRun(string held, string violation)
+   {
+      using var setup = new BrandingSetup();
+      string unrecorded = setup.PlantShortcut(Acme, setup.OurLink);
+      string before = File.ReadAllText(unrecorded);
+      using(Hold(unrecorded, held))
+      {
+         IOException refused = Assert.Throws<IOException>(setup.Rules.ApplyInstalledBranding);
+         Assert.Equal("A file that is not on record has the name the shortcut needs, \"Acme Print Connector.lnk\", and could not be opened (in use by another program: " + violation + "), so it cannot be known whether it is this application's shortcut. It was not replaced. Close the program that holds it and run the installer again.", refused.Message);
+         Assert.Null(refused.InnerException);
+      }
+      Assert.Equal(before, File.ReadAllText(unrecorded));
+      Assert.Empty(setup.Shell.Written);
+      Assert.Equal(new[] { "require", "read-last", "read-pending" }, setup.Record.Operations, StringComparer.Ordinal);
+      Assert.Equal(8, setup.Waits.Count);
+      Assert.Empty(setup.Notes);
+      setup.Rules.ApplyInstalledBranding();
+      Assert.Equal(new[] { unrecorded }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(Acme, setup.Record.Name);
+   }
+
+
+
+   /// <summary>
+   /// When the program that holds our current shortcut deletes it between two tries, the next try finds nothing under
+   /// the name and moves the new shortcut into place without overwriting, so the run does not end without a shortcut.
+   /// </summary>
+   [Fact]
+   public void ShortcutThatIsDeletedBetweenTwoTriesIsWrittenAnew()
+   {
+      using var setup = new BrandingSetup();
+      string current = setup.PlantShortcut(Acme, setup.OurLink);
+      setup.Record.Name = Acme;
+      setup.Branding = setup.Branding with { IconPath = Path.Combine(setup.State, "brand.ico") };
+      FileStream? holder = null;
+      setup.Shell.BeforeWrite = () => holder = new FileStream(current, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+      setup.OnWait = pauses =>
+      {
+         if(pauses == 1)
+         {
+            holder!.Dispose();
+            File.Delete(current);
+         }
+      };
+      setup.Rules.ApplyInstalledBranding();
+      Assert.Equal(new[] { current }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(Path.Combine(setup.State, "brand.ico") + ",0", Assert.IsType<ShortcutLink>(new FakeShortcutShell().Read(current)).IconLocation);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
+   /// <summary>
    /// Takes hold of a file as another program would and returns the hold. "nothing-shared" opens it and shares nothing,
    /// so nobody else can open it. "reading-shared" opens it and shares reading only, so it can be read and neither
    /// deleted nor replaced. "content-locked" opens it for reading, shares everything and locks its content, so it

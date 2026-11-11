@@ -29,17 +29,21 @@ namespace Qqq.PrintAgent.Windows;
 /// What is ours: a shortcut that starts the installed companion with no arguments and carries the ownership
 /// description. Someone else's shortcut, a file that holds no shortcut at all and a link are not ours; they are never
 /// overwritten, changed or deleted, and a recorded name that leads to one is forgotten with a note. A file that cannot
-/// be opened is neither, because it may be ours: it is never judged, and so it is never deleted or overwritten. At a
-/// branding run's first look that stops the run; at the look taken just before a delete or a replacement the file is
-/// left alone and its name stays on record; at an uninstall it is left where it is with a note. Before a delete is
-/// given up, a file that is in use is tried again a bounded number of times; see <see cref="WhileHeld"/>.
+/// be opened is neither, because it may be ours: it is never judged, and so it is never deleted or overwritten. A
+/// file that is in use is tried again a bounded number of times first; see <see cref="WhileHeld"/>. What happens to
+/// one that still cannot be opened depends on what says it is ours. A file the record names is left where it is with
+/// a note, and the run goes on: a branding run keeps the name on record so that the next run tries again, and an
+/// uninstall forgets it. A file under the wanted name that nothing records refuses a branding run, since nothing
+/// says it is ours and it must not be overwritten.
 /// </para>
 /// <para>
-/// Everything that can be checked is checked before anything is changed, so a run that has to refuse refuses while
-/// nothing has changed. A run that fails later, because the shortcut or the record could not be written, leaves the
-/// record naming every shortcut of ours. Once the new shortcut is in place, trouble with an earlier one is noted and
-/// retried by the next run instead: the installer runs this as a required step, and a leftover shortcut is no reason
-/// to fail an install or an upgrade.
+/// The installer runs both runs as required steps, and Windows Installer undoes an install, an upgrade or an
+/// uninstall whose step fails. So a shortcut of ours that another program holds for a moment fails neither. What
+/// still refuses a branding run is checked before anything is changed, so that it refuses while nothing has
+/// changed: no administrator, an untrusted folder, a missing companion, a record that cannot be changed, a file that
+/// is not ours or cannot be judged under the wanted name, a shell that cannot read a recorded shortcut. A run that
+/// fails later, because the shortcut or the record could not be written, leaves the record naming every shortcut of
+/// ours. Once the new shortcut is in place, trouble with an earlier one is noted and retried by the next run.
 /// </para>
 /// This part holds the two runs and the record; the shortcut file, the folders and the names are in the other part.
 /// </summary>
@@ -48,16 +52,25 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
    /// <summary>
    /// Creates or renames the all-users Start menu shortcut to the customer's brand name. It requires an administrator,
    /// verifies the install and shortcut folders (no reparse points, trusted owner, no untrusted write access), proves
-   /// the record can be changed, and refuses to replace a shortcut it does not own. Every recorded shortcut other than
-   /// the wanted one is judged before anything is written: one that cannot be read stops the run, one that is no
-   /// longer ours is left alone and forgotten. The new shortcut's name then joins the record, next to the earlier
-   /// shortcuts that are to be removed, before its file is written, so the shortcut is never on the Start menu
-   /// unrecorded; the file is written and the name recorded as the current shortcut; and only then are the earlier
-   /// ones removed. When writing fails, the record is put back as it was found, with two exceptions that keep the new
-   /// name on record: a shortcut of ours was already under the new name and is still there, or the temporary file of
-   /// the failed write could not be removed, in which case the record must not become empty while that file exists,
-   /// so that an uninstall still comes here and removes it.
+   /// the record can be changed, and refuses to replace a shortcut it does not own; see <see cref="OursToReplace"/>
+   /// for the file that already has the wanted name. Every recorded shortcut other than the wanted one is judged
+   /// before anything is written: one that is no longer ours is left alone and forgotten, one that cannot be opened
+   /// stays on record, and a shell that cannot read one stops the run. The new shortcut's name then joins the record,
+   /// next to the earlier shortcuts that are to be removed, before its file is written, so the shortcut is never on
+   /// the Start menu unrecorded; the file is written and the name recorded as the current shortcut; and only then are
+   /// the earlier ones removed. When writing fails, the record is put back as it was found, with two exceptions that
+   /// keep the new name on record: a shortcut of ours was already under the new name and is still there, or the
+   /// temporary file of the failed write could not be removed, in which case the record must not become empty while
+   /// that file exists, so that an uninstall still comes here and removes it.
    /// Temporary files an earlier run left behind are removed once the run is clear to go, before anything is written.
+   /// <para>
+   /// A shortcut of ours under the wanted name that another program holds does not fail the run. An upgrade or a
+   /// repair writes the same shortcut again: the same companion at the same path, no arguments, the same description,
+   /// so the one that is there still starts the companion, and only a changed icon would be missed. When it cannot be
+   /// opened at the first look although the record names it, or cannot be opened or replaced at the second, after
+   /// the tries a file in use is given, the run leaves it exactly as it is with a note and finishes. The current
+   /// name on record is not changed and no earlier shortcut is removed, so the next run does all of it.
+   /// </para>
    /// </summary>
    internal void ApplyInstalledBranding()
    {
@@ -78,18 +91,20 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
       record.RequireChangeable();
       string? last = record.ReadLastShortcutName();
       IReadOnlyList<string> pending = record.ReadPendingShortcutNames();
-      bool replacingOurs = File.Exists(destination);
-      if(replacingOurs && !IsOwnedShortcut(destination))
-      {
-         throw new InvalidOperationException(NameTaken);
-      }
       List<string> notes = [];
+      bool replacingOurs = File.Exists(destination);
+      if(replacingOurs && !OursToReplace(destination, Names(last, pending).Exists(name => SameName(name, filename)), notes))
+      {
+         WriteNotes(notes);
+         return;
+      }
       List<string> leaving = StillOurs(Names(last, pending).Where(name => !SameName(name, filename)), notes);
       RemoveLeftovers(notes, "The next branding run or the uninstall will try again.");
       RecordPending(SameName(last, filename) ? leaving : [.. leaving, filename]);
+      string? notReplaced;
       try
       {
-         WriteShortcut(destination, branding.IconPath, replacingOurs);
+         notReplaced = WriteShortcut(destination, branding.IconPath, replacingOurs);
       }
       catch
       {
@@ -99,8 +114,15 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
          }
          throw;
       }
-      record.WriteLastShortcutName(filename);
-      RecordPending(RemoveLeaving(leaving, notes));
+      if(notReplaced is null)
+      {
+         record.WriteLastShortcutName(filename);
+         RecordPending(RemoveLeaving(leaving, notes));
+      }
+      else
+      {
+         notes.Add(KeptAsItIs(filename, "replaced", notReplaced));
+      }
       WriteNotes(notes);
    }
 
@@ -166,10 +188,12 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
 
 
    /// <summary>
-   /// Judges recorded names before anything is changed and returns those whose file exists and is still ours. A name
-   /// that is not a shortcut file name in the shortcut folder, or whose file is not ours (someone else's shortcut, no
-   /// shortcut at all, or a link), is dropped with a note; a name without a file is dropped silently. A file that
-   /// cannot be opened is not judged: that throws, so the caller stops while nothing has been changed.
+   /// Judges recorded names before anything is changed and returns those whose file exists and may still be ours. A
+   /// name that is not a shortcut file name in the shortcut folder, or whose file is not ours (someone else's
+   /// shortcut, no shortcut at all, or a link), is dropped with a note; a name without a file is dropped silently. A
+   /// file that cannot be opened is not judged and not dropped: its name is returned with those that are ours, so it
+   /// stays on record, and the look taken just before its delete decides, with the tries a file in use is given.
+   /// This look does not wait for a file in use, so one held file delays a run once, not twice.
    /// </summary>
    private List<string> StillOurs(IEnumerable<string> names, List<string> notes)
    {
@@ -190,13 +214,13 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
          {
             continue;
          }
-         if(IsOwnedShortcut(path))
+         if(Judge(path, patiently: false, out _) is Whose.NotOurs)
          {
-            owned.Add(name);
+            notes.Add(NoLongerOurs(name));
          }
          else
          {
-            notes.Add(NoLongerOurs(name));
+            owned.Add(name);
          }
       }
       return owned;

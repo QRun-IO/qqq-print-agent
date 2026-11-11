@@ -58,37 +58,67 @@ public sealed class AgentBrandingRealShellTests
 
 
    /// <summary>
-   /// A same-brand install, upgrade or repair while another program holds the current shortcut fails saying the shortcut
-   /// could not be read, not that a different shortcut uses the name; the shortcut and the record are as they were, and
-   /// the same run succeeds once the file is free.
+   /// A same-brand install, upgrade or repair while another program holds the current shortcut without sharing
+   /// finishes. The shortcut cannot be opened, so it is not judged and not replaced: it is byte for byte as it was,
+   /// its name is still on record, and one note says so. The same run replaces it once the file is free.
    /// </summary>
    [Fact]
-   public void SameBrandRunWhileTheCurrentShortcutIsHeldSaysItCouldNotBeRead()
+   public void SameBrandRunWhileTheCurrentShortcutIsHeldLeavesItAsItIsAndFinishes()
    {
       using BrandingSetup setup = RealShellSetup();
       setup.Rules.ApplyInstalledBranding();
+      byte[] before = File.ReadAllBytes(setup.Shortcut(Acme));
+      setup.Branding = setup.Branding with { IconPath = Path.Combine(setup.State, "brand.ico") };
       using(new FileStream(setup.Shortcut(Acme), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
       {
-         IOException refused = Assert.Throws<IOException>(setup.Rules.ApplyInstalledBranding);
-         Assert.StartsWith("The shortcut \"Acme Print Connector.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
+         setup.Rules.ApplyInstalledBranding();
       }
       Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(before, File.ReadAllBytes(setup.Shortcut(Acme)));
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Empty(setup.Record.Pending);
+      Assert.Equal(8, setup.Waits.Count);
+      Assert.Equal(new[] { "The shortcut \"Acme Print Connector.lnk\" could not be opened (in use by another program: sharing violation). It was left as it is and stays recorded: it still starts the companion, and the next install, upgrade or repair replaces it." }, setup.Notes, StringComparer.Ordinal);
       setup.Rules.ApplyInstalledBranding();
       Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
-      Assert.Empty(setup.Notes);
+      Assert.NotEqual(before, File.ReadAllBytes(setup.Shortcut(Acme)));
+      _ = Assert.Single(setup.Notes);
    }
 
 
 
    /// <summary>
-   /// A rename while another program holds the previous brand's shortcut stops before anything is changed: no new
-   /// shortcut, the old name still on record, nothing noted. Once the file is free the rename goes through, the old
-   /// shortcut is removed, and an uninstall afterwards leaves nothing.
+   /// A same-brand run while another program has the current shortcut open for reading, which is how a scanner or a
+   /// backup holds a file, finishes too. The shortcut can be read and is ours, but Windows will not replace an open
+   /// file: it is left byte for byte as it was, and the note says that it is in use, not that access was denied.
    /// </summary>
    [Fact]
-   public void RenameWhileThePreviousShortcutIsHeldChangesNothingUntilItIsFree()
+   public void SameBrandRunWhileTheCurrentShortcutIsOpenForReadingLeavesItAsItIsAndFinishes()
+   {
+      using BrandingSetup setup = RealShellSetup();
+      setup.Rules.ApplyInstalledBranding();
+      byte[] before = File.ReadAllBytes(setup.Shortcut(Acme));
+      setup.Branding = setup.Branding with { IconPath = Path.Combine(setup.State, "brand.ico") };
+      using(new FileStream(setup.Shortcut(Acme), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+      {
+         setup.Rules.ApplyInstalledBranding();
+      }
+      Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(before, File.ReadAllBytes(setup.Shortcut(Acme)));
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Equal(8, setup.Waits.Count);
+      Assert.Equal(new[] { "The shortcut \"Acme Print Connector.lnk\" could not be replaced (in use by another program: sharing violation). It was left as it is and stays recorded: it still starts the companion, and the next install, upgrade or repair replaces it." }, setup.Notes, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// A rename while another program holds the previous brand's shortcut goes through: the new shortcut is written
+   /// and made current, the held one is left where it is and stays on record with a note. Once the file is free the
+   /// next run removes it, and an uninstall afterwards leaves nothing.
+   /// </summary>
+   [Fact]
+   public void RenameWhileThePreviousShortcutIsHeldGoesThroughAndTheNextRunRemovesIt()
    {
       using BrandingSetup setup = RealShellSetup();
       setup.Branding = new RuntimeBranding(DisplayName: "Old Brand");
@@ -96,12 +126,12 @@ public sealed class AgentBrandingRealShellTests
       setup.Branding = new RuntimeBranding(DisplayName: "Acme Print Connector");
       using(new FileStream(setup.Shortcut(Old), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
       {
-         IOException refused = Assert.Throws<IOException>(setup.Rules.ApplyInstalledBranding);
-         Assert.StartsWith("The shortcut \"Old Brand.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
+         setup.Rules.ApplyInstalledBranding();
       }
-      Assert.Equal(new[] { setup.Shortcut(Old) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
-      Assert.Equal(Old, setup.Record.Name);
-      Assert.Empty(setup.Record.Pending);
+      Assert.Equal(new[] { setup.Shortcut(Acme), setup.Shortcut(Old) }, Directory.GetFiles(setup.Rules.ShortcutDirectory).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
+      Assert.Equal(new[] { "The previous shortcut \"Old Brand.lnk\" could not be removed (in use by another program: sharing violation). It stays recorded, and the next branding run or the uninstall will try again." }, setup.Notes, StringComparer.Ordinal);
       setup.Rules.ApplyInstalledBranding();
       Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
       Assert.Equal(Acme, setup.Record.Name);
@@ -109,7 +139,7 @@ public sealed class AgentBrandingRealShellTests
       setup.Rules.RemoveInstalledShortcut();
       Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
       Assert.Null(setup.Record.Name);
-      Assert.Empty(setup.Notes);
+      _ = Assert.Single(setup.Notes);
    }
 
 

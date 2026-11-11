@@ -85,6 +85,18 @@ internal sealed partial class AgentBrandingShortcuts
 
 
 
+   /// <summary>What a run says when a file that nothing records has the name the new shortcut needs and cannot be opened: it cannot be judged, so it is not overwritten, and the operator is told what to do.</summary>
+   private static string NotJudged(string filename, string kind)
+      => $"A file that is not on record has the name the shortcut needs, \"{filename}\", and could not be opened ({kind}), so it cannot be known whether it is this application's shortcut. It was not replaced. Close the program that holds it and run the installer again.";
+
+
+
+   /// <summary>The note of an install, upgrade or repair that left the shortcut of ours under the wanted name as it was, because it could not be opened or could not be replaced.</summary>
+   private static string KeptAsItIs(string filename, string what, string kind)
+      => $"The shortcut \"{filename}\" could not be {what} ({kind}). It was left as it is and stays recorded: it still starts the companion, and the next install, upgrade or repair replaces it.";
+
+
+
    /// <summary>The note of an uninstall that left a recorded shortcut behind.</summary>
    private static string LeftBehind(string name, string kind)
       => $"The recorded shortcut \"{name}\" could not be removed ({kind}). It was left where it is and is no longer recorded: delete it by hand, or install again under the same name, which takes it over.";
