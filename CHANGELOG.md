@@ -22,9 +22,12 @@ printer whose driver hung or failed was enough to stop every job on the station,
   printers still reads every printer's settings, and the service reports it to the server after every change.
   When that list could not be read, the connection to the server was ended and made again each time the list
   was due, and jobs stopped. Now the service writes one error to the log ("The printer inventory could not be
-  read, so none was sent to the server"), sends the server nothing in place of the list, keeps the connection,
-  and goes on taking and printing jobs with the list the server already has. The log says once when the
-  inventory can be read again.
+  read, so none was sent to the server"), sends the server nothing in place of the list and keeps the
+  connection. The list the server already has stays in force, so when the cause is one printer's settings the
+  service goes on taking and printing jobs for the other printers. When the cause is one that jobs share (the
+  Windows print spooler cannot list its printers, or the service cannot read its own stored data), jobs stop
+  for that reason as they did before, and the log has "Print lane stopped" as well; the error line gives the
+  reason and does not promise that jobs go on. The log says once when the inventory can be read again.
 - **Cancelling and test prints.** Cancelling a job Windows already holds, from the companion or from the server,
   and sending a test print, no longer read any printer's settings, so they work while a printer's driver does not
   answer.

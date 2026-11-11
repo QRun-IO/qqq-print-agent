@@ -111,8 +111,11 @@ of its own with a 20 second limit.
 
 What still asks every queue is the inventory report. A report that cannot be
 read (one queue's driver is enough) sends nothing and is logged once per
-reason; the connection stays up and jobs continue on the inventory it already
-delivered. While it lasts the server is told nothing new about any printer, so
+reason; the connection stays up and the inventory it already delivered stays
+in force, so this failure by itself holds no job. Jobs continue when the cause
+is one queue's settings. A cause the lanes share, the spooler's list or the
+service's stored data, stops them too, with "Print lane stopped" in the log.
+While it lasts the server is told nothing new about any printer, so
 a change in the status or the media of a healthy printer is not reported
 either. A connection that has delivered no inventory yet claims nothing until
 one full discovery succeeds and the server accepted it, so after a restart or

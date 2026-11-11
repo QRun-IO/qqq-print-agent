@@ -31,8 +31,13 @@ public sealed class AgentRuntimePrinterReadsTests
 
 
 
-   /// <summary>What that error goes on to say on a connection that has already delivered an inventory. It says the failure stops no job, and does not say that jobs are being claimed, which dispatch being paused can prevent.</summary>
-   private const string Delivered = ", so none was sent to the server. This does not stop jobs: they are claimed and printed as before, on the inventory this connection already delivered. ";
+   /// <summary>
+   /// What that error goes on to say on a connection that has already delivered an inventory. It says only what holds
+   /// whatever failed: the delivered inventory stays in force, so the failure by itself holds no job. It does not say
+   /// that jobs are being claimed. A pause of dispatch prevents that, and so does a cause the lanes share with the
+   /// inventory read, the spooler's list or the service's stored data.
+   /// </summary>
+   private const string Delivered = ", so none was sent to the server. The inventory this connection already delivered stays in force, so this failure by itself holds no job; whether jobs go on depends on the reason. ";
 
 
 
@@ -41,8 +46,8 @@ public sealed class AgentRuntimePrinterReadsTests
 
 
 
-   /// <summary>How that error ends before the reason: it names both kinds of cause, a printer and the service's own stored data, because both are caught by the one read.</summary>
-   private const string Causes = "One printer whose driver does not answer is enough to cause this, and so is a failure to read the service's own stored data. Reason: ";
+   /// <summary>How that error ends before the reason: it names the kinds of cause, a printer, the spooler and the service's own stored data, because all are caught by the one read.</summary>
+   private const string Causes = "One printer whose driver does not answer is enough to cause this, and so is a spooler that cannot list its printers or a failure to read the service's own stored data. Reason: ";
 
 
 
@@ -181,9 +186,9 @@ public sealed class AgentRuntimePrinterReadsTests
 
    /// <summary>
    /// The error is true while the administrator has paused dispatch. The connection has delivered its inventory, so the
-   /// line is the one for that case: it says the failure stops no job and that jobs go on as before. It does not say
-   /// that jobs are being claimed, and none is: the job the server holds stays unclaimed because of the pause, as it
-   /// would have without the failure.
+   /// line is the one for that case: it says that inventory stays in force and that the failure by itself holds no
+   /// job. It does not say that jobs are being claimed, and none is: the job the server holds stays unclaimed because
+   /// of the pause, as it would have without the failure.
    /// </summary>
    [Fact]
    public async Task ErrorIsTrueWhileDispatchIsPaused()
@@ -211,10 +216,13 @@ public sealed class AgentRuntimePrinterReadsTests
    /// shared from the journal, and a failure there is caught and logged by the same line. Here the journal's table of
    /// shared printers is put out of reach while the printers themselves answer. The line gives the journal's failure as
    /// its reason and names the service's stored data as a possible cause, so it does not send the operator looking
-   /// only for a driver. The connection is kept, and when the table is back the end of the failure is logged once.
+   /// only for a driver. The connection is kept. The line does not say that jobs go on, and with this cause they do
+   /// not: a lane needs the same record before it claims, so a job offered meanwhile is not claimed and the lane's own
+   /// failure is logged ("Print lane stopped", with the journal's reason). When the table is back the job is claimed
+   /// and spooled, and the end of the failure is logged once.
    /// </summary>
    [Fact]
-   public async Task FailureToReadTheServicesOwnStoredDataIsLoggedByTheSameLineWithItsReason()
+   public async Task FailureToReadTheServicesOwnStoredDataIsLoggedWithItsReasonAndHoldsJobsUntilItEnds()
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
@@ -231,11 +239,23 @@ public sealed class AgentRuntimePrinterReadsTests
       Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
       Assert.False(connection.Completion.IsCompleted);
 
+      int claims = fixture.Claims;
+      fixture.AddJob("held");
+      await connection.SendAsync("JOB_AVAILABLE", new { });
+      await fixture.WaitAsync(() => LaneStoppedOnTheSharedPrintersTable(fixture) || fixture.State("held") is not null);
+      Assert.True(LaneStoppedOnTheSharedPrintersTable(fixture));
+      Assert.Equal(claims, fixture.Claims);
+      Assert.Null(fixture.State("held"));
+      Assert.Equal(0, fixture.Printer.Prints);
+
       MoveSharedPrintersTable(fixture, outOfReach: false);
-      await fixture.HeartbeatAsync(clock);
+      await connection.SendAsync("JOB_AVAILABLE", new { });
+      await fixture.WaitAsync(() => string.Equals(fixture.State("held"), "SPOOLED", StringComparison.Ordinal));
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith(ReadAgain, StringComparison.Ordinal)));
+      Assert.Equal(1, fixture.Printer.Prints);
       Assert.Single(fixture.Logs, line => line.StartsWith(ReadAgain, StringComparison.Ordinal));
       Assert.Single(fixture.Logs, line => line.StartsWith(Unread, StringComparison.Ordinal));
+      Assert.False(connection.Completion.IsCompleted);
       Assert.False(fixture.Running.IsCompleted);
    }
 
@@ -472,6 +492,12 @@ public sealed class AgentRuntimePrinterReadsTests
       rename.CommandText = outOfReach ? "ALTER TABLE exposed_printers RENAME TO exposed_printers_out_of_reach" : "ALTER TABLE exposed_printers_out_of_reach RENAME TO exposed_printers";
       _ = rename.ExecuteNonQuery();
    }
+
+
+
+   /// <summary>True when a lane's failure was logged with the journal's reason for the table of shared printers being out of reach.</summary>
+   private static bool LaneStoppedOnTheSharedPrintersTable(RealtimeRuntimeFixture fixture)
+      => fixture.Logs.Any(line => line.StartsWith("Print lane stopped: ", StringComparison.Ordinal) && line.Contains("exposed_printers", StringComparison.Ordinal));
 
 
 
