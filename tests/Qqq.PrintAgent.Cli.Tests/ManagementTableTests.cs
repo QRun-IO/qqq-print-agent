@@ -120,6 +120,29 @@ public sealed class ManagementTableTests
 
 
 
+   /// <summary>
+   /// The table says which operation is single-flight, and it is the printer discovery alone: a read on the computer
+   /// with the ordinary time limit that takes no arguments, so every request for it asks the same thing and a request
+   /// that arrives while a discovery is running can join it and share its result. Nothing else is marked: the
+   /// snapshot never starts a discovery, and an operation that names a server, takes arguments or changes something
+   /// could not share one result among its requests, so the mark is only ever on a read on the computer without
+   /// arguments.
+   /// </summary>
+   [Fact]
+   public void Operations_PrinterDiscoveryIsTheOneReadThatJoinsARunInProgress()
+   {
+      Assert.True(ManagementOperations.TryFind(ManagementOperations.PrintersDiscover, out ManagementOperationInfo? discover));
+
+      Assert.Equal(["printers.discover"], Names(operation => operation.SingleFlight), StringComparer.Ordinal);
+      Assert.Equal((ManagementScope.Computer, ManagementOperationKind.Read, ManagementOperations.OrdinaryTimeLimit, false, null, typeof(PrintersDiscoverResult), true),
+         (discover.Scope, discover.Kind, discover.ServerTimeLimit, discover.AvailableWhenDegraded, discover.ArgumentsType, discover.ResultType, discover.SingleFlight));
+      Assert.All(ManagementOperations.All.Where(operation => operation.SingleFlight), operation =>
+         Assert.Equal((ManagementScope.Computer, ManagementOperationKind.Read, null), (operation.Scope, operation.Kind, operation.ArgumentsType)));
+      Assert.False(new ManagementOperationInfo("status", ManagementScope.Computer, ManagementOperationKind.Read, ManagementOperations.OrdinaryTimeLimit, false, null, typeof(NoResult)).SingleFlight);
+   }
+
+
+
    /// <summary>The service gives an operation 30 seconds, and 120 to the ones that wait for a QQQ server: sign-in, sign-out and enrollment as in version 1, and checking and adding a server. A client waits a little longer than the service, 35 and 150 seconds as version 1 clients do, so it hears the service's own timeout.</summary>
    [Fact]
    public void Operations_TimeLimitsAreTodaysThirtySeconds_AndOneHundredTwentyForTheLongOnes()

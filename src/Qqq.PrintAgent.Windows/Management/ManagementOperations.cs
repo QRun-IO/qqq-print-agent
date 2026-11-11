@@ -55,7 +55,15 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Discovers this computer's Windows printers now and returns them with the time. A snapshot only reports the list the service last discovered; a client that needs a fresh one (the wizard's printer step, the command line's <c>printers</c>) asks here.</summary>
+   /// <summary>
+   /// Discovers this computer's Windows printers now and returns them with the time. A snapshot only reports the list
+   /// the service last discovered; a client that needs a fresh one (the wizard's printer step, the command line's
+   /// <c>printers</c>) asks here. It is a read, and the one single-flight operation
+   /// (<see cref="ManagementOperationInfo.SingleFlight"/>): a discovery loads printer drivers in a helper process, so the
+   /// computer runs one at a time, and a request that arrives while one is running, whether a client or the service's
+   /// own refresh started it, joins that discovery and gets its result. A hung driver and a client that retries then
+   /// cost one helper process, not one for each request.
+   /// </summary>
    public const string PrintersDiscover = "printers.discover";
 
 
@@ -189,7 +197,7 @@ public static class ManagementOperations
       Computer(ServersReorder, ManagementOperationKind.Change, typeof(ServerListResult), typeof(ServersReorderArgs)),
       Computer(ComputerGetProfile, ManagementOperationKind.Read, typeof(DeviceProfile)),
       Computer(ComputerSetProfile, ManagementOperationKind.Change, typeof(DeviceProfile), typeof(ComputerSetProfileArgs)),
-      Computer(PrintersDiscover, ManagementOperationKind.Read, typeof(PrintersDiscoverResult)),
+      Computer(PrintersDiscover, ManagementOperationKind.Read, typeof(PrintersDiscoverResult), singleFlight: true),
       Computer(LogsGetSettings, ManagementOperationKind.Read, typeof(LogSettings), degraded: true),
       Computer(LogsSetSettings, ManagementOperationKind.Change, typeof(LogSettings), typeof(LogsSetSettingsArgs), degraded: true),
       Computer(LogsClear, ManagementOperationKind.Change, typeof(LogsClearResult), degraded: true),
@@ -259,8 +267,9 @@ public static class ManagementOperations
 
 
    /// <summary>Describes an operation on the computer or the list of servers.</summary>
-   private static ManagementOperationInfo Computer(string name, ManagementOperationKind kind, Type result, Type? arguments = null, bool isLong = false, bool degraded = false)
-      => new(name, ManagementScope.Computer, kind, isLong ? LongTimeLimit : OrdinaryTimeLimit, degraded, arguments, result);
+   private static ManagementOperationInfo Computer(string name, ManagementOperationKind kind, Type result, Type? arguments = null, bool isLong = false, bool degraded = false,
+      bool singleFlight = false)
+      => new(name, ManagementScope.Computer, kind, isLong ? LongTimeLimit : OrdinaryTimeLimit, degraded, arguments, result, singleFlight);
 
 
 

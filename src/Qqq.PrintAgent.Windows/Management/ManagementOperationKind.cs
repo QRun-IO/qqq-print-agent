@@ -8,7 +8,12 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <summary>How an operation behaves beside others, which is what the pipe's concurrency rules are written in.</summary>
 public enum ManagementOperationKind
 {
-   /// <summary>Changes nothing and never waits for another operation.</summary>
+   /// <summary>
+   /// Changes nothing, and never waits for an operation that changes something. A read can still take time of its own,
+   /// and one kind of read waits for another read of the same operation: a read whose table entry is marked
+   /// <see cref="ManagementOperationInfo.SingleFlight"/> runs one at a time for the computer, and a request that
+   /// arrives while one is running joins it and gets its result.
+   /// </summary>
    Read,
 
    /// <summary>Changes something other than a server's session, pairing or trust.</summary>
