@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Globalization;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Windows;
 
@@ -503,9 +504,48 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
+   /// The ring's order is the order of its timestamps. The first writer's reading of the clock is held open while a
+   /// second writer, on a thread of its own, writes a whole line. An entry is stamped inside the lock that orders the
+   /// ring, so the second writer cannot enter the ring until the first has, and the earlier stamp is the earlier entry.
+   /// Stamped before that lock, the second writer would finish during the reading and stand in the ring in front of an
+   /// earlier stamp. The wait for the second writer is bounded, and with the stamp inside the lock it always runs out:
+   /// that the second writer could not finish is the thing being shown.
+   /// </summary>
+   [Fact]
+   public void RingOrder_IsTimestampOrder_WhenASecondWriterArrivesDuringTheFirstStamp()
+   {
+      SteppingClock clock = new();
+      ServiceLog log = new(AgentActivityLog.Create(_directory), _ => { }, clock);
+      Thread second = new(() => log.Write("WARN", "second"));
+      bool secondFinishedDuringTheFirstStamp = true;
+      clock.OnReading = reading =>
+      {
+         if(reading == 1)
+         {
+            second.Start();
+            secondFinishedDuringTheFirstStamp = second.Join(TimeSpan.FromMilliseconds(200));
+         }
+      };
+
+      log.Write("INFO", "first");
+      bool secondFinished = second.Join(TimeSpan.FromSeconds(30));
+
+      AgentLogEntry[] entries = log.Entries();
+      Assert.True(secondFinished);
+      Assert.False(secondFinishedDuringTheFirstStamp);
+      Assert.Equal(["first", "second"], entries.Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal([SteppingClock.Reading(1), SteppingClock.Reading(2)], entries.Select(entry => entry.Timestamp), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
    /// Several threads writing at once, half of them through a server's view, lose no line and never corrupt the ring:
    /// the host's sink and the file receive all 200 lines, each once, and the ring ends with 100 of them, each once,
-   /// the same 100 whether it is read through the log or through a view.
+   /// the same 100 whether it is read through the log or through a view. On a clock that gives every reading a later
+   /// time than the last, the ring's timestamps are the last 100 readings in order. That holds here on every run, but
+   /// this test seldom catches a stamp taken outside the ring's lock, because the writers rarely overlap at that point;
+   /// the test above is the one that proves it.
    /// </summary>
    [Fact]
    public async Task ConcurrentWriters_LoseNothing()
@@ -516,7 +556,7 @@ public sealed class ServiceLogTests : IDisposable
       {
          lock(received)
          { received.Add(line); }
-      });
+      }, new SteppingClock());
 
       await Task.WhenAll(Enumerable.Range(0, 8).Select(writer => Task.Run(() =>
       {
@@ -533,6 +573,7 @@ public sealed class ServiceLogTests : IDisposable
       Assert.Equal(100, ring.Distinct(StringComparer.Ordinal).Count());
       Assert.All(ring, line => Assert.Contains(line, received, StringComparer.Ordinal));
       Assert.Equal(ring, shared.ForServer("Production").Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal(Enumerable.Range(101, 100).Select(reading => SteppingClock.Reading(reading)), shared.Entries().Select(entry => entry.Timestamp), StringComparer.Ordinal);
       Assert.Equal(200, Lines(file).Count);
    }
 
@@ -546,5 +587,38 @@ public sealed class ServiceLogTests : IDisposable
 
       Assert.Throws<ArgumentNullException>(() => new ServiceLog(null!, _sink.Add));
       Assert.Throws<ArgumentNullException>(() => new ServiceLog(file, null!));
+   }
+
+
+
+   /// <summary>
+   /// A clock that counts instead of keeping time: every reading is one second later than the one before, so each stamp
+   /// names the reading that made it and no two are equal, whatever the computer's clock does. A test can run code of
+   /// its own while one reading is being made, which is how it puts a second writer in the middle of a first one.
+   /// </summary>
+   private sealed class SteppingClock : TimeProvider
+   {
+      private static readonly DateTimeOffset s_start = new(2026, 11, 10, 12, 0, 0, TimeSpan.Zero);
+      private long _readings;
+
+
+
+      /// <summary>Called during each reading with its number, the first being 1, before the reading returns.</summary>
+      internal Action<long>? OnReading { get; set; }
+
+
+
+      /// <summary>The timestamp the log writes for a given reading, in the round-trip form the ring holds.</summary>
+      internal static string Reading(long number) => s_start.AddSeconds(number).ToString("O", CultureInfo.InvariantCulture);
+
+
+
+      /// <summary>Counts the reading, lets the test act during it, and returns its time.</summary>
+      public override DateTimeOffset GetUtcNow()
+      {
+         long number = Interlocked.Increment(ref _readings);
+         OnReading?.Invoke(number);
+         return s_start.AddSeconds(number);
+      }
    }
 }

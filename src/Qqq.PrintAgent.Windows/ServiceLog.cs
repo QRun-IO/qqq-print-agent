@@ -35,8 +35,12 @@ internal sealed class ServiceLog
 
 
 
-   /// <summary>Creates the log over the shared activity log file and the host's own sink, which receives each operational line after redaction and bounding.</summary>
-   internal ServiceLog(AgentActivityLog activityLog, Action<string> sink) : this(new Sinks(activityLog, sink), string.Empty)
+   /// <summary>
+   /// Creates the log over the shared activity log file and the host's own sink, which receives each operational line
+   /// after redaction and bounding. The clock stamps the entries of the ring; it is the system clock unless a test
+   /// gives another, so that the order of stamping can be tested without waiting on real time.
+   /// </summary>
+   internal ServiceLog(AgentActivityLog activityLog, Action<string> sink, TimeProvider? clock = null) : this(new Sinks(activityLog, sink, clock ?? TimeProvider.System), string.Empty)
    {
       ArgumentNullException.ThrowIfNull(activityLog);
       ArgumentNullException.ThrowIfNull(sink);
@@ -84,7 +88,7 @@ internal sealed class ServiceLog
          _sinks.ActivityLog.Debug("[Service] " + bounded);
          return;
       }
-      _sinks.Remember(new AgentLogEntry(DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture), level, bounded));
+      _sinks.Remember(level, bounded);
       switch(level)
       {
          case "ERROR":
@@ -159,8 +163,8 @@ internal sealed class ServiceLog
 
 
 
-   /// <summary>What a log and every view made from it share: the file, the host's sink and the ring with its lock.</summary>
-   private sealed class Sinks(AgentActivityLog activityLog, Action<string> sink)
+   /// <summary>What a log and every view made from it share: the file, the host's sink, and the ring with its lock and the clock that stamps its entries.</summary>
+   private sealed class Sinks(AgentActivityLog activityLog, Action<string> sink, TimeProvider clock)
    {
       private readonly Lock _lock = new();
       private readonly Queue<AgentLogEntry> _ring = new();
@@ -177,12 +181,16 @@ internal sealed class ServiceLog
 
 
 
-      /// <summary>Adds an entry to the ring and drops the oldest ones beyond its capacity.</summary>
-      internal void Remember(AgentLogEntry entry)
+      /// <summary>
+      /// Adds an entry to the ring and drops the oldest ones beyond its capacity. The entry is stamped with the time
+      /// inside the lock that orders the ring, so the ring's order is the order of its timestamps: stamped before the
+      /// lock, two writers could take their times in one order and enter the ring in the other.
+      /// </summary>
+      internal void Remember(string level, string message)
       {
          lock(_lock)
          {
-            _ring.Enqueue(entry);
+            _ring.Enqueue(new AgentLogEntry(clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture), level, message));
             while(_ring.Count > RingCapacity)
             {
                _ring.Dequeue();
