@@ -348,10 +348,11 @@ public sealed partial class ManagementClient
 
    /// <summary>
    /// Takes the request's place under the ceiling and returns null, or returns the result of a request that is not
-   /// sent. A repeated read never waits: with no place free it is skipped. Any other request waits its turn, and when
-   /// its caller's token is cancelled meanwhile it is not sent, so a change nobody waits for any more is never made
-   /// later. That holds at the last moment too: a turn that comes as the token is cancelled is given back, and the
-   /// request is not sent.
+   /// sent. A repeated read never waits: with no place free it is skipped. Any other request takes a place that is
+   /// free at once (its caller has looked at its token just before), and otherwise waits its turn. When its caller's
+   /// token is cancelled while it waits, it is not sent, so a change nobody waits for any more is never made later.
+   /// That holds at the last moment too: a turn that comes as the token is cancelled is given back, and the request
+   /// is not sent.
    /// </summary>
    private async Task<ServiceResult<TResult>?> TakePlaceAsync<TResult>(ManagementRequest request, bool repeated, CancellationToken cancellationToken)
    {
@@ -365,10 +366,11 @@ public sealed partial class ManagementClient
          return ServiceResult<TResult>.Skipped();
       }
       Task turn = _ceiling.EnterAsync(cancellationToken);
-      if(!turn.IsCompleted)
+      if(turn.IsCompletedSuccessfully)
       {
-         _log.Debug("Management request {Operation} on {Target} waits its turn: {Limit} requests are already in flight.", request.Op, Target(request.Server), MaximumRequestsInFlight);
+         return null;
       }
+      _log.Debug("Management request {Operation} on {Target} waits its turn: {Limit} requests are already in flight.", request.Op, Target(request.Server), MaximumRequestsInFlight);
       try
       {
          await turn.ConfigureAwait(false);

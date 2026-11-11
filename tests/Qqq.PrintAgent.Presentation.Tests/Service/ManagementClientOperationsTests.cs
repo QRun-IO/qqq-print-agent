@@ -336,8 +336,10 @@ public sealed class ManagementClientOperationsTests
    public async Task AddressTheContractsRuleRefuses_IsNotSent_AndAnAcceptedOneIsSentAsItsOrigin()
    {
       RecordingLog log = new();
+      FakePipe nothingScripted = new();
       FakePipe pipe = new FakePipe().HoldEverything();
-      ManagementClient client = new(pipe.SendAsync, log);
+      ManagementClient refusing = new(nothingScripted.SendAsync, log);
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
       SampleValues given = SampleValues.Golden;
       Uri?[] refused =
       [
@@ -348,10 +350,10 @@ public sealed class ManagementClientOperationsTests
       List<CallResult> results = [];
       foreach(Uri? address in refused)
       {
-         results.Add(CallResult.Of(await client.CheckServerAsync(address!, acceptCertificateException: false)));
-         results.Add(CallResult.Of(await client.AddServerAsync(address!, given.Name, acceptCertificateException: false, given.Check, given.Credential)));
+         results.Add(CallResult.Of(await refusing.CheckServerAsync(address!, acceptCertificateException: false)));
+         results.Add(CallResult.Of(await refusing.AddServerAsync(address!, given.Name, acceptCertificateException: false, given.Check, given.Credential)));
       }
-      Assert.Empty(pipe.Sent);
+      Assert.Empty(nothingScripted.Sent);
       _ = client.CheckServerAsync(new Uri("HTTPS://Qqq.Example.Test:443/"), acceptCertificateException: false);
       _ = client.CheckServerAsync(new Uri("https://b\u00fccher.example:8443"), acceptCertificateException: false);
       _ = client.CheckServerAsync(new Uri("http://localhost:18581/"), acceptCertificateException: false);
