@@ -29,6 +29,7 @@
                ]
             }
          ],
+         "printersDiscoveredAt": "2026-11-10T15:03:10.0000000Z",
          "service": {
             "version": "2.0.0-rc.2",
             "startedAt": "2026-11-10T14:59:05.0000000Z"

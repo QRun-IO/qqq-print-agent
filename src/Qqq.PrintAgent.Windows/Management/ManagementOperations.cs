@@ -20,7 +20,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Each server's transport state, traffic meter and last contact, and nothing else: the light read a client repeats every second to draw the meter, between the snapshots it takes every five.</summary>
+   /// <summary>Each server's transport state, traffic meter and last contact, and nothing else: the light read a client repeats every second to draw the meter, between the snapshots it takes every five. It answers with an empty list while the stored data is not ready, so that state does not produce an error every second.</summary>
    public const string TransportGet = "transport.get";
 
 
@@ -55,6 +55,11 @@ public static class ManagementOperations
 
 
 
+   /// <summary>Discovers this computer's Windows printers now and returns them with the time. A snapshot only reports the list the service last discovered; a client that needs a fresh one (the wizard's printer step, the command line's <c>printers</c>) asks here.</summary>
+   public const string PrintersDiscover = "printers.discover";
+
+
+
    /// <summary>Reads the log limits and the current log file's size.</summary>
    public const string LogsGetSettings = "logs.getSettings";
 
@@ -85,7 +90,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Starts removing a server from this computer.</summary>
+   /// <summary>Starts removing a server from this computer. Asked again for a server that is already being removed, it succeeds with <see cref="ServerRemoveResult.Removing"/> again, where every other change to that server is refused with <see cref="ManagementErrorCode.ServerRemoving"/>.</summary>
    public const string ServersRemove = "servers.remove";
 
 
@@ -177,13 +182,14 @@ public static class ManagementOperations
    public static IReadOnlyList<ManagementOperationInfo> All { get; } =
    [
       Computer(Snapshot, ManagementOperationKind.Read, typeof(ServiceSnapshot), degraded: true),
-      Computer(TransportGet, ManagementOperationKind.Read, typeof(TransportResult)),
+      Computer(TransportGet, ManagementOperationKind.Read, typeof(TransportResult), degraded: true),
       Computer(ServersList, ManagementOperationKind.Read, typeof(ServerListResult)),
       Computer(ServersCheck, ManagementOperationKind.Read, typeof(ServerCheckResult), typeof(ServersCheckArgs), isLong: true),
       Computer(ServersAdd, ManagementOperationKind.Change, typeof(ServerAddResult), typeof(ServersAddArgs), isLong: true),
       Computer(ServersReorder, ManagementOperationKind.Change, typeof(ServerListResult), typeof(ServersReorderArgs)),
       Computer(ComputerGetProfile, ManagementOperationKind.Read, typeof(DeviceProfile)),
       Computer(ComputerSetProfile, ManagementOperationKind.Change, typeof(DeviceProfile), typeof(ComputerSetProfileArgs)),
+      Computer(PrintersDiscover, ManagementOperationKind.Read, typeof(PrintersDiscoverResult)),
       Computer(LogsGetSettings, ManagementOperationKind.Read, typeof(LogSettings), degraded: true),
       Computer(LogsSetSettings, ManagementOperationKind.Change, typeof(LogSettings), typeof(LogsSetSettingsArgs), degraded: true),
       Computer(LogsClear, ManagementOperationKind.Change, typeof(LogsClearResult), degraded: true),
@@ -221,9 +227,10 @@ public static class ManagementOperations
    /// <summary>
    /// Decides whether a request whose envelope was read can be routed, and to which operation. It returns null when it
    /// can, and otherwise the error to answer: the version is not this contract's; the operation does not exist; an
-   /// operation on the computer names a server; or an operation on one server names none, or names it by anything but a
-   /// full identifier. It is pure, so the dispatcher and the tests share one rule. The messages are fixed and never
-   /// repeat what the request said.
+   /// operation on the computer names a server; an operation on one server names none, or names it by anything but a
+   /// full identifier; or an operation that takes no arguments is given some (an empty object is accepted, because it
+   /// says the same as leaving the arguments out). It is pure, so the dispatcher and the tests share one rule. The
+   /// messages are fixed and never repeat what the request said.
    /// </summary>
    public static ManagementError? Check(ManagementRequest request, out ManagementOperationInfo? operation)
    {
@@ -237,12 +244,16 @@ public static class ManagementOperations
       {
          return new ManagementError(ManagementErrorCode.UnknownOperation, "There is no operation with this name.");
       }
-      if(operation.Scope == ManagementScope.Computer)
+      if(operation.Scope == ManagementScope.Computer && request.Server is not null)
       {
-         return request.Server is null ? null : new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on the computer and must not name a server.");
+         return new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on the computer and must not name a server.");
       }
-      return ManagementProtocol.IsServerId(request.Server) ? null
-         : new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on one server and must name it by its full identifier.");
+      if(operation.Scope == ManagementScope.Server && !ManagementProtocol.IsServerId(request.Server))
+      {
+         return new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on one server and must name it by its full identifier.");
+      }
+      return operation.ArgumentsType is null && request.Args is { } given && !given.IsEmpty()
+         ? new ManagementError(ManagementErrorCode.InvalidRequest, "This operation takes no arguments.") : null;
    }
 
 

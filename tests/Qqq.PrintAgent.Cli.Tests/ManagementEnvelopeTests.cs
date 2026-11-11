@@ -4,6 +4,7 @@
  */
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Windows;
 using Qqq.PrintAgent.Windows.Management;
@@ -285,6 +286,36 @@ public sealed class ManagementEnvelopeTests
       Assert.True(found is null || string.Equals(found.Name, operation, StringComparison.Ordinal));
       Assert.True(refusal is null || (!refusal.Message.Contains(operation, StringComparison.Ordinal) && (server is null || !refusal.Message.Contains(server, StringComparison.Ordinal))));
       Assert.Null(refusal?.Details);
+   }
+
+
+
+   /// <summary>
+   /// An operation that takes no arguments refuses a request that gives it some, instead of ignoring what the client
+   /// meant by them; an empty object says the same as leaving the arguments out and is accepted. An operation that
+   /// does take arguments is not judged here: its arguments are read strictly into its own record. The refusal never
+   /// repeats what the arguments held.
+   /// </summary>
+   [Theory]
+   [InlineData("update.resume", null, "{\"anything\":1}", ManagementErrorCode.InvalidRequest)]
+   [InlineData("snapshot", null, "{\"servers\":[]}", ManagementErrorCode.InvalidRequest)]
+   [InlineData("printers.discover", null, "{\"anything\":null}", ManagementErrorCode.InvalidRequest)]
+   [InlineData("servers.remove", Server, "{\"anything\":true}", ManagementErrorCode.InvalidRequest)]
+   [InlineData("update.resume", null, "{}", null)]
+   [InlineData("servers.remove", Server, "{}", null)]
+   [InlineData("session.signOut", Server, "{}", null)]
+   [InlineData("printers.share", Server, "{\"printerId\":\"printer-a1\",\"shared\":true}", null)]
+   public void RoutingCheck_RefusesArgumentsForAnOperationThatTakesNone(string operation, string? server, string arguments, string? code)
+   {
+      ManagementRequestParse parse = ManagementJson.ParseRequest("{\"v\":2,\"op\":\"" + operation + "\"" + (server is null ? "" : ",\"server\":\"" + server + "\"") + ",\"args\":" + arguments + "}");
+
+      Assert.True(parse.Succeeded());
+      ManagementError? refusal = ManagementOperations.Check(parse.Request, out ManagementOperationInfo? found);
+
+      Assert.Equal(code, refusal?.Code);
+      Assert.Equal(operation, found?.Name);
+      Assert.True(refusal is null || !refusal.Message.Contains("anything", StringComparison.Ordinal));
+      Assert.Null(ManagementOperations.Check(ManagementRequest.For(operation, server), out _));
    }
 
 
@@ -575,7 +606,12 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>A list with a null in it is refused, in arguments and in a result, at any depth; the serializer's own null checks do not reach inside a list.</summary>
+   /// <summary>
+   /// A list of the record's with a null in it is refused, in arguments and in a result, at any depth; the serializer's
+   /// own null checks do not reach inside a list. Only the lists the record knows are looked at: a member a later
+   /// version adds is skipped whole, at the top and inside a nested record, even when it is a list with a null in it,
+   /// or today's reader would bind every later version.
+   /// </summary>
    [Fact]
    public void ListsWithANullItem_AreRefused()
    {
@@ -588,6 +624,12 @@ public sealed class ManagementEnvelopeTests
       Assert.False(ManagementJson.TryReadResult(Result("{\"stages\":[{\"stage\":\"connection\",\"outcome\":\"failed\",\"problems\":[null]}],\"signInMethods\":[]}"), out ServerCheckResult? _));
       Assert.True(ManagementJson.TryReadResult(Result("{\"servers\":[]}"), out ServerListResult? empty));
       Assert.Empty(empty.Servers);
+      Assert.True(ManagementJson.TryReadResult(Result("{\"paused\":false,\"addedLater\":[null]}"), out UpdateState? later));
+      Assert.Equal(new UpdateState(Paused: false), later);
+      Assert.True(ManagementJson.TryReadResult(Result("{\"servers\":[],\"addedLater\":{\"items\":[null,[null]],\"servers\":[null]}}"), out ServerListResult? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"stages\":[{\"stage\":\"connection\",\"outcome\":\"failed\",\"problems\":[],\"addedLater\":[null]}],\"signInMethods\":[]}"), out ServerCheckResult? nested));
+      Assert.Empty(Assert.Single(nested.Stages).Problems);
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"serverIds\":[],\"addedLater\":[null]}"), out ServersReorderArgs? _));
    }
 
 
@@ -631,17 +673,127 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>The envelope records can also be read by the serializer itself, which reads a payload as the JSON object it is and refuses anything else; and a payload cannot be made from anything but an object.</summary>
+   /// <summary>
+   /// The serializer is not a way around the envelope checks. Handed a request directly it would accept another version,
+   /// a malformed operation name, a member the envelope does not have and a repeated argument, so the envelope types
+   /// refuse to be read by it, whatever the text and with either set of options, and the refusal names the function
+   /// that reads them with their checks. A typed reader asked for an envelope type reads nothing.
+   /// </summary>
+   [Theory]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\"}")]
+   [InlineData("{\"v\":7,\"op\":\"snapshot\"}")]
+   [InlineData("{\"v\":2,\"op\":\"Not An Operation\"}")]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"extra\":1}")]
+   [InlineData("{\"v\":2,\"op\":\"jobs.retry\",\"args\":{\"jobId\":\"a\",\"jobId\":\"b\"}}")]
+   public void Envelope_IsNotReadByTheSerializer(string text)
+   {
+      NotSupportedException request = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementRequest>(text, ManagementJson.Options));
+      NotSupportedException strict = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementRequest>(text, ManagementJson.StrictOptions));
+      NotSupportedException reply = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementReply>("{\"v\":2,\"ok\":true,\"result\":{}}", ManagementJson.Options));
+      NotSupportedException error = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementError>("{\"code\":\"busy\",\"message\":\"Busy.\"}", ManagementJson.Options));
+
+      Assert.Contains("ManagementJson.ParseRequest", request.Message, StringComparison.Ordinal);
+      Assert.Contains("ManagementJson.ParseRequest", strict.Message, StringComparison.Ordinal);
+      Assert.Contains("ManagementJson.ParseReply", reply.Message, StringComparison.Ordinal);
+      Assert.Contains("ManagementJson.ParseReply", error.Message, StringComparison.Ordinal);
+      Assert.False(ManagementJson.TryReadResult(Result(text), out ManagementRequest? _));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"v\":2,\"ok\":true,\"result\":{}}"), out ManagementReply? _));
+   }
+
+
+
+   /// <summary>A payload is a JSON object and nothing else. It is written as that object, by itself and inside an error, says whether it is empty, and like the envelope it is never read by the serializer.</summary>
    [Fact]
    public void Payload_IsAJsonObject_AndNothingElse()
    {
-      ManagementRequest? read = JsonSerializer.Deserialize<ManagementRequest>("{\"v\":2,\"op\":\"printers.share\",\"server\":\"" + Server + "\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Options);
+      ManagementPayload payload = Payload("{\"printerId\":\"printer-a1\",\"shared\":true}");
 
-      Assert.True(ManagementJson.TryReadArguments(read!, out PrintersShareArgs? arguments));
-      Assert.Equal(new PrintersShareArgs("printer-a1", Shared: true), arguments);
-      Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ManagementRequest>("{\"v\":2,\"op\":\"printers.share\",\"args\":[1]}", ManagementJson.Options));
+      Assert.Equal("{\"printerId\":\"printer-a1\",\"shared\":true}", JsonSerializer.Serialize(payload, ManagementJson.Options));
+      Assert.Equal("{\"code\":\"busy\",\"message\":\"Busy.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}", JsonSerializer.Serialize(new ManagementError(ManagementErrorCode.Busy, "Busy.", payload), ManagementJson.Options));
+      Assert.False(payload.IsEmpty());
+      Assert.True(Payload("{}").IsEmpty());
+      NotSupportedException refusal = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementPayload>("{}", ManagementJson.Options));
+      Assert.Contains("ParseRequest or ParseReply", refusal.Message, StringComparison.Ordinal);
       Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("[1]").RootElement));
       Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("\"text\"").RootElement));
+   }
+
+
+
+   /// <summary>
+   /// A member that may be null may be absent, unless its record marks it as required, by the attribute or by the
+   /// language's keyword: then it must be written, null or not. Without this a record could not say "this must be
+   /// present" about a member that may be null.
+   /// </summary>
+   [Fact]
+   public void Result_ThatLeavesOutAMemberMarkedRequired_IsNotRead()
+   {
+      Assert.True(ManagementJson.TryReadResult(Result("{\"must\":null,\"alsoMust\":null}"), out MarkedRecord? nulls));
+      Assert.Equal(new MarkedRecord(null, null) { AlsoMust = null }, nulls);
+      Assert.True(ManagementJson.TryReadResult(Result("{\"must\":\"a\",\"may\":\"b\",\"alsoMust\":\"c\"}"), out MarkedRecord? full));
+      Assert.Equal(new MarkedRecord("a", "b") { AlsoMust = "c" }, full);
+      Assert.False(ManagementJson.TryReadResult(Result("{\"alsoMust\":null}"), out MarkedRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"must\":null}"), out MarkedRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{}"), out MarkedRecord? _));
+   }
+
+
+
+   /// <summary>
+   /// Every error message is made printable and cut at 512 UTF-16 units by both factories, whatever the code, because a
+   /// message may repeat what a server said. Control characters, the bidirectional overrides, embeddings and isolates,
+   /// the zero-width characters, the line and paragraph separators and a private-use character each become a space;
+   /// visible text in any script is kept; a surrogate without its partner is shown as the replacement character. The
+   /// characters are written as escapes here so this file holds none of them.
+   /// </summary>
+   [Fact]
+   public void FailureMessage_IsMadePrintable_ByBothFactories()
+   {
+      const string Hostile = "refused\u0007 \u001B[31mred\nnext\rline\u0000\u202Egnp.exe\u202C \u202Aa\u202Bb \u2066c\u2067d\u2068e\u2069\u2028sep\u2029 zero\u200Bwidth\u200E\u200F \uFEFFmark \uE000private caf\u00E9 \u4E2D\u6587";
+      char[] replaced = ['\u0007', '\u001B', '\n', '\r', '\u0000', '\u202E', '\u202C', '\u202A', '\u202B', '\u2066', '\u2067', '\u2068', '\u2069', '\u2028', '\u2029', '\u200B', '\u200E', '\u200F', '\uFEFF', '\uE000'];
+      string expected = replaced.Aggregate(Hostile, (text, character) => text.Replace(character, ' '));
+
+      var plain = ManagementReply.Failure(ManagementErrorCode.ServerRefused, Hostile);
+      var detailed = ManagementReply.Failure(ManagementErrorCode.CancelRefused, Hostile, new CancelRefusedDetails(CancelRefusedDetails.DocumentGone));
+      string written = ManagementJson.Write(plain);
+
+      Assert.Equal(expected, plain.Error!.Message);
+      Assert.Equal(expected, detailed.Error!.Message);
+      Assert.All(replaced, character => Assert.DoesNotContain(character, plain.Error.Message));
+      Assert.EndsWith("private caf\u00E9 \u4E2D\u6587", plain.Error.Message, StringComparison.Ordinal);
+      Assert.Equal("a b", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\u202Eb").Error!.Message);
+      Assert.Equal("a\uFFFDb", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\uD83Db").Error!.Message);
+      Assert.Equal("(missing)", ManagementReply.Failure(ManagementErrorCode.InternalError, "").Error!.Message);
+      Assert.DoesNotContain("\\u202E", written, StringComparison.OrdinalIgnoreCase);
+      Assert.DoesNotContain("\\u001B", written, StringComparison.OrdinalIgnoreCase);
+      Assert.DoesNotContain("\\u2028", written, StringComparison.OrdinalIgnoreCase);
+      Assert.Equal(expected, ManagementJson.ParseReply(written).Reply!.Error!.Message);
+      Assert.Equal("Management reply v2 failed: server_refused", plain.ToString());
+      Assert.Equal("server_refused: " + expected, plain.Error.ToString());
+   }
+
+
+
+   /// <summary>
+   /// An error message longer than 512 UTF-16 units is cut there and marked, and the cut never falls inside a surrogate
+   /// pair: a pair that would straddle the limit is left out whole, and one that ends exactly on it is kept whole.
+   /// </summary>
+   [Fact]
+   public void FailureMessage_IsCutAtTheLimit_NeverInsideASurrogatePair()
+   {
+      const string Pair = "\uD83D\uDE00";
+      string tooLong = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 600)).Error!.Message;
+      string straddling = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 511) + Pair + "tail").Error!.Message;
+      string fitting = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 510) + Pair + "tail").Error!.Message;
+      string exact = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 512)).Error!.Message;
+
+      Assert.Equal(new string('x', 512) + "...", tooLong);
+      Assert.Equal(new string('x', 511) + "...", straddling);
+      Assert.Equal(new string('x', 510) + Pair + "...", fitting);
+      Assert.Equal(new string('x', 512), exact);
+      Assert.Equal(ManagementProtocol.MaximumMessageCharacters, exact.Length);
+      Assert.All(new[] { tooLong, straddling, fitting }, message => Assert.False(char.IsHighSurrogate(message[^4])));
+      Assert.True(ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 100000)))).Succeeded());
    }
 
 
@@ -672,4 +824,13 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>A JSON object as the payload an envelope carries. It is parsed the lenient way on purpose, so a test can hand the typed readers something the envelope parser would have refused.</summary>
    private static ManagementPayload Payload(string json) => ManagementPayload.FromElement(JsonDocument.Parse(json).RootElement);
+
+
+
+   /// <summary>A record whose members may all be null: one marked required by the attribute, one by the keyword, and one not marked, which is the only one that may be absent.</summary>
+   private sealed record MarkedRecord([property: JsonRequired] string? Must, string? May)
+   {
+      /// <summary>May be null, but must be written.</summary>
+      public required string? AlsoMust { get; init; }
+   }
 }

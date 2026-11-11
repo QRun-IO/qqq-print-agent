@@ -115,7 +115,7 @@ public sealed class ManagementSecrecyTests
          written.Add(ManagementJson.Write(ManagementReply.Success(further)));
       }
 
-      Assert.Equal(29 + 29 + 31 + 2, written.Count);
+      Assert.Equal(30 + 30 + 31 + 2, written.Count);
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.SessionCookieCanary, text, StringComparison.Ordinal));
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.DeviceTokenCanary, text, StringComparison.Ordinal));
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.EnrollmentCodeCanary, text, StringComparison.Ordinal));

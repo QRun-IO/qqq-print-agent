@@ -171,6 +171,58 @@ public sealed class ManagementResultTests
 
 
 
+   /// <summary>
+   /// The approved account in the details of a changed identity came from the server, so the only way to build the
+   /// details makes both values printable and cuts each at 200 UTF-16 units, never inside a surrogate pair. The record
+   /// has no public constructor and no member that can be set afterwards, and it still reads back from the wire. The
+   /// characters are written as escapes here so this file holds none of them.
+   /// </summary>
+   [Fact]
+   public void IdentityChangedDetails_AreBuiltOnlyPrintableAndBounded()
+   {
+      const string Pair = "\uD83D\uDE00";
+      var hostile = IdentityChangedDetails.For("principal\u202E4\u0007\u2066x\u2069", "tenant\n2\u2028\u200B");
+      var tooLong = IdentityChangedDetails.For(new string('p', 300), new string('t', 199) + Pair + "tail");
+      var fitting = IdentityChangedDetails.For(new string('p', 198) + Pair, new string('t', 200));
+      var missing = IdentityChangedDetails.For(null, "");
+      ManagementReply reply = ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Sign in as the approved account.", hostile))).Reply!;
+
+      Assert.Equal(("principal 4  x ", "tenant 2  "), (hostile.ApprovedPrincipalId, hostile.ApprovedTenantId));
+      Assert.Equal((new string('p', 200) + "...", new string('t', 199) + "..."), (tooLong.ApprovedPrincipalId, tooLong.ApprovedTenantId));
+      Assert.Equal((new string('p', 198) + Pair, new string('t', 200)), (fitting.ApprovedPrincipalId, fitting.ApprovedTenantId));
+      Assert.Equal(("(missing)", "(missing)"), (missing.ApprovedPrincipalId, missing.ApprovedTenantId));
+      Assert.Empty(typeof(IdentityChangedDetails).GetConstructors());
+      Assert.All(typeof(IdentityChangedDetails).GetProperties(), member => Assert.Null(member.SetMethod));
+      Assert.True(ManagementJson.TryReadDetails(reply.Error!, out IdentityChangedDetails? read));
+      Assert.Equal(hostile, read);
+      Assert.False(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.IdentityChanged, "Changed.", ManagementPayload.From(new NoResult())), out IdentityChangedDetails? _));
+   }
+
+
+
+   /// <summary>
+   /// The computer's printers carry the time they were discovered. Before the first discovery the time is absent, so an
+   /// empty list that means "not looked yet" is told from a computer with no printers; a discovery asked for by name
+   /// always has its time.
+   /// </summary>
+   [Fact]
+   public void ComputerPrinters_CarryTheTimeTheyWereDiscovered()
+   {
+      DateTimeOffset found = new(2026, 11, 10, 15, 4, 5, TimeSpan.Zero);
+      ComputerSnapshot notLookedYet = new([], PrintersDiscoveredAt: null, new ServiceState("2.0.0", found), new UpdateState(Paused: false), new LogSettings(), new StoredState(StoredState.Ready), new DeviceProfile());
+      string before = ManagementJson.Write(ManagementReply.Success(notLookedYet));
+      string after = ManagementJson.Write(ManagementReply.Success(notLookedYet with { PrintersDiscoveredAt = found }));
+
+      Assert.StartsWith("{\"v\":2,\"ok\":true,\"result\":{\"printers\":[],\"service\":", before, StringComparison.Ordinal);
+      Assert.StartsWith("{\"v\":2,\"ok\":true,\"result\":{\"printers\":[],\"printersDiscoveredAt\":\"2026-11-10T15:04:05.0000000Z\",\"service\":", after, StringComparison.Ordinal);
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(before).Reply!, out ComputerSnapshot? read));
+      Assert.Null(read.PrintersDiscoveredAt);
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{\"printers\":[],\"discoveredAt\":\"2026-11-10T15:04:05.0000000Z\"}}", ManagementJson.Write(ManagementReply.Success(new PrintersDiscoverResult([], found))));
+      Assert.False(ManagementJson.TryReadResult(new ManagementReply(2, true, ManagementPayload.From(new ServerListResult([]))), out PrintersDiscoverResult? _));
+   }
+
+
+
    /// <summary>The names the contract uses on the wire for the values of its small vocabularies, so renaming one is a deliberate change.</summary>
    [Fact]
    public void Vocabularies_AreSpelledAsOnTheWire()

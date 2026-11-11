@@ -21,4 +21,16 @@ public sealed record ManagementOperationInfo(string Name, ManagementScope Scope,
    /// 30 for a long one, which gives the 35 and 150 seconds version 1 clients use.
    /// </summary>
    public TimeSpan ClientTimeLimit() => ServerTimeLimit + (ServerTimeLimit > ManagementOperations.OrdinaryTimeLimit ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(5));
+
+
+
+   /// <summary>
+   /// Whether the operation is still answered for a server that is being removed. Every read is. So is a repeated
+   /// <see cref="ManagementOperations.ServersRemove"/>, which succeeds with <see cref="ServerRemoveResult.Removing"/>
+   /// again: a client that retried after a timeout is told what is true instead of being refused. Every other change
+   /// to that server is refused with <see cref="ManagementErrorCode.ServerRemoving"/>. An operation on the computer
+   /// names no server, so the question does not arise and it is answered.
+   /// </summary>
+   public bool AnsweredWhileRemoving()
+      => Scope == ManagementScope.Computer || Kind == ManagementOperationKind.Read || string.Equals(Name, ManagementOperations.ServersRemove, StringComparison.Ordinal);
 }

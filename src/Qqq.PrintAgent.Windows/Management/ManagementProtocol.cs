@@ -39,6 +39,16 @@ public static class ManagementProtocol
 
 
 
+   /// <summary>The most UTF-16 units of an error's message that are sent, whatever the code; a longer message is cut there and marked with an ellipsis. One bound for all, so no code's message can flood a log or a screen.</summary>
+   public const int MaximumMessageCharacters = 512;
+
+
+
+   /// <summary>The most UTF-16 units of an identity value (a principal, a tenant) that are sent: the 200 the QQQ contract lets such an identifier run to.</summary>
+   public const int MaximumIdentityCharacters = 200;
+
+
+
    /// <summary>Writes a server's local identity the one way it appears on the wire: the GUID's canonical form, lower-case with hyphens.</summary>
    public static string FormatServerId(Guid serverId) => serverId.ToString("D");
 

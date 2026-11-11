@@ -141,6 +141,7 @@ internal static class ManagementSamples
       ManagementOperations.ServersCheck => CheckPassed,
       ManagementOperations.ServersAdd => new ServerAddResult(Summary, Authentication),
       ManagementOperations.ComputerGetProfile or ManagementOperations.ComputerSetProfile => Computer.Profile,
+      ManagementOperations.PrintersDiscover => new PrintersDiscoverResult([LabelPrinter], s_instant),
       ManagementOperations.LogsGetSettings or ManagementOperations.LogsSetSettings => Computer.LogSettings,
       ManagementOperations.LogsClear => new LogsClearResult(12),
       ManagementOperations.UpdatePrepare => new UpdatePrepareResult(Ready: false, JobsInHand: 2, ClaimPending: true),
@@ -169,7 +170,7 @@ internal static class ManagementSamples
          [new QqqCompatibilityProblem(QqqCompatibilityIssue.SecureConnectionFailed, "Windows does not trust the authority that issued the certificate")], null, QqqSignInMethods.None,
          new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateChainErrors | SslPolicyErrors.RemoteCertificateNameMismatch, "CN=qqq.example.test", "CN=Example Development Root",
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334")), ProviderOrigin, ServerId, Address, s_instant),
-      ManagementErrorCode.IdentityChanged => new IdentityChangedDetails(StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId),
+      ManagementErrorCode.IdentityChanged => IdentityChangedDetails.For(StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId),
       ManagementErrorCode.EnrollmentUnconfirmed => new EnrollmentUnconfirmedDetails(EnrollmentUnconfirmedDetails.DeviceBound, PrintingBlocked: true, EnrollmentAnswer.DeviceId),
       ManagementErrorCode.CancelRefused => new CancelRefusedDetails(CancelRefusedDetails.OwnershipMismatch),
       _ => null,
@@ -220,6 +221,7 @@ internal static class ManagementSamples
    /// <summary>The computer with every member set.</summary>
    private static ComputerSnapshot Computer => new(
       [LabelPrinter],
+      s_instant.AddSeconds(-40),
       new ServiceState("2.0.0-dev+abc1234", s_instant.AddHours(-3)),
       new UpdateState(Paused: true, s_instant.AddMinutes(10)),
       new LogSettings(30, 100, 10, DebugLogging: true, CurrentFileBytes: 20480, SegmentsToday: 2),
@@ -241,7 +243,7 @@ internal static class ManagementSamples
 
    /// <summary>What a healthy service sends: stored data ready, no update pause, one server connected and printing, and a second that is signed in but not yet paired and shares nothing.</summary>
    private static ServiceSnapshot HealthySnapshot => new(
-      new ComputerSnapshot([LabelPrinter], new ServiceState("2.0.0", s_instant.AddDays(-2)), new UpdateState(Paused: false), new LogSettings(), new StoredState(StoredState.Ready),
+      new ComputerSnapshot([LabelPrinter], s_instant.AddSeconds(-25), new ServiceState("2.0.0", s_instant.AddDays(-2)), new UpdateState(Paused: false), new LogSettings(), new StoredState(StoredState.Ready),
          new DeviceProfile("Packing station 7", "", "West warehouse")),
       [
          new ServerSnapshot(ServerId, "Warehouse", Address, 0, ServerSnapshot.Green, "Connected. Waiting for print jobs.", AttentionCount: 0,
@@ -261,7 +263,7 @@ internal static class ManagementSamples
 
    /// <summary>What a service sends when a newer build wrote its stored data: it runs no connections, so there are no servers, and the computer's part says why.</summary>
    private static ServiceSnapshot DegradedSnapshot => new(
-      new ComputerSnapshot([LabelPrinter], new ServiceState("2.0.0-rc.2", s_instant.AddMinutes(-5)), new UpdateState(Paused: false), new LogSettings(),
+      new ComputerSnapshot([LabelPrinter], s_instant.AddSeconds(-55), new ServiceState("2.0.0-rc.2", s_instant.AddMinutes(-5)), new UpdateState(Paused: false), new LogSettings(),
          new StoredState(StoredState.NewerBuild, FoundVersion: 4, SupportedVersion: 3), new DeviceProfile()),
       []);
 }

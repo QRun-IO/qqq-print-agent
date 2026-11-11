@@ -30,7 +30,7 @@ public sealed class ManagementTableTests
    /// <summary>ADR-0004: operations on the computer or the list of servers, which name no server.</summary>
    private static readonly string[] s_computerOperationsInTheAdr =
    [
-      "snapshot", "transport.get", "servers.list", "servers.check", "servers.add", "servers.reorder", "computer.getProfile", "computer.setProfile",
+      "snapshot", "transport.get", "servers.list", "servers.check", "servers.add", "servers.reorder", "computer.getProfile", "computer.setProfile", "printers.discover",
       "logs.getSettings", "logs.setSettings", "logs.clear", "update.prepare", "update.resume",
    ];
 
@@ -83,7 +83,7 @@ public sealed class ManagementTableTests
 
       Assert.Equal(s_computerOperationsInTheAdr, computer);
       Assert.Equal(s_serverOperationsInTheAdr, server);
-      Assert.Equal(29, ManagementOperations.All.Count);
+      Assert.Equal(30, ManagementOperations.All.Count);
       Assert.Equal([.. s_computerOperationsInTheAdr, .. s_serverOperationsInTheAdr], ManagementOperations.All.Select(operation => operation.Name), StringComparer.Ordinal);
       Assert.Equal(ManagementOperations.All.Select(operation => operation.Name).Order(StringComparer.Ordinal), Constants(typeof(ManagementOperations)).Order(StringComparer.Ordinal));
    }
@@ -109,7 +109,7 @@ public sealed class ManagementTableTests
    public void Operations_KindsFollowTheAdrsConcurrencyRules()
    {
       string[] sessionChanges = ["session.signIn", "session.signOut", "pairing.enroll", "trust.set", "servers.remove"];
-      string[] reads = ["snapshot", "transport.get", "servers.list", "servers.check", "computer.getProfile", "logs.getSettings", "trust.get", "jobs.query", "jobs.details"];
+      string[] reads = ["snapshot", "transport.get", "servers.list", "servers.check", "computer.getProfile", "printers.discover", "logs.getSettings", "trust.get", "jobs.query", "jobs.details"];
 
       Assert.Equal(sessionChanges.Order(StringComparer.Ordinal), Names(operation => operation.Kind == ManagementOperationKind.SessionChange), StringComparer.Ordinal);
       Assert.Equal(reads.Order(StringComparer.Ordinal), Names(operation => operation.Kind == ManagementOperationKind.Read), StringComparer.Ordinal);
@@ -128,18 +128,18 @@ public sealed class ManagementTableTests
       Assert.Equal(TimeSpan.FromSeconds(30), ManagementOperations.OrdinaryTimeLimit);
       Assert.Equal(TimeSpan.FromSeconds(120), ManagementOperations.LongTimeLimit);
       Assert.Equal(longOnes.Order(StringComparer.Ordinal), Names(operation => operation.ServerTimeLimit == ManagementOperations.LongTimeLimit), StringComparer.Ordinal);
-      Assert.Equal(24, ManagementOperations.All.Count(operation => operation.ServerTimeLimit == ManagementOperations.OrdinaryTimeLimit));
+      Assert.Equal(25, ManagementOperations.All.Count(operation => operation.ServerTimeLimit == ManagementOperations.OrdinaryTimeLimit));
       Assert.All(ManagementOperations.All, operation => Assert.Equal(
          operation.ServerTimeLimit == ManagementOperations.LongTimeLimit ? TimeSpan.FromSeconds(150) : TimeSpan.FromSeconds(35), operation.ClientTimeLimit()));
    }
 
 
 
-   /// <summary>While the stored data is not ready (written by a newer build, or an upgrade that could not finish) only the snapshot, the log operations and the update operations answer, so the newer build can be reinstalled; no operation on a server does, and neither does the transport read, which has no connections to report.</summary>
+   /// <summary>While the stored data is not ready (written by a newer build, or an upgrade that could not finish) only the snapshot, the transport read, the log operations and the update operations answer, so the newer build can be reinstalled. The transport read answers with an empty list, because a client repeats it every second and an error every second would be noise. No operation on a server answers, and neither does a printer discovery.</summary>
    [Fact]
-   public void Operations_AvailableWhenDegraded_AreTheSnapshotTheLogsAndTheUpdates()
+   public void Operations_AvailableWhenDegraded_AreTheSnapshotTheMeterTheLogsAndTheUpdates()
    {
-      string[] available = ["snapshot", "logs.getSettings", "logs.setSettings", "logs.clear", "update.prepare", "update.resume"];
+      string[] available = ["snapshot", "transport.get", "logs.getSettings", "logs.setSettings", "logs.clear", "update.prepare", "update.resume"];
 
       Assert.Equal(available.Order(StringComparer.Ordinal), Names(operation => operation.AvailableWhenDegraded), StringComparer.Ordinal);
       Assert.All(ManagementOperations.All.Where(operation => operation.AvailableWhenDegraded), operation => Assert.Equal(ManagementScope.Computer, operation.Scope));
@@ -147,11 +147,31 @@ public sealed class ManagementTableTests
 
 
 
-   /// <summary>Eleven operations take no arguments; each of the other eighteen has its own argument record, used by no other operation, and every operation has a result record.</summary>
+   /// <summary>
+   /// For a server that is being removed, every read still answers and so does a repeated removal, which succeeds with
+   /// "removing" again so a client that retried after a timeout is told what is true; every other change to that server
+   /// is refused with <c>server_removing</c>. An operation on the computer names no server and is not affected.
+   /// </summary>
+   [Fact]
+   public void Operations_AnsweredWhileRemoving_AreTheReadsAndARepeatedRemoval()
+   {
+      string[] answered = ["servers.remove", "trust.get", "jobs.query", "jobs.details"];
+      string[] refused = ["servers.rename", "session.signIn", "session.signOut", "pairing.enroll", "connection.reconnect", "trust.set", "printers.share", "printers.setProfile",
+         "printers.testPrint", "jobs.retry", "jobs.cancel", "jobs.acknowledge"];
+
+      Assert.Equal(answered.Order(StringComparer.Ordinal), Names(operation => operation.Scope == ManagementScope.Server && operation.AnsweredWhileRemoving()), StringComparer.Ordinal);
+      Assert.Equal(refused.Order(StringComparer.Ordinal), Names(operation => !operation.AnsweredWhileRemoving()), StringComparer.Ordinal);
+      Assert.All(ManagementOperations.All.Where(operation => operation.Scope == ManagementScope.Computer), operation => Assert.True(operation.AnsweredWhileRemoving()));
+      Assert.Equal(ServerRemoveResult.Removing, ((ServerRemoveResult)ManagementSamples.Result(ManagementOperations.ServersRemove)).State);
+   }
+
+
+
+   /// <summary>Twelve operations take no arguments; each of the other eighteen has its own argument record, used by no other operation, and every operation has a result record.</summary>
    [Fact]
    public void Operations_EachHaveTheirOwnArgumentRecord_AndAResult()
    {
-      string[] withoutArguments = ["snapshot", "transport.get", "servers.list", "computer.getProfile", "logs.getSettings", "logs.clear", "update.prepare", "update.resume", "servers.remove", "connection.reconnect", "trust.get"];
+      string[] withoutArguments = ["snapshot", "transport.get", "servers.list", "computer.getProfile", "printers.discover", "logs.getSettings", "logs.clear", "update.prepare", "update.resume", "servers.remove", "connection.reconnect", "trust.get"];
       Type[] argumentTypes = [.. ManagementOperations.All.Where(operation => operation.ArgumentsType is not null).Select(operation => operation.ArgumentsType!)];
 
       Assert.Equal(withoutArguments.Order(StringComparer.Ordinal), Names(operation => operation.ArgumentsType is null), StringComparer.Ordinal);
@@ -163,7 +183,7 @@ public sealed class ManagementTableTests
 
 
 
-   /// <summary>The protocol's numbers: version 2, sixteen clients at once, eight servers, and the size limits of the existing frame, so a version 2 message fits where a version 1 message did.</summary>
+   /// <summary>The protocol's numbers: version 2, sixteen clients at once, eight servers, the size limits of the existing frame, so a version 2 message fits where a version 1 message did, and the bounds on text a server may have supplied: 512 for an error's message and 200 for an identity value.</summary>
    [Fact]
    public void Protocol_NumbersAreTheAdrs_AndTheSizesAreTheExistingFrames()
    {
@@ -172,6 +192,8 @@ public sealed class ManagementTableTests
       Assert.Equal(8, ManagementProtocol.MaximumServers);
       Assert.Equal(AgentPipeFraming.MaximumCommandCharacters, ManagementProtocol.MaximumRequestCharacters);
       Assert.Equal(AgentPipeFraming.MaximumResponseCharacters, ManagementProtocol.MaximumReplyCharacters);
+      Assert.Equal(512, ManagementProtocol.MaximumMessageCharacters);
+      Assert.Equal(200, ManagementProtocol.MaximumIdentityCharacters);
    }
 
 

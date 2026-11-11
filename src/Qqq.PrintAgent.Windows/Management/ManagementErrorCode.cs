@@ -22,7 +22,7 @@ public static class ManagementErrorCode
 
 
 
-   /// <summary>The request's envelope or its arguments are missing or malformed, or it names a server where it must not, or omits one where it must. A test print in a format the printer does not offer is one.</summary>
+   /// <summary>The request's envelope or its arguments are missing or malformed, or it names a server where it must not, or omits one where it must, or gives arguments to an operation that takes none. A test print in a format the printer does not offer is one.</summary>
    public const string InvalidRequest = "invalid_request";
 
 
@@ -51,7 +51,7 @@ public static class ManagementErrorCode
 
 
 
-   /// <summary>The operation names a server that is being removed. Reads still answer for it; every change is refused with this code.</summary>
+   /// <summary>The operation names a server that is being removed. Reads still answer for it, and a repeated <see cref="ManagementOperations.ServersRemove"/> succeeds with <see cref="ServerRemoveResult.Removing"/> again; every other change is refused with this code.</summary>
    public const string ServerRemoving = "server_removing";
 
 
@@ -91,7 +91,7 @@ public static class ManagementErrorCode
 
 
 
-   /// <summary>The QQQ server refused the action. The message carries its reason in the printable, bounded form Core produces for text a server supplied.</summary>
+   /// <summary>The QQQ server refused the action. The message carries its reason, which <see cref="ManagementReply.Failure(string, string)"/> makes printable and cuts at <see cref="ManagementProtocol.MaximumMessageCharacters"/> as it does every message, so what a server said cannot reach a client raw.</summary>
    public const string ServerRefused = "server_refused";
 
 
@@ -106,7 +106,7 @@ public static class ManagementErrorCode
 
 
 
-   /// <summary>The server bound the pairing for a different account than the one approved for it. The details are an <see cref="IdentityChangedDetails"/> naming the approved account.</summary>
+   /// <summary>The server bound the pairing for a different account than the one approved for it. The details are an <see cref="IdentityChangedDetails"/> naming the approved account, printable and bounded by the only factory that builds them.</summary>
    public const string IdentityChanged = "identity_changed";
 
 

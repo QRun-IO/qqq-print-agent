@@ -43,7 +43,7 @@ public sealed class ManagementGoldenTests
       string[] found = [.. Directory.GetFiles(GoldenDirectory).Select(path => Path.GetFileName(path)!)];
 
       Assert.Equal(expected.Order(StringComparer.Ordinal), found.Order(StringComparer.Ordinal));
-      Assert.Equal((29 * 2) + 5 + 2, found.Length);
+      Assert.Equal((30 * 2) + 5 + 2, found.Length);
    }
 
 

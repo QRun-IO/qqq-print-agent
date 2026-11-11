@@ -42,6 +42,11 @@ public sealed class ManagementPayload
 
 
 
+   /// <summary>True when the object has no members. An operation that takes no arguments accepts such an object and refuses any other.</summary>
+   public bool IsEmpty() => !_element.EnumerateObject().Any();
+
+
+
    /// <summary>The JSON object, for the serializer. Printing what this returns shows the content; the payload itself never does.</summary>
    public JsonElement ToElement() => _element;
 

@@ -35,9 +35,10 @@ public sealed record PresentedCertificate(IReadOnlyList<string> Refusals, string
 
    /// <summary>
    /// Describes the certificate Core recorded as refused, with the address that presented it and the time the service
-   /// saw the refusal, both of which the service knows and Core's record does not hold. The subject and issuer are
-   /// taken as Core holds them, which is already printable and bounded, because they are text the server chose. The
-   /// reasons are listed in a fixed order.
+   /// saw the refusal. The caller passes the address the rejection itself carries: a session client talks to both the
+   /// server and its sign-in provider, so the address is the one that presented this certificate, never one the caller
+   /// assumes from which server it was working on. The subject and issuer are taken as Core holds them, which is
+   /// already printable and bounded, because they are text the server chose. The reasons are listed in a fixed order.
    /// </summary>
    public static PresentedCertificate From(QqqCertificateRejection rejection, string? origin = null, DateTimeOffset? observedAt = null)
    {
