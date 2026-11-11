@@ -123,12 +123,12 @@ public sealed partial class CompanionSignIn
    /// and complete the sign-in on the session that started it. The registration ends when the exchange does. Until
    /// the page is open, the exchange notes what it is at, so an attempt that ends before any browser was involved can
    /// say that, and why (see <see cref="ReportCallbackTrace"/>). Only the provider's host is logged, never the
-   /// address, its state or the callback. The token is looked at again after
-   /// each wait: once the sign-in was begun, so a browser is not opened for a wait that has already ended, and once
-   /// the callback is there, so the session is not asked to complete for one. That second look is needed because a
-   /// callback that has already arrived is handed over whatever the token says, and a session is not bound to
-   /// refuse: the check is made here and not left to it. Completing takes the same token, so a wait that ends while
-   /// the session completes ends the completion too.
+   /// address, its state or the callback. The token is looked at again after each wait: once the sign-in was begun,
+   /// so a browser is not opened for a wait that has already ended, and once the callback is there, so the session
+   /// is not asked to complete for one. That second look is needed because a callback that has already arrived is
+   /// handed over whatever the token says, and a session is not bound to refuse: the check is made here and not left
+   /// to it. Completing takes the same token, so a wait that ends while the session completes ends the completion
+   /// too.
    /// </summary>
    private async Task ExchangeWithBrowserAsync(ISignInSession session, CancellationToken cancellationToken)
    {
