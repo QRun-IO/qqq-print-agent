@@ -101,26 +101,42 @@ levels, so that a job nested too deep to read can still be identified.
   released capacity starts a new wave. The outcome is reported by the lane that
   is submitting the job or, after a restart, by the runtime's recovery at start
   as OUTCOME_UNKNOWN.
-- **Claimed job that is already in hand.** A job a lane of this computer is
-  working on right now is left to that lane when the server offers it again.
-  The worker asks the runtime whether the job is in hand before it does
-  anything else with the claim: nothing is recorded or reported, the job's
-  title and printer in history are not rewritten, the log says once that the
-  job was offered again while this computer is already working on it, and the
-  lane ends its pass as it does for a job that is submitting.
-- **Printer withdrawn while the job waits.** The assigned printer is checked
-  twice before SUBMITTING is recorded: after the download, and again when the
-  printer's turn is held, because a job can wait a long time behind a print.
-  A printer the operator stopped sharing, a queue that is gone, or a selected
-  media default that changed during either wait is FAILED with its reason,
-  and Windows is never asked. The timing line reports both checks together as
-  `revalidate`.
-- **Printer withdrawn after SUBMITTING.** Sharing can still change in the
-  instant between that check and the call, so the exposure filter in front of
-  the backend checks once more. Its refusal is made before the backend behind
-  it is called and has a type only the filter can raise, so the worker knows
-  nothing was sent: the job is FAILED, not OUTCOME_UNKNOWN, and its reason
-  ends "no bytes were submitted".
+- **Claimed job that is already in hand.** A job a lane of this computer
+  holds is left to that lane when the server offers it again. A lane holds a
+  job from its claim until it lets go, which is after the final state was
+  recorded and delivered, so a job in hand is being worked on or has just
+  finished. The worker asks the runtime whether the job is in hand before it
+  does anything else with the claim: nothing is recorded or reported, the
+  job's title and printer in history are not rewritten, the log says once
+  that the job was offered again while a lane of this computer still holds
+  it, and the lane ends its pass as it does for a job that is submitting.
+- **Printer changed before the download finished.** The assigned printer is
+  discovered again once, after the download and before the job asks for the
+  printer's turn. A printer the operator stopped sharing, a queue that is
+  gone, or a selected media default that changed by then is FAILED with its
+  reason before SUBMITTING is recorded, and Windows is never asked. The
+  timing line reports this one check as `revalidate`.
+- **Printer changed while the job waits for its turn.** A job can wait a
+  long time behind a print. The worker does not discover the printers again
+  when the turn is held: that would start the print helper once more for
+  every job, while the job holds the printer's turn and a print slot, and
+  would add a second wait on a slow driver of an unrelated queue. What
+  changed during the wait is settled after SUBMITTING is recorded, by
+  whoever can tell whether anything was sent:
+  - *No longer shared.* The exposure filter in front of the backend checks
+    sharing at the moment of submission. Its refusal is made before the
+    backend behind it is called and has a type only the filter can raise, so
+    the worker knows nothing was sent: the job is FAILED, not
+    OUTCOME_UNKNOWN, and its reason ends "no bytes were submitted".
+  - *Media default changed.* The print helper reads the queue's default
+    again before it starts the document and refuses a mismatch with its own
+    error code. The job is FAILED.
+  - *Queue removed from Windows.* The print helper finds no queue before it
+    sends anything, but reports that as an ordinary failure, which the worker
+    cannot tell from one that happened part-way. The job is OUTCOME_UNKNOWN
+    and needs an operator's review, although nothing was printed. An error
+    code for a missing queue would let the worker record FAILED; it is not
+    implemented.
 - **Between SUBMITTING and Windows.** If delivery of the SUBMITTING receipt
   cannot be confirmed, or the worker is stopped after it was acknowledged and
   before the native call, Windows is never asked. The job is FAILED and its

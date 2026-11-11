@@ -2,18 +2,20 @@
 
 ## Unreleased
 
-Two cases the print worker now settles before Windows is asked (2.0).
+Two cases the print worker now settles with a known outcome (2.0).
 
 - A printer that stops being shared while jobs wait behind a print no longer leaves those jobs with an unknown
-  outcome. The worker checks the printer again when the job's turn comes, before SUBMITTING is recorded: a printer
-  that is no longer shared, a queue that is gone, or a selected media default that changed during the wait is
-  FAILED with its reason, and nothing is sent to Windows. If sharing changes in the instant after that check, the
-  job is still FAILED, with a reason ending "no bytes were submitted", because the refusal is known to come before
-  anything is sent. Each job costs one more printer discovery, and the log's timing line counts both checks under
-  `revalidate`.
-- A job the server offers again while this computer is still working on it is left to the lane that holds it. The
-  log says so in plain words, nothing is recorded for the replay, and the lane ends its pass. Before, the replay was
-  stopped only by an internal duplicate check that logged "An item with the same key has already been added".
+  outcome. The filter that checks sharing at the moment of submission refuses before anything is handed to Windows,
+  and its refusal now has a type of its own, so the worker records the job as FAILED with a reason ending "no bytes
+  were submitted" where it used to record OUTCOME_UNKNOWN. History shows RECEIVED, SUBMITTING, FAILED. The printer
+  is still discovered once per job after the download, as before, and not a second time while the job holds the
+  printer's turn. A selected media default that changed during the wait is refused by the print helper before it
+  prints and is FAILED, as before. A queue that was removed from Windows during the wait is still
+  OUTCOME_UNKNOWN: the print helper finds it missing before it sends anything but cannot yet say so in a form the
+  worker can rely on.
+- A job the server offers again while a lane of this computer still holds it is left to that lane. The log says so
+  in plain words, nothing is recorded for the replay, and the lane ends its pass. Before, the replay was stopped
+  only by an internal duplicate check that logged "An item with the same key has already been added".
 
 Branded Start menu shortcut (2.0). The installer step that creates, renames and removes the shortcut under
 **Start → Print Connectors** now records, by name, every shortcut it has put there and may still own, and a file
