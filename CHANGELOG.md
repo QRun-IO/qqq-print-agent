@@ -9,7 +9,9 @@ whole sign-in address, with that attempt's state, nonce and code challenge. When
 for the identity provider's sign-out, the log entry named the provider's sign-out address the same way, with its ID
 token hint. Both now say only that the default browser could not be opened, with the Windows error number, and what
 to check: that a default browser is set in Windows Settings under Apps, Default apps. Sign-in and sign-out are
-otherwise unchanged. Every release up to 1.2.1 has the sign-in case; the sign-out case was never in a release
+otherwise unchanged. Every release from 0.2.0-rc.1 to 1.2.1 has the sign-in case (0.1.x has no browser sign-in). The
+sign-out case is in no release. Both cases are in the development snapshot `snapshot-2.0.0-rc.1`, which was not
+installed anywhere, and on the unreleased `release/1.2.2` branch; 2.0 builds after that snapshot have neither
 ([audit](docs/AUDIT-2026-11-10.md), U22).
 
 An unexpected failure of the browser callback inbox no longer leaves the connection dialog's browser sign-in as an
