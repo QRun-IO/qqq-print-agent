@@ -47,7 +47,7 @@ Retention is one pass run by the host, not by each store:
 
 Printer sharing and printer profiles get new tables keyed by `server_id` (`server_printers`, `server_printer_profiles`). The old machine-wide tables are not reused under a new meaning: an older build that somehow ran against this directory would otherwise read every server's sharing as its own.
 
-The schema carries a version (`PRAGMA user_version`) and is migrated once, when the service starts, in a transaction. Opening a store no longer creates or alters tables. A service that finds a version newer than it knows does not start its connections and does not touch the state. It keeps serving the pipe: the snapshot says that a newer build wrote this state and that the newer build must be reinstalled; the snapshot, the log operations and the update operations work, so that it can be; and every other operation, `servers.add` included, is answered `state_newer`. It never migrates down. This matters between release candidates, because the installer allows any build with the same numeric version to replace another (`AllowSameVersionUpgrades`), so an older candidate can be installed over a newer one.
+The schema carries a version (`PRAGMA user_version`) and is migrated once, when the service starts, in a transaction. Opening a store no longer creates or alters tables. A service that finds a version newer than it knows does not start its connections and does not touch the state. It keeps serving the pipe: the snapshot says that a newer build wrote this state and that the newer build must be reinstalled; the snapshot, the transport read (with an empty list), the log operations and the update operations work, so that it can be; and every other operation, `servers.add` included, is answered `state_newer`. It never migrates down. This matters between release candidates, because the installer allows any build with the same numeric version to replace another (`AllowSameVersionUpgrades`), so an older candidate can be installed over a newer one.
 
 ### Upgrade from 1.x
 
@@ -66,7 +66,7 @@ Every move ends, so step 4 cannot hold the service forever:
 | Absent | Present | Already done; row deleted. |
 | Present | Present | Something other than the upgrade wrote the destination. The destination is kept, the source is moved beside it under a recovery name, the row is deleted and the event is logged. |
 | Absent | Absent | The file is gone. The row is deleted and logged; the server then simply lacks that file, and shows as needing a sign-in or a new pairing. |
-| A move fails (in use, access denied) | | Tried three times in that start. Then the service starts without connections and the snapshot reports the upgrade as incomplete and names the file. As with a newer schema, the snapshot, the log operations and the update operations work, and every other operation is answered `migration_incomplete`. The next start tries again. |
+| A move fails (in use, access denied) | | Tried three times in that start. Then the service starts without connections and the snapshot reports the upgrade as incomplete and names the file. As with a newer schema, the snapshot, the transport read (with an empty list), the log operations and the update operations work, and every other operation is answered `migration_incomplete`. The next start tries again. |
 
 The service is first started by the installer before the installation commits. If the installer then rolls back, 1.x is left on state that 2.0 has already moved, and shows no pairing. This is accepted: nothing has been deleted, reinstalling 2.0 picks up where it stopped, and keeping a second copy of the secrets in the root to cover it would leave credentials behind that nothing maintains. It is read from the installer's authoring and is checked during upgrade qualification.
 
@@ -111,17 +111,17 @@ Requests and replies are JSON objects on the existing framing.
 | Code | Meaning |
 | --- | --- |
 | `unsupported_version` | The service does not speak this `v`. |
-| `unknown_operation`, `invalid_request` | The operation does not exist, or its arguments are missing or malformed. A test print in a format the printer does not offer is `invalid_request`. |
+| `unknown_operation`, `invalid_request` | The operation does not exist, or its arguments are missing or malformed. A test print in a format the printer does not offer is `invalid_request`, and so are arguments given to an operation that takes none (an empty `args` object says the same as leaving it out and is accepted). |
 | `server_not_found`, `server_ambiguous` | No server has this identifier; or (command line only) a name matches more than one. |
 | `server_limit`, `server_exists` | Eight servers already exist; or this origin is already a server. |
-| `server_removing` | The operation names a server that is being removed. Reads still answer for it; every change is refused with this code. |
+| `server_removing` | The operation names a server that is being removed. Reads still answer for it, and a repeated `servers.remove` succeeds with `removing` again, so a client that retried after a timeout is told what is true. Every other change to that server is refused with this code. |
 | `busy` | Another operation that changes this server's session or pairing is running. |
 | `not_signed_in`, `not_paired` | The operation needs a session, or a pairing, that this server does not have. |
 | `not_connected` | This server's connection is not ready for the action: its administrator disconnected this device, or the connection is still waiting for authorization or for the control state to be agreed. |
 | `server_incompatible`, `certificate_untrusted` | The compatibility check failed; `details` carries its stages and, for the second, a description of the certificate that was presented. |
 | `server_unreachable` | The QQQ server could not be reached or did not answer in time (`session.signIn`, `servers.add`, `pairing.enroll` before the code is sent, `printers.testPrint`, `jobs.retry`, `jobs.cancel`). |
-| `server_refused` | The QQQ server refused the action; `message` carries its reason in the printable, bounded form Core produces. |
-| `sign_in_refused`, `bind_refused`, `identity_changed` | The server refused the session; refused to bind the pairing; or bound it for a different account than the approved one, in which case `details` names the approved principal and tenant, printable and bounded. |
+| `server_refused` | The QQQ server refused the action; `message` carries its reason. The wire enforces the form of that text, here and for every other code: before a message is sent, each control, format, line-separator, paragraph-separator, private-use and unassigned character in it becomes a space, and it is cut at 512 UTF-16 units, never inside a surrogate pair. It is the one definition Core uses for text a server supplied. |
+| `sign_in_refused`, `bind_refused`, `identity_changed` | The server refused the session; refused to bind the pairing; or bound it for a different account than the approved one, in which case `details` names the approved principal and tenant. The only way to build those details puts each value through the same definition, cut at 200. |
 | `enrollment_refused`, `enrollment_unconfirmed` | The server refused the code; or the outcome is not known and `details` says what was left behind. |
 | `printer_not_found`, `job_not_found`, `job_not_current` | No such printer or job for this server (a test print on a printer that is not shared with that server is `printer_not_found`); or the job belongs to an earlier pairing and is history. |
 | `duplicate_risk_unconfirmed` | A retry could print twice and the request did not confirm that. |
@@ -145,11 +145,11 @@ Access, as the code has it:
 
 The snapshot is one aggregated document, so the companion asks once for everything instead of once per server and per view:
 
-- Once: the computer's printers, service state, update state, log settings, and the state of the stored data (ready, upgrade incomplete with the file it stopped at, or written by a newer build).
+- Once: the computer's printers and when they were discovered (`printersDiscoveredAt`, absent before the first discovery, so an empty list before then is told from a computer with no printers), service state, update state, log settings, and the state of the stored data (ready, upgrade incomplete with the file it stopped at, or written by a newer build).
 - Per server: identifier, name, address, position; health and its status text; the attention count that drives health; authentication (signed in, as whom, authorization blocked and why); paired flag and device identifier; transport state and the realtime meter; when the server last answered this computer (`lastContact`; the control state has its own, which is the control channel's alone); control state (desired state, last command); shared printers with each one's server-side approval; whether the certificate exception is on and the two origins it covers; and whether stored state is unreadable.
 - Jobs stay paged and are queried per server.
-- The snapshot never starts printer discovery, and never contacts a server. It reports the printers the host last discovered; the host refreshes that list on its own schedule. A snapshot is therefore always cheap, whatever a printer driver is doing.
-- While the stored data is not ready, the list of servers is empty and the computer's part says why.
+- The snapshot never starts printer discovery, and never contacts a server. It reports the printers the host last discovered. The host refreshes that list at least every 60 seconds and whenever a server connection synchronizes its printers, so a snapshot's list is at most that old. A snapshot is therefore always cheap, whatever a printer driver is doing. A client that needs a fresh list asks `printers.discover`, which runs a discovery now and returns the computer's printers with the time; the wizard's printer step and the command line's `printers` use it.
+- While the stored data is not ready, the list of servers is empty and the computer's part says why. `transport.get` still answers in that state, with an empty list: the companion repeats it every second, and an error every second would be noise beside the snapshot that already says why.
 
 The companion keeps polling the snapshot, every five seconds as today. Between snapshots it draws the traffic meter from `transport.get`, a light read it repeats every second as it does in 1.x: for each server its identifier, its transport state with the meter, and `lastContact`, and nothing else. A change notification pushed by the service is not part of 2.0: one aggregated request already removes the cost that made polling a problem, and a push channel is a second protocol to secure and test.
 
@@ -161,7 +161,7 @@ Clients older than the service:
 
 Operations:
 
-- On the computer or the list of servers (no `server`): `snapshot`, `transport.get`, `servers.list`, `servers.check`, `servers.add`, `servers.reorder` (the identifiers in their new order, in `args`), `computer.getProfile`, `computer.setProfile`, `logs.getSettings`, `logs.setSettings`, `logs.clear`, `update.prepare`, `update.resume`.
+- On the computer or the list of servers (no `server`): `snapshot`, `transport.get`, `servers.list`, `servers.check`, `servers.add`, `servers.reorder` (the identifiers in their new order, in `args`), `computer.getProfile`, `computer.setProfile`, `printers.discover`, `logs.getSettings`, `logs.setSettings`, `logs.clear`, `update.prepare`, `update.resume`. `printers.discover` is a read with the ordinary 30-second limit; it does not answer while the stored data is not ready.
 - On one server (`server` required): `servers.rename`, `servers.remove`, `session.signIn`, `session.signOut`, `pairing.enroll`, `connection.reconnect`, `trust.get`, `trust.set`, `printers.share`, `printers.setProfile`, `printers.testPrint`, `jobs.query`, `jobs.details`, `jobs.retry`, `jobs.cancel`, `jobs.acknowledge`.
 
 When a server comes to exist:
@@ -236,12 +236,16 @@ The contract was built as types and reviewed on 2026-11-10 before anything serve
 - **Unreadable state.** `state_unreadable` names the file in its message and has no details.
 - **The remembered certificate.** `trust.get` returns the certificate from the last refusal the service remembers, with the address that presented it and when, and never probes.
 - **Last contact and the traffic meter.** Each server's snapshot has a `lastContact`, and `transport.get` is the light read for the meter, so the companion keeps its one-second meter without asking for the whole snapshot each second.
-- **A snapshot is always cheap.** It reports the printers the host last discovered and never starts a discovery.
+- **A snapshot is always cheap.** It reports the printers the host last discovered, with the time, and never starts a discovery. The host keeps that list at most 60 seconds old, and `printers.discover` is how a client asks for a fresh one.
 - **Repeated members.** A request or a reply in which any object has the same member twice is refused whole, in the envelope and at any depth beneath it, because two readers can disagree about which value counts.
-- **Arguments that are left out.** A request without `args` is read as one with empty arguments, so it is valid exactly when every argument of the operation is optional. `update.prepare` and `update.resume` take none today; if either ever gains arguments, a request without them stays accepted, because the update helper is always one version behind.
-- **What a reply must contain.** A reply that lacks a member its type requires, or has a null inside a list, is an unreadable reply and not a record with a hole in it; a member the reader does not know is still skipped. A vocabulary value the reader does not know (a health, a stage, an outcome) is treated as unknown, never as a failure to read.
+- **Arguments that are left out.** A request without `args` is read as one with empty arguments, so it is valid exactly when every argument of the operation is optional. `update.prepare` and `update.resume` take none today; if either ever gains arguments, a request without them stays accepted, because the update helper is always one version behind. Arguments given to an operation that takes none are refused; an empty object is accepted.
+- **What a reply must contain.** A reply that lacks a member its type requires, or has a null inside a list its type knows, is an unreadable reply and not a record with a hole in it; a member the reader does not know is still skipped, whatever it holds. A vocabulary value the reader does not know (a health, a stage, an outcome) is treated as unknown, never as a failure to read.
 - **Dates.** A date on the wire is ISO 8601 with a trailing `Z` or an offset, and nothing else is read. The times inside the reused job, printer-catalog and control records are carried as the text the service stored; they are not converted.
 - **The version of a reply.** A reply carries the version of the request it answers.
+- **Text a server supplied.** An error's message and the approved account in the details of `identity_changed` can repeat what a server said. Both are made printable and cut by one definition, which Core owns and the contract calls, when the reply is built: 512 UTF-16 units for any message, 200 for each identity value. It is enforced where the reply is made, not asked of whoever writes a handler.
+- **A server that is being removed.** Reads answer; a repeated `servers.remove` succeeds with `removing` again; every other change is refused with `server_removing`.
+- **The traffic meter while the stored data is not ready.** `transport.get` answers with an empty list instead of an error.
+- **One way to read an envelope.** A request or a reply is read only by the contract's two parsing functions, which make the envelope checks. The envelope types refuse to be read by the serializer directly, so those checks cannot be walked around.
 
 ## Decisions taken while working, per the owner's direction
 
