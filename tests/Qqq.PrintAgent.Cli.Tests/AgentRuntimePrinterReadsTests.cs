@@ -69,7 +69,7 @@ public sealed class AgentRuntimePrinterReadsTests
       await using RealtimeRuntimeFixture fixture = new();
       ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       _ = await fixture.PipeAsync(new PipeRequest("set-printer-profile", PrinterId: "printer", PrinterProfile: new PrinterProfile("Dispatch labels")));
-      await fixture.WaitAsync(() => fixture.Count("INVENTORY") >= 2 && fixture.LastClaimWasEmpty);
+      await fixture.WaitAsync(() => InventoryNamesAPrinter(fixture, "Dispatch labels") && fixture.LastClaimWasEmpty);
       int inventories = fixture.Count("INVENTORY");
       fixture.Printer.DiscoveryFailure = () => new TimeoutException(Unreadable);
       int failedFrom = fixture.Printer.Discoveries;
@@ -492,6 +492,18 @@ public sealed class AgentRuntimePrinterReadsTests
       rename.CommandText = outOfReach ? "ALTER TABLE exposed_printers RENAME TO exposed_printers_out_of_reach" : "ALTER TABLE exposed_printers_out_of_reach RENAME TO exposed_printers";
       _ = rename.ExecuteNonQuery();
    }
+
+
+
+   /// <summary>
+   /// True when the server has received an inventory in which a printer carries this name from the operator. A test
+   /// that names a printer after connecting waits for this and not for a number of inventories: the name is saved
+   /// while the connection's first inventory is being read, so that first inventory may already carry it, and then no
+   /// second one follows.
+   /// </summary>
+   private static bool InventoryNamesAPrinter(RealtimeRuntimeFixture fixture, string displayName)
+      => fixture.Messages.Any(message => message.Type is "INVENTORY" && message.Payload.GetProperty("printers").EnumerateArray()
+         .Any(printer => printer.TryGetProperty("displayName", out JsonElement name) && name.ValueKind is JsonValueKind.String && string.Equals(name.GetString(), displayName, StringComparison.Ordinal)));
 
 
 
