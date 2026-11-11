@@ -96,7 +96,7 @@ public sealed class AgentPipePeerTests
    {
       using SafePipeHandle closed = new(IntPtr.Zero, ownsHandle: false);
 
-      UnauthorizedAccessException refusal = Assert.Throws<UnauthorizedAccessException>(() => AgentPipePeer.Authenticate(closed));
+      UnauthorizedAccessException refusal = Assert.Throws<UnauthorizedAccessException>(() => AgentPipePeer.Installed.Authenticate(closed));
 
       Assert.Equal(ServiceStopped, refusal.Message);
       Assert.NotNull(refusal.InnerException);

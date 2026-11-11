@@ -34,14 +34,16 @@ public sealed class MsiUpdateInstallerTests
 
    /// <summary>
    /// An install request is honored only for an eligible target version (0.1.2-rc.1 is refused, 0.1.3-rc.1 accepted), an .msi
-   /// file inside the staging directory, a well-formed 64-character hash and a real parent process id. The last two are also
-   /// broken independently of the first two, so a valid request cannot mask a missing hash or process check.
+   /// file directly inside the staging directory (neither outside it nor in a folder below it), a well-formed 64-character
+   /// hash and a real parent process id. The last two are also broken independently of the first two, so a valid request
+   /// cannot mask a missing hash or process check.
    /// </summary>
    [Theory]
    [InlineData("0.1.2-rc.1", "package.msi", false)]
    [InlineData("0.1.3-rc.1", "package.msi", true)]
    [InlineData("0.1.3", "package.exe", false)]
    [InlineData("0.1.3", "../other/package.msi", false)]
+   [InlineData("0.1.3", "sub/package.msi", false)]
    public void RequestRequiresEligibleVersionAndSameDirectoryPackage(string version, string filename, bool valid)
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-update-request");

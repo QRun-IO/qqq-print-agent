@@ -12,7 +12,9 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// Folder ownership and access lists as a test describes them. A folder has the descriptor the test gave it, or a trusted
 /// one when the test said nothing; a folder the rules create is made as an ordinary folder on disk and remembered with the
-/// descriptor the rules asked for, so a test can check that descriptor. Nothing is read from Windows.
+/// descriptor the rules asked for, so a test can check that descriptor. A folder or file that does not exist cannot be
+/// read, as with the real one. No owner or access list is read from Windows; the disk is asked only whether the folder
+/// or file is there.
 /// </summary>
 internal sealed class FakePathSecurity : IPathSecurity
 {
@@ -38,6 +40,11 @@ internal sealed class FakePathSecurity : IPathSecurity
 
    /// <summary>Descriptors the test set for particular folders or files.</summary>
    internal Dictionary<string, FileSystemSecurity> Descriptors { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+
+
+   /// <summary>Asked for the descriptor of a folder or file the test did not list, for a path whose name a test cannot know in advance; no function, or null from it, means a trusted one.</summary>
+   internal Func<string, FileSystemSecurity?>? Unlisted { get; set; }
 
 
 
@@ -70,11 +77,13 @@ internal sealed class FakePathSecurity : IPathSecurity
 
 
 
-   /// <summary>Returns the descriptor the test set for the folder, or a trusted one.</summary>
+   /// <summary>Returns the descriptor the test set for the folder, or a trusted one; a folder that does not exist cannot be read, as on a real disk.</summary>
    public FileSystemSecurity ReadDirectorySecurity(string directory)
    {
       Reads.Add(directory);
-      return Descriptors.TryGetValue(directory, out FileSystemSecurity? descriptor) ? descriptor : Descriptor();
+      if(!Directory.Exists(directory))
+      { throw new DirectoryNotFoundException("Synthetic: no such folder to read a security descriptor from: " + directory); }
+      return Descriptors.TryGetValue(directory, out FileSystemSecurity? descriptor) ? descriptor : Unlisted?.Invoke(directory) ?? Descriptor();
    }
 
 
@@ -85,7 +94,7 @@ internal sealed class FakePathSecurity : IPathSecurity
       Reads.Add(file);
       if(!File.Exists(file))
       { throw new FileNotFoundException("Synthetic: no such file to read a security descriptor from.", file); }
-      return Descriptors.TryGetValue(file, out FileSystemSecurity? descriptor) ? descriptor : Descriptor();
+      return Descriptors.TryGetValue(file, out FileSystemSecurity? descriptor) ? descriptor : Unlisted?.Invoke(file) ?? Descriptor();
    }
 
 

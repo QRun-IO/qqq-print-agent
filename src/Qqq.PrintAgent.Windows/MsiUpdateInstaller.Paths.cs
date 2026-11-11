@@ -9,71 +9,13 @@ using System.Security.Principal;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// Path and permission checks of the updater. The staged files later run with administrator rights, so each path must stay
-/// inside the protected folders, contain no link or junction, and be owned and writable only by trusted accounts. Every
-/// failure throws; nothing is repaired automatically.
+/// Path and permission rules of the updater that are decided from what they are handed: whether a path stays inside a
+/// folder, whether anything on the way to it is a link, and whether an owner and access list can be trusted. The checks
+/// that apply them to the staging folder and the install folder are in <see cref="MsiUpdateSteps"/>. Every failure
+/// throws; nothing is repaired automatically.
 /// </summary>
 public static partial class MsiUpdateInstaller
 {
-   /// <summary>Requires installed protected state; permits a not-yet-created staging child.</summary>
-   public static void ValidateStagingDirectory(string path)
-   {
-      RequireAdministrator();
-      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(path);
-      string directory = Path.GetFullPath(path);
-      ValidateContainedPath(directory, UpdatesDirectory, allowRoot: true);
-      if(!Directory.Exists(AgentStore.DefaultDirectory))
-      {
-         throw new InvalidOperationException("Install the machine MSI before staging updates.");
-      }
-      ValidateNoReparseComponents(directory);
-      string? current = directory;
-      while(current is not null && IsContained(current, AgentStore.DefaultDirectory))
-      {
-         if(File.Exists(current))
-         {
-            throw new IOException("An update directory path points to a file.");
-         }
-         if(Directory.Exists(current))
-         {
-            ValidateTrustedAcl(new DirectoryInfo(current).GetAccessControl());
-         }
-         current = Path.GetDirectoryName(current);
-      }
-   }
-
-
-
-   /// <summary>Requires a staged file to sit in a validated staging folder, be free of links, exist, and have a trusted access list.</summary>
-   private static void ValidateStagedFile(string path)
-   {
-      ValidateStagingDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-      ValidateNoReparseComponents(path);
-      if(!File.Exists(path))
-      {
-         throw new FileNotFoundException("A required staged update file is missing.");
-      }
-      ValidateTrustedAcl(new FileInfo(path).GetAccessControl());
-   }
-
-
-
-   /// <summary>Requires an installed program path to be inside Program Files, free of links, and trusted at every level up to Program Files, so a user-writable folder cannot supply the program that is run.</summary>
-   private static void ValidateInstalledPath(string path)
-   {
-      ValidateNoReparseComponents(path);
-      string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-      string? current = Path.GetFullPath(path);
-      ValidateContainedPath(current, programFiles, allowRoot: false);
-      while(current is not null && IsContained(current, programFiles))
-      {
-         ValidateTrustedAcl(Directory.Exists(current) ? new DirectoryInfo(current).GetAccessControl() : new FileInfo(current).GetAccessControl());
-         current = Path.GetDirectoryName(current);
-      }
-   }
-
-
-
    /// <summary>Requires a path to lie inside a root after full normalization, and optionally not be the root itself, so ".." segments or a different drive cannot escape the protected folder.</summary>
    internal static void ValidateContainedPath(string path, string root, bool allowRoot)
    {
@@ -88,7 +30,7 @@ public static partial class MsiUpdateInstaller
 
 
    /// <summary>True when a path is the root or below it, compared on whole path segments so a sibling folder that merely shares the root's name as a prefix does not count.</summary>
-   private static bool IsContained(string path, string root)
+   internal static bool IsContained(string path, string root)
    {
       string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
       string boundary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
@@ -110,27 +52,6 @@ public static partial class MsiUpdateInstaller
          }
          current = Path.GetDirectoryName(current);
       }
-   }
-
-
-
-   /// <summary>Refuses to continue unless the caller is an elevated administrator, and says no installer was started so the operator knows nothing changed.</summary>
-   private static void RequireAdministrator()
-   {
-      using var identity = WindowsIdentity.GetCurrent();
-      if(!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
-      {
-         throw new UnauthorizedAccessException("Machine updates require an elevated administrator. No installer was started.");
-      }
-   }
-
-
-
-   /// <summary>Checks a path's security against trusted accounts, treating the current administrator as one of them.</summary>
-   private static void ValidateTrustedAcl(FileSystemSecurity security)
-   {
-      using var identity = WindowsIdentity.GetCurrent();
-      ValidateTrustedAcl(security, identity.User?.Value);
    }
 
 
