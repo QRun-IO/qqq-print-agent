@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+Sign-in in the companion, rebuilt for several servers (2.0; not used by the window yet). Three types were added to
+the presentation assembly for the connection wizard and the per-server Connection page of
+[ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md). Nothing the operator sees changes in this build: the
+connection dialog still runs on the existing flow, which is untouched.
+
+- `CompanionSignIn` is the part of signing in that needs a session and runs as the signed-in Windows user. It reads
+  the server's sign-in description, signs in by password or through the browser, and returns the session credential
+  to its caller. It hands nothing to the service, enrolls nothing and keeps no certificate setting: the exception to
+  read under is given with each read. It offers only the methods that the service's check and its own read both
+  found, and logs a difference. It stops when the description names another sign-in provider than the check
+  reported. When this Windows account refuses a certificate the service accepted, or the sign-in provider's
+  certificate, it says which of the two it was and keeps the refused certificate for the wizard to show. A cancelled
+  or timed-out browser sign-in keeps its session, so the next attempt needs no new read.
+- `BrowserCallbackDispatcher` owns the one browser callback inbox. A sign-in or a provider sign-out registers the
+  OAuth state it sent and waits for the callback that carries it, so two servers can be signing in at once. A
+  callback that carries no state, more than one, or a state nobody waits for is dropped, and the log says only that
+  one was dropped. An inbox is open exactly while something waits. When the inbox fails, everything that waits fails
+  once and the next registration opens a new inbox.
+- `ProviderSignOut` is the identity provider's half of a sign-out: it opens the provider's sign-out page and waits
+  up to two minutes for the browser to return with that sign-out's own state.
+- When Windows cannot start the browser, its failure text names what it could not start, which is the whole sign-in
+  or sign-out address. The new types report only the kind of failure, so no state and no token hint can reach the
+  log or the screen that way.
+- The sign-in session seen by the presentation assembly (`ISignInSession`) now also gives the certificate it refused
+  last and the origin that presented it.
+- The presentation log (`IPresentationLog`) can be written to with a message template and its values, which the new
+  types use for every entry. A host that implements only the four text methods, as the companion does, gets the
+  finished text.
+
 In-app update, service controls and the pipe's identity check (2.0). The installed product behaves as before. This
 change does not alter the Windows Installer command line, the files, owners and access lists that are checked or
 the order they are checked in, what an installer exit code means, the calls made to the service control manager,

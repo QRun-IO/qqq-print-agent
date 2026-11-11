@@ -41,4 +41,14 @@ public interface ISignInSession : IDisposable
 
    /// <summary>Returns the session credential, the only secret handed to the service; it fails when no sign-in completed.</summary>
    QqqSessionCredential ExportCredential();
+
+
+
+   /// <summary>
+   /// The certificate this session refused most recently, with the origin that presented it, or null when it has
+   /// refused none. The session runs as the signed-in Windows user, whose certificate store can differ from the
+   /// service's, and it talks to its server and to the sign-in provider that server names, so this is how a caller
+   /// learns that a step failed over a certificate and which of the two presented it. It is public certificate data.
+   /// </summary>
+   QqqCertificateRejection? LastCertificateRejection { get; }
 }
