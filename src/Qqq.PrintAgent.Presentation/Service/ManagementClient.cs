@@ -19,10 +19,17 @@ namespace Qqq.PrintAgent.Presentation.Service;
 /// record. No request, reply or payload passes through its methods in either direction, so nothing above it spells an
 /// operation's name, builds arguments or reads a reply.
 /// <para>
-/// It never throws for what a pipe can do. A refusal carries the contract's code; a reply that cannot be used says
-/// whether an older or a newer service sent it or whether it was simply unreadable; a pipe failure says its cause and,
-/// separately, whether the request had left; and a wait the caller ended is a result of its own. Anything else is a
-/// programming error and is left to propagate.
+/// It never throws for what a pipe can do, as long as the send function keeps the contract the constructor states
+/// for it. A refusal carries the contract's code; a reply that cannot be used says whether an older or a newer
+/// service sent it or whether it was simply unreadable; a pipe failure says its cause and, separately, whether the
+/// request had left; and a wait the caller ended is a result of its own. Anything else is a programming error and is
+/// left to propagate.
+/// </para>
+/// <para>
+/// A result says whether the operation may have been carried out (<see cref="ServiceResult{T}.Unconfirmed"/>), and
+/// the client answers "it may have been" whenever it cannot know. A reply that is not in this version of the pipe is
+/// one of those cases for every operation the contract's table does not call a read: the shape of a reply names the
+/// side to update, and it is not proof that nothing was done.
 /// </para>
 /// <para>
 /// It holds itself to <see cref="MaximumRequestsInFlight"/> requests at once, and sends the two reads that are
@@ -30,9 +37,16 @@ namespace Qqq.PrintAgent.Presentation.Service;
 /// answer.
 /// </para>
 /// <para>
+/// A result carries the service's text as it arrived (a name, a status, a job's title), and the view models that
+/// show it give it its printable form; only a refusal's message is already printable, because the contract makes it
+/// so when the reply is read.
+/// </para>
+/// <para>
 /// Nothing it writes to the log comes from a request's arguments or from a reply's content. An entry names the
-/// operation, the server's identifier, the kind of failure and, for a failure of the pipe itself, the pipe's own
-/// description of it. A password never reaches this class; a session credential, an enrollment code and the
+/// operation, the server's identifier, the kind of failure and, for a failure of the pipe itself, the exception's
+/// own description of it (its type names and messages), followed at debug level by the exception's full text with
+/// its stack. That is safe only because the send function's contract forbids request and reply text in an
+/// exception's message. A password never reaches this class; a session credential, an enrollment code and the
 /// provider's sign-out request pass through it once, as an argument or as a result, and are not kept.
 /// </para>
 /// </summary>
@@ -54,6 +68,26 @@ public sealed partial class ManagementClient
 
 
 
+   /// <summary>What a result says of a read that a service older than this companion answered. A read changes nothing, so there is nothing to check.</summary>
+   private const string OlderServiceReason = "The service is older than this companion and does not know its requests. Update the service.";
+
+
+
+   /// <summary>What a result says of a request that is not a read and was answered as an older service answers. It names the side to update and does not say that the request was not known: the reply's form does not prove that.</summary>
+   private const string OlderServiceUnconfirmedReason = "The service answered as one that is older than this companion does. Update the service. The operation may have been carried out: check before repeating it.";
+
+
+
+   /// <summary>What a result says of a read that a service newer than this companion answered. A read changes nothing, so there is nothing to check.</summary>
+   private const string NewerServiceReason = "The service is newer than this companion, which cannot read its replies. Update the companion.";
+
+
+
+   /// <summary>What a result says of a request that is not a read and was answered in a newer version of the pipe.</summary>
+   private const string NewerServiceUnconfirmedReason = NewerServiceReason + " The operation may have been carried out: check before repeating it.";
+
+
+
    /// <summary>What a result says when the client did not send a request because the service would refuse a value in it. It is fixed, so it never repeats the value.</summary>
    private const string RefusedBeforeSendingReason = "The request was not sent: one of its values is not one the service accepts.";
 
@@ -69,7 +103,7 @@ public sealed partial class ManagementClient
 
 
 
-   /// <summary>Sends one request over the pipe and returns the parsed reply.</summary>
+   /// <summary>Sends one request over the pipe and returns the parsed reply. What it must and must not do is the contract the constructor states.</summary>
    private readonly Func<ManagementRequest, Task<ManagementReplyParse>> _send;
 
 
@@ -105,11 +139,21 @@ public sealed partial class ManagementClient
 
 
    /// <summary>
-   /// Wraps the pipe's send function. The function writes the request, verifies the service, waits the operation's
-   /// time limit and returns the reply as <see cref="ManagementJson.ParseReply"/> read it; it throws
-   /// <see cref="AgentPipeNotSentException"/> when nothing left this process. The log receives every failure that is
-   /// turned into a result. The client is given no server's name or identifier: each method that acts on a server
-   /// takes its identifier.
+   /// Wraps the pipe's send function. The log receives every failure that is turned into a result. The client is
+   /// given no server's name or identifier: each method that acts on a server takes its identifier.
+   /// <para>
+   /// The send function's contract. It writes the request (<see cref="ManagementJson.Write(ManagementRequest)"/>),
+   /// verifies the service, waits the operation's time limit (<see cref="ManagementOperationInfo.ClientTimeLimit"/>)
+   /// and returns the reply as <see cref="ManagementJson.ParseReply"/> read it, whatever the reply was: text that
+   /// cannot be read is a result of that function and never an exception. What the function throws, or fails its
+   /// task with, says what is known about the request:
+   /// </para>
+   /// <list type="bullet">
+   /// <item>Certainly not sent: <see cref="AgentPipeNotSentException"/>, and nothing else. It wraps the cause, and it is thrown only while no byte of the request has left this process (the connect limit, a pipe that could not be opened, a service that was not verified, a request over the size limit).</item>
+   /// <item>Outcome unknown: <see cref="IOException"/> (which includes <see cref="InvalidDataException"/>, a reply over the size limit), <see cref="OperationCanceledException"/> and <see cref="TimeoutException"/> (a time limit), <see cref="ObjectDisposedException"/> (a pipe closed under the call), <see cref="UnauthorizedAccessException"/> and <see cref="Win32Exception"/>, each thrown as itself. The client reports every one of them as a request that may have been carried out, whatever its type: a type does not prove when a failure happened.</item>
+   /// <item>Nothing else, for anything a pipe can do. An exception of any other type is taken for a programming error and leaves the client as an exception, also when it is wrapped as "not sent".</item>
+   /// <item>No exception's message, and no inner exception's, may contain text of the request or of the reply. The client writes an exception's description to the log, at debug level with its stack, and puts its messages in the result an operator is shown; a request can hold a session credential or an enrollment code, and a reply the provider's sign-out request.</item>
+   /// </list>
    /// </summary>
    public ManagementClient(Func<ManagementRequest, Task<ManagementReplyParse>> send, IPresentationLog log)
    {
@@ -329,29 +373,34 @@ public sealed partial class ManagementClient
 
 
    /// <summary>
-   /// The result for a reply whose envelope could not be read. Text that is not JSON, or JSON without a version, is
-   /// what a version 1 service answers; another version is what a newer service answers. Neither service speaks this
-   /// version, so neither carried the request out, and the result says which side to update and is not unconfirmed.
-   /// For the older service that is read from its handler and has not been run against one: the version 1 runtime
-   /// reads a request by its <c>operation</c> member, a version 2 request has none, and a request without one is
-   /// answered with an error before anything is done. For the newer service it is the contract's own rule: the only
-   /// reply a service gives in another version than it was asked in is its refusal of the version. Every other
-   /// problem is an answer that arrived and could not be read, after which the service may have acted. The entry
-   /// names the problem and never the reply, which this client is never given as text.
+   /// The result for a reply whose envelope could not be read. Text that is not JSON is what a version 1 service
+   /// answers, and a reply in another version is what a newer service answers; the result names the side to update.
+   /// Neither is proof that nothing was carried out. That a version 1 service does nothing with a version 2 request
+   /// was run against this product's version 1 runtime, but text that is not JSON is also what any failure outside
+   /// the envelope looks like, and a reply in another version need not be a refusal of the version. So only a read,
+   /// which changes nothing whoever answered, is reported as having nothing to check
+   /// (<see cref="IsRead"/>); every other operation is unconfirmed, and its message says so. JSON without a version
+   /// has no known sender (a version 1 service never answers in JSON), so it is an answer that arrived and could not
+   /// be read, as every other problem is: the service may have acted. The entry names the problem and never the
+   /// reply, which this client is never given as text.
    /// </summary>
    private ServiceResult<TResult> Unusable<TResult>(ManagementRequest request, ManagementEnvelopeProblem problem)
    {
+      bool nothingToCheck = IsRead(request);
       (ServiceFailure failure, bool unconfirmed, string reason) = problem switch
       {
-         ManagementEnvelopeProblem.NotJson or ManagementEnvelopeProblem.VersionMissing
-            => (ServiceFailure.OlderService, false, "The service is older than this companion and does not know its requests. Update the service."),
-         ManagementEnvelopeProblem.VersionUnsupported
-            => (ServiceFailure.NewerService, false, "The service is newer than this companion, which cannot read its replies. Update the companion."),
+         ManagementEnvelopeProblem.NotJson => (ServiceFailure.OlderService, !nothingToCheck, nothingToCheck ? OlderServiceReason : OlderServiceUnconfirmedReason),
+         ManagementEnvelopeProblem.VersionUnsupported => (ServiceFailure.NewerService, !nothingToCheck, nothingToCheck ? NewerServiceReason : NewerServiceUnconfirmedReason),
          _ => (ServiceFailure.UnreadableReply, true, UnreadableReason),
       };
       Note(request, (failure, unconfirmed), "Management request {Operation} on {Target} got a reply that could not be used ({Failure}: {Problem}).", request.Op, Target(request.Server), failure, problem);
       return ServiceResult<TResult>.Unreachable(failure, unconfirmed, reason);
    }
+
+
+
+   /// <summary>True for an operation the contract's table calls a read, which changes nothing whoever answers it. An operation the table does not have is not one; none is ever sent (<see cref="TryBuild"/>).</summary>
+   private static bool IsRead(ManagementRequest request) => ManagementOperations.TryFind(request.Op, out ManagementOperationInfo? operation) && operation.Kind == ManagementOperationKind.Read;
 
 
 
@@ -390,8 +439,9 @@ public sealed partial class ManagementClient
 
 
    /// <summary>
-   /// Builds the unavailable result for a pipe failure and logs what was swallowed, followed by the full exception as
-   /// debug detail. What is described is the pipe's own failure; no request's arguments are part of it.
+   /// Builds the unavailable result for a pipe failure and logs what was swallowed, followed by the full exception,
+   /// with its stack, as debug detail. What is described is the pipe's own failure; that no request's arguments and
+   /// no reply's text are part of it is the send function's contract (the constructor states it).
    /// </summary>
    private ServiceResult<TResult> Failed<TResult>(ManagementRequest request, (ServiceFailure Failure, bool Sent) kind, Exception exception)
    {
@@ -406,7 +456,8 @@ public sealed partial class ManagementClient
    /// <summary>
    /// Writes the entry for a request that brought no usable answer. The first failure of an operation on a target is a
    /// warning; the same failure repeating (the reads run every few seconds while the service is down) is a debug line
-   /// instead, so the log is not flooded unless debug logging was asked for.
+   /// instead, so the log is not flooded unless debug logging was asked for. A failure is the same when its cause is
+   /// and when it says the same about whether the request had left.
    /// </summary>
    private void Note(ManagementRequest request, (ServiceFailure Failure, bool Unconfirmed) kind, string template, params object?[] values)
    {
@@ -470,14 +521,19 @@ public sealed partial class ManagementClient
 
 
 
-   /// <summary>Maps a pipe failure to its cause.</summary>
+   /// <summary>
+   /// Maps a pipe failure to its cause. A time limit is one whether it arrives as a cancellation or as a
+   /// <see cref="TimeoutException"/>, and a pipe that was closed under the call
+   /// (<see cref="ObjectDisposedException"/>) is a disconnection. Any type the send function's contract does not
+   /// name is <see cref="ServiceFailure.None"/>, which leaves the exception to propagate.
+   /// </summary>
    private static ServiceFailure Cause(Exception exception) => exception switch
    {
-      OperationCanceledException => ServiceFailure.TimedOut,
+      OperationCanceledException or TimeoutException => ServiceFailure.TimedOut,
       UnauthorizedAccessException => ServiceFailure.AccessDenied,
       InvalidDataException => ServiceFailure.InvalidData,
       Win32Exception => ServiceFailure.Native,
-      IOException => ServiceFailure.Disconnected,
+      IOException or ObjectDisposedException => ServiceFailure.Disconnected,
       _ => ServiceFailure.None,
    };
 
@@ -488,6 +544,7 @@ public sealed partial class ManagementClient
 
 
 
-   /// <summary>A code as an entry shows it: itself when it is shaped like one of the contract's codes, and otherwise a fixed label, so text of any other kind that arrived where a code belongs is not written to the log.</summary>
-   private static string Shown(string code) => code.Length is > 0 and <= 64 && code.All(static letter => char.IsAsciiLetterLower(letter) || letter == '_') ? code : "not shown";
+   /// <summary>A code as an entry shows it: itself when it is shaped like one of the contract's codes (lower-case letters, digits and underscores, at most 64 of them), and otherwise a fixed label, so text of any other kind that arrived where a code belongs is not written to the log.</summary>
+   private static string Shown(string code)
+      => code.Length is > 0 and <= 64 && code.All(static letter => char.IsAsciiLetterLower(letter) || char.IsAsciiDigit(letter) || letter == '_') ? code : "not shown";
 }

@@ -82,10 +82,21 @@ public sealed class ServiceResult<T>
    /// True when the request left this process and no usable answer came back (a reply time limit, a pipe that closed
    /// mid-reply, an oversize or unreadable reply, or a wait the caller ended), so the service may have carried it out and
    /// the operator must check before repeating it. False when the service answered and when nothing was sent at all,
-   /// which includes a wait that had already ended before the request was made and a read that was skipped. It is also
-   /// false when the answer came from a service that does not speak this client's version of the pipe
-   /// (<see cref="ServiceFailure.OlderService"/>, <see cref="ServiceFailure.NewerService"/>): that service did not
-   /// know the request, so it carried nothing out.
+   /// which includes a wait that had already ended before the request was made and a read that was skipped.
+   /// <para>
+   /// A reply that is not in this client's version of the pipe (<see cref="ServiceFailure.OlderService"/>,
+   /// <see cref="ServiceFailure.NewerService"/>) is such an answer too, for every operation of
+   /// <see cref="ManagementClient"/> that the contract's table does not call a read: the form of a reply says which
+   /// side to update, and it is not proof that nothing was carried out. For a read it is false, because a read changes
+   /// nothing whoever answered it.
+   /// </para>
+   /// <para>
+   /// False does not always mean that nothing was done. When the service refused
+   /// (<see cref="ServiceOutcome.Rejected"/>) it answered, so this is false, and <see cref="Code"/> says whether it
+   /// acted: <see cref="ManagementErrorCode.EnrollmentUnconfirmed"/> means the outcome of an enrollment is not known,
+   /// and <see cref="ManagementErrorCode.InternalError"/>, which is also what a code this version does not know
+   /// becomes, says nothing either way.
+   /// </para>
    /// </summary>
    public bool Unconfirmed { get; }
 
@@ -121,7 +132,11 @@ public sealed class ServiceResult<T>
    /// <summary>
    /// A refusal with one of the contract's codes and the message to show: the service's own refusal, with the error it
    /// sent so its details can be read, or (without one) a request the client did not send because the service would
-   /// have refused it. Either way the service did not act.
+   /// have refused it. A request that was not sent did nothing. For a refusal the service sent, the code decides
+   /// whether it acted: most codes mean it did not, <see cref="ManagementErrorCode.EnrollmentUnconfirmed"/> means the
+   /// outcome is not known, and <see cref="ManagementErrorCode.InternalError"/>, which an unknown code becomes, does
+   /// not say. The result is not unconfirmed in any of these cases, because the service answered; a caller that
+   /// offers a repeat decides by the code.
    /// </summary>
    internal static ServiceResult<T> Refusal(string code, string message, ManagementError? error = null)
       => new(ServiceOutcome.Rejected, default, message, null, ServiceFailure.None, unconfirmed: false, code, error);

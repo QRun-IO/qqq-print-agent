@@ -128,11 +128,16 @@ public sealed class ManagementClientTests
    /// <summary>
    /// A code this version does not know is a rejection that shows the service's message and is handled as an internal
    /// error, as the contract says: the result's code is <c>internal_error</c>, and it has no details, because their
-   /// type is not known either. The log says which code arrived when it is shaped like one, and does not repeat text
-   /// of any other kind that arrived where a code belongs.
+   /// type is not known either. The log says which code arrived when it is shaped like one (lower-case letters,
+   /// digits and underscores), and does not repeat text of any other kind that arrived where a code belongs: text in
+   /// upper case is not a code, so it is not logged as one. A code is known only in the contract's own spelling:
+   /// one of its codes in upper case is not that code, and no caller is handed it to switch on.
    /// </summary>
    [Theory]
    [InlineData("quota_exceeded", "quota_exceeded")]
+   [InlineData("limit_429", "limit_429")]
+   [InlineData("SECRETTOKEN", "not shown")]
+   [InlineData("BUSY", "not shown")]
    [InlineData("Bearer CANARY 123", "not shown")]
    [InlineData("", "not shown")]
    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "not shown")]
@@ -197,46 +202,91 @@ public sealed class ManagementClientTests
 
 
    /// <summary>
-   /// A reply that is not JSON, or is JSON without a version, is what a version 1 service answers. That service knows
-   /// none of this version's operations, so it carried nothing out: the result says the service is the older side and
-   /// that there is nothing to check before repeating. The log names the problem and not the reply.
+   /// A reply that is not in this version of the pipe, answering a read. Text that is not JSON is what a version 1
+   /// service answers, and a reply in another version is what a newer service answers; the result names the side to
+   /// update. A read changes nothing whoever answered it, so there is nothing to check before it is repeated. JSON
+   /// without a version has no known sender: it is a reply that could not be read, which is unconfirmed for every
+   /// operation. The log names the problem and not the reply.
    /// </summary>
    [Theory]
-   [InlineData("Error: CANARY Restart the companion.", "NotJson")]
-   [InlineData("", "NotJson")]
-   [InlineData("""{"enrolled":true,"health":"CANARY"}""", "VersionMissing")]
-   public async Task ReplyWithoutAVersion_IsAnOlderService(string reply, string problem)
+   [MemberData(nameof(RepliesNotInThisVersion))]
+   public async Task ReplyNotInThisVersion_ToARead_NamesTheSideToUpdate_AndLeavesNothingToCheck(string reply, ServiceFailure failure, string problem)
    {
       RecordingLog log = new();
-      ManagementClient client = new(new FakePipe().Answer(Replies.Text(reply)).SendAsync, log);
+      ManagementClient client = new(new FakePipe().Answer(Replies.Text(reply)).Answer(Replies.Text(reply)).SendAsync, log);
 
-      ServiceResult<ServerRemoveResult> result = await client.RemoveServerAsync(Server);
+      ServiceResult<TrustResult> onAServer = await client.GetTrustAsync(Server);
+      ServiceResult<ServiceSnapshot> onTheComputer = await client.SnapshotAsync();
 
-      Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.OlderService), (result.Outcome, result.Failure));
-      Assert.False(result.Unconfirmed);
-      Assert.Null(result.Code);
-      Assert.Equal("The service is older than this companion and does not know its requests. Update the service.", result.Message);
-      Assert.Equal($"WARN Management request servers.remove on {Server} got a reply that could not be used (OlderService: {problem}).", Assert.Single(log.Entries));
+      Assert.Equal((ServiceOutcome.Unavailable, failure, failure == ServiceFailure.UnreadableReply, ReadReason(failure)), (onAServer.Outcome, onAServer.Failure, onAServer.Unconfirmed, onAServer.Message));
+      Assert.Equal((ServiceOutcome.Unavailable, failure, failure == ServiceFailure.UnreadableReply, ReadReason(failure)), (onTheComputer.Outcome, onTheComputer.Failure, onTheComputer.Unconfirmed, onTheComputer.Message));
+      Assert.Null(onAServer.Code);
+      Assert.Equal(
+      [
+         $"WARN Management request trust.get on {Server} got a reply that could not be used ({failure}: {problem}).",
+         $"WARN Management request snapshot on the computer got a reply that could not be used ({failure}: {problem}).",
+      ], log.Entries);
    }
 
 
 
-   /// <summary>A reply in another version is what a newer service answers, and the only reply a service gives in another version than it was asked in is its refusal of the version. So nothing was carried out, and the result says the companion is the older side.</summary>
+   /// <summary>
+   /// The same replies answering an operation that is not a read: a test print, adding a server, removing one. The
+   /// form of a reply is not proof that nothing was carried out (text that is not JSON is also what a failure outside
+   /// the envelope looks like, after the operation may have acted, and a reply in another version need not be a
+   /// refusal), so each result is unconfirmed. Its message names the side to update and says that the operation may
+   /// have been carried out and must be checked before it is repeated; it does not say that the service did not know
+   /// the request. The reply <c>{"v":"2","ok":true,"result":{}}</c> is among them: it says the operation succeeded.
+   /// </summary>
    [Theory]
-   [InlineData("""{"v":3,"ok":false,"error":{"code":"unsupported_version","message":"CANARY"}}""")]
-   [InlineData("""{"v":"2","ok":true,"result":{}}""")]
-   public async Task ReplyOfAnotherVersion_IsANewerService(string reply)
+   [MemberData(nameof(RepliesNotInThisVersion))]
+   public async Task ReplyNotInThisVersion_ToAChange_IsUnconfirmed_AndItsMessageSaysSo(string reply, ServiceFailure failure, string problem)
    {
       RecordingLog log = new();
-      ManagementClient client = new(new FakePipe().Answer(Replies.Text(reply)).SendAsync, log);
+      ManagementClient client = new(new FakePipe().Answer(Replies.Text(reply)).Answer(Replies.Text(reply)).Answer(Replies.Text(reply)).SendAsync, log);
+      SampleValues given = SampleValues.Golden;
 
-      ServiceResult<ServiceSnapshot> result = await client.SnapshotAsync();
+      CallResult[] results =
+      [
+         CallResult.Of(await client.TestPrintAsync(Server, given.PrinterId, given.Format, given.TestProfile)),
+         CallResult.Of(await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, given.Check, given.Credential)),
+         CallResult.Of(await client.RemoveServerAsync(Server)),
+      ];
 
-      Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.NewerService), (result.Outcome, result.Failure));
-      Assert.False(result.Unconfirmed);
-      Assert.Equal("The service is newer than this companion, which cannot read its replies. Update the companion.", result.Message);
-      Assert.Equal("WARN Management request snapshot on the computer got a reply that could not be used (NewerService: VersionUnsupported).", Assert.Single(log.Entries));
+      Assert.All(results, result => Assert.Equal((ServiceOutcome.Unavailable, failure, true, ChangeReason(failure)), (result.Outcome, result.Failure, result.Unconfirmed, result.Message)));
+      Assert.All(results, result => Assert.DoesNotContain("does not know", result.Message, StringComparison.Ordinal));
+      Assert.All(results, result => Assert.Null(result.Code));
+      Assert.Equal(
+      [
+         $"WARN Management request printers.testPrint on {Server} got a reply that could not be used ({failure}: {problem}).",
+         $"WARN Management request servers.add on the computer got a reply that could not be used ({failure}: {problem}).",
+         $"WARN Management request servers.remove on {Server} got a reply that could not be used ({failure}: {problem}).",
+      ], log.Entries);
    }
+
+
+
+   /// <summary>
+   /// Replies that are not in this version of the pipe, each holding a mark the log must not show where it can, with
+   /// what the client makes of it and the problem the parser names: text that is not JSON (a version 1 service's
+   /// answer, a failure outside the envelope, nothing at all, JSON followed by more text, and JSON nested deeper than
+   /// the contract reads), a reply in another version (a later one, the refusal of the version, the version as text
+   /// and as a fraction), and JSON without a version.
+   /// </summary>
+   public static TheoryData<string, ServiceFailure, string> RepliesNotInThisVersion() => new()
+   {
+      { "Error: CANARY Restart the companion.", ServiceFailure.OlderService, "NotJson" },
+      { "Error: internal failure after the job was queued", ServiceFailure.OlderService, "NotJson" },
+      { "", ServiceFailure.OlderService, "NotJson" },
+      { """{"v":2,"ok":true,"result":{"outcome":"requested"}} trailing""", ServiceFailure.OlderService, "NotJson" },
+      { """{"v":2,"ok":true,"result":{"outcome":"requested","addedLater":""" + new string('[', 40) + new string(']', 40) + "}}", ServiceFailure.OlderService, "NotJson" },
+      { """{"v":3,"ok":true,"result":{"outcome":"requested"}}""", ServiceFailure.NewerService, "VersionUnsupported" },
+      { """{"v":3,"ok":false,"error":{"code":"unsupported_version","message":"CANARY"}}""", ServiceFailure.NewerService, "VersionUnsupported" },
+      { """{"v":"2","ok":true,"result":{}}""", ServiceFailure.NewerService, "VersionUnsupported" },
+      { """{"v":2.0,"ok":true,"result":{"outcome":"requested"}}""", ServiceFailure.NewerService, "VersionUnsupported" },
+      { """{"ok":true,"result":{"outcome":"requested"}}""", ServiceFailure.UnreadableReply, "VersionMissing" },
+      { """{"enrolled":true,"health":"CANARY"}""", ServiceFailure.UnreadableReply, "VersionMissing" },
+   };
 
 
 
@@ -328,6 +378,8 @@ public sealed class ManagementClientTests
       { new IOException("The pipe could not be opened."), ServiceFailure.Disconnected, "The pipe could not be opened." },
       { new InvalidDataException("Local pipe message exceeds the permitted size."), ServiceFailure.InvalidData, "Local pipe message exceeds the permitted size." },
       { new UnauthorizedAccessException("The local endpoint is not the installed Windows print service."), ServiceFailure.AccessDenied, "The local endpoint is not the installed Windows print service." },
+      { new TimeoutException("The service did not accept the connection in time."), ServiceFailure.TimedOut, "The service did not accept the connection in time." },
+      { new ObjectDisposedException(null, "The pipe was closed before it was used."), ServiceFailure.Disconnected, "The pipe was closed before it was used." },
    };
 
 
@@ -335,7 +387,9 @@ public sealed class ManagementClientTests
    /// <summary>
    /// The same causes without the "not sent" mark are unconfirmed, whatever their type: a refusal or a failed Windows
    /// call that arrives unmarked does not prove that nothing was written, so the operator must check before repeating.
-   /// A failure thrown before a task exists is handled the same way as one whose task fails.
+   /// A time limit that arrives as a <see cref="TimeoutException"/> and a pipe that was closed under the call
+   /// (<see cref="ObjectDisposedException"/>) are among them: they are results, not exceptions the caller has to
+   /// catch. A failure thrown before a task exists is handled the same way as one whose task fails.
    /// </summary>
    [Theory]
    [MemberData(nameof(SentFailures))]
@@ -366,22 +420,30 @@ public sealed class ManagementClientTests
       { new InvalidDataException("Local pipe message exceeds the permitted size."), ServiceFailure.InvalidData, "Local pipe message exceeds the permitted size." },
       { new UnauthorizedAccessException("Access to the path is denied."), ServiceFailure.AccessDenied, "Access to the path is denied." },
       { new Win32Exception(5, "Access is denied."), ServiceFailure.Native, "Access is denied." },
+      { new TimeoutException("The reply did not arrive within the time limit."), ServiceFailure.TimedOut, "The reply did not arrive within the time limit." },
+      { new ObjectDisposedException(null, "The pipe was closed under the request."), ServiceFailure.Disconnected, "The pipe was closed under the request." },
    };
 
 
 
-   /// <summary>An exception that is not a pipe failure is a programming error and is not hidden behind a result, whether it comes from the send's task, from the send itself, or wrapped as "not sent"; nothing is logged for it.</summary>
+   /// <summary>
+   /// An exception that is not a pipe failure is a programming error and is not hidden behind a result, whether it
+   /// comes from the send's task, from the send itself, or wrapped as "not sent"; nothing is logged for it. That
+   /// holds for the kind of exception a closed pipe's own is derived from: only the types the send function's
+   /// contract names are results.
+   /// </summary>
    [Fact]
    public async Task UnrelatedException_IsNotSwallowed()
    {
       RecordingLog log = new();
       FakePipe pipe = new FakePipe().Fail(new FormatException("A bug.")).Throw(new FormatException("A bug thrown at once."))
-         .Fail(new AgentPipeNotSentException(new FormatException("A wrapped bug.")));
+         .Fail(new AgentPipeNotSentException(new FormatException("A wrapped bug."))).Fail(new InvalidOperationException("Another bug."));
       ManagementClient client = new(pipe.SendAsync, log);
 
       FormatException failed = await Assert.ThrowsAsync<FormatException>(() => client.ReconnectAsync(Server));
       FormatException thrown = await Assert.ThrowsAsync<FormatException>(() => client.ReconnectAsync(Server));
       await Assert.ThrowsAsync<AgentPipeNotSentException>(() => client.ReconnectAsync(Server));
+      await Assert.ThrowsAsync<InvalidOperationException>(() => client.ReconnectAsync(Server));
 
       Assert.Equal(("A bug.", "A bug thrown at once."), (failed.Message, thrown.Message));
       Assert.Empty(log.Entries);
@@ -497,6 +559,35 @@ public sealed class ManagementClientTests
 
 
 
+   /// <summary>
+   /// A failure is the same failure only when it also says the same about whether the request had left. The pipe
+   /// closing after a request was sent, and then the pipe not opening at all, have one cause and are two things to an
+   /// operator ("check before repeating" and "nothing happened"), so the second is a warning of its own; repeated, it
+   /// is a debug line.
+   /// </summary>
+   [Fact]
+   public async Task FailureThatChangesFromSentToNotSent_IsAWarningAgain()
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new FakePipe().Fail(new IOException("down")).Fail(new AgentPipeNotSentException(new IOException("down"))).Fail(new AgentPipeNotSentException(new IOException("down")));
+      ManagementClient client = new(pipe.SendAsync, log);
+
+      ServiceResult<ReconnectResult> sent = await client.ReconnectAsync(Server);
+      ServiceResult<ReconnectResult> notSent = await client.ReconnectAsync(Server);
+      _ = await client.ReconnectAsync(Server);
+
+      Assert.Equal((ServiceFailure.Disconnected, true), (sent.Failure, sent.Unconfirmed));
+      Assert.Equal((ServiceFailure.Disconnected, false), (notSent.Failure, notSent.Unconfirmed));
+      Assert.Equal(
+      [
+         $"WARN Management request connection.reconnect on {Server} did not complete (Disconnected, request sent): IOException: down",
+         $"WARN Management request connection.reconnect on {Server} did not complete (Disconnected, nothing sent): AgentPipeNotSentException: down <- IOException: down",
+         $"DEBUG Management request connection.reconnect on {Server} did not complete (Disconnected, nothing sent): AgentPipeNotSentException: down <- IOException: down",
+      ], log.Entries.Where(entry => !entry.Contains("failure detail", StringComparison.Ordinal)).ToList());
+   }
+
+
+
    /// <summary>The client needs the pipe's send function and a log.</summary>
    [Fact]
    public void Constructor_RequiresTheSendFunctionAndTheLog()
@@ -504,4 +595,24 @@ public sealed class ManagementClientTests
       Assert.Equal("send", Assert.Throws<ArgumentNullException>(() => new ManagementClient(null!, new RecordingLog())).ParamName);
       Assert.Equal("log", Assert.Throws<ArgumentNullException>(() => new ManagementClient(new FakePipe().SendAsync, null!)).ParamName);
    }
+
+
+
+   /// <summary>What a read's result says for a reply that is not in this version of the pipe.</summary>
+   private static string ReadReason(ServiceFailure failure) => failure switch
+   {
+      ServiceFailure.OlderService => "The service is older than this companion and does not know its requests. Update the service.",
+      ServiceFailure.NewerService => "The service is newer than this companion, which cannot read its replies. Update the companion.",
+      _ => "The service's reply could not be read.",
+   };
+
+
+
+   /// <summary>What the result of an operation that is not a read says for a reply that is not in this version of the pipe.</summary>
+   private static string ChangeReason(ServiceFailure failure) => failure switch
+   {
+      ServiceFailure.OlderService => "The service answered as one that is older than this companion does. Update the service. The operation may have been carried out: check before repeating it.",
+      ServiceFailure.NewerService => "The service is newer than this companion, which cannot read its replies. Update the companion. The operation may have been carried out: check before repeating it.",
+      _ => "The service's reply could not be read.",
+   };
 }
