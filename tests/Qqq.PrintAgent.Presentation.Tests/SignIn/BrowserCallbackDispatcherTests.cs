@@ -123,9 +123,11 @@ public sealed class BrowserCallbackDispatcherTests
 
    /// <summary>
    /// A callback that cannot be given to anyone is dropped: one with no state, with the state twice, with an empty
-   /// state, with a parameter whose name only looks like "state", or with a state nobody waits for. The ticket that
-   /// waits is untouched, a new inbox is opened for it, and the log holds the fixed sentence and nothing of the
-   /// callback. The ticket's own callback, sent to the new inbox, still reaches it.
+   /// state, with a parameter whose name only looks like "state", or with a state nobody waits for. A state is
+   /// somebody's only when it is exactly the one that was registered: the same letters in another case, the
+   /// beginning of it, more than it, or it with a space after it are all nobody's. The ticket that waits is
+   /// untouched, a new inbox is opened for it, and the log holds the fixed sentence and nothing of the callback.
+   /// The ticket's own callback, sent to the new inbox, still reaches it.
    /// </summary>
    [Theory]
    [InlineData("?code=synthetic-code")]
@@ -134,6 +136,10 @@ public sealed class BrowserCallbackDispatcherTests
    [InlineData("?STATE=synthetic-state-x")]
    [InlineData("?state")]
    [InlineData("?state=synthetic-state-unknown&code=synthetic-code")]
+   [InlineData("?code=synthetic-code&state=SYNTHETIC-STATE-X")]
+   [InlineData("?code=synthetic-code&state=synthetic-state-")]
+   [InlineData("?code=synthetic-code&state=synthetic-state-xy")]
+   [InlineData("?code=synthetic-code&state=synthetic-state-x%20")]
    public async Task Dispatcher_CallbackWithNoStateOrTwo_IsDropped_AndNotLogged(string query)
    {
       SignInWorld world = new();
