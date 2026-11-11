@@ -180,16 +180,16 @@ levels, so that a job nested too deep to read can still be identified.
   that the job was offered again while a lane of this computer still holds
   it, and the lane ends its pass as it does for a job that is submitting.
 - **Printer changed before the download finished.** The assigned printer is
-  discovered again once, after the download and before the job asks for the
-  printer's turn. A printer the operator stopped sharing, a queue that is
+  looked up once, after the download and before the job asks for the
+  printer's turn; no other queue is asked. A printer the operator stopped sharing, a queue that is
   gone, or a selected media default that changed by then is FAILED with its
   reason before SUBMITTING is recorded, and Windows is never asked. The
   timing line reports this one check as `revalidate`.
 - **Printer changed while the job waits for its turn.** A job can wait a
-  long time behind a print. The worker does not discover the printers again
-  when the turn is held: that would start the print helper once more for
+  long time behind a print. The worker does not look the printer up again
+  when the turn is held: that would start a print helper once more for
   every job, while the job holds the printer's turn and a print slot, and
-  would add a second wait on a slow driver of an unrelated queue. What
+  would add a second wait on that queue's driver. What
   changed during the wait is settled after SUBMITTING is recorded, by
   whoever can tell whether anything was sent:
   - *No longer shared.* The exposure filter in front of the backend checks
