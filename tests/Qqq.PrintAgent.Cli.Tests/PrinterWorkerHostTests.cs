@@ -24,6 +24,9 @@ public sealed class PrinterWorkerHostTests
    /// <summary>The identifier of that queue, in the form the helper accepts: the first 24 hexadecimal digits of the SHA-256 of its name.</summary>
    private const string QueueId = "72a900462ca6a6e18ecb8fb2";
 
+
+
+   /// <summary>A synthetic job; the fake printers the helper loop is given never open its document.</summary>
    private static readonly PrintJob Job = new("job-1", "printer-1", "Synthetic", "PDF", new string('0', 64), 1, new PrintOptions(), "2026-11-01T00:00:00Z", "QUEUED");
 
 
