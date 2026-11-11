@@ -576,11 +576,10 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>
    /// The arguments of servers.add carry the sign-in provider's origin that the check reported, after the credential,
-   /// for comparison only: the service still reads the provider itself. An origin is compared whenever it is given,
-   /// and exactly: another origin, the same origin in another spelling, and no provider where the request names one
-   /// are all a change, which the service answers with a code of its own that carries no details and stores nothing.
-   /// A request that leaves the origin out, as the wizard does when the check named no provider, is read and is not
-   /// compared, whatever the service reads.
+   /// for comparison only: the service still reads the provider itself. A request that leaves the origin out, as the
+   /// wizard does when the check named no provider, is read, and states exactly that. A difference between what the
+   /// request states and what the service reads is answered with a code of its own that carries no details, and
+   /// nothing is stored. The rule for the comparison is held row by row in the test below.
    /// </summary>
    [Fact]
    public void ServersAdd_CarriesTheProviderTheCheckReported_ForComparisonOnly()
@@ -597,13 +596,9 @@ public sealed class ManagementEnvelopeTests
       Assert.Null(readUnnamed.ProviderOrigin);
       Assert.True(named.ProviderAgrees("https://sign-in.example.test"));
       Assert.False(named.ProviderAgrees("https://other.example.test"));
-      Assert.False(named.ProviderAgrees("https://SIGN-IN.example.test"));
-      Assert.False(named.ProviderAgrees("https://sign-in.example.test/"));
-      Assert.False(named.ProviderAgrees(""));
       Assert.False(named.ProviderAgrees(null));
       Assert.True(unnamed.ProviderAgrees(null));
-      Assert.True(unnamed.ProviderAgrees("https://sign-in.example.test"));
-      Assert.False(new ServersAddArgs(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, "").ProviderAgrees(null));
+      Assert.False(unnamed.ProviderAgrees("https://sign-in.example.test"));
       Assert.Equal("provider_changed", ManagementErrorCode.ProviderChanged);
       Assert.Contains(ManagementErrorCode.ProviderChanged, ManagementErrorCode.All, StringComparer.Ordinal);
       Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"provider_changed\",\"message\":\"The server now names another sign-in provider. Check the server again.\"}}",
@@ -617,12 +612,13 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>
    /// trust.set has the same race as servers.add, so its arguments carry the provider's origin the check reported in the
-   /// same way: optional, last on the wire, compared whenever it is given by the same rule, and refused with the same
-   /// code. A request that switches the exception off, or comes from a client that ran no check, carries none, is
-   /// written without the member, and is not compared.
+   /// same way: last on the wire, left out to state that the check named none, compared by the same rule and refused
+   /// with the same code. A request that switches the exception off accepts nothing, so it is written without the
+   /// member and agrees whatever the service reads; a request that switches it on without an origin states that the
+   /// check named no provider, and does not agree with a service that reads one.
    /// </summary>
    [Fact]
-   public void TrustSet_CarriesTheProviderTheCheckReported_WhenItIsGiven()
+   public void TrustSet_CarriesTheProviderTheCheckReported_AndComparesItWhenItSwitchesTheExceptionOn()
    {
       TrustSetArgs named = new(AcceptCertificateException: true, ManagementSamples.ProviderOrigin);
       TrustSetArgs off = new(AcceptCertificateException: false);
@@ -637,11 +633,53 @@ public sealed class ManagementEnvelopeTests
       Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"providerOrigin\":\"https://sign-in.example.test\"}}").Request!, out TrustSetArgs? _));
       Assert.True(named.ProviderAgrees("https://sign-in.example.test"));
       Assert.False(named.ProviderAgrees("https://other.example.test"));
-      Assert.False(named.ProviderAgrees("https://Sign-In.example.test"));
       Assert.False(named.ProviderAgrees(null));
+      Assert.True(withoutOrigin.ProviderAgrees(null));
+      Assert.False(withoutOrigin.ProviderAgrees("https://sign-in.example.test"));
       Assert.True(off.ProviderAgrees(null));
       Assert.True(off.ProviderAgrees("https://sign-in.example.test"));
-      Assert.True(withoutOrigin.ProviderAgrees("https://other.example.test"));
+      Assert.True(new TrustSetArgs(AcceptCertificateException: false, "https://other.example.test").ProviderAgrees("https://sign-in.example.test"));
+   }
+
+
+
+   /// <summary>
+   /// The one rule for the provider a request says the operator was shown, for servers.add and for trust.set when it
+   /// switches the exception on. The origin states what the check showed, and an absent one states that it showed no
+   /// provider: none shown and none read agree; none shown and one read do not, because that provider is exactly the
+   /// one the operator has not seen; one shown and none read do not; one shown and another read (another host, port
+   /// or scheme) do not; and the same one agrees. Origins are compared in the one form an origin is kept in, so one
+   /// place written in another letter case, with its default port, with a trailing slash, with a path, or by its
+   /// Unicode name is the same place. Text that names no origin agrees with nothing, not even with itself.
+   /// </summary>
+   [Theory]
+   [InlineData(null, null, true)]
+   [InlineData(null, "https://sign-in.example.test", false)]
+   [InlineData("https://sign-in.example.test", null, false)]
+   [InlineData("https://sign-in.example.test", "https://other.example.test", false)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test:8443", false)]
+   [InlineData("https://sign-in.example.test", "http://sign-in.example.test", false)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test.other.test", false)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test", true)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test/", true)]
+   [InlineData("https://sign-in.example.test", "https://SIGN-IN.Example.Test:443/", true)]
+   [InlineData("https://sign-in.example.test/realms/dev", "https://sign-in.example.test", true)]
+   [InlineData("https://xn--bcher-kva.example", "https://b\u00FCcher.example/", true)]
+   [InlineData("", null, false)]
+   [InlineData("", "", false)]
+   [InlineData("sign-in.example.test", "https://sign-in.example.test", false)]
+   [InlineData("not an origin", "not an origin", false)]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback", "io.qrun.qqq-print-agent:/oauth/callback", false)]
+   [InlineData("https://id\u2028.example.test", "https://id\u2028.example.test", false)]
+   public void TheProviderTheOperatorWasShown_IsComparedWithTheOneTheServiceRead(string? shown, string? read, bool agrees)
+   {
+      ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, shown);
+      TrustSetArgs on = new(AcceptCertificateException: true, shown);
+
+      Assert.Equal(agrees, SignInProviderOrigin.Agrees(shown, read));
+      Assert.Equal(agrees, add.ProviderAgrees(read));
+      Assert.Equal(agrees, on.ProviderAgrees(read));
+      Assert.Equal(agrees, SignInProviderOrigin.Agrees(read, shown));
    }
 
 

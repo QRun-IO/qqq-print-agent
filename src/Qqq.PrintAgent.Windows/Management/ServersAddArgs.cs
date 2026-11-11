@@ -18,8 +18,9 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// not verified could name another provider the second time, which a stored certificate exception would then cover
 /// without the operator having seen it. So the request says which provider the operator was shown, the service
 /// compares it with its own read (<see cref="ProviderAgrees"/>), and when they differ it stores nothing and answers
-/// <see cref="ManagementErrorCode.ProviderChanged"/>. The origin is absent when the check named no provider, and it is
-/// compared whenever it is given; a request that carries none is not compared.
+/// <see cref="ManagementErrorCode.ProviderChanged"/>. An absent origin states that the check named no provider, and
+/// is compared like any other value: when the service then reads a provider, the request is refused. A client
+/// therefore checks the server before it adds it.
 /// </para>
 /// <para>
 /// The name must be one a server may have (<see cref="ServerName"/>): the record cannot be built with another, in code
@@ -61,15 +62,15 @@ public sealed record ServersAddArgs
 
 
 
-   /// <summary>The sign-in provider's origin that the check reported and the operator was shown, or null when the check reported none. It is compared, never stored.</summary>
+   /// <summary>The sign-in provider's origin that the check reported and the operator was shown, or null to state that the check reported none. It is compared, never stored.</summary>
    public string? ProviderOrigin { get; }
 
 
 
    /// <summary>
-   /// True when this request does not contradict the sign-in provider the service read from the server
-   /// (<see cref="SignInProviderOrigin.Agrees"/>): it carries the same text, or carries no origin. When it is false
-   /// the service stores nothing and answers <see cref="ManagementErrorCode.ProviderChanged"/>.
+   /// True when what this request says the operator was shown is what the service read from the server
+   /// (<see cref="SignInProviderOrigin.Agrees"/>): the same origin, or none on both sides. When it is false the
+   /// service stores nothing and answers <see cref="ManagementErrorCode.ProviderChanged"/>.
    /// </summary>
    public bool ProviderAgrees(string? readByTheService) => SignInProviderOrigin.Agrees(ProviderOrigin, readByTheService);
 

@@ -26,9 +26,10 @@ what the service and its clients will be able to build on. The last two are abou
   HTTPS, or plain HTTP for this computer itself, with no user name, query, fragment or path, and a host that has
   an ASCII name. The existing checks of an address are unchanged.
 - **Adding a server, and switching the certificate exception on.** `servers.add` and `trust.set` carry the sign-in
-  provider's address that `servers.check` reported, for comparison only. When the service reads another provider
-  from the server, nothing is stored or changed and the answer is the new error code `provider_changed`; the
-  client checks the server again.
+  provider's address that `servers.check` reported, for comparison only; leaving it out says that the check named
+  no provider. When the service reads another provider from the server, or one where the check named none, nothing
+  is stored or changed and the answer is the new error code `provider_changed`; the client checks the server
+  again.
 - **Printer discovery.** The operation table marks `printers.discover` as single-flight: one discovery runs at a
   time, and a request that arrives during it shares its result. The discovery itself is built with the pipe.
 - **Log redaction recognises more shapes.** As with the two shapes below, this changes what a log line shows only
