@@ -602,6 +602,39 @@ public sealed class CompanionSignInTests
 
 
    /// <summary>
+   /// The same moment, with the sign-in disposed instead of discarded: a view that closes when it hears how an
+   /// operation ended. The operation has ended and is only being released, so nothing is left that would discard
+   /// the session later. Disposing discards it there and then, and nothing more is announced.
+   /// </summary>
+   [Fact]
+   public async Task Dispose_FromASubscriberWhileAnOperationIsBeingReleased_DiscardsTheSession()
+   {
+      using CancellationTokenSource caller = new();
+      SignInWorld world = new();
+      CompanionSignIn signIn = await world.PasswordReadyAsync();
+      world.Sessions[0].PendingPassword = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      List<string> changes = SignInWorld.Watch(signIn);
+      signIn.PropertyChanged += (_, change) =>
+      {
+         if(string.Equals(change.PropertyName, nameof(CompanionSignIn.State), StringComparison.Ordinal) && signIn.State == CompanionSignInState.Ready)
+         {
+            signIn.Dispose();
+         }
+      };
+      Task<QqqSessionCredential?> running = signIn.SignInWithPasswordAsync("synthetic-operator", "synthetic-password", caller.Token);
+      await caller.CancelAsync();
+
+      Assert.Null(await SignInWorld.EndsAsync(running));
+      Assert.True(world.Sessions[0].Disposed);
+      Assert.False(signIn.HasSession);
+      Assert.Null(signIn.Offer);
+      Assert.False(signIn.IsBusy);
+      Assert.Equal(["IsBusy=True", "State=SigningIn", "State=Ready"], changes);
+   }
+
+
+
+   /// <summary>
    /// A read never returns an offer whose session is gone. A subscriber that discards while the read announces that
    /// it is ready ends the read's session with it: the read returns nothing, exactly as the sign-in then offers
    /// nothing and holds no session, and a debug entry says why. The sign-in is free and can read again.

@@ -331,8 +331,10 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
 
    /// <summary>
    /// Ends the sign-in. It only cancels: an operation that is still running sees the cancellation, ends quietly and
-   /// discards the session itself. When nothing is running the session is discarded here. After this nothing is
-   /// announced.
+   /// discards the session itself. When nothing is running the session is discarded here, and "running" is decided
+   /// as it is in <see cref="Discard"/>, by the operation's own wait: a subscriber that disposes the sign-in while
+   /// an operation that has ended is being released finds no call using the session, and nothing left that would
+   /// discard it later. After this nothing is announced.
    /// </summary>
    public void Dispose()
    {
@@ -342,7 +344,7 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
       }
       _disposed = true;
       _lifetime.Cancel();
-      if(!_operating)
+      if(_operation is null)
       {
          DropSession();
       }
