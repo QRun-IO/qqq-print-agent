@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+Branded Start menu shortcut (2.0). The installer step that creates, renames and removes the shortcut under
+**Start → Print Connectors** now keeps a record of every shortcut it made until that shortcut is gone, and a file
+that is not ours no longer fails an install or an uninstall. Nothing changes for an installation whose shortcut
+was never touched by anything else.
+
+- **Install, upgrade or repair with a changed display name.** The new shortcut is written first and the previous
+  brand's shortcut is removed afterwards, as before. What is different:
+  - If the previous shortcut cannot be removed (for example another program has the file open), the install now
+    succeeds. It used to fail, with both shortcuts on the Start menu and nothing left to remove the old one
+    later. The old shortcut stays for the moment, a warning in the activity log names it, and the next install,
+    upgrade, repair or uninstall removes it.
+  - The previous shortcut is looked at again immediately before it is deleted, and is left alone if another
+    program replaced it in the meantime.
+  - If the file under the previous name has become someone else's shortcut, or the recorded name is not a
+    shortcut file name in that folder, it is left unchanged with a warning and the new shortcut is created. This
+    used to fail the install after the new shortcut had been written, and every install after it.
+  - An install still fails, and now always before it has changed anything, when a different shortcut already
+    uses the new name, when a recorded shortcut cannot be read, or when the record in the registry cannot be
+    written. A new shortcut that cannot be written fails the install and leaves the record as it was.
+- **Uninstall.** A recorded shortcut that has become someone else's file no longer fails the uninstall: it is
+  left unchanged, a warning in the activity log says so, and the record is removed. The same holds for a recorded
+  name that is not a shortcut file name in the folder. Both used to stop the uninstall. An uninstall still
+  fails, before it has deleted anything, when a recorded shortcut cannot be read, when the record cannot be
+  changed, or when the shortcut folder can no longer be trusted; and it fails, keeping the record so that it can
+  be run again, when a shortcut of ours cannot be deleted. Shortcuts an earlier install could not remove are
+  removed with the current one.
+- **Registry.** `HKLM\SOFTWARE\QRunIO\PrintAgent` keeps `LastShortcutName` as before and may now also hold
+  `PendingShortcutNames` (multi-string): the names of shortcuts that are being written or are still to be
+  removed. It is normally absent and is removed at uninstall.
+- A warning that cannot be written to the activity log never fails an install or an uninstall.
+
 Removed the code the service never runs (2.0). The installed product behaves as before; the Core and Windows
 libraries lose every path that existed only for the polling transport and the `--legacy-compat` mode.
 

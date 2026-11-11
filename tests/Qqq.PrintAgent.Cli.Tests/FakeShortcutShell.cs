@@ -11,7 +11,9 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// Shortcut files without the Windows shell. A shortcut is written as a small text file that holds what the shortcut says,
 /// so it survives being moved or replaced like the real file does, and is read back from that text. Every read and write
-/// is recorded, and either can be made to fail the way the shell does when its automation object is unavailable.
+/// is recorded. Reading can be made to fail, and writing can be made to fail either before any file exists or part way,
+/// leaving a broken file behind as the real shell can. A test can also act between the steps of the rules under test,
+/// as another program on the same computer could.
 /// </summary>
 internal sealed class FakeShortcutShell : IShortcutShell
 {
@@ -25,8 +27,18 @@ internal sealed class FakeShortcutShell : IShortcutShell
 
 
 
+   /// <summary>Every path at which a failed write left a broken file behind.</summary>
+   internal List<string> Abandoned { get; } = [];
+
+
+
    /// <summary>When set, writing a shortcut fails with this.</summary>
    internal Exception? WriteFailure { get; set; }
+
+
+
+   /// <summary>Whether a failing write gives up before it has created any file. By default it fails part way and leaves a broken file.</summary>
+   internal bool WriteFailsBeforeAnyFile { get; set; }
 
 
 
@@ -35,27 +47,53 @@ internal sealed class FakeShortcutShell : IShortcutShell
 
 
 
+   /// <summary>When set, only reading this path fails; every other shortcut can still be read.</summary>
+   internal string? ReadFailureOn { get; set; }
+
+
+
+   /// <summary>Something that happens just before the shell writes: a test uses it to see what was recorded by then, or to change a file as another program would.</summary>
+   internal Action? BeforeWrite { get; set; }
+
+
+
+   /// <summary>Something that happens just after the shell read a shortcut: a test uses it to change a file between two looks at it.</summary>
+   internal Action? AfterRead { get; set; }
+
+
+
    /// <summary>Puts a shortcut file on disk as some other program would have, without recording it as written by the rules under test.</summary>
    internal static void Plant(string path, ShortcutLink link) => File.WriteAllText(path, JsonSerializer.Serialize(link));
 
 
 
-   /// <summary>Reads what the file at the path says.</summary>
+   /// <summary>Reads what the file at the path says, or fails as asked.</summary>
    public ShortcutLink Read(string path)
    {
       Reads.Add(path);
-      if(ReadFailure is not null)
+      if(ReadFailure is not null && (ReadFailureOn is null || string.Equals(ReadFailureOn, path, StringComparison.OrdinalIgnoreCase)))
       { throw ReadFailure; }
-      return JsonSerializer.Deserialize<ShortcutLink>(File.ReadAllText(path))!;
+      ShortcutLink link = JsonSerializer.Deserialize<ShortcutLink>(File.ReadAllText(path))!;
+      AfterRead?.Invoke();
+      return link;
    }
 
 
 
-   /// <summary>Writes the file and records what it says.</summary>
+   /// <summary>Writes the file and records what it says, or fails as asked, leaving half a file unless told to fail earlier.</summary>
    public void Write(string path, ShortcutLink link)
    {
+      BeforeWrite?.Invoke();
       if(WriteFailure is not null)
-      { throw WriteFailure; }
+      {
+         if(!WriteFailsBeforeAnyFile)
+         {
+            string whole = JsonSerializer.Serialize(link);
+            File.WriteAllText(path, whole[..(whole.Length / 2)]);
+            Abandoned.Add(path);
+         }
+         throw WriteFailure;
+      }
       Written.Add((path, link));
       Plant(path, link);
    }

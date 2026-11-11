@@ -20,7 +20,7 @@ public static class AgentBrandingInstaller
 
 
    /// <summary>Writes one warning to the machine activity log; branding uses it for the notes of a run that left something alone.</summary>
-   [ExcludeFromCodeCoverage(Justification = "Opens the machine activity log under ProgramData and writes one warning entry to it. A test must not write that log: it belongs to the installed product and is protected from ordinary users. It passes the text on unchanged and decides nothing but that a note is a warning. When a note is written and what it says is decided in AgentBrandingShortcuts, and its installer mark is added in BrandingPlaces.Installed; both are tested with a list in place of the log.")]
+   [ExcludeFromCodeCoverage(Justification = "Opens the machine activity log under ProgramData and writes one warning entry to it. A test must not write that log: it belongs to the installed product and is protected from ordinary users. It passes the text on unchanged and decides nothing but that a note is a warning. When a note is written and what it says is decided in AgentBrandingShortcuts, and its installer mark is added in BrandingPlaces.Installed; both are tested with a list in place of the log, as is a log that cannot be written.")]
    private static void WarnInMachineLog(string text) => AgentActivityLog.Create(AgentStore.DefaultDirectory).Warning(text);
 
 
@@ -34,7 +34,7 @@ public static class AgentBrandingInstaller
 
 
 
-   /// <summary>Removes the shortcut recorded by the last branding run, and only if it is still the one this installer created; see <see cref="AgentBrandingShortcuts.RemoveInstalledShortcut"/>.</summary>
+   /// <summary>Removes the shortcuts recorded by earlier branding runs, and only those that are still this installer's; see <see cref="AgentBrandingShortcuts.RemoveInstalledShortcut"/>.</summary>
    [ExcludeFromCodeCoverage(Justification = "Runs the branding rules against this computer's all-users Start menu, registry and install folder, which a test must not change and which need administrator rights. It only passes the call on; the rules it runs are tested in AgentBrandingShortcuts with fakes, and the places it binds them to in BrandingPlaces.Installed.")]
    public static void RemoveInstalledShortcut() => Installed.RemoveInstalledShortcut();
 
