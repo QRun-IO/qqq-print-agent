@@ -433,6 +433,36 @@ public sealed class BrowserCallbackDispatcherTests
 
 
    /// <summary>
+   /// An inbox can have its callback ready the moment it is opened, and the next one too. Two hundred inboxes in a
+   /// row answer at once here, each with a callback for nobody. The dispatcher drops each and opens the next in one
+   /// loop: the stack is no deeper when the last inbox is opened than when the second was, where a call per inbox
+   /// would have gone deeper with every callback. The ticket is still waiting afterwards, on the first inbox that
+   /// did not answer at once, and its own callback reaches it there.
+   /// </summary>
+   [Fact]
+   public async Task InboxesThatAnswerAtOnce_AreWorkedThroughInALoop()
+   {
+      EagerInboxes source = new(200);
+      RecordingLog log = new();
+      BrowserCallbackDispatcher dispatcher = new(source, log);
+
+      using BrowserCallbackTicket ticket = dispatcher.Register("synthetic-state-a");
+
+      Assert.Equal(201, source.Depths.Count);
+      Assert.Equal(200, log.Entries.Count(entry => string.Equals(entry, Dropped, StringComparison.Ordinal)));
+      Assert.Equal(201, log.Entries.Count(entry => string.Equals(entry, InboxOpen, StringComparison.Ordinal)));
+      Assert.InRange(source.Depths.Skip(1).Max() - source.Depths[1], 0, 8);
+      Assert.False(ticket.Callback.IsCompleted);
+
+      source.Waiting.SetResult(CallbackFor("synthetic-state-a"));
+
+      Assert.Equal(CallbackFor("synthetic-state-a"), await SignInWorld.EndsAsync(ticket.Callback));
+      Assert.Equal(201, source.Depths.Count);
+   }
+
+
+
+   /// <summary>
    /// Two exchanges cannot wait under one state, because a callback could not be told to belong to one of them. The
    /// second registration is refused without naming the state, and the first is left as it was. A state of nothing is
    /// refused before anything is opened.
@@ -524,6 +554,60 @@ public sealed class BrowserCallbackDispatcherTests
             Attempts.Add(level);
          }
          throw new IOException("synthetic log failure");
+      }
+   }
+
+
+
+   /// <summary>A callback source whose first inboxes answer the moment they are waited on, each with a callback for nobody, and whose next inbox waits for the test. It notes how deep the stack is each time an inbox is opened.</summary>
+   private sealed class EagerInboxes(int eager) : IBrowserCallbackSource
+   {
+      /// <summary>The depth of the stack at each opening of an inbox, oldest first.</summary>
+      internal List<int> Depths { get; } = [];
+
+
+
+      /// <summary>What the first inbox that does not answer at once waits for.</summary>
+      internal TaskCompletionSource<Uri> Waiting { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+      /// <summary>The registered callback.</summary>
+      public string RedirectUri => SignInWorld.Callback;
+
+
+
+      /// <summary>Not read by the dispatcher.</summary>
+      public string TracePath => "trace/auth-callback.log";
+
+
+
+      /// <summary>Notes the depth of the stack and opens the next inbox.</summary>
+      public IBrowserCallbackInbox Open()
+      {
+         Depths.Add(new System.Diagnostics.StackTrace().FrameCount);
+         return new EagerInbox(Depths.Count <= eager ? Task.FromResult(CallbackFor("synthetic-state-of-nobody")) : Waiting.Task);
+      }
+
+
+
+      /// <summary>Not read by the dispatcher.</summary>
+      public IReadOnlyList<string> RecentTrace(TimeSpan window) => [];
+   }
+
+
+
+   /// <summary>An inbox whose wait is the task it was given: one that is already complete, or one the test completes.</summary>
+   private sealed class EagerInbox(Task<Uri> answer) : IBrowserCallbackInbox
+   {
+      /// <summary>Returns the answer, which may already be there.</summary>
+      public Task<Uri> ReceiveAsync(CancellationToken cancellationToken) => answer;
+
+
+
+      /// <summary>Nothing to close.</summary>
+      public void Dispose()
+      {
       }
    }
 

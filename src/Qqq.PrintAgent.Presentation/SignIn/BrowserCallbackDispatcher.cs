@@ -63,7 +63,8 @@ public sealed class BrowserCallbackDispatcher
          {
             try
             {
-               Listen();
+               (IBrowserCallbackInbox inbox, CancellationToken closed) = Open();
+               _ = ReceiveAsync(inbox, closed);
             }
             catch(Exception exception) when(!BrowserCallbackFailure.Listed(exception))
             {
@@ -126,15 +127,20 @@ public sealed class BrowserCallbackDispatcher
 
 
 
-   /// <summary>Opens an inbox and starts waiting for its one callback. The caller holds the gate. A failure to open is thrown, and no inbox is then open.</summary>
-   private void Listen()
+   /// <summary>
+   /// Opens an inbox, makes it the open one, and returns it with the token that ends the wait on it when it is
+   /// closed. The caller holds the gate, and waits on the inbox next: a registration starts the wait before it lets
+   /// go of the gate, and the wait that has just routed a callback goes on with the inbox it is given. A failure to
+   /// open is thrown, and no inbox is then open.
+   /// </summary>
+   private (IBrowserCallbackInbox Inbox, CancellationToken Closed) Open()
    {
       IBrowserCallbackInbox inbox = _callbacks.Open();
       CancellationTokenSource listening = new();
       _inbox = inbox;
       _listening = listening;
       Record(static log => log.Info("Browser callback inbox open."));
-      _ = ReceiveAsync(inbox, listening.Token);
+      return (inbox, listening.Token);
    }
 
 
@@ -179,24 +185,31 @@ public sealed class BrowserCallbackDispatcher
 
 
    /// <summary>
-   /// Waits for the one callback of an inbox and routes it. Any failure of the wait, whatever its kind, is the inbox
+   /// Waits for the one callback of an inbox, routes it, and goes on with the inbox that was opened for the tickets
+   /// that still wait, until none is. It is one loop for a whole run of inboxes, not a call per inbox: an inbox
+   /// whose callback is already there when the wait starts is dealt with at once, and a call per inbox would then
+   /// go one level deeper for every such callback. Any failure of the wait, whatever its kind, is the inbox
    /// failing, and has to reach the tickets that wait: a failure left here would leave every one of them waiting for
    /// its own time limit. The wait that ends because the inbox was closed is told apart inside
    /// <see cref="Fail"/>, by the inbox no longer being the open one.
    /// </summary>
-   private async Task ReceiveAsync(IBrowserCallbackInbox inbox, CancellationToken listening)
+   private async Task ReceiveAsync(IBrowserCallbackInbox inbox, CancellationToken closed)
    {
-      Uri callback;
-      try
+      IBrowserCallbackInbox? open = inbox;
+      while(open is not null)
       {
-         callback = await inbox.ReceiveAsync(listening).ConfigureAwait(false);
+         Uri callback;
+         try
+         {
+            callback = await open.ReceiveAsync(closed).ConfigureAwait(false);
+         }
+         catch(Exception exception)
+         {
+            Fail(open, exception);
+            return;
+         }
+         open = Route(open, callback, out closed);
       }
-      catch(Exception exception)
-      {
-         Fail(inbox, exception);
-         return;
-      }
-      Route(inbox, callback);
    }
 
 
@@ -204,16 +217,20 @@ public sealed class BrowserCallbackDispatcher
    /// <summary>
    /// Hands a received callback to the ticket whose state it carries, or drops it. The inbox that delivered it is
    /// closed and, when tickets still wait, the next one is opened in the same step, so an inbox is open exactly while
-   /// a ticket waits and the gap between two inboxes is as short as it can be. A callback from an inbox that was
-   /// closed meanwhile (its last ticket ended as the callback arrived) is dropped. The log line for a drop is fixed
-   /// text, written before the next inbox opens so the log reads in the order things happened. The ticket is
-   /// completed last, outside the gate.
+   /// a ticket waits and the gap between two inboxes is as short as it can be. That next inbox is returned, with the
+   /// token that ends the wait on it, for the caller to wait on; null means nothing is left to wait for, or another
+   /// wait already has the open inbox. When the next inbox cannot be opened, the tickets that wait cannot receive
+   /// anything and are failed. A callback from an inbox that was closed meanwhile (its last ticket ended as the
+   /// callback arrived) is dropped. The log line for a drop is fixed text, written before the next inbox opens so
+   /// the log reads in the order things happened. The ticket is completed last, outside the gate.
    /// </summary>
-   private void Route(IBrowserCallbackInbox inbox, Uri callback)
+   private IBrowserCallbackInbox? Route(IBrowserCallbackInbox inbox, Uri callback, out CancellationToken closed)
    {
       BrowserCallbackTicket? ticket = null;
-      BrowserCallbackTicket[] stranded;
-      Exception? failure;
+      BrowserCallbackTicket[] stranded = [];
+      Exception? failure = null;
+      IBrowserCallbackInbox? next = null;
+      closed = CancellationToken.None;
       lock(_gate)
       {
          if(ReferenceEquals(_inbox, inbox))
@@ -228,35 +245,25 @@ public sealed class BrowserCallbackDispatcher
          {
             Record(static log => log.Warning("A browser callback that belongs to no waiting sign-in or sign-out was dropped. Nothing of it is logged."));
          }
-         failure = Reopen(out stranded);
+         if(_inbox is null && _waiting.Count != 0)
+         {
+            try
+            {
+               (next, closed) = Open();
+            }
+            catch(Exception exception)
+            {
+               stranded = TakeWaiting();
+               failure = exception;
+            }
+         }
       }
       if(failure is not null)
       {
          End(stranded, failure);
       }
       ticket?.Complete(callback);
-   }
-
-
-
-   /// <summary>Opens the next inbox when tickets wait and none is open. The caller holds the gate. When it cannot be opened, the tickets that wait cannot receive anything: they are taken out for the caller to fail, and the failure is returned.</summary>
-   private Exception? Reopen(out BrowserCallbackTicket[] stranded)
-   {
-      stranded = [];
-      if(_inbox is not null || _waiting.Count == 0)
-      {
-         return null;
-      }
-      try
-      {
-         Listen();
-         return null;
-      }
-      catch(Exception exception)
-      {
-         stranded = TakeWaiting();
-         return exception;
-      }
+      return next;
    }
 
 
