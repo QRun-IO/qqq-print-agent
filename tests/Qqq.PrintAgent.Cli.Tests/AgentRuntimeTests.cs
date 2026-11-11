@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Globalization;
 using System.IO.Pipes;
 using System.Text;
 using Qqq.PrintAgent.Core.Printing;
@@ -16,6 +17,28 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class AgentRuntimeTests
 {
+   /// <summary>
+   /// The entries the service keeps in memory are stamped by the runtime's own clock, like everything else the runtime
+   /// times. The runtime is given a clock that stands at a moment years from now and never moves, and every entry it
+   /// has written by the time it is connected carries exactly that moment; stamped by the system clock, as they were
+   /// before the runtime handed its clock to the log, none would.
+   /// </summary>
+   [Fact]
+   public async Task LogEntries_AreStampedByTheRuntimesClock()
+   {
+      DateTimeOffset moment = new(2031, 5, 6, 7, 8, 9, TimeSpan.Zero);
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider(moment));
+      _ = await fixture.ConnectAsync();
+      await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Logs.Count > 0);
+
+      IReadOnlyList<AgentLogEntry> entries = fixture.Runtime.GetSnapshot().Logs;
+
+      Assert.NotEmpty(entries);
+      Assert.All(entries, entry => Assert.Equal(moment.ToString("O", CultureInfo.InvariantCulture), entry.Timestamp));
+   }
+
+
+
    /// <summary>
    /// The first server request times out, which leaves the connection loop waiting out a 60-second backoff. A reconnect request
    /// over the pipe wakes the loop at once, so the service connects long before that backoff (which is longer than the

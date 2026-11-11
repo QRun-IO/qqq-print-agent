@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Globalization;
 using System.Text;
 
 namespace Qqq.PrintAgent.Core.Authentication;
@@ -55,16 +54,18 @@ public sealed record QqqCompatibilityProblem(QqqCompatibilityIssue Issue, string
 
 
    /// <summary>
-   /// Makes server-supplied text safe to show. Anything that is not a visible character or a plain space becomes a
-   /// space: control characters, the line and paragraph separators (U+2028, U+2029) that end a line as surely as a
-   /// newline, the format characters that reorder or hide text (the bidirectional embeddings, overrides and isolates,
-   /// the zero-width characters), private-use and unassigned code points, and a surrogate without its partner. The
-   /// text is read as whole code points and cut after the limit (<see cref="ValueLimit"/> UTF-16 units unless the
-   /// caller names another), never in the middle of a surrogate pair, and reading stops there, so a value of any
-   /// length costs the same. A missing value is shown as such. The session client's log lines use it as well as the
-   /// problem details, because a log is read by an operator too.
+   /// Makes server-supplied text safe to show as part of a sentence: a problem's detail, or a line of the session
+   /// client's log, which an operator reads too. Every code point that <see cref="ServerText.IsShown"/> does not show
+   /// becomes a space: control characters, the line and paragraph separators, the format characters that reorder or
+   /// hide text, and private-use and unassigned code points. Other space separators (U+00A0, U+3000) are kept as they
+   /// are, and a surrogate without its partner is shown as U+FFFD. The text is read as whole code points and cut
+   /// after the limit (<see cref="ValueLimit"/> UTF-16 units unless the caller names another), never in the middle
+   /// of a surrogate pair, and reading stops there, so a value of any length costs the same. Because the result is a
+   /// piece of a sentence, a cut is marked with an ellipsis after the limit and a missing value is shown as the words
+   /// "(missing)". Neither suits a typed member of the management pipe, which has its own rule for that reason and
+   /// shares only <see cref="ServerText.IsShown"/> with this one.
    /// </summary>
-   public static string Printable(string? value, int limit = ValueLimit)
+   internal static string Printable(string? value, int limit = ValueLimit)
    {
       if(string.IsNullOrEmpty(value))
       { return "(missing)"; }
@@ -73,20 +74,10 @@ public sealed record QqqCompatibilityProblem(QqqCompatibilityIssue Issue, string
       {
          if(shown.Length + rune.Utf16SequenceLength > limit)
          { return shown.Append(Cut).ToString(); }
-         shown.Append(IsShown(rune) ? rune.ToString() : " ");
+         shown.Append(ServerText.IsShown(rune) ? rune.ToString() : " ");
       }
       return shown.ToString();
    }
-
-
-
-   /// <summary>
-   /// True for a code point that shows as itself and cannot change how the text around it is laid out. A surrogate
-   /// without its partner never arrives here as one: reading by code point has already replaced it with U+FFFD, which
-   /// is shown.
-   /// </summary>
-   private static bool IsShown(Rune rune) => Rune.GetUnicodeCategory(rune) is not (UnicodeCategory.Control or UnicodeCategory.Format
-      or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned);
 
 
 

@@ -35,7 +35,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Stores a new server together with its certificate exception and its session, or nothing.</summary>
+   /// <summary>Stores a new server together with its certificate exception and its session, or nothing. The request states which sign-in provider the check showed the operator: the origin the check reported, or none when the member is left out. Nothing is stored and the answer is <see cref="ManagementErrorCode.ProviderChanged"/> when the provider the service reads is not that one, which includes reading one where the check named none and none where it named one.</summary>
    public const string ServersAdd = "servers.add";
 
 
@@ -55,7 +55,15 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Discovers this computer's Windows printers now and returns them with the time. A snapshot only reports the list the service last discovered; a client that needs a fresh one (the wizard's printer step, the command line's <c>printers</c>) asks here.</summary>
+   /// <summary>
+   /// Discovers this computer's Windows printers now and returns them with the time. A snapshot only reports the list
+   /// the service last discovered; a client that needs a fresh one (the wizard's printer step, the command line's
+   /// <c>printers</c>) asks here. It is a read, and the one single-flight operation
+   /// (<see cref="ManagementOperationInfo.SingleFlight"/>): a discovery loads printer drivers in a helper process, so the
+   /// computer runs one at a time, and a request that arrives while one is running, whether a client or the service's
+   /// own refresh started it, joins that discovery and gets its result. A hung driver and a client that retries then
+   /// cost one helper process, not one for each request.
+   /// </summary>
    public const string PrintersDiscover = "printers.discover";
 
 
@@ -120,7 +128,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Switches a server's certificate exception on or off.</summary>
+   /// <summary>Switches a server's certificate exception on or off. A request that switches it on states which sign-in provider the check showed the operator: the origin the check reported, or none when the member is left out. Nothing is changed and the answer is <see cref="ManagementErrorCode.ProviderChanged"/> when the provider the service reads is not that one, which includes reading one where the check named none and none where it named one. A request that switches it off accepts nothing, so nothing is compared.</summary>
    public const string TrustSet = "trust.set";
 
 
@@ -189,7 +197,7 @@ public static class ManagementOperations
       Computer(ServersReorder, ManagementOperationKind.Change, typeof(ServerListResult), typeof(ServersReorderArgs)),
       Computer(ComputerGetProfile, ManagementOperationKind.Read, typeof(DeviceProfile)),
       Computer(ComputerSetProfile, ManagementOperationKind.Change, typeof(DeviceProfile), typeof(ComputerSetProfileArgs)),
-      Computer(PrintersDiscover, ManagementOperationKind.Read, typeof(PrintersDiscoverResult)),
+      Computer(PrintersDiscover, ManagementOperationKind.Read, typeof(PrintersDiscoverResult), singleFlight: true),
       Computer(LogsGetSettings, ManagementOperationKind.Read, typeof(LogSettings), degraded: true),
       Computer(LogsSetSettings, ManagementOperationKind.Change, typeof(LogSettings), typeof(LogsSetSettingsArgs), degraded: true),
       Computer(LogsClear, ManagementOperationKind.Change, typeof(LogsClearResult), degraded: true),
@@ -226,20 +234,18 @@ public static class ManagementOperations
 
    /// <summary>
    /// Decides whether a request whose envelope was read can be routed, and to which operation. It returns null when it
-   /// can, and otherwise the error to answer: the version is not this contract's; the operation does not exist; an
-   /// operation on the computer names a server; an operation on one server names none, or names it by anything but a
-   /// full identifier; or an operation that takes no arguments is given some (an empty object is accepted, because it
-   /// says the same as leaving the arguments out). It is pure, so the dispatcher and the tests share one rule. The
-   /// messages are fixed and never repeat what the request said.
+   /// can, and otherwise the error to answer: the operation does not exist; an operation on the computer names a
+   /// server; an operation on one server names none; or an operation that takes no arguments is given some (an empty
+   /// object is accepted, because it says the same as leaving the arguments out). It is pure, so the dispatcher and
+   /// the tests share one rule. The messages are fixed and never repeat what the request said. Three things are not
+   /// asked here because no request can be otherwise (<see cref="ManagementRequest"/>): its version is this
+   /// contract's, its operation is shaped like a name, and a server it names is named by a full identifier. Text
+   /// that breaks one of them is refused by the parser, which is where <see cref="ManagementErrorCode.UnsupportedVersion"/>
+   /// is answered.
    /// </summary>
    public static ManagementError? Check(ManagementRequest request, out ManagementOperationInfo? operation)
    {
       ArgumentNullException.ThrowIfNull(request);
-      operation = null;
-      if(request.V != ManagementProtocol.Version)
-      {
-         return new ManagementError(ManagementErrorCode.UnsupportedVersion, "This service speaks version 2 of the management protocol.");
-      }
       if(!TryFind(request.Op, out operation))
       {
          return new ManagementError(ManagementErrorCode.UnknownOperation, "There is no operation with this name.");
@@ -248,7 +254,7 @@ public static class ManagementOperations
       {
          return new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on the computer and must not name a server.");
       }
-      if(operation.Scope == ManagementScope.Server && !ManagementProtocol.IsServerId(request.Server))
+      if(operation.Scope == ManagementScope.Server && request.Server is null)
       {
          return new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on one server and must name it by its full identifier.");
       }
@@ -259,8 +265,9 @@ public static class ManagementOperations
 
 
    /// <summary>Describes an operation on the computer or the list of servers.</summary>
-   private static ManagementOperationInfo Computer(string name, ManagementOperationKind kind, Type result, Type? arguments = null, bool isLong = false, bool degraded = false)
-      => new(name, ManagementScope.Computer, kind, isLong ? LongTimeLimit : OrdinaryTimeLimit, degraded, arguments, result);
+   private static ManagementOperationInfo Computer(string name, ManagementOperationKind kind, Type result, Type? arguments = null, bool isLong = false, bool degraded = false,
+      bool singleFlight = false)
+      => new(name, ManagementScope.Computer, kind, isLong ? LongTimeLimit : OrdinaryTimeLimit, degraded, arguments, result, singleFlight);
 
 
 

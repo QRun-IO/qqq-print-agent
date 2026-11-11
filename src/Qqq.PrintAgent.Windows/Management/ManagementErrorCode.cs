@@ -86,12 +86,25 @@ public static class ManagementErrorCode
 
 
 
+   /// <summary>
+   /// <see cref="ManagementOperations.ServersAdd"/> and <see cref="ManagementOperations.TrustSet"/>: the sign-in
+   /// provider the service reads from the server now is not the one <see cref="ManagementOperations.ServersCheck"/>
+   /// reported, as the request states it (<see cref="SignInProviderOrigin.Agrees"/>). That is so when the service
+   /// reads another provider, when it reads one where the check named none, and when it reads none where the check
+   /// named one. Nothing was stored or changed, so a certificate exception does not come to cover a provider other
+   /// than the one the operator was shown. The client checks the server again and shows what the check now reports.
+   /// There are no details: the check's result names the provider.
+   /// </summary>
+   public const string ProviderChanged = "provider_changed";
+
+
+
    /// <summary>The QQQ server could not be reached or did not answer in time, so the action was not carried out there.</summary>
    public const string ServerUnreachable = "server_unreachable";
 
 
 
-   /// <summary>The QQQ server refused the action. The message carries its reason, which <see cref="ManagementReply.Failure(string, string)"/> makes printable and cuts at <see cref="ManagementProtocol.MaximumMessageCharacters"/> as it does every message, so what a server said cannot reach a client raw.</summary>
+   /// <summary>The QQQ server refused the action. The message carries its reason, which <see cref="ManagementError"/> makes printable and cuts at <see cref="ManagementProtocol.MaximumMessageCharacters"/> as it does every message, however the error is built, so what a server said cannot reach a client raw.</summary>
    public const string ServerRefused = "server_refused";
 
 
@@ -106,7 +119,7 @@ public static class ManagementErrorCode
 
 
 
-   /// <summary>The server bound the pairing for a different account than the one approved for it. The details are an <see cref="IdentityChangedDetails"/> naming the approved account, printable and bounded by the only factory that builds them.</summary>
+   /// <summary>The server bound the pairing for a different account than the one approved for it. The details are an <see cref="IdentityChangedDetails"/> naming the approved account, printable and bounded by the record's one constructor.</summary>
    public const string IdentityChanged = "identity_changed";
 
 
@@ -187,9 +200,9 @@ public static class ManagementErrorCode
    public static IReadOnlyList<string> All { get; } =
    [
       UnsupportedVersion, UnknownOperation, InvalidRequest, ServerNotFound, ServerAmbiguous, ServerLimit, ServerExists, ServerRemoving, Busy, NotSignedIn, NotPaired,
-      NotConnected, ServerIncompatible, CertificateUntrusted, ServerUnreachable, ServerRefused, SignInRefused, BindRefused, IdentityChanged, EnrollmentRefused,
-      EnrollmentUnconfirmed, PrinterNotFound, JobNotFound, JobNotCurrent, DuplicateRiskUnconfirmed, CancelRefused, StateUnreadable, StateNewer, MigrationIncomplete,
-      UpdateInProgress, InternalError,
+      NotConnected, ServerIncompatible, CertificateUntrusted, ProviderChanged, ServerUnreachable, ServerRefused, SignInRefused, BindRefused, IdentityChanged,
+      EnrollmentRefused, EnrollmentUnconfirmed, PrinterNotFound, JobNotFound, JobNotCurrent, DuplicateRiskUnconfirmed, CancelRefused, StateUnreadable, StateNewer,
+      MigrationIncomplete, UpdateInProgress, InternalError,
    ];
 
 

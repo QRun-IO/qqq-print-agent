@@ -178,10 +178,11 @@ public sealed class ManagementResultTests
 
 
    /// <summary>
-   /// The approved account in the details of a changed identity came from the server, so the only way to build the
-   /// details makes both values printable and cuts each at 200 UTF-16 units, never inside a surrogate pair. The record
-   /// has no public constructor and no member that can be set afterwards, and it still reads back from the wire. The
-   /// characters are written as escapes here so this file holds none of them.
+   /// The approved account in the details of a changed identity came from the server, so the record's one constructor
+   /// makes both values printable and cuts each at 200 UTF-16 units exactly, never inside a surrogate pair and with
+   /// nothing added to mark the cut. The record has no public constructor and no member that can be set afterwards,
+   /// and it reads back from the wire as it was written. The characters are written as escapes here so this file
+   /// holds none of them.
    /// </summary>
    [Fact]
    public void IdentityChangedDetails_AreBuiltOnlyPrintableAndBounded()
@@ -190,18 +191,148 @@ public sealed class ManagementResultTests
       var hostile = IdentityChangedDetails.For("principal\u202E4\u0007\u2066x\u2069", "tenant\n2\u2028\u200B");
       var tooLong = IdentityChangedDetails.For(new string('p', 300), new string('t', 199) + Pair + "tail");
       var fitting = IdentityChangedDetails.For(new string('p', 198) + Pair, new string('t', 200));
-      var missing = IdentityChangedDetails.For(null, "");
       ManagementReply reply = ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Sign in as the approved account.", hostile))).Reply!;
 
       Assert.Equal(("principal 4  x ", "tenant 2  "), (hostile.ApprovedPrincipalId, hostile.ApprovedTenantId));
-      Assert.Equal((new string('p', 200) + "...", new string('t', 199) + "..."), (tooLong.ApprovedPrincipalId, tooLong.ApprovedTenantId));
+      Assert.Equal((new string('p', 200), new string('t', 199)), (tooLong.ApprovedPrincipalId, tooLong.ApprovedTenantId));
       Assert.Equal((new string('p', 198) + Pair, new string('t', 200)), (fitting.ApprovedPrincipalId, fitting.ApprovedTenantId));
-      Assert.Equal(("(missing)", "(missing)"), (missing.ApprovedPrincipalId, missing.ApprovedTenantId));
+      Assert.Equal(200, ManagementProtocol.MaximumIdentityCharacters);
       Assert.Empty(typeof(IdentityChangedDetails).GetConstructors());
       Assert.All(typeof(IdentityChangedDetails).GetProperties(), member => Assert.Null(member.SetMethod));
       Assert.True(ManagementJson.TryReadDetails(reply.Error!, out IdentityChangedDetails? read));
       Assert.Equal(hostile, read);
-      Assert.False(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.IdentityChanged, "Changed.", ManagementPayload.From(new NoResult())), out IdentityChangedDetails? _));
+      Assert.Equal(tooLong, IdentityChangedDetails.For(tooLong.ApprovedPrincipalId, tooLong.ApprovedTenantId));
+   }
+
+
+
+   /// <summary>
+   /// An approved account the pairing does not record is absent, not replaced by words: a value that is missing, empty
+   /// or has nothing to show once it is printable is null, is left out of the text, and reads back as null, so a client
+   /// never has to tell a missing account from one named "(missing)". An account that really has that name is carried
+   /// as it is.
+   /// </summary>
+   [Fact]
+   public void IdentityChangedDetails_LeaveOutAValueThatIsMissing()
+   {
+      var missing = IdentityChangedDetails.For(null, "");
+      var blank = IdentityChangedDetails.For("  ", "\u200B\n");
+      var half = IdentityChangedDetails.For("principal-4", null);
+      var literal = IdentityChangedDetails.For("(missing)", "tenant-2");
+      string written = ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Sign in as the approved account.", missing));
+
+      Assert.Equal((null, null), (missing.ApprovedPrincipalId, missing.ApprovedTenantId));
+      Assert.Equal(missing, blank);
+      Assert.Equal(("principal-4", null), (half.ApprovedPrincipalId, half.ApprovedTenantId));
+      Assert.Equal("(missing)", literal.ApprovedPrincipalId);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Sign in as the approved account.\",\"details\":{}}}", written);
+      Assert.Contains("\"details\":{\"approvedPrincipalId\":\"principal-4\"}}", ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Sign in as the approved account.", half)), StringComparison.Ordinal);
+      Assert.True(ManagementJson.TryReadDetails(ManagementJson.ParseReply(written).Reply!.Error!, out IdentityChangedDetails? read));
+      Assert.Equal(missing, read);
+   }
+
+
+
+   /// <summary>
+   /// A client holds bounded, printable identity values even when a service did not send them so: the details are
+   /// read through the same constructor that builds them, so a principal of 2,028 units and a tenant with a character
+   /// that reorders text arrive cut and clean. A value of the wrong kind still makes the details unreadable.
+   /// </summary>
+   [Fact]
+   public void IdentityChangedDetails_ReadFromTheWire_AreBoundedToo()
+   {
+      string raw = "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Changed.\",\"details\":{\"approvedPrincipalId\":\"" + new string('p', 2028) + "\",\"approvedTenantId\":\"tenant\\u202E2\"}}}";
+
+      Assert.True(ManagementJson.TryReadDetails(ManagementJson.ParseReply(raw).Reply!.Error!, out IdentityChangedDetails? read));
+
+      Assert.Equal((new string('p', 200), "tenant 2"), (read.ApprovedPrincipalId, read.ApprovedTenantId));
+      Assert.False(ManagementJson.TryReadDetails(ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Changed.\",\"details\":{\"approvedPrincipalId\":7}}}").Reply!.Error!, out IdentityChangedDetails? _));
+   }
+
+
+
+   /// <summary>
+   /// The same account reads the same wherever a reply names it. The snapshot's authentication and the details of a
+   /// changed identity give a principal and a tenant one form: for values that are hostile, too long, cut beside a
+   /// surrogate pair, empty or missing, both records hold the same text, at most 200 UTF-16 units, and a missing value
+   /// is absent in both. The record has no public constructor and no member that can be set afterwards, and what it
+   /// writes reads back equal.
+   /// </summary>
+   [Theory]
+   [InlineData("principal-4", "tenant-2")]
+   [InlineData("principal\u202E4\u0007\u2066x\u2069", "tenant\n2\u2028\u200B")]
+   [InlineData("pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp-and-more", "tenant\uD83D\uDE00")]
+   [InlineData("", "   ")]
+   [InlineData(null, null)]
+   [InlineData("(missing)", "\u200B")]
+   public void ServerAuthentication_GivesIdentityValuesTheFormTheIdentityChangedDetailsGiveThem(string? principal, string? tenant)
+   {
+      var authentication = ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, principal, tenant, "Signed in. Printing is enabled.", Authorized: true));
+      var details = IdentityChangedDetails.For(principal, tenant);
+      ManagementReply written = ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Success(authentication))).Reply!;
+
+      Assert.Equal((details.ApprovedPrincipalId, details.ApprovedTenantId), (authentication.PrincipalId, authentication.TenantId));
+      Assert.True((authentication.PrincipalId?.Length ?? 0) <= ManagementProtocol.MaximumIdentityCharacters);
+      Assert.Equal((true, "Signed in. Printing is enabled.", true), (authentication.SignedIn, authentication.Message, authentication.Authorized));
+      Assert.True(ManagementJson.TryReadResult(written, out ServerAuthentication? read));
+      Assert.Equal(authentication, read);
+      Assert.Empty(typeof(ServerAuthentication).GetConstructors());
+      Assert.All(typeof(ServerAuthentication).GetProperties(), member => Assert.Null(member.SetMethod));
+   }
+
+
+
+   /// <summary>
+   /// The message beside an account is held to the form of text on the wire, like the two identity values and like
+   /// an error's message: every character that is not shown becomes a space and the text is cut at 512 UTF-16 units
+   /// exactly, when the record is built from the service's status and when it is read from a reply of a service that
+   /// did not bound it. The result is the text an error would carry for the same message, and reading it again
+   /// changes nothing. A message that is already in that form is carried as it is, an empty one included.
+   /// </summary>
+   [Fact]
+   public void ServerAuthentication_GivesItsMessageTheFormOfTextOnTheWire_WhenBuiltAndWhenRead()
+   {
+      string hostile = "Signed in" + (char)0x202E + "as" + (char)0x000A + "another" + (char)0x2028 + "account " + new string('x', 2000);
+      string expected = new ManagementError(ManagementErrorCode.ServerRefused, hostile).Message;
+      string raw = "{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":true,\"principalId\":\"principal-4\",\"tenantId\":\"tenant-2\",\"message\":" + JsonSerializer.Serialize(hostile) + ",\"authorized\":true}}";
+
+      var built = ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", hostile, Authorized: true));
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(raw).Reply!, out ServerAuthentication? read));
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Success(built))).Reply!, out ServerAuthentication? readBack));
+
+      Assert.StartsWith("Signed in as another account xxx", expected, StringComparison.Ordinal);
+      Assert.Equal(ManagementProtocol.MaximumMessageCharacters, expected.Length);
+      Assert.Equal(expected, built.Message);
+      Assert.Equal(expected, read.Message);
+      Assert.Equal(built, read);
+      Assert.Equal(built, readBack);
+      Assert.Equal("Signed in.", ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", "Signed in.")).Message);
+      Assert.Equal("", ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: false, PrincipalId: null, TenantId: null, Message: "")).Message);
+      Assert.Throws<ArgumentNullException>(() => ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: false, PrincipalId: null, TenantId: null, Message: null!)));
+   }
+
+
+
+   /// <summary>
+   /// A client holds bounded, printable identity values in a snapshot's authentication even when a service did not send
+   /// them so, because the wire is read through the constructor that builds the record. A signed-out status has neither
+   /// value and leaves both out of the text; the two flags are carried as given and the message in the form of text
+   /// on the wire (the test below), and a status without its message is unreadable.
+   /// </summary>
+   [Fact]
+   public void ServerAuthentication_ReadFromTheWire_IsBoundedToo()
+   {
+      string raw = "{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":true,\"principalId\":\"" + new string('p', 1024) + "\",\"tenantId\":\"tenant\\u202E2\",\"message\":\"Signed in.\",\"authorized\":true}}";
+      var signedOut = ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: false, PrincipalId: null, TenantId: null, Message: "Sign in to start printing."));
+
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(raw).Reply!, out ServerAuthentication? read));
+
+      Assert.Equal((true, new string('p', 200), "tenant 2", "Signed in.", true), (read.SignedIn, read.PrincipalId, read.TenantId, read.Message, read.Authorized));
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":false,\"message\":\"Sign in to start printing.\",\"authorized\":false}}", ManagementJson.Write(ManagementReply.Success(signedOut)));
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":false,\"message\":\"Sign in to start printing.\"}}").Reply!, out ServerAuthentication? withoutTheFlag));
+      Assert.Equal(signedOut, withoutTheFlag);
+      Assert.False(ManagementJson.TryReadResult(ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":false,\"authorized\":false}}").Reply!, out ServerAuthentication? _));
+      Assert.Throws<ArgumentNullException>(() => ServerAuthentication.From(null!));
    }
 
 
@@ -224,7 +355,7 @@ public sealed class ManagementResultTests
       Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(before).Reply!, out ComputerSnapshot? read));
       Assert.Null(read.PrintersDiscoveredAt);
       Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{\"printers\":[],\"discoveredAt\":\"2026-11-10T15:04:05.0000000Z\"}}", ManagementJson.Write(ManagementReply.Success(new PrintersDiscoverResult([], found))));
-      Assert.False(ManagementJson.TryReadResult(new ManagementReply(2, true, ManagementPayload.From(new ServerListResult([]))), out PrintersDiscoverResult? _));
+      Assert.False(ManagementJson.TryReadResult(ManagementReply.Success(new ServerListResult([])), out PrintersDiscoverResult? _));
    }
 
 

@@ -6,4 +6,4 @@
 namespace Qqq.PrintAgent.Windows.Management;
 
 /// <summary>The result of <see cref="ManagementOperations.ServersAdd"/>: the server as it was stored, with the identifier it was given, and who its session is signed in as.</summary>
-public sealed record ServerAddResult(ServerSummary Server, AgentAuthenticationStatus Authentication);
+public sealed record ServerAddResult(ServerSummary Server, ServerAuthentication Authentication);

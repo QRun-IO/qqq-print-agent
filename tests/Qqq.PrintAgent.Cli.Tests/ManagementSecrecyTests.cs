@@ -25,7 +25,7 @@ public sealed class ManagementSecrecyTests
    /// <summary>The records a reply may be made of besides the contract's own: existing snapshot records the contract reuses, each already free of credentials.</summary>
    private static readonly Type[] s_reusedRecords =
    [
-      typeof(JobPage), typeof(JobSnapshot), typeof(JobDetailsSnapshot), typeof(JobEventSnapshot), typeof(LogSettings), typeof(AgentAuthenticationStatus), typeof(AgentTransportSnapshot),
+      typeof(JobPage), typeof(JobSnapshot), typeof(JobDetailsSnapshot), typeof(JobEventSnapshot), typeof(LogSettings), typeof(AgentTransportSnapshot),
       typeof(PrinterServerSync), typeof(DeviceProfile), typeof(DeviceDesiredState), typeof(PrinterMediaProfile),
    ];
 
@@ -68,6 +68,35 @@ public sealed class ManagementSecrecyTests
 
 
 
+   /// <summary>
+   /// An account's identity values are treated one way everywhere a reply names them. Every member of a result or of an
+   /// error's details that holds a principal or a tenant is declared by one of the two records that give such a value
+   /// its wire form in their one constructor, <see cref="ServerAuthentication"/> and <see cref="IdentityChangedDetails"/>;
+   /// the service's own status record, which holds the values as the session client read them, is in no reply. A new
+   /// result that named an account through another record would fail here.
+   /// </summary>
+   [Fact]
+   public void IdentityValues_AreCarriedOnlyByTheRecordsThatBoundThem()
+   {
+      HashSet<Type> visited = [];
+      foreach(Type root in ManagementOperations.All.Select(operation => operation.ResultType).Concat(ManagementErrorCode.All.Select(ManagementErrorCode.DetailsType).OfType<Type>()))
+      {
+         Walk(root, visited, []);
+      }
+
+      string[] holders = [.. visited.SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+         .Where(member => member.Name.Contains("Principal", StringComparison.OrdinalIgnoreCase) || member.Name.Contains("Tenant", StringComparison.OrdinalIgnoreCase))
+         .Select(member => member.DeclaringType!.Name + "." + member.Name).Order(StringComparer.Ordinal)];
+
+      Assert.Equal(["IdentityChangedDetails.ApprovedPrincipalId", "IdentityChangedDetails.ApprovedTenantId", "ServerAuthentication.PrincipalId", "ServerAuthentication.TenantId"], holders);
+      Assert.DoesNotContain(typeof(AgentAuthenticationStatus), visited);
+      Assert.Equal(typeof(ServerAuthentication), typeof(ServerSnapshot).GetProperty(nameof(ServerSnapshot.Authentication))!.PropertyType);
+      Assert.Equal(typeof(ServerAuthentication), typeof(ServerAddResult).GetProperty(nameof(ServerAddResult.Authentication))!.PropertyType);
+      Assert.Equal(typeof(ServerAuthentication), typeof(SignInResult).GetProperty(nameof(SignInResult.Authentication))!.PropertyType);
+   }
+
+
+
    /// <summary>No argument record is used as a result and no result as an argument, so a credential that travels to the service in a request has no type in common with anything that travels back.</summary>
    [Fact]
    public void ArgumentRecords_AreNeverResults()
@@ -101,21 +130,19 @@ public sealed class ManagementSecrecyTests
       foreach(ManagementOperationInfo operation in ManagementOperations.All)
       {
          object result = ManagementSamples.Result(operation.Name);
-         written.Add(ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, true, Payload(result, operation.ResultType))));
+         written.Add(ManagementJson.Write(ManagementReply.Success(Payload(result, operation.ResultType))));
          written.Add(result.ToString()!);
       }
       foreach(string code in ManagementErrorCode.All)
       {
-         object? details = ManagementSamples.Details(code);
-         written.Add(ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, false, Error: new ManagementError(code, "Synthetic message for people.",
-            details is null ? null : Payload(details, details.GetType())))));
+         written.Add(ManagementJson.Write(ManagementSamples.Failure(code)));
       }
       foreach(ServiceSnapshot further in ManagementSamples.FurtherSnapshots.Values)
       {
          written.Add(ManagementJson.Write(ManagementReply.Success(further)));
       }
 
-      Assert.Equal(30 + 30 + 31 + 2, written.Count);
+      Assert.Equal(30 + 30 + 32 + 2, written.Count);
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.SessionCookieCanary, text, StringComparison.Ordinal));
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.DeviceTokenCanary, text, StringComparison.Ordinal));
       Assert.All(written, text => Assert.DoesNotContain(ManagementSamples.EnrollmentCodeCanary, text, StringComparison.Ordinal));
@@ -142,7 +169,7 @@ public sealed class ManagementSecrecyTests
    [Fact]
    public void ProviderSignOutRequest_IsInTheSignOutReplyAndNowhereElse()
    {
-      string[] carrying = [.. ManagementOperations.All.Where(operation => ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, true,
+      string[] carrying = [.. ManagementOperations.All.Where(operation => ManagementJson.Write(ManagementReply.Success(
          Payload(ManagementSamples.Result(operation.Name), operation.ResultType))).Contains(ManagementSamples.IdTokenHintCanary, StringComparison.Ordinal))
          .Select(operation => operation.Name)];
 
@@ -157,7 +184,7 @@ public sealed class ManagementSecrecyTests
    private static string RequestText(string operation)
    {
       object arguments = ManagementSamples.Arguments(operation)!;
-      return ManagementJson.Write(new ManagementRequest(ManagementProtocol.Version, operation, null, Payload(arguments, arguments.GetType())));
+      return ManagementJson.Write(ManagementRequest.For(operation, null, Payload(arguments, arguments.GetType())));
    }
 
 

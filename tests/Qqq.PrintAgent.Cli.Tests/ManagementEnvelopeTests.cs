@@ -256,28 +256,276 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>The routing check is the one rule for whether a request names a server correctly: an operation on the computer must not name one, and an operation on one server must name it by a full identifier. Each refusal has its code, finds no more than the operation, and never repeats the request.</summary>
+   /// <summary>
+   /// JSON's grammar lets a string hold the escape of a surrogate without its partner, which is not text and cannot
+   /// be read into a string. A request that holds one is refused like any other request that is wrong in that place,
+   /// and reading it never throws: in the operation it is a malformed operation, in the server a malformed server,
+   /// and in a member's name, in the envelope or at any depth beneath it, the text is not JSON, because the parse
+   /// has to read every name to know that none is repeated. A high surrogate and a low one are the same in this, and
+   /// so is one that follows text that would have been valid. The texts are plain ASCII: the escape is six characters.
+   /// </summary>
    [Theory]
-   [InlineData(2, "snapshot", null, null)]
-   [InlineData(2, "servers.list", null, null)]
-   [InlineData(2, "trust.get", Server, null)]
-   [InlineData(2, "jobs.query", Server, null)]
-   [InlineData(2, "snapshot", Server, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.add", Server, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "update.prepare", Server, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "trust.get", null, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "session.signIn", null, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.remove", "3f2b8c1e", ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.remove", "Warehouse", ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.remove", "3F2B8C1E-5D4A-4F6B-9A7C-0E1D2C3B4A5F", ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.explode", null, ManagementErrorCode.UnknownOperation)]
-   [InlineData(2, "Snapshot", null, ManagementErrorCode.UnknownOperation)]
-   [InlineData(2, "printers", null, ManagementErrorCode.UnknownOperation)]
-   [InlineData(1, "snapshot", null, ManagementErrorCode.UnsupportedVersion)]
-   [InlineData(3, "snapshot", null, ManagementErrorCode.UnsupportedVersion)]
-   public void RoutingCheck_AcceptsOrRefusesWithTheRightCode(int version, string operation, string? server, string? code)
+   [InlineData("{\"v\":2,\"op\":\"\\ud800\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"\\udc00\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\\ud800\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"\\ud800\",\"server\":\"" + Server + "\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"server\":\"\\ud800\"}", ManagementEnvelopeProblem.ServerMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"trust.get\",\"server\":\"" + Server + "\\udc00\"}", ManagementEnvelopeProblem.ServerMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"\\ud800\":1}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"args\":{\"\\ud800\":1}}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"op\":\"jobs.query\",\"server\":\"" + Server + "\",\"args\":{\"query\":{\"page\\udc00Size\":25}}}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"\\ud800\":2,\"op\":\"snapshot\"}", ManagementEnvelopeProblem.NotJson)]
+   public void Request_ThatHoldsASurrogateWithoutItsPartner_IsRefusedAndNeverThrows(string text, ManagementEnvelopeProblem problem)
    {
-      ManagementRequest request = new(version, operation, server);
+      AssertRefused(text, problem, ManagementErrorCode.InvalidRequest);
+   }
+
+
+
+   /// <summary>
+   /// The same for a string that holds the surrogate itself, which only code can build (text read from the pipe as
+   /// UTF-8 cannot hold one): it cannot be carried as UTF-8, so a request and a reply that hold one are refused as
+   /// not JSON, wherever it stands, and reading them never throws.
+   /// </summary>
+   [Fact]
+   public void Text_ThatHoldsASurrogateItself_IsRefusedAsNotJson()
+   {
+      string lone = ((char)0xD800).ToString();
+
+      AssertRefused("{\"v\":2,\"op\":\"snap" + lone + "shot\"}", ManagementEnvelopeProblem.NotJson, ManagementErrorCode.InvalidRequest);
+      AssertRefused("{\"v\":2,\"op\":\"snapshot\"}" + lone, ManagementEnvelopeProblem.NotJson, ManagementErrorCode.InvalidRequest);
+      AssertRefused("{\"v\":2,\"op\":\"snapshot\",\"op\":\"snap" + lone + "shot\"}", ManagementEnvelopeProblem.NotJson, ManagementErrorCode.InvalidRequest);
+      Assert.Equal(ManagementEnvelopeProblem.NotJson, ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"a" + lone + "b\"}}").Problem);
+      Assert.Equal(ManagementEnvelopeProblem.NotJson, ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"reason\":\"a" + lone + "b\"}}").Problem);
+   }
+
+
+
+   /// <summary>
+   /// The escape of a surrogate without its partner in a value inside the arguments, a result or the details leaves
+   /// the envelope readable, and the record that holds it is then not read: arguments are refused, and a result and
+   /// details do not fit their type. Writing such a payload back fails with the serializer's own error for text it
+   /// cannot write, as it did when the serializer wrote the envelope, and not with a stray error of the writer. A
+   /// surrogate pair written as two escapes is text, and is read.
+   /// </summary>
+   [Fact]
+   public void Payload_ThatHoldsASurrogateWithoutItsPartner_IsNotReadAndIsNotWritten()
+   {
+      ManagementRequestParse request = ManagementJson.ParseRequest("{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"name\":\"a\\ud800\"}}");
+      ManagementReplyParse result = ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"reason\":\"a\\ud800b\"}}");
+      ManagementReplyParse details = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"reason\":\"\\udc00\"}}}");
+      ManagementReplyParse pair = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy \\ud83d\\ude00.\"}}");
+
+      Assert.True(request.Succeeded());
+      Assert.False(ManagementJson.TryReadArguments(request.Request, out ServersRenameArgs? arguments));
+      Assert.Null(arguments);
+      Assert.True(result.Succeeded());
+      Assert.False(ManagementJson.TryReadResult(result.Reply, out CancelRefusedDetails? read));
+      Assert.Null(read);
+      Assert.True(details.Succeeded());
+      Assert.False(ManagementJson.TryReadDetails(details.Reply.Error!, out CancelRefusedDetails? refused));
+      Assert.Null(refused);
+      Assert.Throws<JsonException>(() => ManagementJson.Write(request.Request));
+      Assert.Throws<JsonException>(() => ManagementJson.Write(result.Reply));
+      Assert.Throws<JsonException>(() => ManagementJson.Write(details.Reply));
+      Assert.True(pair.Succeeded());
+      Assert.Equal("Busy \U0001F600.", pair.Reply.Error!.Message);
+   }
+
+
+
+   /// <summary>
+   /// Neither parsing function throws, whatever stands where a string or a name can stand. Each text below has one
+   /// place marked, in the envelope of a request or of a reply or beneath it, and each fragment is put there in turn:
+   /// the escape of a high or a low surrogate without its partner, two of them, one in the wrong order, one followed
+   /// by another character, the surrogate itself, an escape that is cut short or is not one, a NUL written as an
+   /// escape and as itself, a line break, a whole surrogate pair, and nothing. Every text gets an answer from both
+   /// functions, a request or a reply or the reason there is none, and what was read can be put through the routing
+   /// check and the typed readers without an exception either. This is a table, not a fuzzer: it holds the places and
+   /// the shapes that are known, and audit R2 still stands for the rest.
+   /// </summary>
+   [Fact]
+   public void ParsingFunctions_NeverThrow_WhateverStandsWhereAStringOrANameCanStand()
+   {
+      string[] fragments =
+      [
+         "\\ud800", "\\udc00", "\\ud800\\ud800", "\\udc00\\ud800", "\\udbff\\u0041", "\\ud83d\\ude00", "\\u0000", "\\uffff",
+         "\\u12", "\\x", "\\", "\\\\ud800", ((char)0xD800).ToString(), ((char)0xDC00).ToString(), "\0", "\n", "",
+      ];
+      string[] templates =
+      [
+         "{\"v\":2,\"op\":\"@\"}",
+         "{\"v\":2,\"op\":\"snapshot@\"}",
+         "{\"v\":2,\"op\":\"trust.get\",\"server\":\"@\"}",
+         "{\"v\":2,\"op\":\"trust.get\",\"server\":\"" + Server + "@\"}",
+         "{\"v\":2,\"op\":\"snapshot\",\"@\":1}",
+         "{\"@\":2,\"op\":\"snapshot\"}",
+         "{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"name\":\"Ware@house\"}}",
+         "{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"na@me\":\"Warehouse\"}}",
+         "{\"v\":2,\"op\":\"jobs.query\",\"server\":\"" + Server + "\",\"args\":{\"query\":{\"@\":25}}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"@\",\"message\":\"Busy.\"}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy@.\"}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\",\"@\":1}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"reason\":\"@\"}}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"@\":\"documentGone\"}}}",
+         "{\"v\":2,\"ok\":true,\"result\":{\"reason\":\"@\"}}",
+         "{\"v\":2,\"ok\":true,\"result\":{\"@\":true}}",
+         "{\"v\":2,\"ok\":true,\"result\":{},\"@\":1}",
+         "{\"v\":2,\"ok\":true,\"result\":{},\"error\":{\"code\":\"@\",\"message\":\"@\"}}",
+         "\"@\"",
+         "@",
+      ];
+      int requests = 0;
+      int replies = 0;
+
+      foreach(string text in templates.SelectMany(template => fragments.Select(fragment => template.Replace("@", fragment, StringComparison.Ordinal))))
+      {
+         ManagementRequestParse request = ManagementJson.ParseRequest(text);
+         ManagementReplyParse reply = ManagementJson.ParseReply(text);
+
+         Assert.Equal(request.Problem == ManagementEnvelopeProblem.None, request.Succeeded());
+         Assert.Equal(reply.Problem == ManagementEnvelopeProblem.None, reply.Succeeded());
+         if(request.Succeeded())
+         {
+            requests++;
+            ManagementOperations.Check(request.Request, out _);
+            ManagementJson.TryReadArguments(request.Request, out ServersRenameArgs? _);
+            ManagementJson.TryReadArguments(request.Request, out JobsQueryArgs? _);
+         }
+         if(reply.Succeeded())
+         {
+            replies++;
+            ManagementJson.TryReadResult(reply.Reply, out CancelRefusedDetails? _);
+            Assert.True(reply.Reply.Ok || !ManagementJson.TryReadDetails(reply.Reply.Error!, out CancelRefusedDetails? details) || details.Reason.Length >= 0);
+         }
+      }
+
+      Assert.Equal(templates.Length * fragments.Length, templates.Length * fragments.Distinct(StringComparer.Ordinal).Count());
+      Assert.InRange(requests, 1, templates.Length * fragments.Length);
+      Assert.InRange(replies, 1, templates.Length * fragments.Length);
+   }
+
+
+
+   /// <summary>
+   /// A request is built only by the functions that check it, which the parser uses too, so no request exists that
+   /// the parser would not read back. Text that is not shaped like an operation's name, and a server named by
+   /// anything but a full identifier in its one spelling (a prefix, a name, another letter case, braces, nothing at
+   /// all between the quotes), are refused by each of the three functions, and the refusal does not repeat what was
+   /// given. A request has no public constructor and no member that can be set, so there is no other way to make
+   /// one: not with another version, and not by changing one that was checked.
+   /// </summary>
+   [Theory]
+   [InlineData("Snapshot", null)]
+   [InlineData("servers.List", null)]
+   [InlineData("servers list", null)]
+   [InlineData("Not An Operation\n", null)]
+   [InlineData("", null)]
+   [InlineData("servers.remove", "3f2b8c1e")]
+   [InlineData("servers.remove", "Warehouse")]
+   [InlineData("servers.remove", "3F2B8C1E-5D4A-4F6B-9A7C-0E1D2C3B4A5F")]
+   [InlineData("servers.remove", "{3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f}")]
+   [InlineData("servers.remove", "")]
+   public void Request_IsBuiltOnlyByFunctionsThatCheckTheOperationAndTheServer(string operation, string? server)
+   {
+      ManagementPayload arguments = Payload("{\"printerId\":\"printer-a1\",\"shared\":true}");
+      Func<ManagementRequest>[] ways =
+      [
+         () => ManagementRequest.For(operation, server),
+         () => ManagementRequest.For(operation, server, new PrintersShareArgs("printer-a1", Shared: true)),
+         () => ManagementRequest.For(operation, server, arguments),
+      ];
+
+      Assert.All(ways, way =>
+      {
+         ArgumentException refusal = Assert.Throws<ArgumentException>(way);
+         Assert.True(operation.Length == 0 || !refusal.Message.Contains(operation, StringComparison.Ordinal));
+         Assert.True(string.IsNullOrEmpty(server) || !refusal.Message.Contains(server, StringComparison.Ordinal));
+      });
+      Assert.Throws<ArgumentNullException>(() => ManagementRequest.For(null!));
+      Assert.Empty(typeof(ManagementRequest).GetConstructors());
+      Assert.All(typeof(ManagementRequest).GetProperties(), member => Assert.Null(member.SetMethod));
+      var built = ManagementRequest.For(ManagementOperations.PrintersShare, Server, arguments);
+      Assert.Equal((ManagementProtocol.Version, ManagementOperations.PrintersShare, Server), (built.V, built.Op, built.Server));
+      Assert.Same(arguments, built.Args);
+      Assert.Equal(ManagementJson.Write(built), ManagementJson.Write(ManagementJson.ParseRequest(ManagementJson.Write(built)).Request!));
+   }
+
+
+
+   /// <summary>
+   /// A reply is built only by the functions for a success and for a failure, which the parser uses too. So a reply
+   /// is always of this contract's version and holds exactly one of a result and an error: there is no public
+   /// constructor to give it another version, an error beside a result, or neither, and no member can be set
+   /// afterwards. A success needs its result and a failure its error.
+   /// </summary>
+   [Fact]
+   public void Reply_IsBuiltOnlyByFunctionsThatGiveItExactlyOneOfAResultAndAnError()
+   {
+      ManagementPayload result = Payload("{\"ready\":true}");
+      var success = ManagementReply.Success(result);
+      var typed = ManagementReply.Success(new NoResult());
+      var failure = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
+
+      Assert.Equal((ManagementProtocol.Version, true), (success.V, success.Ok));
+      Assert.Same(result, success.Result);
+      Assert.Null(success.Error);
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{\"ready\":true}}", ManagementJson.Write(success));
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{}}", ManagementJson.Write(typed));
+      Assert.Equal((ManagementProtocol.Version, false), (failure.V, failure.Ok));
+      Assert.Null(failure.Result);
+      Assert.NotNull(failure.Error);
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Success(null!));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(null!));
+      Assert.Empty(typeof(ManagementReply).GetConstructors());
+      Assert.All(typeof(ManagementReply).GetProperties(), member => Assert.Null(member.SetMethod));
+   }
+
+
+
+   /// <summary>
+   /// An error comes to exist in three ways and no others: the constructor and <c>WithDetails</c>, which check the
+   /// code against the table, and the parser's way in, which takes the error object as the JSON a reply carried and
+   /// nothing else. No function of the type, public or internal, turns a code and a message given as text into an
+   /// error without those checks, so code in the service's own assembly cannot send "Not A Code" or details for a
+   /// code that carries none by reaching past the two that check.
+   /// </summary>
+   [Fact]
+   public void Error_HasNoWayInFromLooseText_BesideTheTwoThatCheckTheCode()
+   {
+      System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly;
+      string[] makers = [.. typeof(ManagementError).GetMethods(all)
+         .Where(method => !method.IsPrivate && (Nullable.GetUnderlyingType(method.ReturnType) ?? method.ReturnType) == typeof(ManagementError))
+         .Select(method => method.Name + "(" + string.Join(", ", method.GetParameters().Select(parameter => parameter.ParameterType.Name)) + ")")
+         .Order(StringComparer.Ordinal)];
+
+      Assert.Equal(["FromWire(JsonElement)", "WithDetails(String, String, TDetails)"], makers);
+      Assert.Equal("(String, String)", "(" + string.Join(", ", Assert.Single(typeof(ManagementError).GetConstructors()).GetParameters().Select(parameter => parameter.ParameterType.Name)) + ")");
+      Assert.Null(ManagementError.FromWire(JsonDocument.Parse("\"busy\"").RootElement));
+      Assert.Null(ManagementError.FromWire(JsonDocument.Parse("{\"code\":\"busy\"}").RootElement));
+      Assert.Equal("code_added_later", ManagementError.FromWire(JsonDocument.Parse("{\"code\":\"code_added_later\",\"message\":\"Something newer.\"}").RootElement)!.Code);
+   }
+
+
+
+   /// <summary>The routing check is the one rule for whether a request names a server correctly: an operation on the computer must not name one, and an operation on one server must name one. Each refusal has its code, finds no more than the operation, and never repeats the request. A request of another version, with a name that is not shaped like an operation's, or with a server named by anything but a full identifier, cannot be built, so the check is never asked about one.</summary>
+   [Theory]
+   [InlineData("snapshot", null, null)]
+   [InlineData("servers.list", null, null)]
+   [InlineData("trust.get", Server, null)]
+   [InlineData("jobs.query", Server, null)]
+   [InlineData("snapshot", Server, ManagementErrorCode.InvalidRequest)]
+   [InlineData("servers.add", Server, ManagementErrorCode.InvalidRequest)]
+   [InlineData("update.prepare", Server, ManagementErrorCode.InvalidRequest)]
+   [InlineData("trust.get", null, ManagementErrorCode.InvalidRequest)]
+   [InlineData("session.signIn", null, ManagementErrorCode.InvalidRequest)]
+   [InlineData("servers.remove", null, ManagementErrorCode.InvalidRequest)]
+   [InlineData("servers.explode", null, ManagementErrorCode.UnknownOperation)]
+   [InlineData("servers.explode", Server, ManagementErrorCode.UnknownOperation)]
+   [InlineData("printers", null, ManagementErrorCode.UnknownOperation)]
+   public void RoutingCheck_AcceptsOrRefusesWithTheRightCode(string operation, string? server, string? code)
+   {
+      var request = ManagementRequest.For(operation, server);
 
       ManagementError? refusal = ManagementOperations.Check(request, out ManagementOperationInfo? found);
 
@@ -324,7 +572,7 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void Request_AndItsSecretArguments_NeverShowTheSecretAsText()
    {
-      ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", AcceptCertificateException: false, ManagementSamples.SessionCredential);
+      ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: false, ManagementSamples.SessionCredential);
       SessionSignInArgs signIn = new(ManagementSamples.SessionCredential);
       PairingEnrollArgs enroll = new(ManagementSamples.EnrollmentCodeCanary);
       var addRequest = ManagementRequest.For(ManagementOperations.ServersAdd, null, add);
@@ -361,7 +609,6 @@ public sealed class ManagementEnvelopeTests
       Assert.Equal("Management reply v2 failed: busy", failure.ToString());
       Assert.Equal("busy: Another sign-in is running.", failure.Error!.ToString());
       Assert.Equal("enrollment_unconfirmed: The outcome is not known.", detailed.Error!.ToString());
-      Assert.Equal("Management reply v2 failed: no error given", new ManagementReply(2, false).ToString());
       Assert.Equal("(management payload not shown)", success.Result!.ToString());
       Assert.Equal("result (management payload not shown) details (management payload not shown)", $"result {success.Result} details {detailed.Error.Details}");
       Assert.Contains(ManagementSamples.IdTokenHintCanary, success.Result.ToElement().ToString(), StringComparison.Ordinal);
@@ -412,7 +659,16 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>Each way a reply's text can be unusable is told apart: text that is not JSON (which is what a version 1 service answers), a root that is not an object, no version, another version, a reply that lacks what its ok promises, and one longer than the limit.</summary>
+   /// <summary>
+   /// Each way a reply's text can be unusable is told apart: text that is not JSON (which is what a version 1 service
+   /// answers), a root that is not an object, no version, another version, a reply that lacks what its ok promises,
+   /// one longer than the limit, and one in which any object has the same member twice (in the envelope, in the
+   /// result, in the error or in its details, or under a name written with an escape), which is refused whole as a
+   /// request is. The last rows hold the escape of a surrogate without its partner, which is not text: as an error's
+   /// code or message it leaves the reply without one, so the reply is incomplete (and not "not JSON", which a
+   /// client takes for a version 1 service); in a member's name, at any depth, the text is not JSON. A success whose
+   /// stray error holds one is still a success, since that error is dropped. None of them makes the read throw.
+   /// </summary>
    [Theory]
    [InlineData(null, ManagementEnvelopeProblem.NotJson)]
    [InlineData("", ManagementEnvelopeProblem.NotJson)]
@@ -437,6 +693,19 @@ public sealed class ManagementEnvelopeTests
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":7,\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":null}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":true,\"ok\":true,\"result\":{}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"v\":3,\"ok\":true,\"result\":{}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":true,\"result\":{\"ready\":true,\"jobsInHand\":0,\"jobsInHand\":5,\"claimPending\":false}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"code\":\"internal_error\",\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"reason\":\"documentGone\",\"reason\":\"ownershipMismatch\"}}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":true,\"\\u006fk\":false,\"result\":{}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"a\\ud800b\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"\\udc00\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"\\ud800\",\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\\ud800\",\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":true,\"result\":{},\"\\ud800\":1}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"ok\":true,\"result\":{\"\\ud800\":1}}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\",\"details\":{\"rea\\udc00son\":\"x\"}}}", ManagementEnvelopeProblem.NotJson)]
    public void Reply_ThatIsUnusable_IsToldApart(string? text, ManagementEnvelopeProblem problem)
    {
       ManagementReplyParse parse = ManagementJson.ParseReply(text);
@@ -448,14 +717,19 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>A reply longer than the limit is refused for its size without being parsed; details that are not an object are dropped, since every details type is one, and the failure is still read.</summary>
+   /// <summary>A reply longer than the limit is refused for its size without being parsed; details that are not an object are dropped, since every details type is one, and the failure is still read; and a success that also carries an error is read as the success, whatever that error holds, a code and a message that are not text included.</summary>
    [Fact]
    public void Reply_SizeLimitAndStrayDetails()
    {
       ManagementReplyParse oversize = ManagementJson.ParseReply(new string(' ', ManagementProtocol.MaximumReplyCharacters + 1));
       ManagementReplyParse strayDetails = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\",\"details\":\"text\"}}");
 
+      ManagementReplyParse strayError = ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{},\"error\":{\"code\":\"\\ud800\",\"message\":\"\\ud800\"}}");
+
       Assert.Equal(ManagementEnvelopeProblem.TooLarge, oversize.Problem);
+      Assert.True(strayError.Succeeded());
+      Assert.True(strayError.Reply.Ok);
+      Assert.Null(strayError.Reply.Error);
       Assert.True(strayDetails.Succeeded());
       Assert.Null(strayDetails.Reply.Error!.Details);
       Assert.False(ManagementJson.TryReadDetails(strayDetails.Reply.Error, out EnrollmentUnconfirmedDetails? details));
@@ -481,7 +755,7 @@ public sealed class ManagementEnvelopeTests
    [InlineData(null, false)]
    public void Arguments_AreReadStrictly(string? arguments, bool accepted)
    {
-      ManagementRequest request = new(2, ManagementOperations.PrintersShare, Server, arguments is null ? null : Payload(arguments));
+      var request = ManagementRequest.For(ManagementOperations.PrintersShare, Server, arguments is null ? null : Payload(arguments));
 
       bool read = ManagementJson.TryReadArguments(request, out PrintersShareArgs? shared);
 
@@ -517,9 +791,9 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void ResultAndDetails_ThatDoNotFit_AreNotRead()
    {
-      ManagementReply wrongShape = new(2, true, Payload("{\"ready\":\"soon\"}"));
+      var wrongShape = ManagementReply.Success(Payload("{\"ready\":\"soon\"}"));
       var failure = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
-      ManagementError wrongDetails = new(ManagementErrorCode.EnrollmentUnconfirmed, "Unknown.", Payload("{\"stage\":5}"));
+      ManagementError wrongDetails = ErrorRead(ManagementErrorCode.EnrollmentUnconfirmed, "{\"stage\":5}");
 
       Assert.False(ManagementJson.TryReadResult(wrongShape, out UpdatePrepareResult? _));
       Assert.False(ManagementJson.TryReadResult(failure, out UpdatePrepareResult? _));
@@ -558,12 +832,200 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void ServersAdd_ReadsItsCredentialThroughCoresValidation()
    {
-      var request = ManagementRequest.For(ManagementOperations.ServersAdd, null, new ServersAddArgs(ManagementSamples.Address, "Warehouse", AcceptCertificateException: true, ManagementSamples.SessionCredential));
+      var request = ManagementRequest.For(ManagementOperations.ServersAdd, null, new ServersAddArgs(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential));
 
       Assert.True(ManagementJson.TryReadArguments(request, out ServersAddArgs? arguments));
 
       Assert.IsType<QqqSessionCredential>(arguments.SessionCredential);
       Assert.Equal((ManagementSamples.Address, "Warehouse", true, ManagementSamples.SessionCookieCanary), (arguments.Address, arguments.Name, arguments.AcceptCertificateException, arguments.SessionCredential.SessionToken));
+   }
+
+
+
+   /// <summary>
+   /// The arguments of servers.add carry the sign-in provider's origin that the check reported, after the credential,
+   /// for comparison only: the service still reads the provider itself. A request that leaves the origin out, as the
+   /// wizard does when the check named no provider, is read, and states exactly that. A difference between what the
+   /// request states and what the service reads is answered with a code of its own that carries no details, and
+   /// nothing is stored. The rule for the comparison is held row by row in the test below.
+   /// </summary>
+   [Fact]
+   public void ServersAdd_CarriesTheProviderTheCheckReported_ForComparisonOnly()
+   {
+      ServersAddArgs named = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, ManagementSamples.ProviderOrigin);
+      ServersAddArgs unnamed = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: false, ManagementSamples.SessionCredential);
+      string written = ManagementJson.Write(ManagementRequest.For(ManagementOperations.ServersAdd, null, named));
+
+      Assert.EndsWith(",\"sessionCredential\":{\"origin\":\"https://qqq.example.test\",\"sessionToken\":\"" + ManagementSamples.SessionCookieCanary + "\"},\"providerOrigin\":\"https://sign-in.example.test\"}}", written, StringComparison.Ordinal);
+      Assert.DoesNotContain("providerOrigin", ManagementJson.Write(ManagementRequest.For(ManagementOperations.ServersAdd, null, unnamed)), StringComparison.Ordinal);
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(written).Request!, out ServersAddArgs? read));
+      Assert.Equal((ManagementSamples.ProviderOrigin, "Warehouse", true), (read.ProviderOrigin, read.Name, read.AcceptCertificateException));
+      Assert.True(ManagementJson.TryReadArguments(ManagementRequest.For(ManagementOperations.ServersAdd, null, unnamed), out ServersAddArgs? readUnnamed));
+      Assert.Null(readUnnamed.ProviderOrigin);
+      Assert.True(named.ProviderAgrees("https://sign-in.example.test"));
+      Assert.False(named.ProviderAgrees("https://other.example.test"));
+      Assert.False(named.ProviderAgrees(null));
+      Assert.True(unnamed.ProviderAgrees(null));
+      Assert.False(unnamed.ProviderAgrees("https://sign-in.example.test"));
+      Assert.Equal("provider_changed", ManagementErrorCode.ProviderChanged);
+      Assert.Contains(ManagementErrorCode.ProviderChanged, ManagementErrorCode.All, StringComparer.Ordinal);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"provider_changed\",\"message\":\"The server now names another sign-in provider. Check the server again.\"}}",
+         ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.ProviderChanged, "The server now names another sign-in provider. Check the server again.")));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.ProviderChanged, "Synthetic message.", ServerCheckResult.From(new QqqServerCompatibility([], null, QqqSignInMethods.None))));
+      Assert.Equal("Arguments of servers.add (session credential not shown)", named.ToString());
+      Assert.DoesNotContain(ManagementSamples.ProviderOrigin, $"{named} {ManagementRequest.For(ManagementOperations.ServersAdd, null, named)}", StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// trust.set has the same race as servers.add, so its arguments carry the provider's origin the check reported in the
+   /// same way: last on the wire, left out to state that the check named none, compared by the same rule and refused
+   /// with the same code. A request that switches the exception off accepts nothing, so it is written without the
+   /// member and agrees whatever the service reads; a request that switches it on without an origin states that the
+   /// check named no provider, and does not agree with a service that reads one.
+   /// </summary>
+   [Fact]
+   public void TrustSet_CarriesTheProviderTheCheckReported_AndComparesItWhenItSwitchesTheExceptionOn()
+   {
+      TrustSetArgs named = new(AcceptCertificateException: true, ManagementSamples.ProviderOrigin);
+      TrustSetArgs off = new(AcceptCertificateException: false);
+      string written = ManagementJson.Write(ManagementRequest.For(ManagementOperations.TrustSet, Server, named));
+
+      Assert.Equal("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":true,\"providerOrigin\":\"https://sign-in.example.test\"}}", written);
+      Assert.Equal("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":false}}", ManagementJson.Write(ManagementRequest.For(ManagementOperations.TrustSet, Server, off)));
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(written).Request!, out TrustSetArgs? read));
+      Assert.Equal(named, read);
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":true}}").Request!, out TrustSetArgs? withoutOrigin));
+      Assert.Equal(new TrustSetArgs(AcceptCertificateException: true), withoutOrigin);
+      Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"providerOrigin\":\"https://sign-in.example.test\"}}").Request!, out TrustSetArgs? _));
+      Assert.True(named.ProviderAgrees("https://sign-in.example.test"));
+      Assert.False(named.ProviderAgrees("https://other.example.test"));
+      Assert.False(named.ProviderAgrees(null));
+      Assert.True(withoutOrigin.ProviderAgrees(null));
+      Assert.False(withoutOrigin.ProviderAgrees("https://sign-in.example.test"));
+      Assert.True(off.ProviderAgrees(null));
+      Assert.True(off.ProviderAgrees("https://sign-in.example.test"));
+      Assert.True(new TrustSetArgs(AcceptCertificateException: false, "https://other.example.test").ProviderAgrees("https://sign-in.example.test"));
+   }
+
+
+
+   /// <summary>
+   /// The one rule for the provider a request says the operator was shown, for servers.add and for trust.set when it
+   /// switches the exception on. The origin states what the check showed, and an absent one states that it showed no
+   /// provider: none shown and none read agree; none shown and one read do not, because that provider is exactly the
+   /// one the operator has not seen; one shown and none read do not; one shown and another read (another host, port
+   /// or scheme) do not; and the same one agrees. Origins are compared in the one form an origin is kept in, so one
+   /// place written in another letter case, with its default port, with a trailing slash, with a path, or by its
+   /// Unicode name is the same place. What the service reads is its own, and may name nothing or be an IPv6 literal
+   /// with a zone: that agrees with no origin a request can carry. What a request carries always names an origin or
+   /// is absent; the test below holds what happens to one that does not.
+   /// </summary>
+   [Theory]
+   [InlineData(null, null, true)]
+   [InlineData(null, "https://sign-in.example.test", false)]
+   [InlineData("https://sign-in.example.test", null, false)]
+   [InlineData("https://sign-in.example.test", "https://other.example.test", false)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test:8443", false)]
+   [InlineData("https://sign-in.example.test", "http://sign-in.example.test", false)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test.other.test", false)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test", true)]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test/", true)]
+   [InlineData("https://sign-in.example.test", "https://SIGN-IN.Example.Test:443/", true)]
+   [InlineData("https://sign-in.example.test/realms/dev", "https://sign-in.example.test", true)]
+   [InlineData("https://xn--bcher-kva.example", "https://b\u00FCcher.example/", true)]
+   [InlineData("https://sign-in.example.test", "", false)]
+   [InlineData("https://sign-in.example.test", "sign-in.example.test", false)]
+   [InlineData("https://sign-in.example.test", "not an origin", false)]
+   [InlineData(null, "not an origin", false)]
+   [InlineData("https://[fe80::1]", "https://[fe80::1]:443/", true)]
+   [InlineData("https://[fe80::1]", "https://[fe80::1%25eth0]", false)]
+   public void TheProviderTheOperatorWasShown_IsComparedWithTheOneTheServiceRead(string? shown, string? read, bool agrees)
+   {
+      ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, shown);
+      TrustSetArgs on = new(AcceptCertificateException: true, shown);
+
+      Assert.Equal(agrees, SignInProviderOrigin.Agrees(shown, read));
+      Assert.Equal(agrees, add.ProviderAgrees(read));
+      Assert.Equal(agrees, on.ProviderAgrees(read));
+      Assert.Equal(agrees, SignInProviderOrigin.Agrees(read, shown));
+   }
+
+
+
+   /// <summary>
+   /// A provider origin that names nothing is refused where the arguments are read, as a name that breaks the name
+   /// rule is, and is not read only to be answered "the provider changed" for ever after: empty or blank text, a word
+   /// such as "none", a host with no scheme, a scheme that is not a web one, a host that cannot be named, and an IPv6
+   /// literal with a zone, which the form origins are compared in has no place for (two zones of one address, or a
+   /// zone and none, would compare as one place). Neither argument record can be built with one, in code or from a
+   /// request, for trust.set whichever way the switch goes; the refusal does not repeat the text; and by the rule
+   /// itself such text agrees with nothing, not even with itself.
+   /// </summary>
+   [Theory]
+   [InlineData("")]
+   [InlineData("   ")]
+   [InlineData("none")]
+   [InlineData("null")]
+   [InlineData("not an origin")]
+   [InlineData("sign-in.example.test")]
+   [InlineData("//sign-in.example.test")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback")]
+   [InlineData("ftp://sign-in.example.test")]
+   [InlineData("https://id\u2028.example.test")]
+   [InlineData("https://[fe80::1%25eth0]")]
+   [InlineData("https://[fe80::1%eth0]:8443")]
+   public void AProviderOriginThatNamesNothing_IsRefusedWhenTheArgumentsAreRead(string text)
+   {
+      string member = ",\"providerOrigin\":" + JsonSerializer.Serialize(text);
+      string add = "{\"v\":2,\"op\":\"servers.add\",\"args\":{\"address\":\"https://qqq.example.test\",\"name\":\"Warehouse\",\"acceptCertificateException\":true,"
+         + "\"sessionCredential\":{\"origin\":\"https://qqq.example.test\",\"sessionToken\":\"synthetic-session\"}";
+      string trust = "{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":";
+
+      ArgumentException refusedAdd = Assert.Throws<ArgumentException>(() => new ServersAddArgs(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, text));
+      ArgumentException refusedOn = Assert.Throws<ArgumentException>(() => new TrustSetArgs(AcceptCertificateException: true, text));
+      ArgumentException refusedOff = Assert.Throws<ArgumentException>(() => new TrustSetArgs(AcceptCertificateException: false, text));
+
+      Assert.All(new[] { refusedAdd, refusedOn, refusedOff }, refusal => Assert.True(string.IsNullOrWhiteSpace(text) || !refusal.Message.Contains(text, StringComparison.Ordinal)));
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(add + "}}").Request!, out ServersAddArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(add + member + "}}").Request!, out ServersAddArgs? _));
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(trust + "true}}").Request!, out TrustSetArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(trust + "true" + member + "}}").Request!, out TrustSetArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(trust + "false" + member + "}}").Request!, out TrustSetArgs? _));
+      Assert.False(SignInProviderOrigin.Agrees(text, text));
+      Assert.False(SignInProviderOrigin.Agrees(text, null));
+      Assert.False(SignInProviderOrigin.Agrees(null, text));
+      Assert.False(SignInProviderOrigin.Agrees(text, "https://sign-in.example.test"));
+   }
+
+
+
+   /// <summary>
+   /// "The check named no provider" is said in two ways on the wire, and both are read as the same statement: the
+   /// member left out, and the member given as null. Either agrees with a service that reads no provider and with no
+   /// other, for servers.add and for trust.set. Written back, the member is left out.
+   /// </summary>
+   [Theory]
+   [InlineData("")]
+   [InlineData(",\"providerOrigin\":null")]
+   public void AProviderOriginLeftOutOrNull_StatesThatTheCheckNamedNoProvider(string member)
+   {
+      ManagementRequest add = ManagementJson.ParseRequest("{\"v\":2,\"op\":\"servers.add\",\"args\":{\"address\":\"https://qqq.example.test\",\"name\":\"Warehouse\",\"acceptCertificateException\":true,"
+         + "\"sessionCredential\":{\"origin\":\"https://qqq.example.test\",\"sessionToken\":\"synthetic-session\"}" + member + "}}").Request!;
+      ManagementRequest trust = ManagementJson.ParseRequest("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":true" + member + "}}").Request!;
+
+      Assert.True(ManagementJson.TryReadArguments(add, out ServersAddArgs? readAdd));
+      Assert.True(ManagementJson.TryReadArguments(trust, out TrustSetArgs? readTrust));
+
+      Assert.Null(readAdd.ProviderOrigin);
+      Assert.Null(readTrust.ProviderOrigin);
+      Assert.True(readAdd.ProviderAgrees(null));
+      Assert.True(readTrust.ProviderAgrees(null));
+      Assert.False(readAdd.ProviderAgrees("https://sign-in.example.test"));
+      Assert.False(readTrust.ProviderAgrees("https://sign-in.example.test"));
+      Assert.DoesNotContain("providerOrigin", ManagementJson.Write(ManagementRequest.For(ManagementOperations.ServersAdd, null, readAdd)), StringComparison.Ordinal);
+      Assert.Equal("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":true}}", ManagementJson.Write(ManagementRequest.For(ManagementOperations.TrustSet, Server, readTrust)));
    }
 
 
@@ -634,6 +1096,54 @@ public sealed class ManagementEnvelopeTests
 
 
 
+   /// <summary>
+   /// The rule against a null inside a list holds wherever a list can stand in a record, not only directly in a member
+   /// or inside another record: in the values of a dictionary, where a null value is refused as a null item is, and
+   /// inside a value type that may be null. No record of the contract has either today, so the records here are the
+   /// test's own. A dictionary and a value type without a null in them are read, and a value type that is null or
+   /// absent is still allowed where the member may be null.
+   /// </summary>
+   [Fact]
+   public void ListsWithANullItem_AreRefusedInsideADictionaryAndInsideANullableValueType()
+   {
+      Assert.True(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":[\"x\"],\"b\":[]}}"), out DictionaryRecord? lists));
+      Assert.Equal(["x"], lists.Lists["a"]);
+      Assert.False(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":[null]}}"), out DictionaryRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":[\"x\"],\"b\":[\"y\",null]}}"), out DictionaryRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":null}}"), out DictionaryRecord? _));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"lists\":{\"a\":[null]}}"), out DictionaryRecord? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"maybe\":{\"items\":[\"x\"]}}"), out NullableValueRecord? held));
+      Assert.Equal(["x"], held.Maybe!.Value.Items);
+      Assert.False(ManagementJson.TryReadResult(Result("{\"maybe\":{\"items\":[null]}}"), out NullableValueRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"maybe\":{\"items\":[\"x\",null]}}"), out NullableValueRecord? _));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"maybe\":{\"items\":[null]}}"), out NullableValueRecord? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"maybe\":null}"), out NullableValueRecord? none));
+      Assert.Null(none.Maybe);
+      Assert.True(ManagementJson.TryReadResult(Result("{}"), out NullableValueRecord? absent));
+      Assert.Null(absent.Maybe);
+   }
+
+
+
+   /// <summary>
+   /// A payload is a JSON object however it is made. A value that is not written as one (a list, an array, text) is
+   /// refused when a reply or a request is built from it, instead of producing a reply its client reports as
+   /// incomplete; a record is still written.
+   /// </summary>
+   [Fact]
+   public void Payload_BuiltFromAValueThatIsNotAnObject_IsRefused()
+   {
+      Assert.Throws<ArgumentException>(() => ManagementReply.Success(new List<string> { "a" }));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Success(new[] { 1, 2 }));
+      Assert.Throws<ArgumentException>(() => ManagementPayload.From("text"));
+      Assert.Throws<ArgumentException>(() => ManagementRequest.For(ManagementOperations.ServersReorder, null, new[] { Server }));
+      Assert.Throws<ArgumentException>(() => ManagementPayload.From<NoResult>(null!));
+      Assert.True(ManagementPayload.From(new NoResult()).IsEmpty());
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{}}", ManagementJson.Write(ManagementReply.Success(new NoResult())));
+   }
+
+
+
    /// <summary>A reply that lacks a member its record requires, or has a null where the record needs a value, is an unreadable reply, not a record with a hole in it; an optional member may still be absent, and an unknown one is still skipped.</summary>
    [Fact]
    public void Result_ThatLacksARequiredMember_IsNotRead()
@@ -642,10 +1152,10 @@ public sealed class ManagementEnvelopeTests
       Assert.False(ManagementJson.TryReadResult(Result("{}"), out ServerListResult? _));
       Assert.False(ManagementJson.TryReadResult(Result("{\"servers\":null}"), out ServerListResult? _));
       Assert.False(ManagementJson.TryReadResult(Result("{\"server\":{\"serverId\":\"" + Server + "\",\"name\":null,\"address\":\"https://qqq.example.test\",\"position\":0,\"health\":\"GREEN\",\"status\":\"Connected.\"}}"), out ServerListResult? _));
-      Assert.False(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.CancelRefused, "Refused.", Payload("{}")), out CancelRefusedDetails? _));
+      Assert.False(ManagementJson.TryReadDetails(ErrorRead(ManagementErrorCode.CancelRefused, "{}"), out CancelRefusedDetails? _));
       Assert.True(ManagementJson.TryReadResult(Result("{\"paused\":false,\"addedLater\":1}"), out UpdateState? state));
       Assert.Equal(new UpdateState(Paused: false), state);
-      Assert.True(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.CancelRefused, "Refused.", Payload("{\"reason\":\"reasonAddedLater\"}")), out CancelRefusedDetails? unknownReason));
+      Assert.True(ManagementJson.TryReadDetails(ErrorRead(ManagementErrorCode.CancelRefused, "{\"reason\":\"reasonAddedLater\"}"), out CancelRefusedDetails? unknownReason));
       Assert.Equal("reasonAddedLater", unknownReason.Reason);
    }
 
@@ -676,8 +1186,8 @@ public sealed class ManagementEnvelopeTests
    /// <summary>
    /// The serializer is not a way around the envelope checks. Handed a request directly it would accept another version,
    /// a malformed operation name, a member the envelope does not have and a repeated argument, so the envelope types
-   /// refuse to be read by it, whatever the text and with either set of options, and the refusal names the function
-   /// that reads them with their checks. A typed reader asked for an envelope type reads nothing.
+   /// refuse to be read by it, whatever the text and with either set of the contract's options, and the refusal names
+   /// the functions that read them with their checks. A typed reader asked for an envelope type reads nothing.
    /// </summary>
    [Theory]
    [InlineData("{\"v\":2,\"op\":\"snapshot\"}")]
@@ -702,18 +1212,102 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>A payload is a JSON object and nothing else. It is written as that object, by itself and inside an error, says whether it is empty, and like the envelope it is never read by the serializer.</summary>
+   /// <summary>
+   /// The refusal is declared on the four envelope types, not on the contract's two options objects, so it holds for
+   /// options that were not built for the contract: the default ones, the web ones, ones that indent, ones that
+   /// ignore letter case, and the contract's own two. None of them reads a request of another version with a
+   /// malformed operation and a member the envelope does not have, a reply without a result, an error with a raw
+   /// message or a payload. None of them writes an envelope either, because options of a caller's choosing could
+   /// write it in another form than the contract's one line; the refusal names the function that does write it.
+   /// </summary>
+   [Fact]
+   public void Envelope_IsNeitherReadNorWrittenByTheSerializer_UnderOptionsThatBringNoConverterForIt()
+   {
+      JsonSerializerOptions[] all = [JsonSerializerOptions.Default, JsonSerializerOptions.Web, new JsonSerializerOptions { WriteIndented = true },
+         new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ManagementJson.Options, ManagementJson.StrictOptions];
+      var request = ManagementRequest.For(ManagementOperations.PrintersShare, Server, new PrintersShareArgs("printer-a1", Shared: true));
+      var reply = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
+
+      Assert.All(all, options =>
+      {
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementRequest>("{\"V\":7,\"Op\":\"Not An Operation\",\"Extra\":1}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementRequest>("{\"v\":7,\"op\":\"Not An Operation\",\"extra\":1,\"server\":\"x\"}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementReply>("{\"v\":9,\"ok\":true}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementError>("{\"code\":\"busy\",\"message\":\"raw\\u202E\\ntext\"}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementPayload>("{}", options));
+         NotSupportedException written = Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(request, options));
+         Assert.Contains("ManagementJson.Write", written.Message, StringComparison.Ordinal);
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply, options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply.Error, options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(request.Args, options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new { envelope = request }, options));
+      });
+      Assert.Equal("{\"v\":2,\"op\":\"printers.share\",\"server\":\"" + Server + "\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Write(request));
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\"}}", ManagementJson.Write(reply));
+      Assert.Throws<ArgumentNullException>(() => ManagementJson.Write((ManagementRequest)null!));
+      Assert.Throws<ArgumentNullException>(() => ManagementJson.Write((ManagementReply)null!));
+   }
+
+
+
+   /// <summary>
+   /// Where the refusal ends, held so that no document says more: options that carry a converter written for an
+   /// envelope type are asked before the type is, so with them the serializer writes and reads that type as the
+   /// converter says. Such a converter has to be written on purpose, as the one in this test is; the default options
+   /// and every options object the product builds have none, and under those the refusal holds (the test above).
+   /// </summary>
+   [Fact]
+   public void AConverterPlacedInTheOptionsForAnEnvelopeType_IsAskedBeforeTheRefusalOnTheType()
+   {
+      JsonSerializerOptions withConverter = new() { Converters = { new ReplyAsFixedText() } };
+      var reply = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
+
+      Assert.Equal("\"written by a converter in the options\"", JsonSerializer.Serialize(reply, withConverter));
+      Assert.Equal(ManagementErrorCode.InternalError, JsonSerializer.Deserialize<ManagementReply>("{\"v\":9}", withConverter)!.Error!.Code);
+      Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply.Error, withConverter));
+      Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply, JsonSerializerOptions.Default));
+   }
+
+
+
+   /// <summary>
+   /// An envelope is written as one line with the escaping the serializer's default gives, the same its arguments were
+   /// written with: a character outside ASCII, a quote, a line break and the characters a browser could misread are
+   /// all escapes, in the envelope's own members and inside the arguments, and the text reads back as what was written.
+   /// </summary>
+   [Fact]
+   public void Envelope_IsWrittenAsOneEscapedLine()
+   {
+      var request = ManagementRequest.For(ManagementOperations.ServersRename, Server, new ServersRenameArgs("Caf\u00E9 \"east\" <1>"));
+      var reply = ManagementReply.Failure(ManagementErrorCode.ServerRefused, "Refus\u00E9: \"non\" <b>&</b>");
+
+      string writtenRequest = ManagementJson.Write(request);
+      string writtenReply = ManagementJson.Write(reply);
+
+      Assert.Equal("{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"name\":\"Caf\\u00E9 \\u0022east\\u0022 \\u003C1\\u003E\"}}", writtenRequest);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"server_refused\",\"message\":\"Refus\\u00E9: \\u0022non\\u0022 \\u003Cb\\u003E\\u0026\\u003C/b\\u003E\"}}", writtenReply);
+      Assert.All(new[] { writtenRequest, writtenReply }, text => Assert.True(text.All(char.IsAscii) && !text.Contains('\n', StringComparison.Ordinal)));
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(writtenRequest).Request!, out ServersRenameArgs? renamed));
+      Assert.Equal("Caf\u00E9 \"east\" <1>", renamed.Name);
+      Assert.Equal("Refus\u00E9: \"non\" <b>&</b>", ManagementJson.ParseReply(writtenReply).Reply!.Error!.Message);
+   }
+
+
+
+   /// <summary>A payload is a JSON object and nothing else. It is written as that object inside the envelope that carries it, as a request's arguments and as an error's details, says whether it is empty, and like the envelope it is never read or written by the serializer.</summary>
    [Fact]
    public void Payload_IsAJsonObject_AndNothingElse()
    {
       ManagementPayload payload = Payload("{\"printerId\":\"printer-a1\",\"shared\":true}");
 
-      Assert.Equal("{\"printerId\":\"printer-a1\",\"shared\":true}", JsonSerializer.Serialize(payload, ManagementJson.Options));
-      Assert.Equal("{\"code\":\"busy\",\"message\":\"Busy.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}", JsonSerializer.Serialize(new ManagementError(ManagementErrorCode.Busy, "Busy.", payload), ManagementJson.Options));
+      Assert.Equal("{\"v\":2,\"op\":\"printers.share\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Write(ManagementRequest.For(ManagementOperations.PrintersShare, null, payload)));
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"code_added_later\",\"message\":\"Synthetic message.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}}",
+         ManagementJson.Write(ManagementReply.Failure(ErrorRead("code_added_later", "{\"printerId\":\"printer-a1\",\"shared\":true}"))));
       Assert.False(payload.IsEmpty());
       Assert.True(Payload("{}").IsEmpty());
       NotSupportedException refusal = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementPayload>("{}", ManagementJson.Options));
-      Assert.Contains("ParseRequest or ParseReply", refusal.Message, StringComparison.Ordinal);
+      Assert.Contains("ManagementJson.ParseRequest", refusal.Message, StringComparison.Ordinal);
+      Assert.Contains("ManagementJson.ParseReply", refusal.Message, StringComparison.Ordinal);
       Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("[1]").RootElement));
       Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("\"text\"").RootElement));
    }
@@ -743,8 +1337,9 @@ public sealed class ManagementEnvelopeTests
    /// Every error message is made printable and cut at 512 UTF-16 units by both factories, whatever the code, because a
    /// message may repeat what a server said. Control characters, the bidirectional overrides, embeddings and isolates,
    /// the zero-width characters, the line and paragraph separators and a private-use character each become a space;
-   /// visible text in any script is kept; a surrogate without its partner is shown as the replacement character. The
-   /// characters are written as escapes here so this file holds none of them.
+   /// visible text in any script is kept, and so are the no-break and the ideographic space, which are visible gaps;
+   /// a surrogate without its partner is shown as the replacement character. The characters are written as escapes
+   /// here so this file holds none of them.
    /// </summary>
    [Fact]
    public void FailureMessage_IsMadePrintable_ByBothFactories()
@@ -763,7 +1358,7 @@ public sealed class ManagementEnvelopeTests
       Assert.EndsWith("private caf\u00E9 \u4E2D\u6587", plain.Error.Message, StringComparison.Ordinal);
       Assert.Equal("a b", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\u202Eb").Error!.Message);
       Assert.Equal("a\uFFFDb", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\uD83Db").Error!.Message);
-      Assert.Equal("(missing)", ManagementReply.Failure(ManagementErrorCode.InternalError, "").Error!.Message);
+      Assert.Equal("a\u00A0b\u3000c", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\u00A0b\u3000c").Error!.Message);
       Assert.DoesNotContain("\\u202E", written, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("\\u001B", written, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("\\u2028", written, StringComparison.OrdinalIgnoreCase);
@@ -775,25 +1370,156 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>
-   /// An error message longer than 512 UTF-16 units is cut there and marked, and the cut never falls inside a surrogate
-   /// pair: a pair that would straddle the limit is left out whole, and one that ends exactly on it is kept whole.
+   /// An error message longer than 512 UTF-16 units is cut there, exactly: nothing is added to mark the cut, so no
+   /// message is longer than the bound. The cut never falls inside a surrogate pair: a pair that would straddle the
+   /// limit is left out whole, which leaves 511 units, and one that ends exactly on it is kept whole. A client that
+   /// reads the reply applies the same rule again and holds the same text.
    /// </summary>
    [Fact]
-   public void FailureMessage_IsCutAtTheLimit_NeverInsideASurrogatePair()
+   public void FailureMessage_IsCutAtTheLimitExactly_NeverInsideASurrogatePair()
    {
       const string Pair = "\uD83D\uDE00";
       string tooLong = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 600)).Error!.Message;
       string straddling = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 511) + Pair + "tail").Error!.Message;
       string fitting = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 510) + Pair + "tail").Error!.Message;
       string exact = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 512)).Error!.Message;
+      string oneOver = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 513)).Error!.Message;
 
-      Assert.Equal(new string('x', 512) + "...", tooLong);
-      Assert.Equal(new string('x', 511) + "...", straddling);
-      Assert.Equal(new string('x', 510) + Pair + "...", fitting);
+      Assert.Equal(new string('x', 512), tooLong);
+      Assert.Equal(new string('x', 511), straddling);
+      Assert.Equal(new string('x', 510) + Pair, fitting);
       Assert.Equal(new string('x', 512), exact);
-      Assert.Equal(ManagementProtocol.MaximumMessageCharacters, exact.Length);
-      Assert.All(new[] { tooLong, straddling, fitting }, message => Assert.False(char.IsHighSurrogate(message[^4])));
+      Assert.Equal(new string('x', 512), oneOver);
+      Assert.Equal(512, ManagementProtocol.MaximumMessageCharacters);
+      Assert.All(new[] { tooLong, straddling, fitting, exact, oneOver }, message =>
+      {
+         Assert.True(message.Length <= ManagementProtocol.MaximumMessageCharacters);
+         Assert.False(char.IsHighSurrogate(message[^1]));
+         Assert.Equal(message, ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.ServerRefused, message))).Reply!.Error!.Message);
+      });
       Assert.True(ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 100000)))).Succeeded());
+   }
+
+
+
+   /// <summary>
+   /// A failure the service builds must say something. A message that is missing, empty, blank, or blank once it is
+   /// printable is refused by every way of building an error, and no words such as "(missing)" are sent in its place:
+   /// a server that refused "with no reason" leaves the handler to say so in its own words. A client still reads a
+   /// reply whose message is empty, so that it learns the code.
+   /// </summary>
+   [Theory]
+   [InlineData("")]
+   [InlineData("   ")]
+   [InlineData("\u00A0\u3000")]
+   [InlineData("\n\t\r")]
+   [InlineData("\u202E\u200B\uFEFF")]
+   public void FailureMessage_WithNothingToShow_IsRefused(string message)
+   {
+      CancelRefusedDetails details = new(CancelRefusedDetails.DocumentGone);
+
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.ServerRefused, message));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.CancelRefused, message, details));
+      Assert.Throws<ArgumentException>(() => new ManagementError(ManagementErrorCode.InternalError, message));
+      Assert.Throws<ArgumentException>(() => ManagementError.WithDetails(ManagementErrorCode.CancelRefused, message, details));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(ManagementErrorCode.ServerRefused, null!));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(ManagementErrorCode.CancelRefused, null!, details));
+      ManagementReplyParse read = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"server_refused\",\"message\":" + JsonSerializer.Serialize(message) + "}}");
+      Assert.True(read.Succeeded());
+      Assert.Equal(ManagementErrorCode.ServerRefused, read.Reply.Error!.Code);
+      Assert.True(string.IsNullOrWhiteSpace(read.Reply.Error.Message));
+      Assert.DoesNotContain("missing", read.Reply.Error.Message, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The form and the bound of an error's message hold however the error is made, not only through the reply
+   /// factories: built by its constructor, handed to the factory that takes an error, built by the factory that
+   /// takes a code and a message, and read from the text of a service that did not bound it. Each
+   /// carries the same printable, cut message, and none of them writes the raw text. An error has one constructor and
+   /// no member that can be set afterwards, so there is no second way to give it a message.
+   /// </summary>
+   [Fact]
+   public void ErrorMessage_IsPrintableAndBounded_HoweverTheErrorIsMade()
+   {
+      string hostile = "refused\u202Egnp.exe\nnext\u2028line " + new string('x', 2000);
+      ManagementError built = new(ManagementErrorCode.ServerRefused, hostile);
+      var byFactory = ManagementReply.Failure(built);
+      var byCode = ManagementReply.Failure(ManagementErrorCode.ServerRefused, hostile);
+      ManagementError read = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"server_refused\",\"message\":" + JsonSerializer.Serialize(hostile) + "}}").Reply!.Error!;
+
+      string expected = ManagementReply.Failure(ManagementErrorCode.ServerRefused, hostile).Error!.Message;
+
+      Assert.StartsWith("refused gnp.exe next line xxx", expected, StringComparison.Ordinal);
+      Assert.Equal(ManagementProtocol.MaximumMessageCharacters, expected.Length);
+      Assert.All(new[] { built, byFactory.Error!, byCode.Error!, read }, error => Assert.Equal(expected, error.Message));
+      Assert.All(new[] { byFactory, byCode }, reply =>
+      {
+         string written = ManagementJson.Write(reply);
+         Assert.DoesNotContain("\\u202E", written, StringComparison.OrdinalIgnoreCase);
+         Assert.DoesNotContain("\\n", written, StringComparison.Ordinal);
+         Assert.DoesNotContain("\\u2028", written, StringComparison.OrdinalIgnoreCase);
+         Assert.InRange(written.Length, expected.Length, expected.Length + 80);
+      });
+      Assert.Single(typeof(ManagementError).GetConstructors());
+      Assert.All(typeof(ManagementError).GetProperties(), member => Assert.Null(member.SetMethod));
+   }
+
+
+
+   /// <summary>The refusal the routing check returns is sent by the factory that takes an error, as it is, so the dispatcher's first reply does not have to be built member by member; a missing error or a missing code is refused.</summary>
+   [Fact]
+   public void RoutingRefusal_IsSentByTheFactoryThatTakesAnError()
+   {
+      ManagementError refusal = ManagementOperations.Check(ManagementRequest.For("servers.explode"), out _)!;
+
+      var reply = ManagementReply.Failure(refusal);
+
+      Assert.Equal((ManagementProtocol.Version, false), (reply.V, reply.Ok));
+      Assert.Same(refusal, reply.Error);
+      Assert.Null(reply.Result);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"unknown_operation\",\"message\":\"There is no operation with this name.\"}}", ManagementJson.Write(reply));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(null!));
+      Assert.Throws<ArgumentNullException>(() => new ManagementError(null!, "Synthetic message."));
+   }
+
+
+
+   /// <summary>
+   /// A failure the service builds carries a code from the table and exactly the details the table names for it. Text
+   /// that is not a code is refused, with or without details, and the refusal does not repeat it. A code that carries no
+   /// details cannot be given any; a code that carries details cannot be sent without them, with another code's record,
+   /// or with an object that merely has the right members, which would skip what the record's own construction
+   /// enforces (the unbounded principal here would otherwise be written whole). Every code in the table is accepted
+   /// with its own details, or with none when it carries none.
+   /// </summary>
+   [Fact]
+   public void Failure_TiesTheDetailsToTheCode_AndRefusesACodeThatIsNotInTheTable()
+   {
+      CancelRefusedDetails cancel = new(CancelRefusedDetails.DocumentGone);
+      var lookalike = new { approvedPrincipalId = new string('p', 2028), approvedTenantId = "tenant\u202E2" };
+
+      ArgumentException notACode = Assert.Throws<ArgumentException>(() => ManagementReply.Failure("Synthetic Text\n", "Synthetic message."));
+      Assert.DoesNotContain("Synthetic Text", notACode.Message, StringComparison.Ordinal);
+      Assert.Throws<ArgumentException>(() => new ManagementError("code_added_later", "Synthetic message."));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure("code_added_later", "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure("", "Synthetic message."));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(null!, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.Busy, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Synthetic message.", lookalike));
+      Assert.Throws<ArgumentException>(() => ManagementError.WithDetails<object>(ManagementErrorCode.CancelRefused, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.CancelRefused, "Synthetic message."));
+      Assert.Throws<ArgumentException>(() => new ManagementError(ManagementErrorCode.IdentityChanged, "Synthetic message."));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure<CancelRefusedDetails>(ManagementErrorCode.CancelRefused, "Synthetic message.", null!));
+      Assert.All(ManagementErrorCode.All, code =>
+      {
+         ManagementError error = ManagementSamples.Failure(code).Error!;
+         Assert.Equal((code, ManagementErrorCode.DetailsType(code) is not null), (error.Code, error.Details is not null));
+      });
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Synthetic message.\",\"details\":{\"reason\":\"documentGone\"}}}",
+         ManagementJson.Write(ManagementReply.Failure(ManagementError.WithDetails(ManagementErrorCode.CancelRefused, "Synthetic message.", cancel))));
    }
 
 
@@ -813,17 +1539,56 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>A request for some operation with the given arguments object; which operation does not matter to reading arguments.</summary>
-   private static ManagementRequest Request(string arguments) => new(2, ManagementOperations.Snapshot, null, Payload(arguments));
+   private static ManagementRequest Request(string arguments) => ManagementRequest.For(ManagementOperations.Snapshot, null, Payload(arguments));
 
 
 
    /// <summary>A successful reply with the given result object.</summary>
-   private static ManagementReply Result(string result) => new(2, true, Payload(result));
+   private static ManagementReply Result(string result) => ManagementReply.Success(Payload(result));
+
+
+
+   /// <summary>An error as a client reads it from the wire, with the given code and details object. The service cannot build an error whose details do not belong to its code, so a test that needs one reads it, as a client would from a service that sent it.</summary>
+   private static ManagementError ErrorRead(string code, string details)
+      => ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"" + code + "\",\"message\":\"Synthetic message.\",\"details\":" + details + "}}").Reply!.Error!;
 
 
 
    /// <summary>A JSON object as the payload an envelope carries. It is parsed the lenient way on purpose, so a test can hand the typed readers something the envelope parser would have refused.</summary>
    private static ManagementPayload Payload(string json) => ManagementPayload.FromElement(JsonDocument.Parse(json).RootElement);
+
+
+
+   /// <summary>A converter for the reply type of the kind only a deliberate caller writes: it writes every reply as one fixed text and reads any text as one fixed failure. It exists to show that options carrying it are asked before the refusal declared on the type.</summary>
+   private sealed class ReplyAsFixedText : JsonConverter<ManagementReply>
+   {
+      /// <summary>Skips whatever is there and returns a fixed failure.</summary>
+      public override ManagementReply Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+      {
+         reader.Skip();
+         return ManagementReply.Failure(ManagementErrorCode.InternalError, "Read by a converter in the options.");
+      }
+
+
+
+      /// <summary>Writes a fixed text, whatever the reply holds.</summary>
+      public override void Write(Utf8JsonWriter writer, ManagementReply value, JsonSerializerOptions options) => writer.WriteStringValue("written by a converter in the options");
+   }
+
+
+
+   /// <summary>A record with a dictionary of lists, which no record of the contract has, for the test of the walk that looks for a null inside a list.</summary>
+   private sealed record DictionaryRecord(IReadOnlyDictionary<string, IReadOnlyList<string>> Lists);
+
+
+
+   /// <summary>A record with a value type that may be null and holds a list, which no record of the contract has, for the same test.</summary>
+   private sealed record NullableValueRecord(Holder? Maybe);
+
+
+
+   /// <summary>The value type inside <see cref="NullableValueRecord"/>.</summary>
+   private readonly record struct Holder(IReadOnlyList<string> Items);
 
 
 

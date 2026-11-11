@@ -8,12 +8,19 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <summary>
 /// Everything the pipe needs to know about one operation before running it: its name on the wire, whether it names a
 /// server, how it behaves beside others, how long the service lets it run, whether it still answers while the stored
-/// data is not ready (written by a newer build, or an upgrade that could not finish), and the records its arguments
-/// and its result are read into. The service and its clients both read the time limit from here, so they cannot drift
-/// apart the way two hard-coded lists of operation names could.
+/// data is not ready (written by a newer build, or an upgrade that could not finish), the records its arguments
+/// and its result are read into, and whether it is single-flight. The service and its clients both read the time limit
+/// from here, so they cannot drift apart the way two hard-coded lists of operation names could.
+/// <para>
+/// A single-flight operation does work of its own that must not be multiplied by the number of clients asking for it
+/// (ADR-0004, "<c>printers.discover</c> is single-flight"): the computer runs it once at a time, and a request that
+/// arrives while it is running, whoever started it, joins that run and is answered with its result. Each request
+/// keeps its own time limit. Only an operation whose requests cannot differ can be shared this way, so a
+/// single-flight operation is a read on the computer that takes no arguments.
+/// </para>
 /// </summary>
 public sealed record ManagementOperationInfo(string Name, ManagementScope Scope, ManagementOperationKind Kind, TimeSpan ServerTimeLimit, bool AvailableWhenDegraded,
-   Type? ArgumentsType, Type ResultType)
+   Type? ArgumentsType, Type ResultType, bool SingleFlight = false)
 {
    /// <summary>
    /// How long a client waits for the reply: the service's limit and a margin for the reply to arrive, so the client

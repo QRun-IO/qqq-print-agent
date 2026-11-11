@@ -4,6 +4,7 @@
  */
 
 using System.Net.Security;
+using System.Reflection;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
@@ -110,7 +111,7 @@ internal static class ManagementSamples
    internal static object? Arguments(string operation) => operation switch
    {
       ManagementOperations.ServersCheck => new ServersCheckArgs(Address, AcceptCertificateException: true),
-      ManagementOperations.ServersAdd => new ServersAddArgs(Address, "Warehouse", AcceptCertificateException: true, SessionCredential),
+      ManagementOperations.ServersAdd => new ServersAddArgs(Address, "Warehouse", acceptCertificateException: true, SessionCredential, ProviderOrigin),
       ManagementOperations.ServersReorder => new ServersReorderArgs([SecondServerId, ServerId]),
       ManagementOperations.ComputerSetProfile => new ComputerSetProfileArgs(Computer.Profile),
       ManagementOperations.LogsSetSettings => new LogsSetSettingsArgs(RetentionDays: 14, MaxFileMegabytes: 50, SegmentsPerDay: 5, DebugLogging: true),
@@ -118,7 +119,7 @@ internal static class ManagementSamples
       ManagementOperations.SessionSignIn => new SessionSignInArgs(SessionCredential, SessionSignInArgs.AssociatePairing),
       ManagementOperations.SessionSignOut => new SessionSignOutArgs("io.qrun.qqq-print-agent:/oauth/callback"),
       ManagementOperations.PairingEnroll => new PairingEnrollArgs(EnrollmentCodeCanary),
-      ManagementOperations.TrustSet => new TrustSetArgs(AcceptCertificateException: true),
+      ManagementOperations.TrustSet => new TrustSetArgs(AcceptCertificateException: true, ProviderOrigin),
       ManagementOperations.PrintersShare => new PrintersShareArgs("printer-a1", Shared: true),
       ManagementOperations.PrintersSetProfile => new PrintersSetProfileArgs("printer-a1", new PrinterProfile("Shipping labels", "Thermal printer", "Dock 2")),
       ManagementOperations.PrintersTestPrint => new PrintersTestPrintArgs("printer-a1", "PDF", "alignment"),
@@ -178,14 +179,33 @@ internal static class ManagementSamples
 
 
 
+   /// <summary>The message every example failure carries.</summary>
+   internal const string FailureMessage = "Synthetic message for people.";
+
+
+
+   /// <summary>The example failure of a code, built by the factory the service will use for it: the one that takes details for a code that carries them, with the example details, and the other for a code that carries none.</summary>
+   internal static ManagementReply Failure(string code) => Details(code) is { } details ? FailureWith(code, details) : ManagementReply.Failure(code, FailureMessage);
+
+
+
+   /// <summary>A failed reply built through the contract's own factory for details whose type is known only at run time. A refusal by the factory is thrown as itself, not wrapped by the reflection call.</summary>
+   internal static ManagementReply FailureWith(string code, object details)
+   {
+      MethodInfo factory = typeof(ManagementReply).GetMethods().Single(method => method is { Name: nameof(ManagementReply.Failure), IsGenericMethodDefinition: true });
+      return (ManagementReply)factory.MakeGenericMethod(details.GetType()).Invoke(null, BindingFlags.DoNotWrapExceptions, null, [code, FailureMessage, details], null)!;
+   }
+
+
+
    /// <summary>A check in which every stage passed, for a server that offers both sign-in methods and is already a server here.</summary>
    private static ServerCheckResult CheckPassed => ServerCheckResult.From(new QqqServerCompatibility([], null, QqqSignInMethods.Password | QqqSignInMethods.Browser), ProviderOrigin, ServerId);
 
 
 
    /// <summary>Who is signed in, taken from the stored session's identity and never from its credential.</summary>
-   private static AgentAuthenticationStatus Authentication
-      => new(SignedIn: true, StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId, "Signed in. Printing is enabled.", Authorized: true);
+   private static ServerAuthentication Authentication
+      => ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId, "Signed in. Printing is enabled.", Authorized: true));
 
 
 
@@ -247,14 +267,14 @@ internal static class ManagementSamples
          new DeviceProfile("Packing station 7", "", "West warehouse")),
       [
          new ServerSnapshot(ServerId, "Warehouse", Address, 0, ServerSnapshot.Green, "Connected. Waiting for print jobs.", AttentionCount: 0,
-            new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", "Signed in. Printing is enabled.", Authorized: true), Paired: true, "device-17",
+            ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", "Signed in. Printing is enabled.", Authorized: true)), Paired: true, "device-17",
             new AgentTransportSnapshot("qqq-printing.v1", "CONNECTED", 20480, 5242880, 0, 0, s_instant.AddDays(-2)), s_instant.AddSeconds(-12),
             new ServerControl("SUPPORTED", new DeviceDesiredState(3, DispatchPaused: false, "CONNECTED"), "2026-11-10T15:03:53.0000000Z"),
             [new ServerPrinter("printer-a1", PrinterServerState.Approved, "Shipping labels")],
             new PrinterServerSync(PrinterServerSync.Reported, "2026-11-10T15:03:00.0000000Z", Server: Address, Source: PrinterServerSync.RealtimeSource),
             new CertificateExceptionState(Enabled: false, Address), StateUnreadable: false, Removing: false),
          new ServerSnapshot(SecondServerId, "Test bench", "https://bench.example.test", 1, ServerSnapshot.Orange, "Signed in. Pair this computer to enable printing.", AttentionCount: 0,
-            new AgentAuthenticationStatus(SignedIn: true, "principal-9", "tenant-2", "Signed in. Pair this computer to enable printing.", Authorized: false), Paired: false, DeviceId: null,
+            ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-9", "tenant-2", "Signed in. Pair this computer to enable printing.", Authorized: false)), Paired: false, DeviceId: null,
             Stopped, LastContact: null, new ServerControl("UNKNOWN", new DeviceDesiredState(0, DispatchPaused: false, "CONNECTED")), [],
             PrinterServerSync.Initial, new CertificateExceptionState(Enabled: true, "https://bench.example.test", "https://bench.example.test"), StateUnreadable: false, Removing: false),
       ]);

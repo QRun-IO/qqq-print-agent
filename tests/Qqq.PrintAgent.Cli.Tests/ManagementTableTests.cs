@@ -20,9 +20,9 @@ public sealed class ManagementTableTests
    private static readonly string[] s_codesInTheAdr =
    [
       "unsupported_version", "unknown_operation", "invalid_request", "server_not_found", "server_ambiguous", "server_limit", "server_exists", "server_removing", "busy",
-      "not_signed_in", "not_paired", "not_connected", "server_incompatible", "certificate_untrusted", "server_unreachable", "server_refused", "sign_in_refused", "bind_refused",
-      "identity_changed", "enrollment_refused", "enrollment_unconfirmed", "printer_not_found", "job_not_found", "job_not_current", "duplicate_risk_unconfirmed", "cancel_refused",
-      "state_unreadable", "state_newer", "migration_incomplete", "update_in_progress", "internal_error",
+      "not_signed_in", "not_paired", "not_connected", "server_incompatible", "certificate_untrusted", "provider_changed", "server_unreachable", "server_refused", "sign_in_refused",
+      "bind_refused", "identity_changed", "enrollment_refused", "enrollment_unconfirmed", "printer_not_found", "job_not_found", "job_not_current", "duplicate_risk_unconfirmed",
+      "cancel_refused", "state_unreadable", "state_newer", "migration_incomplete", "update_in_progress", "internal_error",
    ];
 
 
@@ -52,7 +52,7 @@ public sealed class ManagementTableTests
       string[] declared = Constants(typeof(ManagementErrorCode));
 
       Assert.Equal(s_codesInTheAdr, ManagementErrorCode.All);
-      Assert.Equal(31, ManagementErrorCode.All.Count);
+      Assert.Equal(32, ManagementErrorCode.All.Count);
       Assert.Equal(s_codesInTheAdr.Order(StringComparer.Ordinal), declared.Order(StringComparer.Ordinal));
       Assert.All(ManagementErrorCode.All, code => Assert.Matches("^[a-z]+(_[a-z]+)*$", code));
    }
@@ -69,6 +69,7 @@ public sealed class ManagementTableTests
       Assert.Equal(typeof(IdentityChangedDetails), ManagementErrorCode.DetailsType(ManagementErrorCode.IdentityChanged));
       Assert.Equal(typeof(CancelRefusedDetails), ManagementErrorCode.DetailsType(ManagementErrorCode.CancelRefused));
       Assert.Equal(5, ManagementErrorCode.All.Count(code => ManagementErrorCode.DetailsType(code) is not null));
+      Assert.Null(ManagementErrorCode.DetailsType(ManagementErrorCode.ProviderChanged));
       Assert.Null(ManagementErrorCode.DetailsType("code_added_later"));
    }
 
@@ -115,6 +116,29 @@ public sealed class ManagementTableTests
       Assert.Equal(reads.Order(StringComparer.Ordinal), Names(operation => operation.Kind == ManagementOperationKind.Read), StringComparer.Ordinal);
       Assert.Equal(15, ManagementOperations.All.Count(operation => operation.Kind == ManagementOperationKind.Change));
       Assert.All(ManagementOperations.All.Where(operation => operation.Kind == ManagementOperationKind.SessionChange), operation => Assert.Equal(ManagementScope.Server, operation.Scope));
+   }
+
+
+
+   /// <summary>
+   /// The table says which operation is single-flight, and it is the printer discovery alone: a read on the computer
+   /// with the ordinary time limit that takes no arguments, so every request for it asks the same thing and a request
+   /// that arrives while a discovery is running can join it and share its result. Nothing else is marked: the
+   /// snapshot never starts a discovery, and an operation that names a server, takes arguments or changes something
+   /// could not share one result among its requests, so the mark is only ever on a read on the computer without
+   /// arguments.
+   /// </summary>
+   [Fact]
+   public void Operations_PrinterDiscoveryIsTheOneReadThatJoinsARunInProgress()
+   {
+      Assert.True(ManagementOperations.TryFind(ManagementOperations.PrintersDiscover, out ManagementOperationInfo? discover));
+
+      Assert.Equal(["printers.discover"], Names(operation => operation.SingleFlight), StringComparer.Ordinal);
+      Assert.Equal((ManagementScope.Computer, ManagementOperationKind.Read, ManagementOperations.OrdinaryTimeLimit, false, null, typeof(PrintersDiscoverResult), true),
+         (discover.Scope, discover.Kind, discover.ServerTimeLimit, discover.AvailableWhenDegraded, discover.ArgumentsType, discover.ResultType, discover.SingleFlight));
+      Assert.All(ManagementOperations.All.Where(operation => operation.SingleFlight), operation =>
+         Assert.Equal((ManagementScope.Computer, ManagementOperationKind.Read, null), (operation.Scope, operation.Kind, operation.ArgumentsType)));
+      Assert.False(new ManagementOperationInfo("status", ManagementScope.Computer, ManagementOperationKind.Read, ManagementOperations.OrdinaryTimeLimit, false, null, typeof(NoResult)).SingleFlight);
    }
 
 

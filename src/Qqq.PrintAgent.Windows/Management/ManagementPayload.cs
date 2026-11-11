@@ -4,6 +4,7 @@
  */
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Qqq.PrintAgent.Windows.Management;
 
@@ -14,6 +15,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// content when it is put into a log line or an interpolated string, and arguments can hold a session credential or an
 /// enrollment code and one result holds the provider's sign-out request. The text form of a payload is fixed.
 /// </summary>
+[JsonConverter(typeof(ManagementJson.NotBySerializer<ManagementPayload>))]
 public sealed class ManagementPayload
 {
    /// <summary>The JSON object, copied so it outlives the document it was read from. It is private so nothing prints it by reaching through the payload.</summary>
@@ -29,10 +31,10 @@ public sealed class ManagementPayload
 
 
 
-   /// <summary>Writes a record the way the wire carries it.</summary>
+   /// <summary>Writes a record the way the wire carries it. A value that is not written as a JSON object (a list, text, nothing at all) is refused, as <see cref="FromElement"/> refuses one: every argument, result and details record is an object, and a reply built around anything else would be unreadable to its client.</summary>
    public static ManagementPayload From<TValue>(TValue value)
       where TValue : class
-      => new(JsonSerializer.SerializeToElement(value, ManagementJson.Options));
+      => FromElement(JsonSerializer.SerializeToElement(value, ManagementJson.Options));
 
 
 

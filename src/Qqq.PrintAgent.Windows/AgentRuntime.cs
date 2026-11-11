@@ -24,7 +24,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 {
    private readonly Lock _stateLock = new();
    private readonly IPrinterBackend _printers = printerBackend ?? new WindowsPrinters();
-   private readonly ServiceLog _log = new(AgentActivityLog.Create(directory), log);
+   private readonly ServiceLog _log = new(AgentActivityLog.Create(directory), log, timeProvider);
    private readonly SemaphoreSlim _claimsRequested = new(0, 1);
    private readonly SemaphoreSlim _connectionGate = new(1, 1);
    private DateTimeOffset? _lastServerContact;

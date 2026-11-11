@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -24,7 +26,13 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// without breaking an older client; for the same reason a client treats a vocabulary value it does not know (a
 /// health, a stage, an outcome) as unknown, never as a failure to read the reply. An envelope is read only by
 /// <see cref="ParseRequest"/> and <see cref="ParseReply"/>: handed to the serializer directly, the envelope types
-/// refuse to be read, so the checks those two make cannot be walked around.
+/// refuse to be read, so the checks those two make cannot be walked around by accident. The refusal is declared on
+/// the four envelope types themselves (<see cref="NotBySerializer{TEnvelope}"/>), so it holds for the default
+/// options and for any options object that does not bring a converter of its own for one of these types. Such a
+/// converter, placed in the options, takes precedence over a declaration on the type; it has to be written for the
+/// purpose, and nothing in the product has one. The same types refuse to be written by the serializer, and an
+/// envelope is written only by <see cref="Write(ManagementRequest)"/> and <see cref="Write(ManagementReply)"/>, so it
+/// cannot leave in another form than the one line this contract defines (other options could indent it across lines).
 /// </summary>
 public static class ManagementJson
 {
@@ -43,7 +51,7 @@ public static class ManagementJson
 
 
 
-   /// <summary>The options everything is written with, and replies are read with: a member the reader does not know is skipped.</summary>
+   /// <summary>The options every argument, result and details record is written with, and results and details are read with: a member the reader does not know is skipped. The envelope around them is written by <see cref="Write(ManagementRequest)"/> and <see cref="Write(ManagementReply)"/>, not through these.</summary>
    public static JsonSerializerOptions Options { get; } = CreateOptions(skipUnknownMembers: true);
 
 
@@ -54,12 +62,20 @@ public static class ManagementJson
 
 
    /// <summary>Writes a request as the one line the pipe carries.</summary>
-   public static string Write(ManagementRequest request) => JsonSerializer.Serialize(request, Options);
+   public static string Write(ManagementRequest request)
+   {
+      ArgumentNullException.ThrowIfNull(request);
+      return WriteLine(writer => WriteRequest(writer, request));
+   }
 
 
 
    /// <summary>Writes a reply as the one line the pipe carries.</summary>
-   public static string Write(ManagementReply reply) => JsonSerializer.Serialize(reply, Options);
+   public static string Write(ManagementReply reply)
+   {
+      ArgumentNullException.ThrowIfNull(reply);
+      return WriteLine(writer => WriteReply(writer, reply));
+   }
 
 
 
@@ -69,6 +85,13 @@ public static class ManagementJson
    /// members this one does not know. After that the envelope allows exactly <c>v</c>, <c>op</c>, <c>server</c> and
    /// <c>args</c>. Whether the operation exists, and whether it should name a server, is not decided here but by
    /// <see cref="ManagementOperations.Check"/>, and the arguments are read by <see cref="TryReadArguments"/>.
+   /// <para>
+   /// Nothing a text holds makes this throw. JSON's grammar lets a string hold the escape of a surrogate without its
+   /// partner (<c>\ud800</c> on its own), which is not text. It is answered like any other value that is wrong where
+   /// it stands: in <c>op</c> the operation is malformed, in <c>server</c> the server is, and in a member's name, at
+   /// any depth, the text is not JSON, because the parse cannot know that no member is repeated. In a value of the
+   /// arguments it leaves the envelope readable, and the arguments are then not read.
+   /// </para>
    /// </summary>
    public static ManagementRequestParse ParseRequest(string? text)
    {
@@ -88,7 +111,9 @@ public static class ManagementJson
    /// <summary>
    /// Reads a reply's envelope. A success must carry a result object and a failure an error with a code and a message;
    /// members this version does not know are skipped. The result and the details are read into their own types by
-   /// <see cref="TryReadResult"/> and <see cref="TryReadDetails"/>.
+   /// <see cref="TryReadResult"/> and <see cref="TryReadDetails"/>. Nothing a text holds makes this throw: a code or a
+   /// message that holds the escape of a surrogate without its partner is not text, so the reply is incomplete, and
+   /// such an escape in a member's name makes the text not JSON, as it does for a request.
    /// </summary>
    public static ManagementReplyParse ParseReply(string? text)
    {
@@ -175,10 +200,6 @@ public static class ManagementJson
          TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { LetNullableMembersBeAbsent } },
       };
       options.Converters.Add(new UtcDateTimeConverter());
-      options.Converters.Add(new WriteOnlyConverter<ManagementRequest>(WriteRequest, nameof(ParseRequest)));
-      options.Converters.Add(new WriteOnlyConverter<ManagementReply>(WriteReply, nameof(ParseReply)));
-      options.Converters.Add(new WriteOnlyConverter<ManagementError>(WriteError, nameof(ParseReply)));
-      options.Converters.Add(new WriteOnlyConverter<ManagementPayload>((writer, payload) => payload.ToElement().WriteTo(writer), nameof(ParseRequest) + " or " + nameof(ParseReply)));
       options.MakeReadOnly();
       return options;
    }
@@ -238,6 +259,16 @@ public static class ManagementJson
       {
          return IsJsonWithARepeatedMember(text) ? ManagementEnvelopeProblem.RepeatedMember : ManagementEnvelopeProblem.NotJson;
       }
+      catch(Exception exception) when(exception is InvalidOperationException or ArgumentException)
+      {
+         /////////////////////////////////////////////////////////////////////////////////////////
+         // The text holds a surrogate without its partner where the parse has to read it: as  //
+         // itself, so the text cannot be carried as UTF-8 at all, or as an escape in a        //
+         // member's name, which the parse must read to know that no member is repeated. The   //
+         // parser reports neither as a JSON error. Nothing in such a text can be trusted.     //
+         /////////////////////////////////////////////////////////////////////////////////////////
+         return ManagementEnvelopeProblem.NotJson;
+      }
       if(parsed.RootElement.ValueKind != JsonValueKind.Object)
       {
          parsed.Dispose();
@@ -295,13 +326,13 @@ public static class ManagementJson
          problem = member.Name switch
          {
             "v" => ManagementEnvelopeProblem.None,
-            "op" => kind == JsonValueKind.String ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.OperationMissing,
-            "server" => kind == JsonValueKind.String && ManagementProtocol.IsServerId(member.Value.GetString()) ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ServerMalformed,
+            "op" => kind != JsonValueKind.String ? ManagementEnvelopeProblem.OperationMissing : TextOf(member.Value) is null ? ManagementEnvelopeProblem.OperationMalformed : ManagementEnvelopeProblem.None,
+            "server" => kind == JsonValueKind.String && ManagementProtocol.IsServerId(TextOf(member.Value)) ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ServerMalformed,
             "args" => kind == JsonValueKind.Object ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ArgumentsNotAnObject,
             _ => ManagementEnvelopeProblem.UnexpectedMember,
          };
-         operation = member.NameEquals("op") ? member.Value.ToString() : operation;
-         server = member.NameEquals("server") ? member.Value.ToString() : server;
+         operation = member.NameEquals("op") ? TextOf(member.Value) : operation;
+         server = member.NameEquals("server") ? TextOf(member.Value) : server;
          arguments = member.NameEquals("args") && kind == JsonValueKind.Object ? ManagementPayload.FromElement(member.Value) : arguments;
       }
       if(problem == ManagementEnvelopeProblem.None && operation is null)
@@ -313,13 +344,13 @@ public static class ManagementJson
          problem = ManagementEnvelopeProblem.OperationMalformed;
       }
       return problem == ManagementEnvelopeProblem.None
-         ? new ManagementRequestParse(new ManagementRequest(ManagementProtocol.Version, operation!, server, arguments), ManagementEnvelopeProblem.None)
+         ? new ManagementRequestParse(ManagementRequest.For(operation!, server, arguments), ManagementEnvelopeProblem.None)
          : new ManagementRequestParse(null, problem);
    }
 
 
 
-   /// <summary>Reads the members of a reply object whose root is known to be an object.</summary>
+   /// <summary>Reads the members of a reply object whose root is known to be an object. The error is read by <see cref="ManagementError.FromWire"/>, and a reply is made by the same functions the service makes one with.</summary>
    private static ManagementReplyParse ReadReply(JsonElement root)
    {
       ManagementEnvelopeProblem problem = CheckVersion(root);
@@ -328,11 +359,11 @@ public static class ManagementJson
          return new ManagementReplyParse(null, problem);
       }
       bool hasResult = root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object;
-      ManagementError? error = root.TryGetProperty("error", out JsonElement failure) ? ReadError(failure) : null;
+      ManagementError? error = root.TryGetProperty("error", out JsonElement failure) ? ManagementError.FromWire(failure) : null;
       ManagementReply? reply = root.TryGetProperty("ok", out JsonElement ok) switch
       {
-         true when ok.ValueKind == JsonValueKind.True && hasResult => new ManagementReply(ManagementProtocol.Version, true, ManagementPayload.FromElement(result)),
-         true when ok.ValueKind == JsonValueKind.False && error is not null => new ManagementReply(ManagementProtocol.Version, false, Error: error),
+         true when ok.ValueKind == JsonValueKind.True && hasResult => ManagementReply.Success(ManagementPayload.FromElement(result)),
+         true when ok.ValueKind == JsonValueKind.False && error is not null => ManagementReply.Failure(error),
          _ => null,
       };
       return new ManagementReplyParse(reply, reply is null ? ManagementEnvelopeProblem.ReplyIncomplete : ManagementEnvelopeProblem.None);
@@ -340,17 +371,22 @@ public static class ManagementJson
 
 
 
-   /// <summary>Reads an error object, or returns null when it lacks a code or a message as text. Details of any kind but an object are dropped, because every details type is an object.</summary>
-   private static ManagementError? ReadError(JsonElement error)
+   /// <summary>
+   /// The text of a JSON string, or null when it has none to give. JSON's grammar lets a string hold the escape of a
+   /// surrogate without its partner (<c>\ud800</c> on its own), which is not text: it cannot be turned into a string,
+   /// and the platform throws when asked to. The envelope's own strings are read through here, so such a value is
+   /// answered like any other value that is not what its member needs, and never thrown.
+   /// </summary>
+   internal static string? TextOf(JsonElement value)
    {
-      if(error.ValueKind != JsonValueKind.Object
-         || !error.TryGetProperty("code", out JsonElement code) || code.ValueKind != JsonValueKind.String
-         || !error.TryGetProperty("message", out JsonElement message) || message.ValueKind != JsonValueKind.String)
+      try
+      {
+         return value.GetString();
+      }
+      catch(InvalidOperationException)
       {
          return null;
       }
-      ManagementPayload? details = error.TryGetProperty("details", out JsonElement found) && found.ValueKind == JsonValueKind.Object ? ManagementPayload.FromElement(found) : null;
-      return new ManagementError(code.ToString(), message.ToString(), details);
    }
 
 
@@ -379,14 +415,18 @@ public static class ManagementJson
    /// True when a list the type knows, at any depth, has a null among its items. The element is walked beside the
    /// type the serializer will read it into, so only members of the record are looked at: a member this version does
    /// not know is skipped whole, as the serializer skips it, and what a later version puts in it (a list with a null
-   /// included) cannot make today's reader refuse the reply.
+   /// included) cannot make today's reader refuse the reply. The walk goes wherever a list can stand: through a
+   /// record's members, a list's items, the values of a dictionary (which are held to the same rule as a list's
+   /// items) and a value type that may be null. No record of the contract has a dictionary or such a value type
+   /// today; the walk follows them so that one added later is not a way around the rule.
    /// </summary>
    private static bool HasNullInAKnownList(JsonElement element, Type type, JsonSerializerOptions options)
    {
-      JsonTypeInfo known = options.GetTypeInfo(type);
+      JsonTypeInfo known = options.GetTypeInfo(Nullable.GetUnderlyingType(type) ?? type);
       return (known.Kind, element.ValueKind) switch
       {
          (JsonTypeInfoKind.Enumerable, JsonValueKind.Array) => element.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.Null || HasNullInAKnownList(item, known.ElementType!, options)),
+         (JsonTypeInfoKind.Dictionary, JsonValueKind.Object) => element.EnumerateObject().Any(entry => entry.Value.ValueKind == JsonValueKind.Null || HasNullInAKnownList(entry.Value, known.ElementType!, options)),
          (JsonTypeInfoKind.Object, JsonValueKind.Object) => element.EnumerateObject().Any(member => MemberType(known, member.Name) is { } memberType && HasNullInAKnownList(member.Value, memberType, options)),
          _ => false,
       };
@@ -396,6 +436,32 @@ public static class ManagementJson
 
    /// <summary>The type of the record's member with this name on the wire, or null when the record has none.</summary>
    private static Type? MemberType(JsonTypeInfo record, string name) => record.Properties.FirstOrDefault(member => string.Equals(member.Name, name, StringComparison.Ordinal))?.PropertyType;
+
+
+
+   /// <summary>
+   /// Writes one envelope as text. The envelope is written here and not by the serializer, so its form does not depend
+   /// on any options object: one line, never indented, with the escaping the serializer's own default gives, which is
+   /// also what the arguments, results and details inside it were written with. A payload that was read from the
+   /// wire can hold, in a value, the escape of a surrogate without its partner; that is not text and cannot be
+   /// written, and the failure is a <see cref="JsonException"/>, as it was when the serializer wrote the envelope.
+   /// </summary>
+   private static string WriteLine(Action<Utf8JsonWriter> write)
+   {
+      ArrayBufferWriter<byte> buffer = new();
+      using(Utf8JsonWriter writer = new(buffer))
+      {
+         try
+         {
+            write(writer);
+         }
+         catch(InvalidOperationException exception)
+         {
+            throw new JsonException("The envelope holds a value that is not text (a surrogate without its partner) and cannot be written.", exception);
+         }
+      }
+      return Encoding.UTF8.GetString(buffer.WrittenSpan);
+   }
 
 
 
@@ -488,20 +554,30 @@ public static class ManagementJson
 
 
    /// <summary>
-   /// Writes one of the envelope's types and refuses to read it. The serializer would read an envelope without any of
-   /// the checks <see cref="ParseRequest"/> and <see cref="ParseReply"/> make (another version, a malformed operation
-   /// name, a member the envelope does not have), so reading through it is closed and the refusal names the function
-   /// to use instead.
+   /// What the serializer does with one of the envelope's types: nothing. It would read an envelope without any of the
+   /// checks <see cref="ParseRequest"/> and <see cref="ParseReply"/> make (another version, a malformed operation name,
+   /// a member the envelope does not have), and with options of a caller's choosing it could write one indented across
+   /// lines, which the pipe's framing cannot carry. So both are closed, and the refusal names the functions to use
+   /// instead. Each envelope type names this converter in an attribute on the type itself, which is why the refusal
+   /// holds for the default options and for options built elsewhere, and not only for the two this contract builds.
+   /// It does not hold against options that carry a converter written for the envelope type: the serializer asks the
+   /// options before it asks the type.
    /// </summary>
-   private sealed class WriteOnlyConverter<TEnvelope>(Action<Utf8JsonWriter, TEnvelope> write, string readWith) : JsonConverter<TEnvelope>
+   internal sealed class NotBySerializer<TEnvelope> : JsonConverter<TEnvelope>
    {
-      /// <summary>Refuses, naming the function that reads this type with its checks.</summary>
-      public override TEnvelope Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-         => throw new NotSupportedException($"A {typeof(TEnvelope).Name} is not read by the serializer. Read it with {nameof(ManagementJson)}.{readWith}, which checks the envelope.");
+      /// <summary>Refuses to read.</summary>
+      public override TEnvelope Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw Refusal();
 
 
 
-      /// <summary>Writes the value the one way the wire carries it.</summary>
-      public override void Write(Utf8JsonWriter writer, TEnvelope value, JsonSerializerOptions options) => write(writer, value);
+      /// <summary>Refuses to write.</summary>
+      public override void Write(Utf8JsonWriter writer, TEnvelope value, JsonSerializerOptions options) => throw Refusal();
+
+
+
+      /// <summary>The refusal, naming the functions that read an envelope with its checks and the one that writes it.</summary>
+      private static NotSupportedException Refusal()
+         => new($"A {typeof(TEnvelope).Name} is neither read nor written by the serializer. Read a request with {nameof(ManagementJson)}.{nameof(ParseRequest)} and a reply with "
+            + $"{nameof(ManagementJson)}.{nameof(ParseReply)}, which check the envelope, and write either with {nameof(ManagementJson)}.{nameof(ManagementJson.Write)}.");
    }
 }

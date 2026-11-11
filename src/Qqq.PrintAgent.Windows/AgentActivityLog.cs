@@ -92,10 +92,17 @@ public sealed partial class AgentActivityLog : IAgentLog
 
    /// <summary>
    /// Redacts credential-shaped diagnostics; callers must still never log documents or credential payloads. What it
-   /// recognises: a bearer credential, a named secret written as name and value, a user name and password inside a web
-   /// address, the value of a cookie header line, and the one-time code and the state of a sign-in callback in the
-   /// query or fragment of an address. It is a second line of defense, not a parser: a secret in a shape it does not
-   /// know passes through.
+   /// recognises:
+   /// <list type="bullet">
+   /// <item>a bearer credential;</item>
+   /// <item>a named secret written as name and value (<see cref="NamedCredential"/>), also with the equals sign percent-encoded (<see cref="EncodedNamedCredential"/>);</item>
+   /// <item>a user name and password inside a web address;</item>
+   /// <item>the value of a cookie header line and of an authorization header line of any scheme, on the header's own line or, when that line holds nothing after the name, on the next;</item>
+   /// <item>the one-time code and the state of a sign-in callback in the query or fragment of an address, quoted or percent-encoded;</item>
+   /// <item>a member or parameter named <c>code</c> in a message that also names a code verifier, which is the code-exchange request (<see cref="ExchangedCode"/>).</item>
+   /// </list>
+   /// It is a second line of defense, not a parser: a secret in a shape it does not know passes through, and the
+   /// service log's tests record the shapes that are known to pass.
    /// </summary>
    public static string Redact(string message)
    {
@@ -104,9 +111,14 @@ public sealed partial class AgentActivityLog : IAgentLog
          string bounded = message.Length <= 8192 ? message : message[..8192] + " [truncated]";
          string redacted = BearerCredential().Replace(bounded, "Bearer [REDACTED]");
          redacted = NamedCredential().Replace(redacted, "${prefix}[REDACTED]");
+         redacted = EncodedNamedCredential().Replace(redacted, "${prefix}[REDACTED]");
          redacted = UrlCredential().Replace(redacted, "${scheme}[REDACTED]@");
          redacted = CookieHeader().Replace(redacted, "${prefix}[REDACTED]");
+         redacted = AuthorizationHeader().Replace(redacted, "${prefix}[REDACTED]");
          redacted = CallbackParameter().Replace(redacted, "${prefix}[REDACTED]");
+         // The verifier's name is looked for in the message as it was given, not in the redacted text: a rule above
+         // may have hidden the name together with the value it stood in (a header's line, another secret's quotes).
+         redacted = CodeVerifierName().IsMatch(bounded) ? ExchangedCode().Replace(redacted, "${prefix}[REDACTED]") : redacted;
          // Continuations cannot forge another timestamped AppKit log entry.
          return redacted.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\n  ", StringComparison.Ordinal);
       }
@@ -118,15 +130,48 @@ public sealed partial class AgentActivityLog : IAgentLog
 
 
 
+   /// <summary>
+   /// The names of the named secrets, as the one alternation <see cref="NamedCredential"/> and
+   /// <see cref="EncodedNamedCredential"/> share; letter case is ignored. Beside the general words (token, password,
+   /// secret, API key, document content) it holds every name under which the product's own requests and responses
+   /// carry a secret, in the product's spelling and in the standard ones:
+   /// <list type="bullet">
+   /// <item><c>enrollmentCode</c>, the one-time code of the enrollment request, and <c>deviceToken</c>, the device's secret in the enrollment response, which the <c>X-QQQ-Device-Token</c> header also carries (that name ends in "token");</item>
+   /// <item><c>uuid</c>, the session identifier in the body of a session response, and <c>sessionUUID</c> and <c>sessionId</c>, the two names of the session cookie; <c>sessionToken</c>, the stored session, ends in "token";</item>
+   /// <item><c>codeVerifier</c>, the secret half of a browser sign-in in the code-exchange request, with <c>code_verifier</c> and <c>code-verifier</c>;</item>
+   /// <item><c>idTokenHint</c>, which the sign-out response carries, and <c>id_token_hint</c>, the parameter the identity provider's sign-out request carries it in, with <c>id-token-hint</c>.</item>
+   /// </list>
+   /// "uuid" is a name only at the start of a word or straight after a percent-encoded separator, so an identifier
+   /// whose name merely ends in it (a device's, a job's) is left alone.
+   /// </summary>
+   private const string SecretNames = """deviceToken|enrollment[_-]?code|access_token|refresh_token|id[_-]?token[_-]?hint|code[_-]?verifier|sessionUUID|sessionId|(?:\b|(?<=%3F|%26|%23))uuid|api[_-]?key|token|password|secret|contentBase64""";
+
+
+
    /// <summary>Matches an HTTP bearer credential (the word Bearer and its token) so it can be replaced before anything is logged. The match has a one second limit so a crafted message cannot stall logging.</summary>
    [GeneratedRegex("""\bBearer\s+[^\s,;"']+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex BearerCredential();
 
 
 
-   /// <summary>Matches a named secret such as a token, password, enrollment code, API key or document payload field written as name and value, keeping the name so the log still shows which field was hidden.</summary>
-   [GeneratedRegex("""(?<prefix>["']?(?:deviceToken|enrollmentCode|access_token|refresh_token|api[_-]?key|token|password|secret|contentBase64)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&]+)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   /// <summary>
+   /// Matches a named secret (<see cref="SecretNames"/>) written as name and value, keeping the name so the log still
+   /// shows which field was hidden: <c>name=value</c>, <c>name: value</c> and a member of a JSON object, with the
+   /// name and the value quoted or not. White space, a no-break space or a character that shows as nothing may stand
+   /// between the name and the separator. A name is redacted wherever it stands in a line, not only inside a header.
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>["']?(?:""" + SecretNames + """)["']?[\s\p{Cf}]*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&]+)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex NamedCredential();
+
+
+
+   /// <summary>
+   /// Matches a named secret (<see cref="SecretNames"/>) whose equals sign is percent-encoded (<c>%3D</c>), which is
+   /// how a parameter looks inside another address, keeping the name. The value ends at a percent-encoded separator
+   /// (<c>%26</c>, <c>%23</c>) as well as at a plain one, so the parameters after it stay readable.
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>(?:""" + SecretNames + """)%3D)(?:(?!%26|%23)[^\s,;&"'<>])+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex EncodedNamedCredential();
 
 
 
@@ -137,12 +182,32 @@ public sealed partial class AgentActivityLog : IAgentLog
 
 
    /// <summary>
-   /// Matches the value of a <c>Cookie:</c> or <c>Set-Cookie:</c> header line, to the end of the line, keeping the header's
-   /// name. The whole value goes because a cookie header carries any number of name and value pairs and the session
-   /// cookie's name is the server's choice; whatever follows on the same line is hidden with it, which errs on the safe side.
+   /// Matches the value of a cookie header line, to the end of the line, keeping the header's name. The name is
+   /// "Cookie" where no letter or digit stands before it, so <c>Cookie:</c>, <c>Set-Cookie:</c> and
+   /// <c>HTTP_COOKIE:</c> are all one; white space, a no-break space or a character that shows as nothing may stand
+   /// before the colon. When the header's own line holds nothing after the colon, the value is the next line, which
+   /// is where a folded header puts it. The whole value goes because a cookie header carries any number of name and
+   /// value pairs and the session cookie's name is the server's choice; whatever follows on the same line is hidden
+   /// with it, which errs on the safe side.
    /// </summary>
-   [GeneratedRegex("""(?<prefix>\b(?:Set-)?Cookie[ \t]*:[ \t]*)[^\r\n]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   [GeneratedRegex("""(?<prefix>(?<![A-Za-z0-9])Cookie[\s\p{Cf}-[\r\n]]*:[ \t]*(?:\r?\n[ \t]*)?)[^\r\n]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex CookieHeader();
+
+
+
+   /// <summary>
+   /// Matches the value of an authorization header line, to the end of the line, keeping the header's name. The name
+   /// is "Authorization" where no letter or digit stands before it, so <c>Authorization:</c>,
+   /// <c>Proxy-Authorization:</c> and <c>HTTP_AUTHORIZATION:</c> are all one. The separator is a colon or an equals
+   /// sign, and white space, a no-break space, a character that shows as nothing or a quote may stand before it, so
+   /// the header as a member of a JSON object and in a list of <c>name=value</c> pairs is covered too. When the
+   /// header's own line holds nothing after the separator, the value is the next line, which is where a folded header
+   /// puts it. The whole value goes, whatever the scheme (Basic, Digest, Negotiate, a bare key), because the scheme
+   /// decides where the credential is and a new scheme must not need a new pattern; whatever follows on the same line
+   /// is hidden with it, which errs on the safe side, as it does for a cookie header.
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>(?<![A-Za-z0-9])Authorization["']?[\s\p{Cf}-[\r\n]]*[:=][ \t]*(?:\r?\n[ \t]*)?)[^\r\n]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex AuthorizationHeader();
 
 
 
@@ -151,9 +216,30 @@ public sealed partial class AgentActivityLog : IAgentLog
    /// address: <c>code=</c> or <c>state=</c> straight after the <c>?</c>, <c>&amp;</c> or <c>#</c> that starts a
    /// parameter, keeping the name. The separator is required on purpose. "code" and "state" are ordinary words in a
    /// log ("status code: 401", "exit code=1", "state=Paused"), so neither is a keyword on its own the way "token" is.
+   /// The value may be quoted, and the separator, the equals sign and the end of the value may be percent-encoded
+   /// (<c>%3F</c>, <c>%26</c>, <c>%23</c>, <c>%3D</c>), which is how a callback looks inside another address; the
+   /// ampersand may also be written the way HTML writes it (<c>&amp;amp;</c>).
    /// </summary>
-   [GeneratedRegex("""(?<prefix>[?&#](?:code|state)=)[^\s&#"'<>]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   [GeneratedRegex("""(?<prefix>(?:[?&#]|&amp;|%3F|%26|%23)(?:code|state)(?:=|%3D))(?:"[^"\r\n]*"|'[^'\r\n]*'|(?:(?!%26|%23)[^\s&#"'<>])+)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex CallbackParameter();
+
+
+
+   /// <summary>Matches the name of a code verifier in any of its spellings (<c>codeVerifier</c>, <c>code_verifier</c>, <c>code-verifier</c>). A message that holds one is about a code exchange, which is what lets <see cref="ExchangedCode"/> treat "code" as a secret's name there.</summary>
+   [GeneratedRegex("""code[_-]?verifier""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex CodeVerifierName();
+
+
+
+   /// <summary>
+   /// Matches a member or parameter named exactly <c>code</c> with its value, keeping the name: a member of a JSON
+   /// object, <c>code=value</c>, <c>code: value</c>, or with the equals sign percent-encoded. It is applied only to a
+   /// message that also names a code verifier (<see cref="CodeVerifierName"/>): the product's code-exchange request
+   /// carries the one-time authorization code as <c>code</c> beside <c>codeVerifier</c>, and outside that request
+   /// "code" is an ordinary word whose value an operator needs (an exit code, an error's code).
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>["']?\bcode["']?(?:[\s\p{Cf}]*[:=]\s*|%3D))(?:"[^"\r\n]*"|'[^'\r\n]*'|(?:(?!%26|%23)[^\s,;&"'<>])+)""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex ExchangedCode();
 
 
 

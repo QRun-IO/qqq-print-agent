@@ -5,16 +5,19 @@
 
 using System.Globalization;
 using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Windows.Management;
 
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
 /// The service's own log: one place that redacts, bounds and routes every line the service writes. A line goes to the
-/// in-memory ring the companion shows (the newest 100 operational entries), to the shared activity log file with the
-/// "[Service]" marker, and to the host's sink. Debug detail goes to the file only, and only while debug logging is on.
+/// in-memory ring (the newest 100 operational entries), to the shared activity log file with the "[Service]" marker,
+/// and to the host's sink. The ring is what version 1 of the pipe carries in its snapshot, which the command line
+/// prints; the companion does not show it (its Logs page reads the activity log file), and ADR-0004 removes the ring
+/// with version 1. Debug detail goes to the file only, and only while debug logging is on.
 /// It is a type of its own, not part of the runtime, because it belongs to the computer and not to one server
-/// connection: a connection is given a view of it through <see cref="ForServer"/> that puts that server's name in front
-/// of each line and otherwise behaves exactly the same.
+/// connection: a connection is given a view of it through <see cref="ForServer"/> that puts that server's short
+/// identifier in front of each line and otherwise behaves exactly the same.
 /// </summary>
 internal sealed class ServiceLog
 {
@@ -30,11 +33,6 @@ internal sealed class ServiceLog
 
    /// <summary>The longest line of debug detail, in characters, after redaction; it is longer because it carries exception text.</summary>
    internal const int DebugLimit = 4000;
-
-
-
-   /// <summary>The longest server name a prefixed view shows, in characters, so an operator's long name cannot use up a line.</summary>
-   internal const int ServerNameLimit = 64;
 
 
 
@@ -71,7 +69,7 @@ internal sealed class ServiceLog
 
 
    /// <summary>
-   /// Records a service message in the in-memory ring shown to the companion (newest 100) and in the shared activity log.
+   /// Records a service message in the in-memory ring (newest 100) and in the shared activity log.
    /// The text is redacted first and capped at 1000 characters (4000 for debug detail), so credentials and document content
    /// cannot reach either sink. DEBUG entries go only to the file, only while debug logging is on, and never displace the
    /// ring's operational entries. A level other than ERROR, WARN or DEBUG is written to the file as information and kept
@@ -83,10 +81,9 @@ internal sealed class ServiceLog
       if(debug && !_sinks.ActivityLog.IsDebugEnabled)
       { return; }
       //////////////////////////////////////////////////////////////////////////////////
-      // the name in the prefix was redacted when the view was made, and is joined on //
-      // only here: redacted as one string with the message, a name ending in an open //
-      // quote would pair with the quote in front of a secret in the message, and the //
-      // secret itself would be left outside what is redacted                         //
+      // the prefix of a server's view is that server's short identifier, which holds //
+      // nothing to redact; it is joined on after the message is redacted, so the     //
+      // line a view writes is the log's own line with eight digits in front of it    //
       //////////////////////////////////////////////////////////////////////////////////
       string sanitized = _prefix + AgentActivityLog.Redact(message);
       int cap = debug ? DebugLimit : LineLimit;
@@ -129,45 +126,34 @@ internal sealed class ServiceLog
 
 
 
-   /// <summary>A copy of the ring, oldest entry first, for the snapshot the companion reads.</summary>
+   /// <summary>A copy of the ring, oldest entry first, for the version 1 snapshot.</summary>
    internal AgentLogEntry[] Entries() => _sinks.Entries();
 
 
 
-   /// <summary>Empties the ring, which is what clearing the logs does to the entries the companion shows; the files are cleared by the caller.</summary>
+   /// <summary>Empties the ring, which is what clearing the logs does to the entries the snapshot carries; the files are cleared by the caller.</summary>
    internal void ClearEntries() => _sinks.Forget();
 
 
 
    /// <summary>
-   /// A view of this log for one server's connection. Every line it writes starts with the server's name in square
-   /// brackets, so lines from several connections can be told apart; redaction, the caps (which then include the name),
-   /// the debug routing, the ring and the file are the same ones. The name is an operator's text, so it is made safe
-   /// here, once: a character that would end the line or reorder it becomes a space (see <see cref="StaysInItsLine"/>),
-   /// the name is redacted on its own, and it is cut at 64 characters. It is redacted apart from the lines it will
-   /// stand in front of because the redaction reads a quoted value up to the next quote: a name ending in an open quote,
-   /// redacted together with a line, would pair with the quote in front of a secret in that line and leave the secret
-   /// in the log. A name with nothing left to show is refused.
+   /// A view of this log for one server's connection. Every line it writes starts with the server's short identifier
+   /// in square brackets (the first eight characters of its identifier, which the command line's <c>--server</c>
+   /// accepts), so lines from several connections can be told apart; redaction, the caps (which then include the
+   /// prefix), the debug routing, the ring and the file are the same ones. The prefix is the identifier and not the
+   /// server's name (ADR-0004, "Server names"): the activity log file redacts each joined line a second time, so a name
+   /// holding a credential keyword would hide that server's lines, square brackets in a name would forge structure
+   /// inside a line, and a name changes when the server is renamed. Eight hexadecimal digits can do none of that, so
+   /// nothing here has to make an operator's text safe. Anything but a full identifier is refused.
    /// </summary>
-   internal ServiceLog ForServer(string name)
+   internal ServiceLog ForServer(string serverId)
    {
-      ArgumentException.ThrowIfNullOrWhiteSpace(name);
-      string plain = new string(name.Select(character => StaysInItsLine(character) ? character : ' ').ToArray()).Trim();
-      ArgumentException.ThrowIfNullOrWhiteSpace(plain, nameof(name));
-      string shown = AgentActivityLog.Redact(plain);
-      return new ServiceLog(_sinks, "[" + (shown.Length <= ServerNameLimit ? shown : shown[..ServerNameLimit]) + "] ");
+      if(!ManagementProtocol.IsServerId(serverId))
+      {
+         throw new ArgumentException("A server's view of the log is named by the server's full identifier.", nameof(serverId));
+      }
+      return new ServiceLog(_sinks, "[" + serverId[..ServerSelector.MinimumPrefixLength] + "] ");
    }
-
-
-
-   /// <summary>
-   /// True for a character that shows as itself where it stands. False for the ones that let a name forge or disguise a
-   /// log line: control characters, the line and paragraph separators (U+2028, U+2029) that end a line as surely as a
-   /// newline, and the format characters, which include the bidirectional embeddings, overrides and isolates that make
-   /// text display in another order than it was written. It is the rule Core applies to text a server sends.
-   /// </summary>
-   private static bool StaysInItsLine(char character) => char.GetUnicodeCategory(character) is not (UnicodeCategory.Control
-      or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator);
 
 
 

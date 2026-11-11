@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+Version 2 of the management pipe: the contract's gaps are closed (2.0). The contract is a set of types that
+nothing serves or sends yet, so none of the first seven items changes what the installed product does; they change
+what the service and its clients will be able to build on. The last two are about logging.
+
+- **Error messages.** An error carries a message that is printable and at most 512 UTF-16 units, however the reply
+  is built and however it is read; this used to hold only for replies built by two functions. A cut adds no mark
+  (a message could be 515 units, and an identity value 203), a value that is missing is absent instead of the words
+  "(missing)", and a failure with no message cannot be built.
+- **Error codes.** A failure can be built only with a code from the contract's table and with exactly the details
+  that table names for the code. A client still reads a code it does not know.
+- **The envelope.** A request or a reply is read only by the contract's two parsing functions and written only by
+  its writing function. The JSON serializer refuses both under the default options and under any options that do
+  not bring a converter of their own for the envelope; it used to refuse reading for the contract's own options
+  only. A request and a reply are built only by functions that check them: a request names its operation by a
+  well-formed name and a server by its full identifier, and a reply holds exactly one of a result and an error.
+  The text on the wire is unchanged. The parsing functions no longer throw
+  for a text that holds a surrogate without its partner, as itself or as an escape (`\ud800` on its own): it is
+  refused like anything else that is wrong in the same place.
+- **Accounts.** The principal and the tenant are carried one way wherever a reply names an account (a snapshot,
+  the result of adding a server or signing in, the details of a changed identity): printable, at most 200 units,
+  left out when missing. The message beside an account is printable and at most 512 units, like an error's.
+- **Server names and addresses.** A name is 1 to 64 characters of visible text after trimming, of which at least
+  one draws something (a name made only of spaces, combining marks and characters that draw nothing, such as
+  U+3164, is refused), without square brackets (ASCII or fullwidth), and not shaped like a server identifier or the
+  first eight or more characters of one. `servers.add` and
+  `servers.rename` refuse any other name as `invalid_request`. The rule is one function for the service and the
+  companion, it says which part a name breaks, and it proposes a name from a server's address that always passes
+  (the host; "Server" in front of a host that looks like an identifier). The rule for an address is beside it:
+  HTTPS, or plain HTTP for this computer itself, with no user name, query, fragment or path, and a host that has
+  an ASCII name and is not an IPv6 literal with a zone (the stored form of an address cannot hold the zone, so two
+  zones would be one server). The existing checks of an address are unchanged.
+- **Adding a server, and switching the certificate exception on.** `servers.add` and `trust.set` carry the sign-in
+  provider's address that `servers.check` reported, for comparison only; leaving it out, or giving null, says that
+  the check named no provider, and text that names no address is refused as `invalid_request`. When the service
+  reads another provider from the server, or one where the check named none, or none where it named one, nothing
+  is stored or changed and the answer is the new error code `provider_changed`; the client checks the server
+  again.
+- **Printer discovery.** The operation table marks `printers.discover` as single-flight: one discovery runs at a
+  time, and a request that arrives during it shares its result. The discovery itself is built with the pipe.
+- **Log redaction recognises more shapes.** As with the two shapes below, this changes what a log line shows only
+  for a line that holds one of them, and no line the product writes today does. The named values,
+  whose value is replaced by `[REDACTED]` while the name stays, now include every name under which the product's
+  own requests and responses carry a secret. `enrollmentCode`, `deviceToken` and the `X-QQQ-Device-Token` header
+  were covered; added are a session response's `uuid`, `sessionUUID`, `sessionId`, the code verifier and the
+  ID-token hint in every spelling (`codeVerifier`, `code_verifier`, `code-verifier`; `idTokenHint`,
+  `id_token_hint`, `id-token-hint`), and `code` in a message that also names a code verifier. Each named value is
+  recognised as a member of a JSON object, as `name=value` or `name: value`, and now also with the equals sign
+  percent-encoded (`name%3Dvalue`). A name that is itself percent-encoded, the rest of a value after a comma, a
+  semicolon or a space, and a nonce are not covered. An `Authorization:` or `Proxy-Authorization:` header line
+  loses its whole value to the end of the line,
+  whatever its scheme; a line that began with `Authorization: Bearer` and went on with other text used to keep
+  that text. A callback's `code` and `state` are also redacted when the value is quoted, when the callback is
+  percent-encoded inside another address, and when its ampersands are written `&amp;`. A cookie or authorization
+  header is also recognised when its value stands on the next line, under the names `HTTP_COOKIE` and
+  `HTTP_AUTHORIZATION`, with a no-break or zero-width space before the colon, and, for the authorization header,
+  with an equals sign in place of the colon. What is still not recognised, and what is hidden although it is no
+  secret, is listed in audit W41 and held by tests.
+- **Service log.** The entries the service keeps in memory are stamped by the service's own clock, and a
+  per-server view of the log, which nothing uses yet, would prefix a server's lines with the first eight characters
+  of its identifier, never with its name.
+
 One printer whose driver does not answer no longer stops jobs for the other printers (2.0). What such a printer
 still affects is listed at the end of this entry; one case is not covered at all, a printer reached through a
 print server that is switched off or unreachable. Until now the service asked Windows about every printer

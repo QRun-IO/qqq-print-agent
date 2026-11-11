@@ -12,13 +12,23 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// The service's log as a type of its own. It must write exactly what the runtime's own log method wrote before it was
 /// moved here (the same redaction, caps, routing of debug detail, ring and file lines), and a view of it for one server
-/// must add that server's name and change nothing else.
+/// must add that server's short identifier and change nothing else.
 /// </summary>
 public sealed class ServiceLogTests : IDisposable
 {
    private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-service-log-tests", Guid.NewGuid().ToString("N"));
    private readonly string _referenceDirectory = Path.Combine(Path.GetTempPath(), "qqq-service-log-tests", Guid.NewGuid().ToString("N"));
    private readonly List<string> _sink = [];
+
+
+
+   /// <summary>The identifier of the first server a view is made for; its lines start with "[3f2b8c1e] ".</summary>
+   private const string Production = "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f";
+
+
+
+   /// <summary>The identifier of the second server a view is made for; its lines start with "[9a1c0e2d] ".</summary>
+   private const string Staging = "9a1c0e2d-77b3-4c58-8f10-5e6d7c8b9a01";
 
 
 
@@ -61,10 +71,11 @@ public sealed class ServiceLogTests : IDisposable
    /// What the runtime's log method did before it became this type, transcribed from the runtime as it was: redact, cap at
    /// 1000 characters (4000 for debug detail), write debug detail to the file only and only while it is on, and write
    /// everything else to the file under its level with the "[Service]" marker. It is the reference the moved code is held to.
-   /// It redacts through the shared <see cref="AgentActivityLog.Redact"/>, as the runtime did, so it follows the two
-   /// patterns added to that method since (a cookie header line, and the code and state of a callback address) and is
-   /// otherwise the method as it was; <see cref="LinesWithNeitherNewPattern_AreRedactedAsBefore"/> holds the redaction
-   /// of every other kind of line to the text it gave before those patterns were added.
+   /// It redacts through the shared <see cref="AgentActivityLog.Redact"/>, as the runtime did, so it follows the
+   /// patterns added to that method since (a cookie header line, an authorization header line, the code and state of
+   /// a callback address, more named values and the code of a code exchange) and is otherwise the method as it was;
+   /// <see cref="LinesWithNoPatternAddedSince_AreRedactedAsBefore"/> holds the redaction of every other kind of line
+   /// to the text it gave before those patterns were added.
    /// </summary>
    private static string? WriteAsTheRuntimeDid(AgentActivityLog file, string level, string message)
    {
@@ -150,7 +161,29 @@ public sealed class ServiceLogTests : IDisposable
    /// and the file), with the redaction marker in its place: a bearer credential, a device token, an enrollment code, an
    /// access or refresh token (including in the query of a callback address), a password, a secret, an API key, document
    /// content, a user name and password inside an address, the value of a cookie header line, and the one-time code and
-   /// the state of a sign-in callback in the query or the fragment of an address.
+   /// the state of a sign-in callback in the query or the fragment of an address. So are the values the product handles
+   /// that were added later: the identity provider's ID-token hint, an authorization header of any scheme or of none,
+   /// the PKCE code verifier, the session cookie under either of the product's names wherever it stands (bare, in JSON,
+   /// on the continuation line of a folded header, under a header name that only ends in "Cookie"), and a callback's
+   /// code and state when the value is quoted or the callback is percent-encoded inside another address.
+   /// <para>
+   /// The rows from the code-exchange request on are the names under which the product's own requests and responses
+   /// carry a secret (the session client's sign-in, code exchange, session renewal and sign-out, and the API client's
+   /// enrollment), each as a member of a JSON object, as name and value, and with the equals sign percent-encoded:
+   /// <c>code</c> beside <c>codeVerifier</c> in the code-exchange request, <c>uuid</c> in a session response,
+   /// <c>sessionUUID</c>, <c>sessionId</c> and <c>sessionToken</c>, <c>enrollmentCode</c>, <c>deviceToken</c> and the
+   /// <c>X-QQQ-Device-Token</c> header, and <c>idTokenHint</c> in the sign-out response with the provider's
+   /// <c>id_token_hint</c>. The verifier and the hint are covered in every spelling and letter case.
+   /// </para>
+   /// <para>
+   /// The last rows are the edges of the header and callback patterns: a header whose value stands on the next
+   /// line, an authorization header written with an equals sign, the two headers under the names a web server's
+   /// environment gives them, a no-break space or a zero-width space between a name and its separator, and a
+   /// callback whose ampersands are written the way HTML writes them. After them stands the edge of the rule for a
+   /// code beside a code verifier: the code on a line of its own, and the verifier's name where an earlier rule hides
+   /// it with the value around it (on a cookie header's line, on an authorization header's line, inside the quoted
+   /// value of another named secret). The name is looked for in the message as it was given, so the code still goes.
+   /// </para>
    /// </summary>
    [Theory]
    [InlineData("Authorization: Bearer synthetic-value-1", "synthetic-value-1")]
@@ -171,6 +204,82 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("callback io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-value-15&state=synthetic-value-16", "synthetic-value-16")]
    [InlineData("returned to https://print.example.com/signed-in#state=synthetic-value-17&code=synthetic-value-18", "synthetic-value-17")]
    [InlineData("returned to https://print.example.com/signed-in#state=synthetic-value-17&code=synthetic-value-18", "synthetic-value-18")]
+   [InlineData("GET https://id.example.com/logout?id_token_hint=synthetic-value-19&post_logout_redirect_uri=x&state=synthetic-state", "synthetic-value-19")]
+   [InlineData("Authorization: Basic synthetic-value-20", "synthetic-value-20")]
+   [InlineData("authorization: Digest username=\"operator\", response=\"synthetic-value-21\"", "synthetic-value-21")]
+   [InlineData("Proxy-Authorization: Negotiate synthetic-value-22", "synthetic-value-22")]
+   [InlineData("Authorization: synthetic-value-23", "synthetic-value-23")]
+   [InlineData("{\"Authorization\":\"Basic synthetic-value-24\"}", "synthetic-value-24")]
+   [InlineData("token request: grant_type=authorization_code&code_verifier=synthetic-value-25", "synthetic-value-25")]
+   [InlineData("sessionId=synthetic-value-26", "synthetic-value-26")]
+   [InlineData("sessionUUID=synthetic-value-27", "synthetic-value-27")]
+   [InlineData("{\"sessionUUID\":\"synthetic-value-28\"}", "synthetic-value-28")]
+   [InlineData("{\"Cookie\":\"sessionUUID=synthetic-value-29\"}", "synthetic-value-29")]
+   [InlineData("Cookie:\r\n sessionUUID=synthetic-value-30", "synthetic-value-30")]
+   [InlineData("SessionCookie: sessionUUID=synthetic-value-31", "synthetic-value-31")]
+   [InlineData("callback ?code=\"synthetic-value-32\"&state='synthetic-value-33'", "synthetic-value-32")]
+   [InlineData("callback ?code=\"synthetic-value-32\"&state='synthetic-value-33'", "synthetic-value-33")]
+   [InlineData("callback ?code%3Dsynthetic-value-34", "synthetic-value-34")]
+   [InlineData("redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb%3Fcode%3Dsynthetic-value-35%26state%3Dsynthetic-value-36", "synthetic-value-35")]
+   [InlineData("redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb%3Fcode%3Dsynthetic-value-35%26state%3Dsynthetic-value-36", "synthetic-value-36")]
+   [InlineData("POST /qqq/v1/manageSession body {\"code\":\"synthetic-value-37\",\"codeVerifier\":\"synthetic-value-38\",\"redirectUri\":\"io.qrun.qqq-print-agent:/oauth/callback\",\"authenticationFlow\":\"native\"}", "synthetic-value-37")]
+   [InlineData("POST /qqq/v1/manageSession body {\"code\":\"synthetic-value-37\",\"codeVerifier\":\"synthetic-value-38\",\"redirectUri\":\"io.qrun.qqq-print-agent:/oauth/callback\",\"authenticationFlow\":\"native\"}", "synthetic-value-38")]
+   [InlineData("codeVerifier=synthetic-value-39", "synthetic-value-39")]
+   [InlineData("CodeVerifier = synthetic-value-40", "synthetic-value-40")]
+   [InlineData("CODEVERIFIER: synthetic-value-41", "synthetic-value-41")]
+   [InlineData("code-verifier: synthetic-value-42", "synthetic-value-42")]
+   [InlineData("codeVerifier%3Dsynthetic-value-43%26redirectUri%3Dx", "synthetic-value-43")]
+   [InlineData("code_verifier%3Dsynthetic-value-44", "synthetic-value-44")]
+   [InlineData("code=synthetic-value-45&code_verifier=synthetic-value-46&grant_type=authorization_code", "synthetic-value-45")]
+   [InlineData("code=synthetic-value-45&code_verifier=synthetic-value-46&grant_type=authorization_code", "synthetic-value-46")]
+   [InlineData("code%3Dsynthetic-value-47%26code_verifier%3Dsynthetic-value-48", "synthetic-value-47")]
+   [InlineData("code%3Dsynthetic-value-47%26code_verifier%3Dsynthetic-value-48", "synthetic-value-48")]
+   [InlineData("{\"nativeLogoutData\":{\"issuer\":\"https://id.example.com\",\"idTokenHint\":\"synthetic-value-49\"}}", "synthetic-value-49")]
+   [InlineData("idTokenHint=synthetic-value-50", "synthetic-value-50")]
+   [InlineData("IdTokenHint = synthetic-value-51", "synthetic-value-51")]
+   [InlineData("id-token-hint=synthetic-value-52", "synthetic-value-52")]
+   [InlineData("id_token_hint%3Dsynthetic-value-53", "synthetic-value-53")]
+   [InlineData("redirect=https%3A%2F%2Fid.example.com%2Flogout%3Fid_token_hint%3Dsynthetic-value-54%26state%3Dsynthetic-state", "synthetic-value-54")]
+   [InlineData("idTokenHint%3Dsynthetic-value-55", "synthetic-value-55")]
+   [InlineData("session response {\"uuid\":\"synthetic-value-56\"}", "synthetic-value-56")]
+   [InlineData("uuid=synthetic-value-57", "synthetic-value-57")]
+   [InlineData("The session response's uuid: synthetic-value-58", "synthetic-value-58")]
+   [InlineData("next=https%3A%2F%2Fprint.example.com%2Fresume%3Fuuid%3Dsynthetic-value-59%26x%3D1", "synthetic-value-59")]
+   [InlineData("uuid%3Dsynthetic-value-60", "synthetic-value-60")]
+   [InlineData("sessionUUID%3Dsynthetic-value-61", "synthetic-value-61")]
+   [InlineData("sessionId%3Dsynthetic-value-62", "synthetic-value-62")]
+   [InlineData("{\"sessionId\":\"synthetic-value-63\"}", "synthetic-value-63")]
+   [InlineData("{\"origin\":\"https://print.example.com/\",\"sessionToken\":\"synthetic-value-64\"}", "synthetic-value-64")]
+   [InlineData("sessionToken=synthetic-value-65", "synthetic-value-65")]
+   [InlineData("sessionToken%3Dsynthetic-value-66", "synthetic-value-66")]
+   [InlineData("enrollmentCode%3Dsynthetic-value-67", "synthetic-value-67")]
+   [InlineData("enrollment_code=synthetic-value-68", "synthetic-value-68")]
+   [InlineData("{\"protocolVersion\":1,\"deviceId\":\"device-17\",\"deviceToken\":\"synthetic-value-69\"}", "synthetic-value-69")]
+   [InlineData("deviceToken%3Dsynthetic-value-70", "synthetic-value-70")]
+   [InlineData("X-QQQ-Device-Id: device-17, X-QQQ-Device-Token: synthetic-value-71", "synthetic-value-71")]
+   [InlineData("access_token%3Dsynthetic-value-72%26token_type%3Dbearer", "synthetic-value-72")]
+   [InlineData("{\"grant_type\":\"authorization_code\",\"code_verifier\":\"synthetic-value-90\"}", "synthetic-value-90")]
+   [InlineData("{\"id_token_hint\":\"synthetic-value-91\",\"post_logout_redirect_uri\":\"x\"}", "synthetic-value-91")]
+   [InlineData("Authorization:\r\n Basic synthetic-value-73", "synthetic-value-73")]
+   [InlineData("Authorization: \r\nBasic synthetic-value-74", "synthetic-value-74")]
+   [InlineData("Cookie:\r\n other=synthetic-value-75", "synthetic-value-75")]
+   [InlineData("Authorization=Basic synthetic-value-76", "synthetic-value-76")]
+   [InlineData("headers: Accept=*/*, Authorization=Basic synthetic-value-77", "synthetic-value-77")]
+   [InlineData("HTTP_AUTHORIZATION: Basic synthetic-value-78", "synthetic-value-78")]
+   [InlineData("HTTP_COOKIE: other=synthetic-value-79", "synthetic-value-79")]
+   [InlineData("Authorization\u00A0: Basic synthetic-value-80", "synthetic-value-80")]
+   [InlineData("Authorization\u200B: Basic synthetic-value-81", "synthetic-value-81")]
+   [InlineData("Cookie\u00A0: other=synthetic-value-82", "synthetic-value-82")]
+   [InlineData("Cookie\u200B: other=synthetic-value-83", "synthetic-value-83")]
+   [InlineData("sessionUUID\u200B=synthetic-value-84", "synthetic-value-84")]
+   [InlineData("code\u200B=synthetic-value-88&code_verifier\u00A0=synthetic-value-89", "synthetic-value-88")]
+   [InlineData("code\u200B=synthetic-value-88&code_verifier\u00A0=synthetic-value-89", "synthetic-value-89")]
+   [InlineData("\"Authorization\" => \"Basic synthetic-value-85\"", "synthetic-value-85")]
+   [InlineData("callback ?x=1&amp;code=synthetic-value-86&amp;state=synthetic-value-87", "synthetic-value-86")]
+   [InlineData("callback ?x=1&amp;code=synthetic-value-86&amp;state=synthetic-value-87", "synthetic-value-87")]
+   [InlineData("Cookie: a=b; codeVerifier=synthetic-value-92\ncode=synthetic-value-93", "synthetic-value-93")]
+   [InlineData("Authorization: Basic synthetic-value-94 {\"codeVerifier\":\"synthetic-value-95\"}\n{\"code\":\"synthetic-value-96\"}", "synthetic-value-96")]
+   [InlineData("token=\"codeVerifier\"\ncode=synthetic-value-97", "synthetic-value-97")]
    public void Secrets_NeverReachTheRingTheSinkOrTheFile(string message, string secret)
    {
       (ServiceLog log, AgentActivityLog file) = Create();
@@ -219,9 +328,104 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
+   /// An authorization header line loses its whole value, to the end of that line and no further, whatever its scheme
+   /// and in either letter case, and keeps its name; so does the same header as a member of a JSON object. The ID-token
+   /// hint, the code verifier and the session cookie's two names lose their value and keep their name and everything
+   /// around it. A callback's code and state lose a quoted value with its quotes, and a percent-encoded callback loses
+   /// both values up to the encoded separator. A header whose own line holds nothing after its name loses the next
+   /// line, which is where its value then stands, and the lines after that are kept; an authorization header written
+   /// with an equals sign, or under the name a web server's environment gives it, is a header too; and a callback
+   /// whose ampersands are written as in HTML loses both values. Each text is the same in the ring, the host's sink
+   /// and the file.
+   /// </summary>
+   [Theory]
+   [InlineData("Authorization: Basic c3ludGhldGlj", "Authorization: [REDACTED]")]
+   [InlineData("authorization: Digest username=\"operator\", response=\"synthetic-response\"", "authorization: [REDACTED]")]
+   [InlineData("Proxy-Authorization:Negotiate synthetic-ticket", "Proxy-Authorization:[REDACTED]")]
+   [InlineData("Authorization: Bearer synthetic-bearer deviceToken=synthetic-device", "Authorization: [REDACTED]")]
+   [InlineData("Request headers:\nAccept: */*\nAuthorization: Basic c3ludGhldGlj\nUser-Agent: agent", "Request headers:\n  Accept: */*\n  Authorization: [REDACTED]\n  User-Agent: agent")]
+   [InlineData("{\"Authorization\":\"Basic c3ludGhldGlj\"}", "{\"Authorization\":[REDACTED]")]
+   [InlineData("GET https://id.example.com/logout?id_token_hint=synthetic-hint&post_logout_redirect_uri=io.qrun.qqq-print-agent:/oauth/callback&state=synthetic-state",
+      "GET https://id.example.com/logout?id_token_hint=[REDACTED]&post_logout_redirect_uri=io.qrun.qqq-print-agent:/oauth/callback&state=[REDACTED]")]
+   [InlineData("token request: grant_type=authorization_code&code_verifier=synthetic-verifier&redirect_uri=x", "token request: grant_type=authorization_code&code_verifier=[REDACTED]&redirect_uri=x")]
+   [InlineData("sessionUUID=synthetic-session; Path=/", "sessionUUID=[REDACTED]; Path=/")]
+   [InlineData("The server refused sessionId=synthetic-session for this device", "The server refused sessionId=[REDACTED] for this device")]
+   [InlineData("{\"sessionUUID\":\"synthetic-session\",\"theme\":\"dark\"}", "{\"sessionUUID\":[REDACTED],\"theme\":\"dark\"}")]
+   [InlineData("callback ?code=\"synthetic-quoted\"&state='synthetic-quoted-2' received", "callback ?code=[REDACTED]&state=[REDACTED] received")]
+   [InlineData("callback ?code%3Dsynthetic-encoded%26state%3Dsynthetic-encoded-2 received", "callback ?code%3D[REDACTED]%26state%3D[REDACTED] received")]
+   [InlineData("redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb%3FCODE%3dsynthetic-encoded%23top", "redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb%3FCODE%3d[REDACTED]%23top")]
+   [InlineData("Authorization:\r\n Basic synthetic-ticket\r\nAccept: */*", "Authorization:\n   [REDACTED]\n  Accept: */*")]
+   [InlineData("Authorization: \r\nBasic synthetic-ticket", "Authorization: \n  [REDACTED]")]
+   [InlineData("Cookie:\n\tother=synthetic-cookie; theme=dark\nAccept: */*", "Cookie:\n  \t[REDACTED]\n  Accept: */*")]
+   [InlineData("headers: Accept=*/*, Authorization=Basic synthetic-ticket", "headers: Accept=*/*, Authorization=[REDACTED]")]
+   [InlineData("HTTP_AUTHORIZATION: Basic synthetic-ticket", "HTTP_AUTHORIZATION: [REDACTED]")]
+   [InlineData("HTTP_COOKIE: other=synthetic-cookie", "HTTP_COOKIE: [REDACTED]")]
+   [InlineData("<a href=\"https://print.example.com/cb?session_state=kept&amp;code=synthetic-code&amp;state=synthetic-state\">", "<a href=\"https://print.example.com/cb?session_state=kept&amp;code=[REDACTED]&amp;state=[REDACTED]\">")]
+   public void AuthorizationHeadersAndTheValuesAddedLater_AreRedacted(string message, string expected)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(expected, AgentActivityLog.Redact(message));
+      Assert.Equal(expected, Assert.Single(_sink));
+      Assert.Equal(expected, Assert.Single(log.Entries()).Message);
+      string written = File.ReadAllText(file.CurrentLogFilePath);
+      Assert.DoesNotContain("synthetic-", written, StringComparison.Ordinal);
+      Assert.DoesNotContain("c3ludGhldGlj", written, StringComparison.Ordinal);
+      Assert.Contains("[REDACTED]", written, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The product's own request and response bodies, were one ever logged, lose every secret and keep the rest, with
+   /// each member's name left to show what was hidden: the code-exchange request (its <c>code</c> and its
+   /// <c>codeVerifier</c>, as JSON and as a form), a session response's <c>uuid</c>, the enrollment request's code and
+   /// the enrollment response's device token, the device's proof header, the sign-out response's <c>idTokenHint</c>,
+   /// and the provider's sign-out address percent-encoded inside another address. The nonce of the code-exchange
+   /// request stays; <see cref="WhatTheRedactionStillDoesNotRecognise_IsRecorded"/> says why. Each text is the same in
+   /// the ring and the host's sink; the file, which redacts the joined line a second time, holds no secret either.
+   /// </summary>
+   [Theory]
+   [InlineData("POST /qqq/v1/manageSession body {\"code\":\"synthetic-code\",\"codeVerifier\":\"synthetic-verifier\",\"redirectUri\":\"io.qrun.qqq-print-agent:/oauth/callback\",\"authenticationFlow\":\"native\",\"expectedNonce\":\"kept-nonce\"}",
+      "POST /qqq/v1/manageSession body {\"code\":[REDACTED],\"codeVerifier\":[REDACTED],\"redirectUri\":\"io.qrun.qqq-print-agent:/oauth/callback\",\"authenticationFlow\":\"native\",\"expectedNonce\":\"kept-nonce\"}")]
+   [InlineData("code=synthetic-code&code_verifier=synthetic-verifier&grant_type=authorization_code", "code=[REDACTED]&code_verifier=[REDACTED]&grant_type=authorization_code")]
+   [InlineData("code%3Dsynthetic-code%26code_verifier%3Dsynthetic-verifier%26grant_type%3Dauthorization_code", "code%3D[REDACTED]%26code_verifier%3D[REDACTED]%26grant_type%3Dauthorization_code")]
+   [InlineData("{\"codeVerifier\":\"synthetic-verifier\",\"code\":\"synthetic-code\"}", "{\"codeVerifier\":[REDACTED],\"code\":[REDACTED]}")]
+   [InlineData("session response {\"uuid\":\"synthetic-session\",\"values\":{}}", "session response {\"uuid\":[REDACTED],\"values\":{}}")]
+   [InlineData("{\"enrollmentCode\":\"synthetic-code\",\"deviceName\":\"Front desk\",\"agentVersion\":\"2.0.0\"}", "{\"enrollmentCode\":[REDACTED],\"deviceName\":\"Front desk\",\"agentVersion\":\"2.0.0\"}")]
+   [InlineData("{\"protocolVersion\":1,\"deviceId\":\"device-17\",\"deviceToken\":\"synthetic-token\",\"pollIntervalSeconds\":5}", "{\"protocolVersion\":1,\"deviceId\":\"device-17\",\"deviceToken\":[REDACTED],\"pollIntervalSeconds\":5}")]
+   [InlineData("X-QQQ-Device-Id: device-17, X-QQQ-Device-Token: synthetic-token", "X-QQQ-Device-Id: device-17, X-QQQ-Device-Token: [REDACTED]")]
+   [InlineData("{\"nativeLogoutData\":{\"issuer\":\"https://id.example.com\",\"endSessionEndpoint\":\"https://id.example.com/logout\",\"idTokenHint\":\"synthetic-hint\"}}",
+      "{\"nativeLogoutData\":{\"issuer\":\"https://id.example.com\",\"endSessionEndpoint\":\"https://id.example.com/logout\",\"idTokenHint\":[REDACTED]}}")]
+   [InlineData("next=https%3A%2F%2Fid.example.com%2Flogout%3Fid_token_hint%3Dsynthetic-hint%26post_logout_redirect_uri%3Dx%26state%3Dsynthetic-state",
+      "next=https%3A%2F%2Fid.example.com%2Flogout%3Fid_token_hint%3D[REDACTED]%26post_logout_redirect_uri%3Dx%26state%3D[REDACTED]")]
+   [InlineData("next=https%3A%2F%2Fprint.example.com%2Fresume%3Fuuid%3Dsynthetic-session%26x%3D1", "next=https%3A%2F%2Fprint.example.com%2Fresume%3Fuuid%3D[REDACTED]%26x%3D1")]
+   [InlineData("{\"origin\":\"https://print.example.com/\",\"sessionToken\":\"synthetic-session\"}", "{\"origin\":\"https://print.example.com/\",\"sessionToken\":[REDACTED]}")]
+   public void TheProductsOwnBodies_LoseEverySecretAndKeepTheRest(string message, string expected)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(expected, AgentActivityLog.Redact(message));
+      Assert.Equal(expected, Assert.Single(_sink));
+      Assert.Equal(expected, Assert.Single(log.Entries()).Message);
+      string written = File.ReadAllText(file.CurrentLogFilePath);
+      Assert.DoesNotContain("synthetic-", written, StringComparison.Ordinal);
+      Assert.Contains("[REDACTED]", written, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
    /// "code" and "state" are ordinary words in a log, so neither is a keyword on its own the way "token" is: only a
-   /// parameter of an address is redacted. Lines that report a status code, an exit code, an error code or a state, with
-   /// a colon, an equals sign or neither, and lines that only mention a cookie, are written exactly as they were given.
+   /// parameter of an address is redacted, and a <c>code</c> in a message that also names a code verifier. Lines that
+   /// report a status code, an exit code, an error code or a state, with a colon, an equals sign or neither, an
+   /// error object with its code, and lines that only mention a cookie, an authorization, a session, an ID token or a
+   /// code verifier without giving a value, are written exactly as they were given. So is an identifier whose name
+   /// only ends in "uuid".
    /// </summary>
    [Theory]
    [InlineData("The server answered with status code: 401")]
@@ -236,6 +440,16 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("Is the printer in a ready state? code 0")]
    [InlineData("HTTP GET /qqq/v1/session: session cookie yes, device proof no")]
    [InlineData("The server sent no session cookie; sign in again")]
+   [InlineData("Printing blocked: QQQ authorization is required.")]
+   [InlineData("Authorization required by the server; sign in again")]
+   [InlineData("Waiting for authorization (attempt 2 of 5)")]
+   [InlineData("Native grant: id token hint present yes, code verifier present yes")]
+   [InlineData("The session identifier changed; signing in again")]
+   [InlineData("Session established for print.example.com, session UUID present yes")]
+   [InlineData("GET /qqq/v1/operator/printers?limit=50&after=printer-a1 answered 200")]
+   [InlineData("The server answered {\"code\":\"busy\",\"message\":\"Another sign-in is running.\"}")]
+   [InlineData("Code exchange: code present yes, code verifier present yes")]
+   [InlineData("Printer deviceUuid=3f2b8c1e jobUuid: 9a1c0e2d")]
    public void OrdinaryLinesAboutCodesStatesAndCookies_AreUntouched(string message)
    {
       (ServiceLog log, AgentActivityLog file) = Create();
@@ -251,39 +465,60 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
-   /// The redaction of a line that holds neither a cookie header nor a callback's code or state is, to the character,
-   /// what it was before those two patterns were added: each expected text here was produced by the method as it stood
-   /// before them. It is what lets the comparison with the runtime's old method keep its meaning.
+   /// The redaction of a line that holds none of the shapes added since (a cookie header, an authorization header, a
+   /// callback's code or state, an ID-token hint, a code verifier, the session's names, a percent-encoded equals
+   /// sign after a name) is, to the character,
+   /// what it was before they were added: each expected text here was produced by the method as it stood before them.
+   /// It is what lets the comparison with the runtime's old method keep its meaning. The line that used to stand here
+   /// with an "Authorization:" header in front is now hidden to its end, which the test above holds; the same
+   /// credentials without the header name are still redacted one by one.
    /// </summary>
    [Theory]
    [InlineData("Print service started.", "Print service started.")]
-   [InlineData("Authorization: Bearer synthetic-bearer deviceToken=synthetic-device enrollmentCode=\"synthetic-code\"", "Authorization: Bearer [REDACTED] deviceToken=[REDACTED] enrollmentCode=[REDACTED]")]
+   [InlineData("Sent Bearer synthetic-bearer deviceToken=synthetic-device enrollmentCode=\"synthetic-code\"", "Sent Bearer [REDACTED] deviceToken=[REDACTED] enrollmentCode=[REDACTED]")]
    [InlineData("https://operator:synthetic-password@print.example.com/ refused access_token=synthetic-access&refresh_token=synthetic-refresh", "https://[REDACTED]@print.example.com/ refused access_token=[REDACTED]&refresh_token=[REDACTED]")]
    [InlineData("First line\r\n2026-11-10 12:00:00 [ERROR] forged entry", "First line\n  2026-11-10 12:00:00 [ERROR] forged entry")]
    [InlineData("{\"enrollmentCode\":\"synthetic-code\",\"name\":\"Front desk\"}", "{\"enrollmentCode\":[REDACTED],\"name\":\"Front desk\"}")]
    [InlineData("password='synthetic-secret' contentBase64=synthetic-document, api-key: synthetic-key; secret = synthetic-secret", "password=[REDACTED] contentBase64=[REDACTED], api-key: [REDACTED]; secret = [REDACTED]")]
    [InlineData("[Session] GET /qqq/v1/metaData token=synthetic-debug-token", "[Session] GET /qqq/v1/metaData token=[REDACTED]")]
-   public void LinesWithNeitherNewPattern_AreRedactedAsBefore(string message, string expected)
+   public void LinesWithNoPatternAddedSince_AreRedactedAsBefore(string message, string expected)
       => Assert.Equal(expected, AgentActivityLog.Redact(message));
 
 
 
    /// <summary>
    /// What the redaction still does not recognise, recorded so that each is a known fact and not a surprise. A code or a
-   /// state that is not a parameter of an address (on its own, or as members of a JSON object), a PKCE verifier, a
-   /// session cookie outside a cookie header line (as a bare pair, or as a JSON member), and a Basic credential all pass
-   /// through unchanged. The redaction cannot help with these. They stay out of the log only for as long as nothing
-   /// writes them: the service is handed a session credential and not the callback, the session client logs an address
-   /// without its query (asserted below) and says only whether a cookie or a Basic credential was attached. This test
-   /// does not show that nothing writes them; it shows what would happen if something did.
+   /// state that is not a parameter of an address (on its own, or as members of a JSON object) where the message names
+   /// no code verifier, a cookie whose name is not one of the product's two when it stands under a header name that
+   /// only ends in "Cookie", with an equals sign in place of the colon, or as a JSON member, a client assertion, and
+   /// a secret whose name is percent-encoded itself or whose colon is, and a callback value that opens a quote and
+   /// never closes it, all pass through unchanged. The redaction
+   /// cannot help with these. They stay out of the log only for as long as nothing writes them: the service is handed
+   /// a session credential and not the callback, the session client logs an address without its query (asserted
+   /// below) and says only whether a cookie was attached. This test does not show that nothing writes them; it shows
+   /// what would happen if something did.
+   /// <para>
+   /// A nonce is on this list on purpose, under both of its names (<c>nonce</c> in the address the browser is sent
+   /// to, <c>expectedNonce</c> in the code-exchange request). It is not a credential: the client makes it up, sends it
+   /// through the browser's address bar in the open, and the server only checks that the ID token repeats it, so
+   /// reading it afterwards gives no access and nothing to replay. The code and the verifier that travel with it
+   /// are what must not be read, and those are redacted. "nonce" is also an ordinary word in a protocol log, which
+   /// a keyword would hide.
+   /// </para>
    /// </summary>
    [Theory]
    [InlineData("code=synthetic-code state=synthetic-state")]
    [InlineData("{\"code\":\"synthetic-code\",\"state\":\"synthetic-state\"}")]
-   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code_verifier=synthetic-verifier")]
-   [InlineData("sessionUUID=synthetic-session")]
-   [InlineData("{\"Cookie\":\"sessionUUID=synthetic-session\"}")]
-   [InlineData("Authorization: Basic c3ludGhldGlj")]
+   [InlineData("SessionCookie: other=synthetic-cookie")]
+   [InlineData("cookie = other=synthetic-cookie")]
+   [InlineData("{\"Cookie\":\"other=synthetic-cookie\"}")]
+   [InlineData("nonce=synthetic-nonce client_assertion=synthetic-assertion")]
+   [InlineData("{\"expectedNonce\":\"synthetic-nonce\"}")]
+   [InlineData("expectedNonce=synthetic-nonce")]
+   [InlineData("code%5Fverifier=synthetic-verifier")]
+   [InlineData("%7B%22idTokenHint%22%3A%22synthetic-hint%22%7D")]
+   [InlineData("callback ?code=\"synthetic-code and no closing quote")]
+   [InlineData("callback ?code='synthetic-code and no closing quote")]
    public void WhatTheRedactionStillDoesNotRecognise_IsRecorded(string message)
    {
       (ServiceLog log, _) = Create();
@@ -293,6 +528,78 @@ public sealed class ServiceLogTests : IDisposable
       Assert.Equal(message, Assert.Single(_sink));
       Assert.Equal(message, AgentActivityLog.Redact(message));
       Assert.Equal("io.qrun.qqq-print-agent:///oauth/callback", QqqSessionDiagnostics.Describe(new Uri("io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code&state=synthetic-state")));
+   }
+
+
+
+   /// <summary>
+   /// Where the redaction takes part of a secret and leaves the rest, recorded like the shapes above so that each is a
+   /// known fact. A named value ends at the first space, comma, semicolon or ampersand, so what follows one of those
+   /// survives; a quoted value ends at the first quote, so an escaped quote inside it ends it early; an arrow
+   /// (<c>=&gt;</c>) is read as an equals sign with the value "&gt;", and the real value stands after it; and a
+   /// header whose value begins on its own line and is continued on the next loses the first line only. Each
+   /// expected text holds the part that survives. Closing these would need a parser for each notation, and a longer
+   /// reach (a named value to the end of its line, a header over every indented line after it) would take lines an
+   /// operator needs, the header lines of a logged request among them.
+   /// </summary>
+   [Theory]
+   [InlineData("id_token_hint=synthetic-head,surviving-tail", "id_token_hint=[REDACTED],surviving-tail")]
+   [InlineData("sessionUUID=synthetic-head surviving-tail", "sessionUUID=[REDACTED] surviving-tail")]
+   [InlineData("deviceToken=synthetic-head;surviving-tail", "deviceToken=[REDACTED];surviving-tail")]
+   [InlineData("{\"sessionUUID\":\"synthetic-head\\\"surviving-tail\"}", "{\"sessionUUID\":[REDACTED]surviving-tail\"}")]
+   [InlineData("password='it\\'s surviving-tail'", "password=[REDACTED]s surviving-tail'")]
+   [InlineData("sessionUUID => surviving-value", "sessionUUID =[REDACTED] surviving-value")]
+   [InlineData("Authorization: Digest username=\"operator\",\r\n response=\"surviving-tail\"", "Authorization: [REDACTED]\n   response=\"surviving-tail\"")]
+   [InlineData("Cookie: a=synthetic-head;\r\n\tother=surviving-tail", "Cookie: [REDACTED]\n  \tother=surviving-tail")]
+   public void WhatSurvivesBesideARedactedValue_IsRecorded(string message, string expected)
+   {
+      (ServiceLog log, _) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(expected, AgentActivityLog.Redact(message));
+      Assert.Equal(expected, Assert.Single(_sink));
+      Assert.Contains("surviving-", expected, StringComparison.Ordinal);
+      Assert.DoesNotContain("synthetic-head", expected, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// What the redaction hides although it is not a secret, recorded for the same reason. A header pattern takes the
+   /// rest of its line, so a sentence that happens to put a colon after the word "cookie" or "authorization" loses
+   /// what follows; a header whose name only ends in "-Cookie" is hidden like a cookie header; a parameter named
+   /// "state" or "code" in an ordinary address loses its value; the word "uuid" with a value after it is taken for
+   /// a session response's; in a message that names a code verifier every "code" with a value loses it; a line that
+   /// ends in "authorization:" or "cookie:" takes the next line with it, as a header whose value stands there
+   /// does; "authorization" before an equals sign is a header; and the session cookie's name before a colon loses
+   /// what follows even when that is a number. No line
+   /// the product writes has these shapes: the session client writes "session cookie yes" without a colon, and its
+   /// one address with a query is the printer list's. If such a line is ever written it must be worded differently,
+   /// or the pattern anchored; hiding too much is the side these patterns err on.
+   /// </summary>
+   [Theory]
+   [InlineData("HTTP GET /x: session cookie: yes, device proof: no, basic credential: no", "HTTP GET /x: session cookie: [REDACTED]")]
+   [InlineData("Proxy stripped the cookie: the request was refused with 407 by proxy.example.com", "Proxy stripped the cookie: [REDACTED]")]
+   [InlineData("X-Cookie: abc", "X-Cookie: [REDACTED]")]
+   [InlineData("Waiting for authorization: the administrator must approve this device", "Waiting for authorization: [REDACTED]")]
+   [InlineData("GET /qqq/v1/qbit/printing/jobs?state=QUEUED&printerId=printer-a1 answered 200", "GET /qqq/v1/qbit/printing/jobs?state=[REDACTED]&printerId=printer-a1 answered 200")]
+   [InlineData("GET /report?code=E1234&lang=en answered 500", "GET /report?code=[REDACTED]&lang=en answered 500")]
+   [InlineData("The job's uuid: 204 was not found", "The job's uuid: [REDACTED] was not found")]
+   [InlineData("Exchange failed with exit code=1 (codeVerifier present yes)", "Exchange failed with exit code=[REDACTED] (codeVerifier present yes)")]
+   [InlineData("sessionId: 12 established", "sessionId: [REDACTED] established")]
+   [InlineData("The server asks for authorization:\nsign in again\nand try once more", "The server asks for authorization:\n  [REDACTED]\n  and try once more")]
+   [InlineData("The proxy removed the cookie:\r\nthe request was refused", "The proxy removed the cookie:\n  [REDACTED]")]
+   [InlineData("authorization=required for this device", "authorization=[REDACTED]")]
+   [InlineData("session_cookie: yes", "session_cookie: [REDACTED]")]
+   public void WhatTheRedactionHidesAlthoughItIsNotASecret_IsRecorded(string message, string expected)
+   {
+      (ServiceLog log, _) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(expected, AgentActivityLog.Redact(message));
+      Assert.Equal(expected, Assert.Single(_sink));
    }
 
 
@@ -341,7 +648,7 @@ public sealed class ServiceLogTests : IDisposable
 
 
 
-   /// <summary>Clearing the ring empties what the companion is shown and nothing else; later lines are kept again.</summary>
+   /// <summary>Clearing the ring empties what the snapshot carries and nothing else; later lines are kept again.</summary>
    [Fact]
    public void ClearingTheRing_EmptiesItAndLaterLinesAreKept()
    {
@@ -375,7 +682,7 @@ public sealed class ServiceLogTests : IDisposable
 
    /// <summary>
    /// While debug logging is on, debug detail goes to the file only, marked as debug, redacted and cut at 4000 characters.
-   /// It never enters the ring or the host's sink, so it cannot displace the operational entries the companion shows.
+   /// It never enters the ring or the host's sink, so it cannot displace the operational entries the snapshot carries.
    /// </summary>
    [Fact]
    public void DebugDetail_GoesToTheFileOnly_RedactedAndCappedAtFourThousand()
@@ -444,28 +751,28 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
-   /// A view for one server writes the same lines with that server's name in front, in the ring, the sink and the file.
-   /// It shares the ring and the file with the log it came from, so lines from the service and from each server appear
-   /// together in the order they were written.
+   /// A view for one server writes the same lines with that server's short identifier in front (the first eight
+   /// characters of its identifier), in the ring, the sink and the file. It shares the ring and the file with the log
+   /// it came from, so lines from the service and from each server appear together in the order they were written.
    /// </summary>
    [Fact]
-   public void ForServer_PrefixesTheServerNameAndSharesTheRingAndTheFile()
+   public void ForServer_PrefixesTheShortIdentifierAndSharesTheRingAndTheFile()
    {
       (ServiceLog log, AgentActivityLog file) = Create();
-      ServiceLog production = log.ForServer("Production");
-      ServiceLog staging = log.ForServer("Staging");
+      ServiceLog production = log.ForServer(Production);
+      ServiceLog staging = log.ForServer(Staging);
 
       log.Write("INFO", "Print service started.");
       production.Write("WARN", "Printing blocked.");
       staging.Write("ERROR", "Local command failed.");
       production.Write("INFO", "Signed in.");
 
-      string[] expected = ["Print service started.", "[Production] Printing blocked.", "[Staging] Local command failed.", "[Production] Signed in."];
+      string[] expected = ["Print service started.", "[3f2b8c1e] Printing blocked.", "[9a1c0e2d] Local command failed.", "[3f2b8c1e] Signed in."];
       Assert.Equal(expected, _sink, StringComparer.Ordinal);
       Assert.Equal(expected, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       Assert.Equal(expected, staging.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       Assert.Equal(["INFO", "WARN", "ERROR", "INFO"], production.Entries().Select(entry => entry.Level), StringComparer.Ordinal);
-      Assert.Equal([" [INFO] [Service] Print service started.", " [WARN] [Service] [Production] Printing blocked.", " [ERROR] [Service] [Staging] Local command failed.", " [INFO] [Service] [Production] Signed in."], Lines(file));
+      Assert.Equal([" [INFO] [Service] Print service started.", " [WARN] [Service] [3f2b8c1e] Printing blocked.", " [ERROR] [Service] [9a1c0e2d] Local command failed.", " [INFO] [Service] [3f2b8c1e] Signed in."], Lines(file));
       staging.ClearEntries();
       Assert.Empty(log.Entries());
    }
@@ -473,9 +780,9 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
-   /// A server's view redacts exactly as the log does, and the caps do not grow by the name: the line is still at most
-   /// 1000 characters (4000 for debug detail) with the name counted in. Debug detail is still dropped while it is off
-   /// and goes to the file only while it is on, and a failure and the session client's progress carry the name too.
+   /// A server's view redacts exactly as the log does, and the caps do not grow by the prefix: the line is still at most
+   /// 1000 characters (4000 for debug detail) with the prefix counted in. Debug detail is still dropped while it is off
+   /// and goes to the file only while it is on, and a failure and the session client's progress carry the prefix too.
    /// </summary>
    [Theory]
    [InlineData(false)]
@@ -483,9 +790,9 @@ public sealed class ServiceLogTests : IDisposable
    public void ForServer_KeepsRedactionCapsAndDebugRouting(bool debug)
    {
       (ServiceLog log, AgentActivityLog file) = Create(debug);
-      ServiceLog server = log.ForServer("Production");
+      ServiceLog server = log.ForServer(Production);
 
-      server.Write("ERROR", "Authorization: Bearer synthetic-server-bearer enrollmentCode=synthetic-server-code");
+      server.Write("ERROR", "Sent Bearer synthetic-server-bearer enrollmentCode=synthetic-server-code");
       server.Write("INFO", new string('p', 1500));
       server.Write("DEBUG", new string('q', 4500));
       server.Failure("Sign-in failed", new IOException("password=synthetic-server-password"));
@@ -494,111 +801,92 @@ public sealed class ServiceLogTests : IDisposable
       Assert.Equal(debug, server.IsDebugEnabled);
       Assert.Equal(
       [
-         "[Production] Authorization: Bearer [REDACTED] enrollmentCode=[REDACTED]",
-         "[Production] " + new string('p', 1000 - "[Production] ".Length),
-         "[Production] Sign-in failed: IOException: password=[REDACTED]",
-         "[Production] [Session] Discovery started.",
+         "[3f2b8c1e] Sent Bearer [REDACTED] enrollmentCode=[REDACTED]",
+         "[3f2b8c1e] " + new string('p', 1000 - "[3f2b8c1e] ".Length),
+         "[3f2b8c1e] Sign-in failed: IOException: password=[REDACTED]",
+         "[3f2b8c1e] [Session] Discovery started.",
       ], _sink);
       Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       List<string> lines = Lines(file);
       Assert.Equal(debug ? 6 : 4, lines.Count(line => line.StartsWith(" [", StringComparison.Ordinal)));
-      Assert.Equal(debug, lines.Contains(" [INFO] [DEBUG] [Service] [Production] " + new string('q', 4000 - "[Production] ".Length), StringComparer.Ordinal));
+      Assert.Equal(debug, lines.Contains(" [INFO] [DEBUG] [Service] [3f2b8c1e] " + new string('q', 4000 - "[3f2b8c1e] ".Length), StringComparer.Ordinal));
       Assert.DoesNotContain(lines, line => line.Contains("synthetic-server", StringComparison.Ordinal));
    }
 
 
 
    /// <summary>
-   /// A server's name is an operator's text, so it is made safe to stand at the front of a line: a line break or other
-   /// control character becomes a space (it cannot start a forged log entry), surrounding spaces go, and a long name is
-   /// cut at 64 characters. A name with nothing in it is refused.
+   /// A view is named by a server's full identifier and by nothing else. A server's name is refused, whatever it holds:
+   /// a credential keyword that would make the file's second redaction hide the server's lines, square brackets that
+   /// would forge structure inside a line, a line break that would start a forged entry. So are an identifier's
+   /// beginning, an identifier in another spelling, and nothing at all. The refusal does not repeat what was given, and
+   /// nothing is written.
    /// </summary>
-   [Fact]
-   public void ForServer_MakesTheNameSafeToPrefix()
+   [Theory]
+   [InlineData("Production")]
+   [InlineData("Cookie:")]
+   [InlineData("Test Cookie: staging")]
+   [InlineData("Lab token:")]
+   [InlineData("password=")]
+   [InlineData("A token=\"")]
+   [InlineData("a] [ERROR] forged [b")]
+   [InlineData("Warehouse\r\n2026-11-10 12:00:00 [ERROR] forged")]
+   [InlineData("3f2b8c1e")]
+   [InlineData("3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5")]
+   [InlineData("3F2B8C1E-5D4A-4F6B-9A7C-0E1D2C3B4A5F")]
+   [InlineData("{3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f}")]
+   [InlineData(" 3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f")]
+   [InlineData("3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f\n")]
+   [InlineData("")]
+   [InlineData("   ")]
+   [InlineData(null)]
+   public void ForServer_TakesAFullIdentifierAndNothingElse(string? value)
    {
       (ServiceLog log, AgentActivityLog file) = Create();
 
-      log.ForServer("  Warehouse\r\n2026-11-10 12:00:00 [ERROR] forged\t ").Write("INFO", "one");
-      log.ForServer(new string('n', 80)).Write("INFO", "two");
+      ArgumentException refusal = Assert.Throws<ArgumentException>(() => log.ForServer(value!));
 
-      Assert.Equal(["[Warehouse  2026-11-10 12:00:00 [ERROR] forged] one", "[" + new string('n', 64) + "] two"], _sink);
-      Assert.Equal(2, File.ReadAllLines(file.CurrentLogFilePath).Length);
-      Assert.Equal(64, ServiceLog.ServerNameLimit);
-      Assert.Throws<ArgumentException>(() => log.ForServer("   "));
-      Assert.Throws<ArgumentNullException>(() => log.ForServer(null!));
+      Assert.True(string.IsNullOrWhiteSpace(value) || !refusal.Message.Contains(value, StringComparison.Ordinal));
+      Assert.Empty(_sink);
+      Assert.Empty(log.Entries());
+      Assert.False(File.Exists(file.CurrentLogFilePath));
    }
 
 
 
    /// <summary>
-   /// A server's name cannot switch off the redaction of the line it stands in front of. The redaction reads a quoted
-   /// value up to the next quote, so a name ending in an open quote, redacted as one string with the line, pairs with
-   /// the quote in front of the password and leaves the password itself in the log. The name and the line are redacted
-   /// apart: the password is gone from the ring, the host's sink and the file, for an operational line, for debug detail
-   /// and for a failure, and a secret written into the name itself is gone as well.
+   /// The prefix of a server's view changes nothing about the line behind it, in the ring, the host's sink or the file.
+   /// Each message is written once through the log and once through a view: the view's line is the log's own line with
+   /// the short identifier in front, for a plain line, for lines that hold a secret in each quoting, and for a line
+   /// that ends in an open quote. In the file, which redacts every joined line a second time, the server's line keeps
+   /// its marker, its prefix and its text: a prefix made of an operator's name could lose all three there.
    /// </summary>
    [Theory]
-   [InlineData("A token=\"", "[A token=[REDACTED]] ")]
-   [InlineData("B secret='", "[B secret=[REDACTED]] ")]
-   [InlineData("C password=\"synthetic-name-secret", "[C password=[REDACTED]] ")]
-   public void ForServer_ANameCannotDefeatTheRedactionOfItsLine(string name, string prefix)
+   [InlineData("Print lane stopped: The printer is offline (job job-204).")]
+   [InlineData("Sign-in failed: password=\"synthetic-quoted\" rejected")]
+   [InlineData("Sign-in failed: token='synthetic-quoted' refused")]
+   [InlineData("Cookie: sessionUUID=synthetic-cookie; theme=dark")]
+   [InlineData("returned to io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code&state=synthetic-state")]
+   [InlineData("The server sent secret=\"")]
+   public void ForServer_ThePrefixChangesNothingAboutTheLineBehindIt(string message)
    {
       (ServiceLog log, AgentActivityLog file) = Create(debug: true);
-      ServiceLog server = log.ForServer(name);
+      ServiceLog server = log.ForServer(Production);
 
-      server.Write("ERROR", "Sign-in failed: password=\"hunter2\" rejected");
-      server.Write("DEBUG", "POST /session password=\"hunter2\" rejected");
-      server.Failure("Sign-in failed", new IOException("token=\"hunter2\" refused"));
+      log.Write("WARN", message);
+      server.Write("WARN", message);
+      log.Write("DEBUG", message);
+      server.Write("DEBUG", message);
 
-      Assert.Equal([prefix + "Sign-in failed: password=[REDACTED] rejected", prefix + "Sign-in failed: IOException: token=[REDACTED] refused"], _sink);
+      List<string> lines = Lines(file);
+      Assert.Equal([AgentActivityLog.Redact(message), "[3f2b8c1e] " + AgentActivityLog.Redact(message)], _sink);
       Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
-      string written = File.ReadAllText(file.CurrentLogFilePath);
-      Assert.DoesNotContain("hunter2", written, StringComparison.Ordinal);
-      Assert.DoesNotContain("synthetic-name-secret", written, StringComparison.Ordinal);
-      Assert.Contains("POST /session password=[REDACTED] rejected", written, StringComparison.Ordinal);
-      Assert.Equal(4, File.ReadAllLines(file.CurrentLogFilePath).Count(line => line.Contains(" [Service] ", StringComparison.Ordinal)));
-   }
-
-
-
-   /// <summary>
-   /// A character in a server's name that would end the line or change the order it is shown in becomes a space, as a
-   /// control character does: the line and paragraph separators (U+2028, U+2029), the next-line control (U+0085), the
-   /// bidirectional embeddings, overrides and isolates with the characters that end them (U+202A to U+202E, U+2066 to
-   /// U+2069), the directional marks and the zero-width characters. None of them is a control character, so each used
-   /// to pass through, and a name could show a forged line or text in reverse.
-   /// </summary>
-   [Theory]
-   [InlineData(0x0085)]
-   [InlineData(0x2028)]
-   [InlineData(0x2029)]
-   [InlineData(0x202A)]
-   [InlineData(0x202B)]
-   [InlineData(0x202C)]
-   [InlineData(0x202D)]
-   [InlineData(0x202E)]
-   [InlineData(0x2066)]
-   [InlineData(0x2067)]
-   [InlineData(0x2068)]
-   [InlineData(0x2069)]
-   [InlineData(0x200E)]
-   [InlineData(0x200F)]
-   [InlineData(0x061C)]
-   [InlineData(0x200B)]
-   [InlineData(0xFEFF)]
-   public void ForServer_ACharacterThatEndsOrReordersALine_BecomesASpace(int codePoint)
-   {
-      (ServiceLog log, AgentActivityLog file) = Create();
-      char character = (char)codePoint;
-
-      log.ForServer("Ware" + character + "house" + character).Write("INFO", "one");
-      log.ForServer(character + "2026-11-10 12:00:00 [ERROR] forged" + character + character + "entry").Write("INFO", "two");
-
-      Assert.Equal(["[Ware house] one", "[2026-11-10 12:00:00 [ERROR] forged  entry] two"], _sink);
-      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
-      Assert.Equal([" [INFO] [Service] [Ware house] one", " [INFO] [Service] [2026-11-10 12:00:00 [ERROR] forged  entry] two"], Lines(file));
-      Assert.DoesNotContain(character.ToString(), File.ReadAllText(file.CurrentLogFilePath), StringComparison.Ordinal);
-      Assert.Throws<ArgumentException>(() => log.ForServer(new string(character, 3)));
+      Assert.Equal(4, lines.Count);
+      Assert.Equal(lines[0].Replace(" [Service] ", " [Service] [3f2b8c1e] ", StringComparison.Ordinal), lines[1]);
+      Assert.Equal(lines[2].Replace(" [Service] ", " [Service] [3f2b8c1e] ", StringComparison.Ordinal), lines[3]);
+      Assert.StartsWith(" [WARN] [Service] [3f2b8c1e] ", lines[1], StringComparison.Ordinal);
+      Assert.StartsWith(" [INFO] [DEBUG] [Service] [3f2b8c1e] ", lines[3], StringComparison.Ordinal);
+      Assert.DoesNotContain(lines, line => line.Contains("synthetic-", StringComparison.Ordinal));
    }
 
 
@@ -609,7 +897,10 @@ public sealed class ServiceLogTests : IDisposable
    /// ring, so the second writer cannot enter the ring until the first has, and the earlier stamp is the earlier entry.
    /// Stamped before that lock, the second writer would finish during the reading and stand in the ring in front of an
    /// earlier stamp. The wait for the second writer is bounded, and with the stamp inside the lock it always runs out:
-   /// that the second writer could not finish is the thing being shown.
+   /// that the second writer could not finish is the thing being shown. It is a deliberate wait of 200 milliseconds of
+   /// real time for something that must not happen, the one kind of timed wait a test of an absence cannot avoid, and
+   /// it is counted with the other timed waits in the audit (W28). It cannot fail falsely: a slow machine only makes
+   /// the second writer later still.
    /// </summary>
    [Fact]
    public void RingOrder_IsTimestampOrder_WhenASecondWriterArrivesDuringTheFirstStamp()
@@ -662,7 +953,7 @@ public sealed class ServiceLogTests : IDisposable
       {
          for(int index = 0; index < 25; index++)
          {
-            (writer % 2 == 0 ? shared : shared.ForServer("Production")).Write("INFO", $"writer {writer} line {index}");
+            (writer % 2 == 0 ? shared : shared.ForServer(Production)).Write("INFO", $"writer {writer} line {index}");
          }
       })));
 
@@ -672,7 +963,7 @@ public sealed class ServiceLogTests : IDisposable
       Assert.Equal(100, ring.Length);
       Assert.Equal(100, ring.Distinct(StringComparer.Ordinal).Count());
       Assert.All(ring, line => Assert.Contains(line, received, StringComparer.Ordinal));
-      Assert.Equal(ring, shared.ForServer("Production").Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal(ring, shared.ForServer(Production).Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       Assert.Equal(Enumerable.Range(101, 100).Select(reading => SteppingClock.Reading(reading)), shared.Entries().Select(entry => entry.Timestamp), StringComparer.Ordinal);
       Assert.Equal(200, Lines(file).Count);
    }
