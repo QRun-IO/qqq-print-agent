@@ -76,16 +76,17 @@ public sealed class ManagementResultTests
 
 
 
-   /// <summary>A refused certificate turns a failed secure connection into the code the operator can act on, and its description is carried; a failed secure connection without a certificate, and a certificate beside a failure at another stage, stay an incompatible server.</summary>
+   /// <summary>A refused certificate turns a failed secure connection into the code the operator can act on, and its description is carried with the address and time Core recorded with the refusal; a failed secure connection without a certificate, and a certificate beside a failure at another stage, stay an incompatible server.</summary>
    [Fact]
    public void Check_WithARefusedCertificate_IsAnsweredAsUntrusted()
    {
       QqqCertificateRejection rejection = new(SslPolicyErrors.RemoteCertificateChainErrors, "CN=qqq.example.test", "CN=Example Development Root",
-         new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3");
+         new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3",
+         QqqOrigin.Of(new Uri("https://qqq.example.test/qqq/v1/version")), new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero));
       QqqCompatibilityProblem secure = new(QqqCompatibilityIssue.SecureConnectionFailed, "the certificate was refused");
       QqqCompatibilityProblem unreachable = new(QqqCompatibilityIssue.ServerUnreachable, "no answer");
 
-      var untrusted = ServerCheckResult.From(new QqqServerCompatibility([secure], null, QqqSignInMethods.None, rejection), certificateOrigin: "https://qqq.example.test", observedAt: new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero));
+      var untrusted = ServerCheckResult.From(new QqqServerCompatibility([secure], null, QqqSignInMethods.None, rejection));
       var handshake = ServerCheckResult.From(new QqqServerCompatibility([secure], null, QqqSignInMethods.None));
       var elsewhere = ServerCheckResult.From(new QqqServerCompatibility([unreachable], null, QqqSignInMethods.None, rejection));
 
@@ -98,7 +99,12 @@ public sealed class ManagementResultTests
 
 
 
-   /// <summary>A refused certificate is described by its subject, issuer, validity in UTC and fingerprint as Core recorded them, with every reason Windows gave in a fixed order and the address and time the service adds; a certificate that was never presented has reasons and nothing else.</summary>
+   /// <summary>
+   /// A refused certificate is described by its subject, issuer, validity in UTC and fingerprint as Core recorded them, with every reason Windows gave in a fixed
+   /// order. The address that presented it and the time are the ones Core recorded with the refusal: the origin of the address the request was going to, here the
+   /// sign-in provider's and written with its default port, carried as scheme, host and port. A certificate that was never presented, from an address whose host
+   /// Core could give no ASCII name, has its reasons and the time and nothing else.
+   /// </summary>
    [Theory]
    [InlineData(SslPolicyErrors.RemoteCertificateChainErrors, "untrustedAuthority")]
    [InlineData(SslPolicyErrors.RemoteCertificateNameMismatch, "nameMismatch")]
@@ -108,17 +114,17 @@ public sealed class ManagementResultTests
    public void Certificate_IsDescribedWithEveryReasonItWasRefused(SslPolicyErrors errors, string refusals)
    {
       var described = PresentedCertificate.From(new QqqCertificateRejection(errors, "CN=qqq.example.test", "CN=Example Development Root",
-         new DateTime(2026, 1, 1, 8, 30, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 8, 30, 0, DateTimeKind.Unspecified), "A1B2C3"),
-         "https://sign-in.example.test", new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero));
-      var absent = PresentedCertificate.From(new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateNotAvailable, null, null, null, null, null));
+         new DateTime(2026, 1, 1, 8, 30, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 8, 30, 0, DateTimeKind.Unspecified), "A1B2C3",
+         QqqOrigin.Of(new Uri("https://Sign-In.example.test:443/application/.well-known/openid-configuration")), new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero)));
+      var absent = PresentedCertificate.From(new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateNotAvailable, null, null, null, null, null, null, new DateTimeOffset(2026, 11, 10, 15, 4, 6, TimeSpan.Zero)));
 
       Assert.Equal(refusals.Split(','), described.Refusals);
       Assert.Equal(("CN=qqq.example.test", "CN=Example Development Root", "A1B2C3"), (described.Subject, described.Issuer, described.Fingerprint));
       Assert.Equal(new DateTimeOffset(2026, 1, 1, 8, 30, 0, TimeSpan.Zero), described.NotBefore);
       Assert.Equal(new DateTimeOffset(2027, 1, 1, 8, 30, 0, TimeSpan.Zero), described.NotAfter);
       Assert.Equal(("https://sign-in.example.test", new DateTimeOffset(2026, 11, 10, 15, 4, 5, TimeSpan.Zero)), (described.Origin, described.ObservedAt));
-      Assert.Equal((null, null), (absent.Origin, absent.ObservedAt));
-      Assert.Equal(new PresentedCertificate(absent.Refusals), absent);
+      Assert.Equal((null, new DateTimeOffset(2026, 11, 10, 15, 4, 6, TimeSpan.Zero)), (absent.Origin, absent.ObservedAt));
+      Assert.Equal(new PresentedCertificate(absent.Refusals, ObservedAt: new DateTimeOffset(2026, 11, 10, 15, 4, 6, TimeSpan.Zero)), absent);
       Assert.Equal(["notPresented"], absent.Refusals);
    }
 

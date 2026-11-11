@@ -32,11 +32,11 @@ public sealed record ServerCheckResult(IReadOnlyList<CompatibilityStageResult> S
    /// <summary>
    /// Turns Core's compatibility finding into the form the pipe carries. A stage with a problem failed; a stage after
    /// the first failure that has no problem of its own was not reached; every other stage passed. The problem text is
-   /// taken as Core produced it. The provider's address, the existing server, and the address and time that go with a
-   /// refused certificate are the service's own knowledge and are passed in; none is ever taken from a client.
+   /// taken as Core produced it. The provider's address and the existing server are the service's own knowledge and
+   /// are passed in; neither is ever taken from a client. The address and time that go with a refused certificate are
+   /// the ones Core recorded with the refusal, so they cannot be passed in at all.
    /// </summary>
-   public static ServerCheckResult From(QqqServerCompatibility compatibility, string? providerOrigin = null, string? existingServerId = null, string? certificateOrigin = null,
-      DateTimeOffset? observedAt = null)
+   public static ServerCheckResult From(QqqServerCompatibility compatibility, string? providerOrigin = null, string? existingServerId = null)
    {
       ArgumentNullException.ThrowIfNull(compatibility);
       QqqCompatibilityStage[] order = [QqqCompatibilityStage.Connection, QqqCompatibilityStage.Security, QqqCompatibilityStage.Server, QqqCompatibilityStage.Printing, QqqCompatibilityStage.SignIn];
@@ -58,7 +58,7 @@ public sealed record ServerCheckResult(IReadOnlyList<CompatibilityStageResult> S
       {
          methods.Add(Browser);
       }
-      PresentedCertificate? certificate = compatibility.Certificate is null ? null : PresentedCertificate.From(compatibility.Certificate, certificateOrigin, observedAt);
+      PresentedCertificate? certificate = compatibility.Certificate is null ? null : PresentedCertificate.From(compatibility.Certificate);
       return new ServerCheckResult(stages, methods, providerOrigin, certificate, existingServerId);
    }
 

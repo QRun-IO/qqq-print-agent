@@ -169,7 +169,7 @@ internal static class ManagementSamples
       ManagementErrorCode.CertificateUntrusted => ServerCheckResult.From(new QqqServerCompatibility(
          [new QqqCompatibilityProblem(QqqCompatibilityIssue.SecureConnectionFailed, "Windows does not trust the authority that issued the certificate")], null, QqqSignInMethods.None,
          new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateChainErrors | SslPolicyErrors.RemoteCertificateNameMismatch, "CN=qqq.example.test", "CN=Example Development Root",
-            new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334")), ProviderOrigin, ServerId, Address, s_instant),
+            new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334", new Uri(Address), s_instant)), ProviderOrigin, ServerId),
       ManagementErrorCode.IdentityChanged => IdentityChangedDetails.For(StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId),
       ManagementErrorCode.EnrollmentUnconfirmed => new EnrollmentUnconfirmedDetails(EnrollmentUnconfirmedDetails.DeviceBound, PrintingBlocked: true, EnrollmentAnswer.DeviceId),
       ManagementErrorCode.CancelRefused => new CancelRefusedDetails(CancelRefusedDetails.OwnershipMismatch),
@@ -191,8 +191,8 @@ internal static class ManagementSamples
 
    /// <summary>The certificate Windows refused, as the trust operations describe it: remembered from the sign-in provider's address.</summary>
    private static PresentedCertificate Certificate => PresentedCertificate.From(new QqqCertificateRejection(SslPolicyErrors.RemoteCertificateChainErrors, "CN=sign-in.example.test",
-      "CN=Example Development Root", new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334"),
-      ProviderOrigin, s_instant.AddMinutes(-20));
+      "CN=Example Development Root", new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334",
+      new Uri(ProviderOrigin), s_instant.AddMinutes(-20)));
 
 
 
