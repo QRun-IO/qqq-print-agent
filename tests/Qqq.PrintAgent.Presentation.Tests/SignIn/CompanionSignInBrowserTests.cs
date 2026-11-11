@@ -19,6 +19,11 @@ public sealed class CompanionSignInBrowserTests
 
 
 
+   /// <summary>What the log says, in place of anything about the protocol handler, when an attempt ended before a browser page was opened, with what the attempt had not got past.</summary>
+   private static string NotOpened(string reason) => "INFO This attempt ended before a browser page was opened (" + reason + "), so the sign-in protocol handler was not involved and its trace is not copied here.";
+
+
+
    /// <summary>True when an entry holds something that must never be logged: a sign-in state, a one-time code or a session token.</summary>
    private static bool Secret(string entry)
       => entry.Contains("synthetic-state", StringComparison.Ordinal) || entry.Contains("one-time-code", StringComparison.Ordinal) || entry.Contains("synthetic-session-token", StringComparison.Ordinal);
@@ -200,6 +205,9 @@ public sealed class CompanionSignInBrowserTests
       Assert.True(signIn.HasSession);
       Assert.False(signIn.IsBusy);
       Assert.Equal("WARN The server's native grant does not list this application's callback io.qrun.qqq-print-agent:/oauth/callback; it lists 2 other address(es). Add the callback to the QQQ native session grant.", world.Log.Entries[1]);
+      Assert.Equal(NotOpened("the server does not list this application's callback"), world.Log.Entries[2]);
+      Assert.DoesNotContain(NeverLaunched, world.Log.Entries, StringComparer.Ordinal);
+      Assert.Empty(world.TraceWindows);
       Assert.DoesNotContain(world.Log.Entries, entry => entry.Contains("synthetic-other-callback", StringComparison.Ordinal) || entry.Contains("/oauth/Callback", StringComparison.Ordinal));
    }
 
@@ -248,19 +256,22 @@ public sealed class CompanionSignInBrowserTests
    /// state, the inbox cannot be opened, the browser cannot be opened, the inbox breaks while waiting, the session
    /// refuses the callback, no credential can be taken, or the server's own time limit ends the completion. When
    /// the browser cannot be opened the failure Windows gives names the whole sign-in address; the reason shown and
-   /// logged names only the kind of failure. No state reaches the log or the reason in any of them.
+   /// logged names only the kind of failure. No state reaches the log or the reason in any of them. What the log
+   /// adds about the hand-off from the browser is true for where the attempt stopped: before a page was opened it
+   /// says that, with what the attempt had not got past, and reads no handler trace; after, it says that the
+   /// browser never launched the protocol handler.
    /// </summary>
    [Theory]
-   [InlineData("begin", 0, "The server's sign-in configuration is not usable.", "QqqSessionException: The server's sign-in configuration is not usable.")]
-   [InlineData("no state", 0, "The sign-in address the session prepared carries no state of its own, so its callback could not be told from another.", "InvalidOperationException: The sign-in address the session prepared carries no state of its own, so its callback could not be told from another.")]
-   [InlineData("no inbox", 0, "synthetic open failure", "IOException: synthetic open failure")]
-   [InlineData("browser", 0, BrowserStartFailure.WindowsReport, "IOException: " + BrowserStartFailure.WindowsReport)]
-   [InlineData("launcher", 0, BrowserStartFailure.OtherReport, "IOException: " + BrowserStartFailure.OtherReport)]
-   [InlineData("inbox", 1, "Invalid QQQ browser callback.", "InvalidDataException: Invalid QQQ browser callback.")]
-   [InlineData("complete", 1, "The server's answer was not usable.", "QqqSessionException: The server's answer was not usable.")]
-   [InlineData("export", 1, "Sign in before exporting the session.", "QqqSessionException: Sign in before exporting the session.")]
-   [InlineData("time limit", 1, "The server did not answer in time.", "TaskCanceledException: The server did not answer in time.")]
-   public async Task Browser_FailureDuringTheExchange_IsReportedWithItsReason(string step, int opened, string reason, string logged)
+   [InlineData("begin", "the session had not prepared a usable sign-in address", "The server's sign-in configuration is not usable.", "QqqSessionException: The server's sign-in configuration is not usable.")]
+   [InlineData("no state", "the session had not prepared a usable sign-in address", "The sign-in address the session prepared carries no state of its own, so its callback could not be told from another.", "InvalidOperationException: The sign-in address the session prepared carries no state of its own, so its callback could not be told from another.")]
+   [InlineData("no inbox", "the attempt was not yet waiting for its callback", "synthetic open failure", "IOException: synthetic open failure")]
+   [InlineData("browser", "the default browser was not started", BrowserStartFailure.WindowsReport, "IOException: " + BrowserStartFailure.WindowsReport)]
+   [InlineData("launcher", "the default browser was not started", BrowserStartFailure.OtherReport, "IOException: " + BrowserStartFailure.OtherReport)]
+   [InlineData("inbox", null, "Invalid QQQ browser callback.", "InvalidDataException: Invalid QQQ browser callback.")]
+   [InlineData("complete", null, "The server's answer was not usable.", "QqqSessionException: The server's answer was not usable.")]
+   [InlineData("export", null, "Sign in before exporting the session.", "QqqSessionException: Sign in before exporting the session.")]
+   [InlineData("time limit", null, "The server did not answer in time.", "TaskCanceledException: The server did not answer in time.")]
+   public async Task Browser_FailureDuringTheExchange_IsReportedWithItsReason(string step, string? unopened, string reason, string logged)
    {
       const string address = "https://id.example.com/authorize?state=synthetic-state-a-1";
       SignInWorld world = new();
@@ -300,9 +311,11 @@ public sealed class CompanionSignInBrowserTests
       Assert.True(signIn.HasSession);
       Assert.False(session.Disposed);
       Assert.False(signIn.IsBusy);
-      Assert.Equal(opened, world.Opened.Count);
+      Assert.Equal(unopened is null ? 1 : 0, world.Opened.Count);
       Assert.All(world.Inboxes, inbox => Assert.True(inbox.Disposed));
-      Assert.Contains(NeverLaunched, world.Log.Entries, StringComparer.Ordinal);
+      Assert.Single(world.Log.Entries, entry => string.Equals(entry, unopened is null ? NeverLaunched : NotOpened(unopened), StringComparison.Ordinal));
+      Assert.Equal(unopened is null ? 1 : 0, world.TraceWindows.Count);
+      Assert.DoesNotContain(world.Log.Entries, entry => entry.Contains(unopened is null ? "before a browser page was opened" : "never launched", StringComparison.Ordinal));
       Assert.Contains("ERROR Browser sign-in not completed: " + logged, world.Log.Entries, StringComparer.Ordinal);
       Assert.DoesNotContain(world.Log.Entries, Secret);
       Assert.False(Secret(signIn.Failure!));
@@ -386,10 +399,49 @@ public sealed class CompanionSignInBrowserTests
       Assert.Contains(world.Log.Entries, entry => entry.StartsWith("DEBUG Browser sign-in not completed detail: System.IO.IOException: " + report, StringComparison.Ordinal));
       Assert.DoesNotContain(world.Log.Entries, BrowserStartFailure.Leaks);
       Assert.DoesNotContain(BrowserStartFailure.Bound(signIn), BrowserStartFailure.Leaks);
+      Assert.Contains(NotOpened("the default browser was not started"), world.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(NeverLaunched, world.Log.Entries, StringComparer.Ordinal);
       Assert.Empty(world.Opened);
       Assert.True(Assert.Single(world.Inboxes).Disposed);
       Assert.True(signIn.HasSession);
       Assert.False(signIn.IsBusy);
+   }
+
+
+
+   /// <summary>
+   /// The operator cancels, or the three minutes run out, while the session is still beginning the sign-in. No
+   /// browser page was opened, so the log does not say that the browser never launched the protocol handler or that
+   /// the provider did not redirect: it says the attempt ended before a page was opened and what it had not got
+   /// past. The session stays.
+   /// </summary>
+   [Theory]
+   [InlineData(false, CompanionSignInState.BrowserCanceled, "INFO Browser sign-in to print.example.com was cancelled by the operator.")]
+   [InlineData(true, CompanionSignInState.BrowserTimedOut, "INFO Browser sign-in to print.example.com was given up after the three minute limit.")]
+   public async Task Browser_WaitEndsWhileTheSessionBegins_SaysNoPageWasOpened(bool byLimit, CompanionSignInState ending, string entry)
+   {
+      SignInWorld world = new();
+      using CompanionSignIn signIn = await world.BrowserReadyAsync();
+      world.Sessions[0].PendingBegin = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+      Task<QqqSessionCredential?> running = signIn.SignInWithBrowserAsync();
+      if(byLimit)
+      {
+         world.Time.Advance(CompanionSignIn.BrowserSignInLimit);
+      }
+      else
+      {
+         signIn.CancelBrowserSignIn();
+      }
+
+      Assert.Null(await SignInWorld.EndsAsync(running));
+      Assert.Equal(ending, signIn.State);
+      Assert.Equal([Requested, entry, NotOpened("the session had not prepared a usable sign-in address")], world.Log.Entries);
+      Assert.Empty(world.Opened);
+      Assert.Empty(world.Inboxes);
+      Assert.Empty(world.TraceWindows);
+      Assert.True(signIn.HasSession);
+      Assert.False(world.Sessions[0].Disposed);
    }
 
 

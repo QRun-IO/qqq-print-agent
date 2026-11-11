@@ -33,6 +33,7 @@ public sealed partial class CompanionSignIn
    private static readonly TimeSpan s_traceWindow = TimeSpan.FromMinutes(10);
    private CancellationTokenSource? _browserCancel;
    private bool _handedOver;
+   private string? _unopened;
 
 
 
@@ -112,7 +113,9 @@ public sealed partial class CompanionSignIn
    /// The browser exchange itself: begin the sign-in on the session, read the state it sent from the address it
    /// returned, register that state with the dispatcher (which has an inbox open before the browser is, so a fast
    /// redirect is not lost), open the provider's page in the default browser, wait for the callback with that state,
-   /// and complete the sign-in on the session that started it. The registration ends when the exchange does. Only the
+   /// and complete the sign-in on the session that started it. The registration ends when the exchange does. Until
+   /// the page is open, the exchange notes what it is at, so an attempt that ends before any browser was involved can
+   /// say that, and why (see <see cref="ReportCallbackTrace"/>). Only the
    /// provider's host is logged, never the address, its state or the callback. The token is looked at again after
    /// each wait: once the sign-in was begun, so a browser is not opened for a wait that has already ended, and once
    /// the callback is there, so the session is not asked to complete for one. That second look is needed because a
@@ -123,17 +126,22 @@ public sealed partial class CompanionSignIn
    private async Task ExchangeWithBrowserAsync(ISignInSession session, CancellationToken cancellationToken)
    {
       _log.Info("Browser sign-in requested for {Server}; this application's callback is {Callback}.", QqqOrigin.ShownAuthority(session.Origin), _callbacks.RedirectUri);
+      _unopened = "the server does not list this application's callback";
       if(!_redirects.Contains(_callbacks.RedirectUri, StringComparer.Ordinal))
       {
          _log.Warning("The server's native grant does not list this application's callback {Callback}; it lists {Count} other address(es). Add the callback to the QQQ native session grant.", _callbacks.RedirectUri, _redirects.Count);
          throw new InvalidOperationException("No approved native browser callback is configured.");
       }
+      _unopened = "the session had not prepared a usable sign-in address";
       Uri authorization = await session.BeginBrowserSignInAsync(new Uri(_callbacks.RedirectUri), cancellationToken);
       cancellationToken.ThrowIfCancellationRequested();
       string state = BrowserCallbackDispatcher.ReadState(authorization) ?? throw new InvalidOperationException("The sign-in address the session prepared carries no state of its own, so its callback could not be told from another.");
+      _unopened = "the attempt was not yet waiting for its callback";
       using BrowserCallbackTicket ticket = _dispatcher.Register(state);
       _log.Info("Opening the identity provider's sign-in page in the default browser ({Provider}).", QqqOrigin.ShownAuthority(authorization));
+      _unopened = "the default browser was not started";
       BrowserLaunch.Open(_browser, authorization);
+      _unopened = null;
       Uri callback = await ticket.Callback.WaitAsync(cancellationToken);
       cancellationToken.ThrowIfCancellationRequested();
       _log.Info("Browser callback received; completing the sign-in.");
@@ -163,12 +171,23 @@ public sealed partial class CompanionSignIn
 
 
    /// <summary>
-   /// Copies the protocol handler's recent trace into the activity log, or states that the browser never launched the
-   /// handler at all, so a hand-off that stops outside the companion is still visible in one place. The handler
-   /// writes that trace without the query of any callback.
+   /// Says what is known about the hand-off from the browser when an attempt ends without a result. When the
+   /// provider's page was opened, it copies the protocol handler's recent trace into the activity log, or states
+   /// that the browser never launched the handler at all, so a hand-off that stops outside the companion is still
+   /// visible in one place. The handler writes that trace without the query of any callback. When the attempt ended
+   /// before a page was opened, none of that applies: no browser was started, so nothing could have redirected or
+   /// been blocked, and a trace from the last ten minutes would be some other attempt's. The entry then says that
+   /// no page was opened and what the attempt had not got past: the server not listing this application's callback,
+   /// the session not having prepared an address, the wait for the callback not having started, or the browser not
+   /// having started.
    /// </summary>
    private void ReportCallbackTrace()
    {
+      if(_unopened is { } reason)
+      {
+         _log.Info("This attempt ended before a browser page was opened ({Reason}), so the sign-in protocol handler was not involved and its trace is not copied here.", reason);
+         return;
+      }
       IReadOnlyList<string> lines = _callbacks.RecentTrace(s_traceWindow);
       if(lines.Count == 0)
       {
