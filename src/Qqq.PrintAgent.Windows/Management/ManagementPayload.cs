@@ -4,6 +4,7 @@
  */
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Qqq.PrintAgent.Windows.Management;
 
@@ -14,6 +15,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// content when it is put into a log line or an interpolated string, and arguments can hold a session credential or an
 /// enrollment code and one result holds the provider's sign-out request. The text form of a payload is fixed.
 /// </summary>
+[JsonConverter(typeof(ManagementJson.NotBySerializer<ManagementPayload>))]
 public sealed class ManagementPayload
 {
    /// <summary>The JSON object, copied so it outlives the document it was read from. It is private so nothing prints it by reaching through the payload.</summary>

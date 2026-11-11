@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -24,7 +26,11 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// without breaking an older client; for the same reason a client treats a vocabulary value it does not know (a
 /// health, a stage, an outcome) as unknown, never as a failure to read the reply. An envelope is read only by
 /// <see cref="ParseRequest"/> and <see cref="ParseReply"/>: handed to the serializer directly, the envelope types
-/// refuse to be read, so the checks those two make cannot be walked around.
+/// refuse to be read, so the checks those two make cannot be walked around. The refusal is declared on the four
+/// envelope types themselves (<see cref="NotBySerializer{TEnvelope}"/>), so it holds whatever options the serializer
+/// is given, the default ones included. The same types refuse to be written by the serializer, and an envelope is
+/// written only by <see cref="Write(ManagementRequest)"/> and <see cref="Write(ManagementReply)"/>, so it cannot
+/// leave in another form than the one line this contract defines (other options could indent it across lines).
 /// </summary>
 public static class ManagementJson
 {
@@ -43,7 +49,7 @@ public static class ManagementJson
 
 
 
-   /// <summary>The options everything is written with, and replies are read with: a member the reader does not know is skipped.</summary>
+   /// <summary>The options every argument, result and details record is written with, and results and details are read with: a member the reader does not know is skipped. The envelope around them is written by <see cref="Write(ManagementRequest)"/> and <see cref="Write(ManagementReply)"/>, not through these.</summary>
    public static JsonSerializerOptions Options { get; } = CreateOptions(skipUnknownMembers: true);
 
 
@@ -54,12 +60,20 @@ public static class ManagementJson
 
 
    /// <summary>Writes a request as the one line the pipe carries.</summary>
-   public static string Write(ManagementRequest request) => JsonSerializer.Serialize(request, Options);
+   public static string Write(ManagementRequest request)
+   {
+      ArgumentNullException.ThrowIfNull(request);
+      return WriteLine(writer => WriteRequest(writer, request));
+   }
 
 
 
    /// <summary>Writes a reply as the one line the pipe carries.</summary>
-   public static string Write(ManagementReply reply) => JsonSerializer.Serialize(reply, Options);
+   public static string Write(ManagementReply reply)
+   {
+      ArgumentNullException.ThrowIfNull(reply);
+      return WriteLine(writer => WriteReply(writer, reply));
+   }
 
 
 
@@ -175,10 +189,6 @@ public static class ManagementJson
          TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { LetNullableMembersBeAbsent } },
       };
       options.Converters.Add(new UtcDateTimeConverter());
-      options.Converters.Add(new WriteOnlyConverter<ManagementRequest>(WriteRequest, nameof(ParseRequest)));
-      options.Converters.Add(new WriteOnlyConverter<ManagementReply>(WriteReply, nameof(ParseReply)));
-      options.Converters.Add(new WriteOnlyConverter<ManagementError>(WriteError, nameof(ParseReply)));
-      options.Converters.Add(new WriteOnlyConverter<ManagementPayload>((writer, payload) => payload.ToElement().WriteTo(writer), nameof(ParseRequest) + " or " + nameof(ParseReply)));
       options.MakeReadOnly();
       return options;
    }
@@ -399,6 +409,23 @@ public static class ManagementJson
 
 
 
+   /// <summary>
+   /// Writes one envelope as text. The envelope is written here and not by the serializer, so its form does not depend
+   /// on any options object: one line, never indented, with the escaping the serializer's own default gives, which is
+   /// also what the arguments, results and details inside it were written with.
+   /// </summary>
+   private static string WriteLine(Action<Utf8JsonWriter> write)
+   {
+      ArrayBufferWriter<byte> buffer = new();
+      using(Utf8JsonWriter writer = new(buffer))
+      {
+         write(writer);
+      }
+      return Encoding.UTF8.GetString(buffer.WrittenSpan);
+   }
+
+
+
    /// <summary>Writes a request's envelope: the version, the operation, the server when one is named and the arguments when there are any.</summary>
    private static void WriteRequest(Utf8JsonWriter writer, ManagementRequest request)
    {
@@ -488,20 +515,28 @@ public static class ManagementJson
 
 
    /// <summary>
-   /// Writes one of the envelope's types and refuses to read it. The serializer would read an envelope without any of
-   /// the checks <see cref="ParseRequest"/> and <see cref="ParseReply"/> make (another version, a malformed operation
-   /// name, a member the envelope does not have), so reading through it is closed and the refusal names the function
-   /// to use instead.
+   /// What the serializer does with one of the envelope's types: nothing. It would read an envelope without any of the
+   /// checks <see cref="ParseRequest"/> and <see cref="ParseReply"/> make (another version, a malformed operation name,
+   /// a member the envelope does not have), and with options of a caller's choosing it could write one indented across
+   /// lines, which the pipe's framing cannot carry. So both are closed, and the refusal names the functions to use
+   /// instead. Each envelope type names this converter in an attribute on the type itself, which is why the refusal
+   /// holds for every options object, the default ones included, and not only for the two this contract builds.
    /// </summary>
-   private sealed class WriteOnlyConverter<TEnvelope>(Action<Utf8JsonWriter, TEnvelope> write, string readWith) : JsonConverter<TEnvelope>
+   internal sealed class NotBySerializer<TEnvelope> : JsonConverter<TEnvelope>
    {
-      /// <summary>Refuses, naming the function that reads this type with its checks.</summary>
-      public override TEnvelope Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-         => throw new NotSupportedException($"A {typeof(TEnvelope).Name} is not read by the serializer. Read it with {nameof(ManagementJson)}.{readWith}, which checks the envelope.");
+      /// <summary>Refuses to read.</summary>
+      public override TEnvelope Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw Refusal();
 
 
 
-      /// <summary>Writes the value the one way the wire carries it.</summary>
-      public override void Write(Utf8JsonWriter writer, TEnvelope value, JsonSerializerOptions options) => write(writer, value);
+      /// <summary>Refuses to write.</summary>
+      public override void Write(Utf8JsonWriter writer, TEnvelope value, JsonSerializerOptions options) => throw Refusal();
+
+
+
+      /// <summary>The refusal, naming the functions that read an envelope with its checks and the one that writes it.</summary>
+      private static NotSupportedException Refusal()
+         => new($"A {typeof(TEnvelope).Name} is neither read nor written by the serializer, whatever its options. Read a request with {nameof(ManagementJson)}.{nameof(ParseRequest)} and a reply with "
+            + $"{nameof(ManagementJson)}.{nameof(ParseReply)}, which check the envelope, and write either with {nameof(ManagementJson)}.{nameof(ManagementJson.Write)}.");
    }
 }

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json.Serialization;
 using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Windows.Management;
@@ -28,6 +29,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// reaches neither the wire nor a client's screen raw.
 /// </para>
 /// </summary>
+[JsonConverter(typeof(ManagementJson.NotBySerializer<ManagementError>))]
 public sealed record ManagementError
 {
    /// <summary>Builds an error with a code that carries no details. A code that is not in the table, or one whose table entry promises details, is refused.</summary>

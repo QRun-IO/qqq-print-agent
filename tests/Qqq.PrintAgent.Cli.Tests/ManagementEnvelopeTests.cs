@@ -676,8 +676,8 @@ public sealed class ManagementEnvelopeTests
    /// <summary>
    /// The serializer is not a way around the envelope checks. Handed a request directly it would accept another version,
    /// a malformed operation name, a member the envelope does not have and a repeated argument, so the envelope types
-   /// refuse to be read by it, whatever the text and with either set of options, and the refusal names the function
-   /// that reads them with their checks. A typed reader asked for an envelope type reads nothing.
+   /// refuse to be read by it, whatever the text and with either set of the contract's options, and the refusal names
+   /// the functions that read them with their checks. A typed reader asked for an envelope type reads nothing.
    /// </summary>
    [Theory]
    [InlineData("{\"v\":2,\"op\":\"snapshot\"}")]
@@ -702,19 +702,82 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>A payload is a JSON object and nothing else. It is written as that object, by itself and inside an error, says whether it is empty, and like the envelope it is never read by the serializer.</summary>
+   /// <summary>
+   /// The refusal is declared on the four envelope types, not on the contract's two options objects, so it holds for
+   /// every options object a caller could hand the serializer: the default ones, the web ones, ones that indent, ones
+   /// that ignore letter case, and the contract's own two. None of them reads a request of another version with a
+   /// malformed operation and a member the envelope does not have, a reply without a result, an error with a raw
+   /// message or a payload. None of them writes an envelope either, because options of a caller's choosing could
+   /// write it in another form than the contract's one line; the refusal names the function that does write it.
+   /// </summary>
+   [Fact]
+   public void Envelope_IsNeitherReadNorWrittenByTheSerializer_WhateverItsOptions()
+   {
+      JsonSerializerOptions[] all = [JsonSerializerOptions.Default, JsonSerializerOptions.Web, new JsonSerializerOptions { WriteIndented = true },
+         new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ManagementJson.Options, ManagementJson.StrictOptions];
+      var request = ManagementRequest.For(ManagementOperations.PrintersShare, Server, new PrintersShareArgs("printer-a1", Shared: true));
+      var reply = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
+
+      Assert.All(all, options =>
+      {
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementRequest>("{\"V\":7,\"Op\":\"Not An Operation\",\"Extra\":1}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementRequest>("{\"v\":7,\"op\":\"Not An Operation\",\"extra\":1,\"server\":\"x\"}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementReply>("{\"v\":9,\"ok\":true}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementError>("{\"code\":\"busy\",\"message\":\"raw\\u202E\\ntext\"}", options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementPayload>("{}", options));
+         NotSupportedException written = Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(request, options));
+         Assert.Contains("ManagementJson.Write", written.Message, StringComparison.Ordinal);
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply, options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply.Error, options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(request.Args, options));
+         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new { envelope = request }, options));
+      });
+      Assert.Equal("{\"v\":2,\"op\":\"printers.share\",\"server\":\"" + Server + "\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Write(request));
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\"}}", ManagementJson.Write(reply));
+      Assert.Throws<ArgumentNullException>(() => ManagementJson.Write((ManagementRequest)null!));
+      Assert.Throws<ArgumentNullException>(() => ManagementJson.Write((ManagementReply)null!));
+   }
+
+
+
+   /// <summary>
+   /// An envelope is written as one line with the escaping the serializer's default gives, the same its arguments were
+   /// written with: a character outside ASCII, a quote, a line break and the characters a browser could misread are
+   /// all escapes, in the envelope's own members and inside the arguments, and the text reads back as what was written.
+   /// </summary>
+   [Fact]
+   public void Envelope_IsWrittenAsOneEscapedLine()
+   {
+      var request = ManagementRequest.For(ManagementOperations.ServersRename, Server, new ServersRenameArgs("Caf\u00E9 \"east\" <1>"));
+      var reply = ManagementReply.Failure(ManagementErrorCode.ServerRefused, "Refus\u00E9: \"non\" <b>&</b>");
+
+      string writtenRequest = ManagementJson.Write(request);
+      string writtenReply = ManagementJson.Write(reply);
+
+      Assert.Equal("{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"name\":\"Caf\\u00E9 \\u0022east\\u0022 \\u003C1\\u003E\"}}", writtenRequest);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"server_refused\",\"message\":\"Refus\\u00E9: \\u0022non\\u0022 \\u003Cb\\u003E\\u0026\\u003C/b\\u003E\"}}", writtenReply);
+      Assert.All(new[] { writtenRequest, writtenReply }, text => Assert.True(text.All(char.IsAscii) && !text.Contains('\n', StringComparison.Ordinal)));
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(writtenRequest).Request!, out ServersRenameArgs? renamed));
+      Assert.Equal("Caf\u00E9 \"east\" <1>", renamed.Name);
+      Assert.Equal("Refus\u00E9: \"non\" <b>&</b>", ManagementJson.ParseReply(writtenReply).Reply!.Error!.Message);
+   }
+
+
+
+   /// <summary>A payload is a JSON object and nothing else. It is written as that object inside the envelope that carries it, as a request's arguments and as an error's details, says whether it is empty, and like the envelope it is never read or written by the serializer.</summary>
    [Fact]
    public void Payload_IsAJsonObject_AndNothingElse()
    {
       ManagementPayload payload = Payload("{\"printerId\":\"printer-a1\",\"shared\":true}");
 
-      Assert.Equal("{\"printerId\":\"printer-a1\",\"shared\":true}", JsonSerializer.Serialize(payload, ManagementJson.Options));
-      Assert.Equal("{\"code\":\"code_added_later\",\"message\":\"Synthetic message.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}",
-         JsonSerializer.Serialize(ErrorRead("code_added_later", "{\"printerId\":\"printer-a1\",\"shared\":true}"), ManagementJson.Options));
+      Assert.Equal("{\"v\":2,\"op\":\"printers.share\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Write(new ManagementRequest(2, ManagementOperations.PrintersShare, null, payload)));
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"code_added_later\",\"message\":\"Synthetic message.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}}",
+         ManagementJson.Write(ManagementReply.Failure(ErrorRead("code_added_later", "{\"printerId\":\"printer-a1\",\"shared\":true}"))));
       Assert.False(payload.IsEmpty());
       Assert.True(Payload("{}").IsEmpty());
       NotSupportedException refusal = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementPayload>("{}", ManagementJson.Options));
-      Assert.Contains("ParseRequest or ParseReply", refusal.Message, StringComparison.Ordinal);
+      Assert.Contains("ManagementJson.ParseRequest", refusal.Message, StringComparison.Ordinal);
+      Assert.Contains("ManagementJson.ParseReply", refusal.Message, StringComparison.Ordinal);
       Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("[1]").RootElement));
       Assert.Throws<ArgumentException>(() => ManagementPayload.FromElement(JsonDocument.Parse("\"text\"").RootElement));
    }
@@ -885,8 +948,8 @@ public sealed class ManagementEnvelopeTests
          ManagementError error = ManagementSamples.Failure(code).Error!;
          Assert.Equal((code, ManagementErrorCode.DetailsType(code) is not null), (error.Code, error.Details is not null));
       });
-      Assert.Equal("{\"code\":\"cancel_refused\",\"message\":\"Synthetic message.\",\"details\":{\"reason\":\"documentGone\"}}",
-         JsonSerializer.Serialize(ManagementError.WithDetails(ManagementErrorCode.CancelRefused, "Synthetic message.", cancel), ManagementJson.Options));
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Synthetic message.\",\"details\":{\"reason\":\"documentGone\"}}}",
+         ManagementJson.Write(ManagementReply.Failure(ManagementError.WithDetails(ManagementErrorCode.CancelRefused, "Synthetic message.", cancel))));
    }
 
 

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json.Serialization;
+
 namespace Qqq.PrintAgent.Windows.Management;
 
 /// <summary>
@@ -12,6 +14,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <see cref="ManagementJson"/> reads it into the operation's own record. One result, that of a sign-out, carries the
 /// identity provider's sign-out request, so neither the text form of a reply nor that of its result shows it.
 /// </summary>
+[JsonConverter(typeof(ManagementJson.NotBySerializer<ManagementReply>))]
 public sealed record ManagementReply(int V, bool Ok, ManagementPayload? Result = null, ManagementError? Error = null)
 {
    /// <summary>Builds the reply to an operation that succeeded, writing its result record the way the wire carries it. An operation with nothing to report answers <see cref="NoResult"/>, so a success always has a result object.</summary>

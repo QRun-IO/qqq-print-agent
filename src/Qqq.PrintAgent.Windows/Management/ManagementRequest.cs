@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json.Serialization;
+
 namespace Qqq.PrintAgent.Windows.Management;
 
 /// <summary>
@@ -12,6 +14,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// them into the operation's own record. Arguments can hold a session credential or an enrollment code, so neither the
 /// text form of a request nor that of its arguments shows them.
 /// </summary>
+[JsonConverter(typeof(ManagementJson.NotBySerializer<ManagementRequest>))]
 public sealed record ManagementRequest(int V, string Op, string? Server = null, ManagementPayload? Args = null)
 {
    /// <summary>Builds a request of this contract's version without arguments: for an operation that takes none, or one whose arguments are all optional.</summary>
