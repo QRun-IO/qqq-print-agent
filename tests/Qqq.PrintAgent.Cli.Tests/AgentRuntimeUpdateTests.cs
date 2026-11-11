@@ -33,7 +33,7 @@ public sealed class AgentRuntimeUpdateTests
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
       fixture.Printer.BlockPrint = true;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       fixture.AddJob("active");
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(fixture.Printer.Entered.Task);
@@ -85,7 +85,7 @@ public sealed class AgentRuntimeUpdateTests
    public async Task UpdatePreparationLetsAJobThatIsStillDownloadingFinishBeforeItAnswers()
    {
       await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-downloading");
       using var document = new GatedDocument(bytes);
       fixture.AddJob("downloading", () => document, length: bytes.Length);
@@ -126,7 +126,7 @@ public sealed class AgentRuntimeUpdateTests
    public async Task UpdatePreparationWaitsForAClaimInFlightAndPrintsItsJob()
    {
       await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => fixture.LastClaimWasEmpty);
       int claims = fixture.Claims;
       fixture.ClaimHold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -156,7 +156,7 @@ public sealed class AgentRuntimeUpdateTests
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-slow");
       using var document = new GatedDocument(bytes);
       fixture.AddJob("slow", () => document, length: bytes.Length);
@@ -165,9 +165,9 @@ public sealed class AgentRuntimeUpdateTests
       try
       {
          Task<string> preparation = fixture.PipeAsync(new PipeRequest("prepare-update"));
-         await fixture.WaitAsync(() => clock.HasTimerDueIn(AgentRuntime.UpdatePreparationLimit));
+         await fixture.WaitAsync(() => clock.HasTimerDueIn(SingleServerHarness.UpdatePreparationLimit));
          Assert.False(preparation.IsCompleted);
-         clock.Advance(AgentRuntime.UpdatePreparationLimit);
+         clock.Advance(SingleServerHarness.UpdatePreparationLimit);
          string reply = await preparation;
          Assert.StartsWith("Not ready for update: 1 job(s) were still in progress", reply, StringComparison.Ordinal);
          Assert.Equal("The update was not started, and the current version remains installed. " + reply, MsiUpdateService.PreparationNotCompleted(reply));
@@ -195,7 +195,7 @@ public sealed class AgentRuntimeUpdateTests
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => fixture.LastClaimWasEmpty);
       int claims = fixture.Claims;
       fixture.ClaimHold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -203,8 +203,8 @@ public sealed class AgentRuntimeUpdateTests
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(() => fixture.Claims > claims);
       Task<string> preparation = fixture.PipeAsync(new PipeRequest("prepare-update"));
-      await fixture.WaitAsync(() => clock.HasTimerDueIn(AgentRuntime.UpdatePreparationLimit));
-      clock.Advance(AgentRuntime.UpdatePreparationLimit);
+      await fixture.WaitAsync(() => clock.HasTimerDueIn(SingleServerHarness.UpdatePreparationLimit));
+      clock.Advance(SingleServerHarness.UpdatePreparationLimit);
       string reply = await preparation;
       Assert.StartsWith("Not ready for update: a claim was still in progress after 25 seconds.", reply, StringComparison.Ordinal);
       Assert.DoesNotContain("job(s)", reply, StringComparison.Ordinal);
@@ -232,7 +232,7 @@ public sealed class AgentRuntimeUpdateTests
    public async Task ServerStateArrivingDuringUpdatePreparationIsAppliedAndTheClaimedJobFinishes(string frame)
    {
       await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-during");
       using var document = new GatedDocument(bytes);
       fixture.AddJob("during", () => document, length: bytes.Length);
@@ -274,7 +274,7 @@ public sealed class AgentRuntimeUpdateTests
    public async Task UpdatePreparationInterruptedByAResumeDoesNotAnswerReady()
    {
       await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-resumed");
       using var document = new GatedDocument(bytes);
       fixture.AddJob("resumed", () => document, length: bytes.Length);
@@ -314,7 +314,7 @@ public sealed class AgentRuntimeUpdateTests
       using var signInReachedTheServer = new ManualResetEventSlim();
       using var letSignInContinue = new ManualResetEventSlim();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: new ManualTimeProvider());
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = Encoding.ASCII.GetBytes("%PDF-synthetic-sign-in");
       using var document = new GatedDocument(bytes);
       fixture.AddJob("cancelled", () => document, length: bytes.Length);
@@ -363,7 +363,7 @@ public sealed class AgentRuntimeUpdateTests
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       Assert.Equal("Ready for update.", await fixture.PipeAsync(new PipeRequest("prepare-update")));
       int heartbeats = fixture.Count("HEARTBEAT");
       fixture.AddJob("waiting");
@@ -373,7 +373,7 @@ public sealed class AgentRuntimeUpdateTests
       await fixture.WaitAsync(() => fixture.Count("HEARTBEAT") > heartbeats);
       Assert.StartsWith(Paused, fixture.Runtime.GetSnapshot().Status, StringComparison.Ordinal);
       Assert.Null(fixture.State("waiting"));
-      clock.Advance(AgentRuntime.UpdatePauseDuration);
+      clock.Advance(SingleServerHarness.UpdatePauseDuration);
       await fixture.WaitAsync(() => fixture.State("waiting") is "SPOOLED");
       Assert.Contains(fixture.Logs, line => line.StartsWith("The update pause ran out", StringComparison.Ordinal));
       Assert.False(fixture.Runtime.GetSnapshot().Status.StartsWith(Paused, StringComparison.Ordinal));

@@ -34,6 +34,16 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
+      /// <summary>
+      /// When set to a printer identifier, a submission to that queue stays inside the printer until <see cref="Release"/>
+      /// completes, as one busy device does, while submissions to the other queue pass straight through; <see cref="BlockPrint"/>
+      /// holds both. A held submission is counted in <see cref="Submissions"/> at once and in <see cref="Prints"/> only when it
+      /// is let go. When this is not set, no job is held on its account, a job that names no printer included.
+      /// </summary>
+      internal string? BlockPrinter { get; set; }
+
+
+
       /// <summary>Completed when a submission has reached the printer.</summary>
       internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -71,7 +81,7 @@ internal sealed partial class RealtimeRuntimeFixture
          Assert.Equal(job.ContentLength, new FileInfo(path).Length);
          Interlocked.Increment(ref Submissions);
          Entered.TrySetResult();
-         if(BlockPrint)
+         if(BlockPrint || (BlockPrinter is string held && string.Equals(held, job.PrinterId, StringComparison.Ordinal)))
          { await Release.Task.WaitAsync(cancellationToken); }
          Interlocked.Increment(ref Prints);
          Order.Enqueue(job.JobId);

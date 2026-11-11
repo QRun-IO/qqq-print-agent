@@ -11,10 +11,10 @@ using Qqq.PrintAgent.Core.Printing;
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// The scripted HTTP server behind the fixture's session client, with the counters and switches tests use to see and steer the
-/// agent's HTTPS traffic: claims, the queued-job preview, operator actions, the printer catalog and session routes.
+/// The HTTP side of the scripted server, behind the session client, with the counters and switches tests use to see and steer
+/// the agent's HTTPS traffic: claims, the queued-job preview, operator actions, the printer catalog and session routes.
 /// </summary>
-internal sealed partial class RealtimeRuntimeFixture
+internal sealed partial class ScriptedPrintServer
 {
    /// <summary>Counts the claims that reached the server, whatever they were answered.</summary>
    internal int Claims;
@@ -36,7 +36,7 @@ internal sealed partial class RealtimeRuntimeFixture
 
    /// <summary>
    /// True from the moment the server acknowledges the agent's report of the applied state until the agent's next HELLO
-   /// or a restart of the runtime. A claim outside that span is a violation. A drop of the socket by the server does not
+   /// or a restart of the service. A claim outside that span is a violation. A drop of the socket by the server does not
    /// end the span, because a claim the agent had already sent when the socket died is not its fault.
    /// </summary>
    private volatile bool _claimsAllowed;
@@ -45,6 +45,15 @@ internal sealed partial class RealtimeRuntimeFixture
 
    /// <summary>Counts every HTTP request the agent makes, so a test can show that an evaluation touched no network.</summary>
    internal int Requests;
+
+
+
+   /// <summary>
+   /// Counts requests that reached this server's handler but were addressed to another origin. Each is refused. A service
+   /// with several servers gives every session the handler of the server it is for; a request here for another address
+   /// means a session was built on the wrong server's handler.
+   /// </summary>
+   internal int MisroutedRequests;
 
 
 
@@ -88,35 +97,55 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
+   /// <summary>Controls advertised discovery across a server upgrade or downgrade while retaining the same authenticated client session.</summary>
+   internal string PrintingVersion { get; set; } = "2.0.0";
+
+
+
+   /// <summary>Printer identifiers the fake server's operator catalog lists for this device; both shared queues by default.</summary>
+   internal string[] ApprovedPrinters { get; set; } = ["printer", "other"];
+
+
+
+   /// <summary>When set, the operator catalog answers with this status instead of a page, to model an older server (404) or a user without catalog access (403).</summary>
+   internal HttpStatusCode? CatalogStatus { get; set; }
+
+
+
    /// <summary>
    /// Fake HTTP server for the session client: version discovery (advertising native sign-in and the configured printing
    /// version), document content, claims, the queued list, operator actions, enrollment and session identity. Any other route
    /// is a forbidden polling or control call and is counted and thrown, which proves the realtime path adds no HTTP polling.
    /// </summary>
-   private sealed class Handler(RealtimeRuntimeFixture fixture) : HttpMessageHandler
+   private sealed class Handler(ScriptedPrintServer server) : HttpMessageHandler
    {
-      /// <summary>Counts the request, applies a scripted fault, and routes by path.</summary>
+      /// <summary>Counts the request, refuses and counts one addressed to another server, applies a scripted fault, and routes by path.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
-         Interlocked.Increment(ref fixture.Requests);
-         if(fixture.HttpFault?.Invoke(request) is Exception fault)
+         Interlocked.Increment(ref server.Requests);
+         if(!string.Equals(request.RequestUri!.Authority, server.Origin.Authority, StringComparison.OrdinalIgnoreCase))
+         {
+            Interlocked.Increment(ref server.MisroutedRequests);
+            throw new InvalidOperationException("Request for " + request.RequestUri.Authority + " reached the scripted server at " + server.Origin.Authority + ".");
+         }
+         if(server.HttpFault?.Invoke(request) is Exception fault)
          { throw fault; }
-         string path = request.RequestUri!.AbsolutePath;
+         string path = request.RequestUri.AbsolutePath;
          if(string.Equals(path, "/qqq/v1/version", StringComparison.Ordinal))
          {
-            Interlocked.Increment(ref fixture.DiscoveryRequests);
+            Interlocked.Increment(ref server.DiscoveryRequests);
             return Response(JsonSerializer.Serialize(new
             {
                apiVersion = "1.9.0",
                features = new[] { "version", "metaData", "processes", "processCancel", "extensions", "widgets", "nativeSessionLogin" },
                clientChannels = new[] { "api" },
-               extensions = new[] { new { name = "printing", version = fixture.PrintingVersion, pathPrefix = "/qbit/printing" } },
+               extensions = new[] { new { name = "printing", version = server.PrintingVersion, pathPrefix = "/qbit/printing" } },
             }));
          }
          if(path.EndsWith("/content", StringComparison.Ordinal))
          {
             string id = path.Split('/')[^2];
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(fixture.Documents[id]()) });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(server.Documents[id]()) });
          }
          if(path.EndsWith("/claim", StringComparison.Ordinal))
          { return ClaimAsync(cancellationToken); }
@@ -131,23 +160,23 @@ internal sealed partial class RealtimeRuntimeFixture
       /// </summary>
       private async Task<HttpResponseMessage> ClaimAsync(CancellationToken cancellationToken)
       {
-         if(!fixture._claimsAllowed)
+         if(!server._claimsAllowed)
          {
-            Interlocked.Increment(ref fixture.ForbiddenPolls);
+            Interlocked.Increment(ref server.ForbiddenPolls);
             throw new InvalidOperationException("Claim without a realtime connection whose applied state was acknowledged.");
          }
-         Interlocked.Increment(ref fixture.Claims);
-         fixture.ClaimArrived.TrySetResult();
-         if(fixture.ClaimHold is TaskCompletionSource hold)
+         Interlocked.Increment(ref server.Claims);
+         server.ClaimArrived.TrySetResult();
+         if(server.ClaimHold is TaskCompletionSource hold)
          { await hold.Task.WaitAsync(cancellationToken); }
-         lock(fixture._claimLock)
+         lock(server._claimLock)
          {
-            if(fixture._claimed is null)
-            { fixture.Queue.TryDequeue(out fixture._claimed); }
-            fixture.LastClaimWasEmpty = fixture._claimed is null;
-            if(fixture._claimed is null && fixture.FailEmptyClaims)
+            if(server._claimed is null)
+            { server.Queue.TryDequeue(out server._claimed); }
+            server.LastClaimWasEmpty = server._claimed is null;
+            if(server._claimed is null && server.FailEmptyClaims)
             { return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("{}") }; }
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { job = fixture._claimed }, PrintApiClient.JsonOptions)) };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { job = server._claimed }, PrintApiClient.JsonOptions)) };
          }
       }
 
@@ -159,28 +188,28 @@ internal sealed partial class RealtimeRuntimeFixture
          response = null;
          if(path.EndsWith("/queued", StringComparison.Ordinal))
          {
-            response = Response(JsonSerializer.Serialize(new { jobs = fixture.Queue.ToArray() }, PrintApiClient.JsonOptions));
+            response = Response(JsonSerializer.Serialize(new { jobs = server.Queue.ToArray() }, PrintApiClient.JsonOptions));
          }
          else if(path.EndsWith("/device/test-print", StringComparison.Ordinal))
          {
-            fixture.OperatorActions.Enqueue(path);
+            server.OperatorActions.Enqueue(path);
             response = Response("""{"jobId":"test-queued"}""");
          }
          else if(path.EndsWith("/cancel", StringComparison.Ordinal))
          {
-            fixture.OperatorActions.Enqueue(path);
-            Interlocked.Increment(ref fixture.OperatorCancellations);
-            fixture.RemoveQueued(path.Split('/')[^2]);
+            server.OperatorActions.Enqueue(path);
+            Interlocked.Increment(ref server.OperatorCancellations);
+            server.RemoveQueued(path.Split('/')[^2]);
             response = Response("""{"accepted":true}""");
          }
          else if(path.EndsWith("/operator/printers", StringComparison.Ordinal))
          {
-            Interlocked.Increment(ref fixture.CatalogRequests);
-            response = fixture.CatalogStatus is HttpStatusCode status
+            Interlocked.Increment(ref server.CatalogRequests);
+            response = server.CatalogStatus is HttpStatusCode status
                ? Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{}") })
                : Response(JsonSerializer.Serialize(new
                {
-                  printers = fixture.ApprovedPrinters.Select(id => new { printerRowId = "row-" + id, deviceId = "device", printerId = id, name = id, deviceName = "Synthetic workstation", status = "READY", formats = new[] { "PDF" }, mediaProfiles = Array.Empty<object>() }),
+                  printers = server.ApprovedPrinters.Select(id => new { printerRowId = "row-" + id, deviceId = "device", printerId = id, name = id, deviceName = "Synthetic workstation", status = "READY", formats = new[] { "PDF" }, mediaProfiles = Array.Empty<object>() }),
                   nextCursor = (string?)null,
                }, PrintApiClient.JsonOptions));
          }
@@ -212,7 +241,7 @@ internal sealed partial class RealtimeRuntimeFixture
       /// <summary>Counts and rejects a route the realtime path must never call.</summary>
       private string Unexpected(string path)
       {
-         Interlocked.Increment(ref fixture.ForbiddenPolls);
+         Interlocked.Increment(ref server.ForbiddenPolls);
          throw new InvalidOperationException("Unexpected HTTP polling/control route: " + path);
       }
 

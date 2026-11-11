@@ -34,7 +34,7 @@ public sealed class AgentRuntimeBacklogTests
       await using RealtimeRuntimeFixture fixture = new();
       fixture.ClaimHold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       fixture.FailEmptyClaims = failWhenEmpty;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(fixture.ClaimArrived.Task);
       await connection.SendAsync("DESIRED_STATE", new DeviceDesiredState(2, false, "CONNECTED"));
       await connection.SendAsync("SETTINGS", fixture.Settings with { Revision = 2 });

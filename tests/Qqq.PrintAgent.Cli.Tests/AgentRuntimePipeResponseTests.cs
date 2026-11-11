@@ -150,8 +150,8 @@ public sealed class AgentRuntimePipeResponseTests
    private sealed class Fixture : IAsyncDisposable
    {
       private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-pipe-response-" + Guid.NewGuid().ToString("N"));
-      private readonly AgentRuntime _runtime;
-      public string PipeName { get; } = "QqqPrintAgent-test-response-" + Guid.NewGuid().ToString("N");
+      private readonly SingleServerHarness _runtime;
+      public string PipeName => _runtime.PipeName;
       public CancellationTokenSource Stop { get; } = new(TimeSpan.FromSeconds(15));
       public Task Running { get; }
 
@@ -160,9 +160,7 @@ public sealed class AgentRuntimePipeResponseTests
       /// <summary>Starts the runtime on a uniquely named private pipe with small buffers, so tests never touch the installed service's pipe.</summary>
       public Fixture()
       {
-         _runtime = new(_directory, _ => { }, new NoPrinters(), pipeName: PipeName,
-            pipeFactory: () => new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
-               PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 4096, 4096));
+         _runtime = new(_directory, _ => { }, new NoPrinters(), pipeBufferSize: 4096);
          Running = _runtime.RunAsync(Stop.Token);
       }
 

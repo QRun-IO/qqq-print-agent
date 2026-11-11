@@ -37,7 +37,7 @@ public sealed class JobSortingTests
       Assert.Throws<ArgumentException>(() => fixture.Store.QueryJobs(new JobQuery(SortBy: "title; DELETE FROM local_jobs")));
       // A distant corrupt payload would expose any accidental whole-history materialization.
       fixture.Execute("UPDATE local_jobs SET last_event_json='invalid-json' WHERE job_id='job09999'");
-      Assert.Equal(100, AgentRuntime.QueryJobsWithQueue(fixture.Store, new JobQuery(Offset: 5000, PageSize: 100), cloud).Jobs.Count);
+      Assert.Equal(100, SingleServerHarness.QueryJobsWithQueue(fixture.Store, new JobQuery(Offset: 5000, PageSize: 100), cloud).Jobs.Count);
    }
 
 
@@ -46,7 +46,7 @@ public sealed class JobSortingTests
    /// Compares database pages and merged database-plus-queue pages with an independent in-memory sort of the same jobs. The merged
    /// total must exclude queue entries already stored locally and must report that the server queue was limited.
    /// </summary>
-   private static void VerifyPages(AgentStore store, JobSnapshot[] local, JobSnapshot[] cloud, JobQuery query)
+   private static void VerifyPages(JournalStore store, JobSnapshot[] local, JobSnapshot[] cloud, JobQuery query)
    {
       var comparer = Comparer<JobSnapshot>.Create((left, right) => JobSorting.Compare(left, right, query));
       JobSnapshot[] expectedLocal = local.Order(comparer).ToArray();
@@ -56,7 +56,7 @@ public sealed class JobSortingTests
          JobQuery pageQuery = query with { Offset = offset, PageSize = 100 };
          JobPage page = store.QueryJobs(pageQuery);
          Assert.Equal(expectedLocal.Skip(offset).Take(100).Select(job => job.JobId), page.Jobs.Select(job => job.JobId), StringComparer.Ordinal);
-         JobPage merged = AgentRuntime.QueryJobsWithQueue(store, pageQuery, cloud);
+         JobPage merged = SingleServerHarness.QueryJobsWithQueue(store, pageQuery, cloud);
          Assert.Equal(expectedAll.Skip(offset).Take(100).Select(job => job.JobId), merged.Jobs.Select(job => job.JobId), StringComparer.Ordinal);
          Assert.Equal(expectedAll.Length, merged.TotalCount);
          Assert.True(merged.ServerQueueLimited);
@@ -113,16 +113,15 @@ public sealed class JobSortingTests
    {
       private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-sort-" + Guid.NewGuid().ToString("N"));
       private readonly SqliteConnection _database;
-      public AgentStore Store { get; }
+      public JournalStore Store { get; }
 
 
 
       /// <summary>Creates the store (and with it the journal schema) in a fresh temporary directory, then opens the journal for direct access.</summary>
       public Fixture()
       {
-         Store = new AgentStore(_directory);
-         _database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(_directory, "journal.db") }.ToString());
-         _database.Open();
+         Store = TestState.OpenStore(_directory);
+         _database = TestState.OpenJournal(_directory);
       }
 
 

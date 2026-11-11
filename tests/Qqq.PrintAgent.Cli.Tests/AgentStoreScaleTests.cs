@@ -32,7 +32,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       string directory = Path.Combine(Path.GetTempPath(), "qqq-scale-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using AgentStore store = new(directory);
+         using JournalStore store = TestState.OpenStore(directory);
          long start = Stopwatch.GetTimestamp();
          Seed(directory, count, pending: false);
          TimeSpan seedElapsed = Stopwatch.GetElapsedTime(start);
@@ -87,7 +87,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       Task acknowledging = server.RunAsync(limit.Token);
       try
       {
-         using AgentStore store = new(directory);
+         using JournalStore store = TestState.OpenStore(directory);
          Seed(directory, 10000, pending: true);
          using SessionFixture.FakeSession session = new();
          using PrintApiClient api = PrintApiClient.ForSession(session).WithRealtime(channel, new RealtimeSettings());
@@ -144,7 +144,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
       string directory = Path.Combine(Path.GetTempPath(), "qqq-query-bound-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore store = new(directory))
+         using(JournalStore store = TestState.OpenStore(directory))
          {
             Seed(directory, 10000, pending: false);
          }
@@ -154,7 +154,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
             command.CommandText = "UPDATE local_jobs SET last_event_json='not-json' WHERE job_id='job000000'; INSERT INTO events(job_id,event_id,state,json,connection_id) VALUES('legacy-only','legacy-only','SPOOLED','not-json','unenrolled');";
             command.ExecuteNonQuery();
          }
-         using AgentStore reopened = new(directory);
+         using JournalStore reopened = TestState.OpenStore(directory);
          Assert.Null(reopened.GetState("legacy-only")); // Existing summary migration is not replayed on every open.
          Assert.Single(reopened.QueryJobs(new JobQuery(Search: "Packing 000001")).Jobs);
          Assert.Equal(10000, reopened.QueryJobs(new JobQuery(PageSize: 1)).TotalCount);
@@ -168,12 +168,7 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
 
 
    /// <summary>Opens a direct connection to the store's journal file for seeding and tampering.</summary>
-   private static SqliteConnection Open(string directory)
-   {
-      SqliteConnection database = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "journal.db") }.ToString());
-      database.Open();
-      return database;
-   }
+   private static SqliteConnection Open(string directory) => TestState.OpenJournal(directory);
 
 
 

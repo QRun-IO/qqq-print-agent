@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.IO.Pipes;
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
@@ -22,7 +21,7 @@ public sealed class AgentTransportTests
    public async Task DispatchDisconnectKeepsWebSocketConnectedAndReconnectPreservesTrafficTotals()
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       AgentTransportSnapshot before = fixture.Runtime.GetTransportSnapshot();
       Assert.Equal("WS", before.Protocol);
       Assert.Equal("CONNECTED", before.State);
@@ -52,17 +51,12 @@ public sealed class AgentTransportTests
    public async Task TransportPipeOperationDoesNotDiscoverPrintersAndReturnsOnlyTrafficStatus()
    {
       string directory = Path.Combine(Path.GetTempPath(), "qqq-transport-pipe-" + Guid.NewGuid().ToString("N"));
-      string name = "qqq-transport-" + Guid.NewGuid().ToString("N");
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-      var runtime = new AgentRuntime(directory, _ => { }, new ForbiddenPrinters(), pipeName: name,
-         pipeFactory: () => new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly));
+      var runtime = new SingleServerHarness(directory, _ => { }, new ForbiddenPrinters());
       Task run = runtime.RunAsync(timeout.Token);
       try
       {
-         using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
-         await client.ConnectAsync(timeout.Token);
-         await AgentPipeFraming.WriteAsync(client, """{"operation":"transport"}""", AgentPipeFraming.MaximumCommandCharacters, timeout.Token);
-         string json = await AgentPipeFraming.ReadAsync(client, AgentPipeFraming.MaximumResponseCharacters, timeout.Token);
+         string json = await runtime.PipeAsync("""{"operation":"transport"}""", timeout.Token);
          AgentTransportSnapshot status = JsonSerializer.Deserialize<AgentTransportSnapshot>(json, PrintApiClient.JsonOptions)!;
          Assert.Equal("NONE", status.Protocol);
          Assert.Equal("DISCONNECTED", status.State);

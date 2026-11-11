@@ -22,7 +22,7 @@ public sealed class AgentRuntimeHeartbeatTests
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
       fixture.Printer.BlockPrint = true;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       fixture.AddJob("job");
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(fixture.Printer.Entered.Task);
@@ -53,7 +53,7 @@ public sealed class AgentRuntimeHeartbeatTests
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
-      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.HeartbeatAsync(clock);
       await fixture.WaitAsync(() => fixture.Count("HEARTBEAT") == 1);
       DateTimeOffset afterFirst = clock.GetUtcNow();

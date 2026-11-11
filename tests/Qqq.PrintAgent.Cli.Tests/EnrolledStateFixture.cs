@@ -6,7 +6,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using Qqq.PrintAgent.Core.Printing;
-using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
@@ -30,7 +29,7 @@ internal sealed class EnrolledStateFixture : IDisposable
    /// <summary>Saves an enrolled configuration and shares the synthetic queue.</summary>
    internal EnrolledStateFixture()
    {
-      using AgentStore store = new(DirectoryPath);
+      using JournalStore store = TestState.OpenStore(DirectoryPath);
       store.SaveConfiguration(new AgentConfiguration("https://synthetic.invalid", "device", "synthetic-token"));
       store.SetExposure("printer", true, Printer.Discover());
    }
@@ -40,7 +39,7 @@ internal sealed class EnrolledStateFixture : IDisposable
    /// <summary>Records a job that has already been handed to the Windows spooler (spooler id 123) with its receipt acknowledged, so a test can show the journal was kept.</summary>
    internal void SeedSpooledJob()
    {
-      using AgentStore store = new(DirectoryPath);
+      using JournalStore store = TestState.OpenStore(DirectoryPath);
       store.TrackJob(new PrintJob("job", "printer", "Synthetic", "PDF", Convert.ToHexString(SHA256.HashData([1, 2, 3])), 3,
          new PrintOptions(), DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture), "CLAIMED"), "Synthetic printer");
       PrintEvent receipt = new("spooled", "SPOOLED", SpoolerJobId: "123");

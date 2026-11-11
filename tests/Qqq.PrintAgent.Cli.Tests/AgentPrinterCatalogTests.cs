@@ -21,7 +21,7 @@ public sealed class AgentPrinterCatalogTests
    {
       await using RealtimeRuntimeFixture fixture = new();
       fixture.ApprovedPrinters = ["printer"];
-      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
       AgentSnapshot snapshot = fixture.Runtime.GetSnapshot();
       Assert.Equal(PrinterServerState.Approved, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "printer", StringComparison.Ordinal)).ServerState);
@@ -39,9 +39,9 @@ public sealed class AgentPrinterCatalogTests
    public async Task UnsharedPrinter_IsNotShared_NotAwaitingApproval()
    {
       await using RealtimeRuntimeFixture fixture = new();
-      using(AgentStore store = new(fixture.DirectoryPath))
+      using(JournalStore store = TestState.OpenStore(fixture.DirectoryPath))
       { store.SetExposure("other", false, fixture.Printer.Discover()); }
-      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
       AgentSnapshot snapshot = fixture.Runtime.GetSnapshot();
       Assert.Equal(PrinterServerState.NotShared, snapshot.Printers.Single(printer => string.Equals(printer.PrinterId, "other", StringComparison.Ordinal)).ServerState);
@@ -58,7 +58,7 @@ public sealed class AgentPrinterCatalogTests
    {
       await using RealtimeRuntimeFixture fixture = new();
       fixture.CatalogStatus = status;
-      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.NotReported, StringComparison.Ordinal));
       AgentSnapshot snapshot = fixture.Runtime.GetSnapshot();
       Assert.All(snapshot.Printers, printer => Assert.Equal(PrinterServerState.NotReported, printer.ServerState));
@@ -83,10 +83,10 @@ public sealed class AgentPrinterCatalogTests
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
-      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
       int reads = fixture.CatalogRequests;
-      int rounds = (int)Math.Ceiling(AgentRuntime.CatalogRefreshInterval / TimeSpan.FromSeconds(fixture.Settings.HeartbeatIntervalSeconds));
+      int rounds = (int)Math.Ceiling(SingleServerHarness.CatalogRefreshInterval / TimeSpan.FromSeconds(fixture.Settings.HeartbeatIntervalSeconds));
       Assert.True(rounds >= 3);
       for(int round = 1; round < rounds; round++)
       {
@@ -111,7 +111,7 @@ public sealed class AgentPrinterCatalogTests
    public async Task PrintersFrame_IsAuthoritativeOnA24Server()
    {
       await using RealtimeRuntimeFixture fixture = new(printingVersion: "2.4.0");
-      await using RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       Assert.Contains("printer-approval-v1", fixture.LastHelloCapabilities, StringComparer.Ordinal);
       await fixture.WaitAsync(() => fixture.Messages.Any(message => message.Type is "INVENTORY"));
       await connection.SendAsync("PRINTERS", new { printers = new object[] { new { printerId = "printer", enabled = true } } });
@@ -136,10 +136,10 @@ public sealed class AgentPrinterCatalogTests
    public async Task MalformedPrintersFrame_EndsTheConnection()
    {
       await using RealtimeRuntimeFixture fixture = new(printingVersion: "2.4.0");
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       await first.SendAsync("PRINTERS", new { nothing = true });
       await fixture.WaitAsync(() => !fixture.Runtime.GetSnapshot().Connected);
-      await using RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection second = await fixture.ConnectAsync();
       Assert.Equal(0, fixture.CatalogRequests);
       Assert.Contains(fixture.Logs, line => line.Contains("PRINTERS frame has no printers list", StringComparison.Ordinal));
    }
@@ -168,7 +168,7 @@ public sealed class AgentPrinterCatalogTests
       };
       try
       {
-         RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+         ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
          await fixture.WaitAsync(() => inventoryPending.Task.IsCompleted);
          await first.SendAsync("PRINTERS", new { nothing = true });
          await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains("Realtime connection stopped", StringComparison.Ordinal)));
@@ -186,13 +186,13 @@ public sealed class AgentPrinterCatalogTests
    public async Task Reconnect_StartsFromNotCheckedAndAsksAgain()
    {
       await using RealtimeRuntimeFixture fixture = new();
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
       int reads = fixture.CatalogRequests;
       first.Abort();
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.NotChecked, StringComparison.Ordinal));
       Assert.All(fixture.Runtime.GetSnapshot().Printers.Where(printer => printer.Exposed), printer => Assert.Equal(PrinterServerState.NotChecked, printer.ServerState));
-      await using RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
+      await using ScriptedPrintServer.Connection second = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => fixture.CatalogRequests > reads);
       await fixture.WaitAsync(() => string.Equals(fixture.Runtime.GetSnapshot().PrinterSync?.Outcome, PrinterServerSync.Reported, StringComparison.Ordinal));
    }

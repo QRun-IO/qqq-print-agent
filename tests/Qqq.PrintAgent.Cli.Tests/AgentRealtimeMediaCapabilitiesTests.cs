@@ -24,7 +24,7 @@ public sealed class AgentRealtimeMediaCapabilitiesTests
    public async Task HelloAdvertisesMediaOnlyAfterStandardDiscoveryConfirmsSupport(string version, bool media, bool approval)
    {
       await using var fixture = new RealtimeRuntimeFixture(printingVersion: version);
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       string[] expected = approval ? ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL", "printer-media-v1", "printer-approval-v1"]
          : media ? ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL", "printer-media-v1"]
          : ["realtime-v1", "REFRESH_INVENTORY", "CANCEL_SPOOL"];
@@ -50,7 +50,7 @@ public sealed class AgentRealtimeMediaCapabilitiesTests
    public async Task SameSessionReconnectTracksServerUpgradeAndDowngrade(string initial, string replacement, bool mediaAfter)
    {
       await using var fixture = new RealtimeRuntimeFixture(printingVersion: initial);
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       Assert.Equal(!mediaAfter, fixture.LastHelloCapabilities.Contains("printer-media-v1", StringComparer.Ordinal));
       Assert.Equal(2, fixture.DiscoveryRequests);
       fixture.PrintingVersion = replacement;

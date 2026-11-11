@@ -21,7 +21,7 @@ public sealed class AgentRuntimeQueuedJobsTests
    public async Task QueuedJobAppearsAndCanBeCanceledBeforeAnyLocalReceipt()
    {
       await using RealtimeRuntimeFixture fixture = new(seed: store => store.SavePrinterProfile("printer", new PrinterProfile("Dispatch labels")));
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, true, "CONNECTED"));
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, true, "CONNECTED"));
       fixture.AddJob("queued-job");
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Jobs.Count > 0);
@@ -53,7 +53,7 @@ public sealed class AgentRuntimeQueuedJobsTests
    /// <summary>What the local journal holds for a job; null means the job was never received by this computer.</summary>
    private static JobDetailsSnapshot? Details(RealtimeRuntimeFixture fixture, string jobId)
    {
-      using AgentStore store = new(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       return store.GetJobDetails(jobId);
    }
 }

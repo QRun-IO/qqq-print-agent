@@ -34,7 +34,7 @@ public sealed class AgentRemoteControlTests
    public async Task MissingRequiredStateCannotResumeDispatch(string state)
    {
       await using RealtimeRuntimeFixture fixture = new();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(5, true, "CONNECTED"));
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(5, true, "CONNECTED"));
       using var malformed = JsonDocument.Parse(state);
       await connection.SendAsync("DESIRED_STATE", malformed.RootElement);
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal)));
@@ -57,7 +57,7 @@ public sealed class AgentRemoteControlTests
          if(interrupted)
          { Assert.True(store.BeginControlCommand(command)); }
       });
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       if(!interrupted)
       { await connection.SendAsync("COMMAND", command); }
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") > 0);
@@ -79,12 +79,12 @@ public sealed class AgentRemoteControlTests
       DeviceControlCommand command = RealtimeRuntimeFixture.Command();
       await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
       fixture.Printer.LoseCancellationResult = true;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await connection.SendAsync("COMMAND", command);
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") == 1);
       await connection.SendAsync("COMMAND", command);
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") == 2);
-      using AgentStore store = new(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal("OUTCOME_UNKNOWN", store.GetControlReceipt("command")!.Outcome);
       Assert.All(Receipts(fixture), receipt => Assert.Equal("OUTCOME_UNKNOWN", receipt.GetProperty("outcome").GetString()));
       Assert.Equal(1, fixture.Printer.Cancellations);
@@ -112,9 +112,9 @@ public sealed class AgentRemoteControlTests
          store.SaveControlReceipt(old.CommandId, receipt);
       });
       fixture.RefuseWith = message => message.Type is "COMMAND_RECEIPT" ? "NOT_FOUND" : null;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => PendingReceipts(fixture) == 0);
-      using(AgentStore inspected = new(fixture.DirectoryPath))
+      using(JournalStore inspected = TestState.OpenStore(fixture.DirectoryPath))
       { Assert.Equal(receipt, inspected.GetControlReceipt(old.CommandId)); }
       Assert.Equal(0, fixture.Printer.Cancellations);
       fixture.RefuseWith = null;
@@ -137,7 +137,7 @@ public sealed class AgentRemoteControlTests
    {
       await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
       fixture.RefuseWith = message => message.Type is "COMMAND_RECEIPT" ? "NOT_FOUND" : null;
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       await first.SendAsync("COMMAND", RealtimeRuntimeFixture.Command());
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal) && line.Contains("NOT_FOUND", StringComparison.Ordinal)));
       Assert.Equal(1, PendingReceipts(fixture));
@@ -162,7 +162,7 @@ public sealed class AgentRemoteControlTests
       await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
       fixture.RefuseWith = message => message.Type is "COMMAND_RECEIPT" ? "CONFLICT" : null;
       fixture.CloseAfterRefusal = true;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await connection.SendAsync("COMMAND", RealtimeRuntimeFixture.Command());
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal)));
       string stopped = fixture.Logs.First(line => line.Contains(Stopped, StringComparison.Ordinal));
@@ -180,11 +180,11 @@ public sealed class AgentRemoteControlTests
    {
       const string regressed = "Desired state revision regressed";
       await using RealtimeRuntimeFixture fixture = new();
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(5, true, "CONNECTED"));
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(5, true, "CONNECTED"));
       await first.SendAsync("DESIRED_STATE", new DeviceDesiredState(4, false, "CONNECTED"));
       await fixture.WaitAsync(() => fixture.Logs.Count(line => line.Contains(regressed, StringComparison.Ordinal)) == 1);
       AssertPausedAtRevisionFive(fixture);
-      RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(5, true, "CONNECTED"));
+      ScriptedPrintServer.Connection second = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(5, true, "CONNECTED"));
       await second.SendAsync("DESIRED_STATE", new DeviceDesiredState(5, false, "CONNECTED"));
       await fixture.WaitAsync(() => fixture.Logs.Count(line => line.Contains(regressed, StringComparison.Ordinal)) == 2);
       AssertPausedAtRevisionFive(fixture);
@@ -203,12 +203,12 @@ public sealed class AgentRemoteControlTests
       DeviceControlCommand command = RealtimeRuntimeFixture.Command();
       await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
       fixture.LoseAcknowledgementOf = message => message.Type is "COMMAND_RECEIPT";
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       await first.SendAsync("COMMAND", command);
       await fixture.WaitAsync(first.LostAcknowledgement.Task);
       fixture.LoseAcknowledgementOf = null;
       await fixture.RestartAsync();
-      RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection second = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") >= 2 && PendingReceipts(fixture) == 0);
       await second.SendAsync("COMMAND", command);
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") >= 3);
@@ -231,13 +231,13 @@ public sealed class AgentRemoteControlTests
          RealtimeRuntimeFixture.SeedSpooledJob(store);
          Assert.True(store.BeginControlCommand(command));
       });
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => HasReceipt(fixture, "command", "OUTCOME_UNKNOWN"));
       await connection.SendAsync("COMMAND", command);
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") >= 2);
       Assert.Equal(0, fixture.Printer.Cancellations);
       Assert.Single(ReceiptMessageIds(fixture).Distinct(StringComparer.Ordinal));
-      using AgentStore inspected = new(fixture.DirectoryPath);
+      using JournalStore inspected = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal("OUTCOME_UNKNOWN", inspected.GetControlReceipt("command")!.Outcome);
       Assert.Equal("SPOOLED", inspected.GetState("job"));
    }
@@ -256,20 +256,20 @@ public sealed class AgentRemoteControlTests
       DeviceControlCommand command = RealtimeRuntimeFixture.Command();
       await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
       fixture.Printer.CancellationFailure = new NotSupportedException("Synthetic unexpected spooler failure.");
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync();
       await first.SendAsync("COMMAND", command);
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal) && line.Contains("Synthetic unexpected spooler failure", StringComparison.Ordinal)));
       Assert.Equal(1, fixture.Printer.Cancellations);
       Assert.Equal(0, fixture.Count("COMMAND_RECEIPT"));
-      using(AgentStore interrupted = new(fixture.DirectoryPath))
+      using(JournalStore interrupted = TestState.OpenStore(fixture.DirectoryPath))
       { Assert.Null(interrupted.GetControlReceipt("command")); }
       fixture.Printer.CancellationFailure = null;
-      RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection second = await fixture.ConnectAsync();
       await second.SendAsync("COMMAND", command);
       await fixture.WaitAsync(() => HasReceipt(fixture, "command", "OUTCOME_UNKNOWN") && PendingReceipts(fixture) == 0);
       Assert.Equal(1, fixture.Printer.Cancellations);
       Assert.Equal(1, fixture.Count("COMMAND_RECEIPT"));
-      using AgentStore store = new(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Contains("No command was automatically repeated", store.GetControlReceipt("command")!.Message, StringComparison.Ordinal);
       Assert.Equal("SPOOLED", store.GetState("job"));
       Assert.False(fixture.Running.IsCompleted);
@@ -284,11 +284,11 @@ public sealed class AgentRemoteControlTests
    public async Task ExpiryAndMissingOwnershipNeverTouchWindows(bool expired, string expected)
    {
       await using RealtimeRuntimeFixture fixture = new();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await connection.SendAsync("COMMAND", RealtimeRuntimeFixture.Command(expired: expired));
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") > 0);
       Assert.True(HasReceipt(fixture, "command", expected));
-      using AgentStore store = new(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal(expected, store.GetControlReceipt("command")!.Outcome);
       Assert.Equal(0, fixture.Printer.Cancellations);
    }
@@ -303,12 +303,12 @@ public sealed class AgentRemoteControlTests
    {
       await using RealtimeRuntimeFixture fixture = new(seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
       fixture.Printer.CancellationOutcome = outcome;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await connection.SendAsync("COMMAND", RealtimeRuntimeFixture.Command());
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") > 0);
       Assert.True(HasReceipt(fixture, "command", outcome));
       Assert.Equal(1, fixture.Printer.Cancellations);
-      using AgentStore store = new(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal(outcome, store.GetControlReceipt("command")!.Outcome);
    }
 
@@ -324,7 +324,7 @@ public sealed class AgentRemoteControlTests
    {
       DeviceControlCommand refresh = RealtimeRuntimeFixture.Command("REFRESH_INVENTORY");
       await using RealtimeRuntimeFixture fixture = new();
-      RealtimeRuntimeFixture.Connection first = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(3, true, "DISCONNECTED"));
+      ScriptedPrintServer.Connection first = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(3, true, "DISCONNECTED"));
       await first.SendAsync("COMMAND", refresh);
       // Commands are handled one at a time in arrival order, so the receipt of this later one proves the refresh was handled.
       await first.SendAsync("COMMAND", RealtimeRuntimeFixture.Command(id: "later", expired: true));
@@ -336,7 +336,7 @@ public sealed class AgentRemoteControlTests
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal) && line.Contains("Synthetic outage", StringComparison.Ordinal)));
       Assert.Equal("DISCONNECTED", fixture.Runtime.GetSnapshot().Control!.DesiredState.ConnectionState);
       fixture.HttpFault = null;
-      RealtimeRuntimeFixture.Connection second = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(4, false, "CONNECTED"));
+      ScriptedPrintServer.Connection second = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(4, false, "CONNECTED"));
       await fixture.WaitAsync(() => fixture.Count("INVENTORY") == 1);
       await second.SendAsync("COMMAND", refresh);
       await fixture.WaitAsync(() => HasReceipt(fixture, "command", "INVENTORY_REFRESHED"));
@@ -358,7 +358,7 @@ public sealed class AgentRemoteControlTests
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock, seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, true, "CONNECTED"));
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, true, "CONNECTED"));
       await connection.SendAsync("ERROR", new { code = "AUTHENTICATION_REQUIRED", message = "Synthetic session ended." });
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal)));
       await fixture.BackoffPassAsync(clock);
@@ -396,11 +396,10 @@ public sealed class AgentRemoteControlTests
    public async Task ControlStateSavedByThePollingPrereleaseIsReadButNotHonored()
    {
       await using RealtimeRuntimeFixture fixture = new();
-      using(AgentStore store = new(fixture.DirectoryPath))
+      using(JournalStore store = TestState.OpenStore(fixture.DirectoryPath))
       { store.SaveControlState(AgentControlState.Initial); }
-      using(var journal = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Path.Combine(fixture.DirectoryPath, "journal.db") }.ToString()))
+      using(Microsoft.Data.Sqlite.SqliteConnection journal = TestState.OpenJournal(fixture.DirectoryPath))
       {
-         journal.Open();
          using Microsoft.Data.Sqlite.SqliteCommand overwrite = journal.CreateCommand();
          overwrite.CommandText = """UPDATE control_state SET json='{"support":"LEGACY","desiredState":{"revision":0,"dispatchPaused":false,"connectionState":"CONNECTED"},"authorizationRequired":true}'""";
          Assert.Equal(1, overwrite.ExecuteNonQuery());
@@ -425,7 +424,7 @@ public sealed class AgentRemoteControlTests
       DeviceDesiredState live = fixture.Runtime.GetSnapshot().Control!.DesiredState;
       Assert.True(live.DispatchPaused);
       Assert.Equal(5, live.Revision);
-      using AgentStore store = new(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       DeviceDesiredState saved = store.LoadControlState().DesiredState;
       Assert.True(saved.DispatchPaused);
       Assert.Equal(5, saved.Revision);
@@ -456,7 +455,7 @@ public sealed class AgentRemoteControlTests
    /// <summary>How many receipts the store still holds for delivery.</summary>
    private static int PendingReceipts(RealtimeRuntimeFixture fixture)
    {
-      using AgentStore store = new(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       return store.PendingControlReceipts().Count;
    }
 }

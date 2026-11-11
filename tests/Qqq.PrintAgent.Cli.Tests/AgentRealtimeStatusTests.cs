@@ -15,7 +15,7 @@ public sealed class AgentRealtimeStatusTests
    public async Task PausedQueuePreviewRefreshesOnlyOnSignalsIncludingCancellation()
    {
       await using var fixture = new RealtimeRuntimeFixture();
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await connection.SendAsync("DESIRED_STATE", new DeviceDesiredState(2, true, "CONNECTED"));
       await fixture.WaitAsync(() => fixture.Runtime.GetSnapshot().Control!.DesiredState.DispatchPaused);
       fixture.AddJob("waiting");

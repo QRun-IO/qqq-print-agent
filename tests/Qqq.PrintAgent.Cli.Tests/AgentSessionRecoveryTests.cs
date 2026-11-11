@@ -34,16 +34,16 @@ public sealed class AgentSessionRecoveryTests
          fixture.Local.SeedSpooledJob();
          byte[] corrupt = ProtectedData.Protect(Encoding.UTF8.GetBytes(json), null, DataProtectionScope.CurrentUser);
          File.WriteAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), corrupt);
-         using AgentRuntime runtime = fixture.Runtime();
+         using SingleServerHarness runtime = fixture.Runtime();
          using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
-         using(AgentStore unreadable = new(fixture.Local.DirectoryPath))
+         using(JournalStore unreadable = TestState.OpenStore(fixture.Local.DirectoryPath))
          {
             Assert.Throws<InvalidDataException>(() => unreadable.LoadAuthentication());
          }
          _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token);
          Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
          Assert.Equal(corrupt, File.ReadAllBytes(Assert.Single(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"))));
-         using AgentStore store = new(fixture.Local.DirectoryPath);
+         using JournalStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
          Assert.Equal("SPOOLED", store.GetState("job"));
          Assert.NotNull(store.LoadAuthentication()!.Binding);
       }
@@ -59,7 +59,7 @@ public sealed class AgentSessionRecoveryTests
       fixture.Local.SeedSpooledJob();
       byte[] corrupt = [1, 2, 3, 4];
       File.WriteAllBytes(Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi"), corrupt);
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
       fixture.Session.DenyBinding = true;
       await Assert.ThrowsAsync<Qqq.PrintAgent.Core.Authentication.QqqSessionException>(() => runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token));
@@ -68,7 +68,7 @@ public sealed class AgentSessionRecoveryTests
       fixture.Session.DenyBinding = false;
       _ = await runtime.SignInAsync(new PipeRequest("sign-in", SessionCredential: fixture.Session.ExportCredential()), timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("device", store.LoadConfiguration()!.DeviceId);
       Assert.Equal("SPOOLED", store.GetState("job"));
       Assert.Contains("printer", store.GetExposedPrinterIds());
@@ -93,7 +93,7 @@ public sealed class AgentSessionRecoveryTests
       byte[] corrupt = [5, 6, 7, 8];
       File.WriteAllBytes(path, corrupt);
       fixture.Session.Binding = fixture.Session.Binding with { DeviceId = null };
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       Assert.False(runtime.GetSnapshot().Enrolled);
       Assert.Equal(corrupt, File.ReadAllBytes(path));
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
@@ -104,7 +104,7 @@ public sealed class AgentSessionRecoveryTests
       _ = await runtime.EnrollWithGatesAsync(new PipeRequest("enroll", "https://synthetic.invalid", "synthetic-code"), timeout.Token);
       Assert.True(runtime.GetSnapshot().Authentication!.Authorized);
       Assert.Equal(corrupt, File.ReadAllBytes(Assert.Single(Directory.GetFiles(fixture.Local.DirectoryPath, "connection.recovery-*.dpapi"))));
-      using(AgentStore store = new(fixture.Local.DirectoryPath))
+      using(JournalStore store = TestState.OpenStore(fixture.Local.DirectoryPath))
       {
          Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
          Assert.Null(store.GetState("job"));
@@ -112,7 +112,7 @@ public sealed class AgentSessionRecoveryTests
       }
       // Restore only the fixture's old proof to verify its journal was retained, not reassigned.
       File.WriteAllBytes(path, original);
-      using AgentStore originalStore = new(fixture.Local.DirectoryPath);
+      using JournalStore originalStore = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("SPOOLED", originalStore.GetState("job"));
    }
 
@@ -127,13 +127,13 @@ public sealed class AgentSessionRecoveryTests
       byte[] corrupt = [9, 10, 11];
       string path = Path.Combine(fixture.Local.DirectoryPath, "qqq-session.dpapi");
       File.WriteAllBytes(path, corrupt);
-      using AgentRuntime runtime = fixture.Runtime();
+      using SingleServerHarness runtime = fixture.Runtime();
       using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
       Assert.Contains("revoke the previous session in QQQ", await runtime.SignOutAsync(timeout.Token), StringComparison.Ordinal);
       Assert.False(File.Exists(path));
       Assert.Equal(corrupt, File.ReadAllBytes(Assert.Single(Directory.GetFiles(fixture.Local.DirectoryPath, "qqq-session.recovery-*.dpapi"))));
       Assert.False(runtime.GetSnapshot().Authentication!.Authorized);
-      using AgentStore store = new(fixture.Local.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.Local.DirectoryPath);
       Assert.Equal("device", store.LoadConfiguration()!.DeviceId);
       Assert.Equal("SPOOLED", store.GetState("job"));
       Assert.Contains("printer", store.GetExposedPrinterIds());

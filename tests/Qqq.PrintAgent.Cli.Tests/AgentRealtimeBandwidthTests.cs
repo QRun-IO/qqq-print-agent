@@ -25,7 +25,7 @@ public sealed class AgentRealtimeBandwidthTests
       const int aggregateBytesPerSecond = 128 * 1024;
       var settings = new RealtimeSettings(Revision: 1, MaxConcurrentPrints: 2, MaxDownloadBytesPerSecond: aggregateBytesPerSecond);
       await using var fixture = new RealtimeRuntimeFixture(downloads: 2, settings: settings);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       byte[] bytes = new byte[documentBytes];
       Encoding.ASCII.GetBytes("%PDF-1.7 synthetic bandwidth fixture").CopyTo(bytes, 0);
       var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

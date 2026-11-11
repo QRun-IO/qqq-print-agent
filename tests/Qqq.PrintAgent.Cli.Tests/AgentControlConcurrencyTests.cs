@@ -27,7 +27,7 @@ public sealed class AgentControlConcurrencyTests
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(downloads: 2, timeProvider: clock);
       fixture.Printer.BlockPrint = true;
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       fixture.AddJob("job");
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(fixture.Printer.Entered.Task);
@@ -65,7 +65,7 @@ public sealed class AgentControlConcurrencyTests
    {
       var clock = new ManualTimeProvider();
       await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
-      RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       fixture.AddJob("first");
       await connection.SendAsync("JOB_AVAILABLE", new { });
       // The claim after the printed job found the queue empty: the wave that printed it claims nothing more.
@@ -113,7 +113,7 @@ public sealed class AgentControlConcurrencyTests
       try
       {
          DeviceDesiredState arriving = new(2, !resumeArrives, "CONNECTED");
-         RealtimeRuntimeFixture.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, resumeArrives, "CONNECTED"));
+         ScriptedPrintServer.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, resumeArrives, "CONNECTED"));
          await connection.SendAsync("COMMAND", RealtimeRuntimeFixture.Command("REFRESH_INVENTORY"));
          await fixture.WaitAsync(() => saving.IsSet);
          int reportedBefore = fixture.Count("STATE_APPLIED");
@@ -127,7 +127,7 @@ public sealed class AgentControlConcurrencyTests
          Assert.Equal(arriving, live.DesiredState);
          Assert.Equal("REFRESH_INVENTORY", live.LastCommand);
          Assert.Equal("INVENTORY_REFRESHED", live.LastOutcome);
-         using(AgentStore store = new(fixture.DirectoryPath))
+         using(JournalStore store = TestState.OpenStore(fixture.DirectoryPath))
          {
             AgentControlState saved = store.LoadControlState();
             Assert.Equal(arriving, saved.DesiredState);
@@ -157,7 +157,7 @@ public sealed class AgentControlConcurrencyTests
    /// the transport ping went out in both and that no heartbeat did. Frames are handled in arrival order, so the receipt of
    /// the expired command sent after the announcement proves the announcement was handled before the intervals begin.
    /// </summary>
-   private static async Task AnnounceAndPassTwoSilentHeartbeatRoundsAsync(RealtimeRuntimeFixture fixture, RealtimeRuntimeFixture.Connection connection, ManualTimeProvider clock, string jobId, string printerId)
+   private static async Task AnnounceAndPassTwoSilentHeartbeatRoundsAsync(RealtimeRuntimeFixture fixture, ScriptedPrintServer.Connection connection, ManualTimeProvider clock, string jobId, string printerId)
    {
       int heartbeats = fixture.Count("HEARTBEAT");
       int pings = fixture.Count("PING");

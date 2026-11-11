@@ -55,7 +55,7 @@ public sealed class AgentRuntimeTests
       string denied = await fixture.PipeAsync(new PipeRequest("test-print", PrinterId: "other", Format: "PDF"));
       Assert.StartsWith("Error: Share the printer", denied, StringComparison.Ordinal);
       Assert.Empty(fixture.OperatorActions);
-      using(AgentStore store = new(fixture.DirectoryPath))
+      using(JournalStore store = TestState.OpenStore(fixture.DirectoryPath))
       {
          store.SetExposure("other", true, fixture.Printer.Discover());
          store.Record("failed-job", new PrintEvent("test-failed", "FAILED", "Synthetic failure", null));
