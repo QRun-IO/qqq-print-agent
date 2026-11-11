@@ -43,10 +43,10 @@ internal sealed class WizardFixture : IDisposable
          Changes.Add(change.PropertyName!);
          Threads.Add(Environment.CurrentManagedThreadId);
       };
-      Wizard.Result.Raised += (_, _) =>
+      Wizard.Result.Raised += (_, said) =>
       {
-         Announced.Add(Wizard.Result.Text);
-         Moments.Add(new Moment(Wizard.Result.Text, Wizard.ServerState, Wizard.Stages.Count, Wizard.PrimaryAction, Wizard.IsBusy, Gate.IsBusy(OperationGate.Wizard), Wizard.ResultSeverity, Wizard.FocusTarget));
+         Announced.Add(said.Text);
+         Moments.Add(new Moment(said.Text, Wizard.ServerState, Wizard.Stages.Count, Wizard.PrimaryAction, Wizard.IsBusy, Gate.IsBusy(OperationGate.Wizard), Wizard.ResultSeverity, Wizard.FocusTarget));
          Threads.Add(Environment.CurrentManagedThreadId);
       };
    }
@@ -68,7 +68,7 @@ internal sealed class WizardFixture : IDisposable
    /// <summary>The wizard under test.</summary>
    internal ConnectionWizard Wizard { get; }
 
-   /// <summary>Every sentence announced, in order, as the text was when the event arrived.</summary>
+   /// <summary>Every sentence announced, in order, as the event carried it.</summary>
    internal List<string> Announced { get; } = [];
 
    /// <summary>What the wizard showed at the moment of each announcement.</summary>

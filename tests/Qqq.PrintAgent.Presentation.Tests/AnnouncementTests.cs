@@ -25,16 +25,16 @@ public sealed class AnnouncementTests
       List<string> seen = [];
       int thread = 0;
       announcement.PropertyChanged += (_, change) => seen.Add("changed " + change.PropertyName + ": " + announcement.Text);
-      announcement.Raised += (sender, _) =>
+      announcement.Raised += (sender, said) =>
       {
          Assert.Same(announcement, sender);
          thread = Environment.CurrentManagedThreadId;
-         seen.Add("raised: " + announcement.Text);
+         seen.Add("raised: " + said.Text + " / text: " + announcement.Text);
       };
 
       announcement.Announce("The server passed every check.");
 
-      Assert.Equal(["changed Text: The server passed every check.", "raised: The server passed every check."], seen);
+      Assert.Equal(["changed Text: The server passed every check.", "raised: The server passed every check. / text: The server passed every check."], seen);
       Assert.Equal(Environment.CurrentManagedThreadId, thread);
       Assert.Equal("The server passed every check.", announcement.Text);
    }
@@ -49,7 +49,7 @@ public sealed class AnnouncementTests
       List<string> raised = [];
       int changes = 0;
       announcement.PropertyChanged += (_, _) => changes++;
-      announcement.Raised += (_, _) => raised.Add(announcement.Text);
+      announcement.Raised += (_, said) => raised.Add(said.Text);
 
       announcement.Announce("First.");
       announcement.Announce("Second.");
@@ -122,7 +122,7 @@ public sealed class AnnouncementTests
    {
       Announcement announcement = new();
       int raised = 0;
-      void Count(object? sender, EventArgs e) => raised++;
+      void Count(object? sender, AnnouncementEventArgs e) => raised++;
       announcement.Raised += Count;
       announcement.Announce("One.");
       announcement.Raised -= Count;
@@ -130,5 +130,69 @@ public sealed class AnnouncementTests
       announcement.Announce("Two.");
 
       Assert.Equal(1, raised);
+   }
+
+
+
+   /// <summary>
+   /// The event carries its own sentence. A listener that announces something more from inside the event does not
+   /// change what the listeners after it are told: every listener hears each sentence exactly once, the one
+   /// announced from inside first for those that come later in the list, and the text ends as what was announced
+   /// last. A listener that read the text and not the event would hear the inner sentence twice and the outer one
+   /// never.
+   /// </summary>
+   [Fact]
+   public void Announce_FromInsideRaised_EveryListenerHearsEachSentenceOnce()
+   {
+      Announcement announcement = new();
+      List<string> first = [];
+      List<string> second = [];
+      List<string> textSeenBySecond = [];
+      announcement.Raised += (_, said) =>
+      {
+         first.Add(said.Text);
+         if(string.Equals(said.Text, "Outer.", StringComparison.Ordinal))
+         {
+            announcement.Announce("Inner.");
+         }
+      };
+      announcement.Raised += (_, said) =>
+      {
+         second.Add(said.Text);
+         textSeenBySecond.Add(announcement.Text);
+      };
+
+      announcement.Announce("Outer.");
+
+      Assert.Equal(["Outer.", "Inner."], first);
+      Assert.Equal(["Inner.", "Outer."], second);
+      Assert.Equal(["Inner.", "Inner."], textSeenBySecond);
+      Assert.Equal("Inner.", announcement.Text);
+   }
+
+
+
+   /// <summary>A listener that throws is not caught: the text is already in place, the listeners after it are not told, and the failure reaches whoever announced.</summary>
+   [Fact]
+   public void AListenerThatThrows_IsNotCaught()
+   {
+      Announcement announcement = new();
+      int later = 0;
+      announcement.Raised += (_, _) => throw new InvalidOperationException("The view failed.");
+      announcement.Raised += (_, _) => later++;
+
+      Assert.Throws<InvalidOperationException>(() => announcement.Announce("Said."));
+
+      Assert.Equal("Said.", announcement.Text);
+      Assert.Equal(0, later);
+   }
+
+
+
+   /// <summary>The event's arguments are the sentence and nothing else.</summary>
+   [Fact]
+   public void EventArguments_AreTheSentence()
+   {
+      Assert.Equal("Said.", new AnnouncementEventArgs("Said.").Text);
    }
 }
