@@ -19,9 +19,11 @@ namespace Qqq.PrintAgent.Windows;
 /// run or the uninstall cannot find. A recorded name without a file of ours is harmless and is dropped by the next run.
 /// </para>
 /// <para>
-/// A run that has to fail fails before it has changed anything. Once the new shortcut is in place, trouble with an
-/// earlier one is noted and retried by the next run instead: the installer runs this as a required step, and a
-/// leftover shortcut is no reason to fail an install or an upgrade.
+/// Everything that can be checked is checked before anything is changed, so a run that has to refuse refuses while
+/// nothing has changed. A run that fails later, because the shortcut or the record could not be written, leaves the
+/// record naming every shortcut of ours. Once the new shortcut is in place, trouble with an earlier one is noted and
+/// retried by the next run instead: the installer runs this as a required step, and a leftover shortcut is no reason
+/// to fail an install or an upgrade.
 /// </para>
 /// This part holds the two runs and the record; the shortcut file, the folders and the names are in the other part.
 /// </summary>
