@@ -14,6 +14,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 public sealed class CompanionSignInBrowserTests
 {
    private const string Requested = "INFO Browser sign-in requested for print.example.com; this application's callback is io.qrun.qqq-print-agent:/oauth/callback.";
+   private const string Discarded = "INFO The browser sign-in ended without a result after its callback had been handed to the session, so the session is discarded: the server may have signed it in, and nothing here waits for that. The next attempt reads the sign-in description again.";
    private const string NeverLaunched = "WARN The browser never launched the sign-in protocol handler in the last 10 minutes (no entries in trace/auth-callback.log). Either the identity provider did not redirect to io.qrun.qqq-print-agent:/oauth/callback (check the provider's allowed redirect URIs and any error page it showed), or the browser blocked opening the QQQ Print Agent sign-in link.";
 
 
@@ -441,27 +442,63 @@ public sealed class CompanionSignInBrowserTests
 
 
 
-   /// <summary>When the operator cancels at the very moment the session completes the sign-in, the wait has ended: no credential is taken, and the attempt ends as cancelled.</summary>
-   [Fact]
-   public async Task Browser_CompletedAtTheMomentItIsCancelled_TakesNoCredential()
+   /// <summary>
+   /// The wait ends at the very moment the session completes the sign-in: the operator cancels, the three minutes
+   /// run out, or the caller stops waiting. No credential is taken, and the attempt ends as what ended it. The
+   /// session, though, was handed the callback and is signed in on the server by now, so it is not kept behind an
+   /// attempt that was reported as cancelled: it is discarded, what it offered is withdrawn before the ending is
+   /// announced, the log says why, and a sign-in then needs a new read, which works.
+   /// </summary>
+   [Theory]
+   [InlineData("cancel", CompanionSignInState.BrowserCanceled)]
+   [InlineData("limit", CompanionSignInState.BrowserTimedOut)]
+   [InlineData("caller", CompanionSignInState.NotPrepared)]
+   public async Task Browser_WaitEndsAfterTheCallbackWasHandedOver_TakesNoCredentialAndDiscardsTheSession(string by, CompanionSignInState ending)
    {
+      using CancellationTokenSource caller = new();
       SignInWorld world = new();
       using CompanionSignIn signIn = await world.BrowserReadyAsync();
       FakeSession session = world.Sessions[0];
       session.BeforeAnswer = () =>
       {
-         if(session.Callback is not null)
+         if(session.Callback is null)
          {
-            signIn.CancelBrowserSignIn();
+            return;
+         }
+         switch(by)
+         {
+            case "cancel":
+               signIn.CancelBrowserSignIn();
+               break;
+            case "limit":
+               world.Time.Advance(CompanionSignIn.BrowserSignInLimit);
+               break;
+            default:
+               caller.Cancel();
+               break;
          }
       };
+      List<string> changes = SignInWorld.Watch(signIn);
 
-      Task<QqqSessionCredential?> running = signIn.SignInWithBrowserAsync();
+      Task<QqqSessionCredential?> running = signIn.SignInWithBrowserAsync(caller.Token);
       world.Inboxes[0].Deliver(session.CallbackForLatestAttempt);
 
       Assert.Null(await SignInWorld.EndsAsync(running));
-      Assert.Equal(CompanionSignInState.BrowserCanceled, signIn.State);
+      Assert.Equal(ending, signIn.State);
       Assert.NotNull(session.Callback);
+      Assert.NotNull(session.ExportCredential());
+      Assert.True(session.Disposed);
+      Assert.False(signIn.HasSession);
+      Assert.Null(signIn.Offer);
+      Assert.False(signIn.IsBusy);
+      Assert.Equal(["IsBusy=True", "State=WaitingForBrowser", "Offer=null", "HasSession=False", "State=" + ending, "IsBusy=False"], changes);
+      Assert.Single(world.Log.Entries, entry => string.Equals(entry, Discarded, StringComparison.Ordinal));
+      Assert.DoesNotContain(world.Log.Entries, entry => entry.StartsWith("ERROR", StringComparison.Ordinal) || Secret(entry));
+      Assert.Null(await signIn.SignInWithBrowserAsync());
+
+      Assert.NotNull(await signIn.PrepareAsync(new Uri(SignInWorld.Server), SignInWorld.BrowserCheck, QqqCertificateExceptionOrigins.None));
+      Assert.True(signIn.HasSession);
+      Assert.False(world.Sessions[1].Disposed);
    }
 
 
@@ -509,10 +546,45 @@ public sealed class CompanionSignInBrowserTests
       Assert.DoesNotContain("INFO Browser callback received; completing the sign-in.", world.Log.Entries, StringComparer.Ordinal);
       Assert.Equal(ending, signIn.State);
       Assert.True(signIn.HasSession);
+      Assert.Equal(new SignInOffer(false, true), signIn.Offer);
       Assert.False(session.Disposed);
       Assert.False(signIn.IsBusy);
       Assert.Single(world.Opened);
+      Assert.DoesNotContain(Discarded, world.Log.Entries, StringComparer.Ordinal);
       Assert.DoesNotContain(world.Log.Entries, Secret);
+   }
+
+
+
+   /// <summary>
+   /// An attempt that failed keeps its session even when the callback had been handed over: here the server refuses
+   /// the completion. That the callback was handed over is forgotten when the attempt ends, so a later operation
+   /// that is stopped is not taken for a browser sign-in whose session has to go: a read whose caller had already
+   /// stopped waiting leaves the session where it was and logs nothing about discarding it.
+   /// </summary>
+   [Fact]
+   public async Task Browser_FailedAfterTheCallbackWasHandedOver_KeepsTheSession_AlsoThroughALaterStoppedRead()
+   {
+      using CancellationTokenSource caller = new();
+      SignInWorld world = new();
+      using CompanionSignIn signIn = await world.BrowserReadyAsync();
+      FakeSession session = world.Sessions[0];
+      session.CompleteFailure = new QqqSessionException(QqqSessionException.FailureKind.InvalidResponse, "The server's answer was not usable.");
+      Task<QqqSessionCredential?> running = signIn.SignInWithBrowserAsync();
+      world.Inboxes[0].Deliver(session.CallbackForLatestAttempt);
+      Assert.Null(await SignInWorld.EndsAsync(running));
+      Assert.Equal(CompanionSignInState.BrowserFailed, signIn.State);
+      Assert.NotNull(session.Callback);
+      Assert.True(signIn.HasSession);
+
+      await caller.CancelAsync();
+      Assert.Null(await signIn.PrepareAsync(new Uri(SignInWorld.Server), SignInWorld.BrowserCheck, QqqCertificateExceptionOrigins.None, caller.Token));
+
+      Assert.Equal(CompanionSignInState.Ready, signIn.State);
+      Assert.True(signIn.HasSession);
+      Assert.False(session.Disposed);
+      Assert.Single(world.Sessions);
+      Assert.DoesNotContain(Discarded, world.Log.Entries, StringComparer.Ordinal);
    }
 
 
@@ -520,7 +592,8 @@ public sealed class CompanionSignInBrowserTests
    /// <summary>
    /// The session is asked to complete with the exchange's own token, not with one that never ends: while the session
    /// is completing, the token it was given is still live, and Cancel ends it, so the completion stops with the
-   /// attempt instead of running on behind an attempt that was reported as cancelled.
+   /// attempt instead of running on behind an attempt that was reported as cancelled. The session had been handed
+   /// the callback by then, so it is discarded with the attempt.
    /// </summary>
    [Fact]
    public async Task Browser_CancelledWhileTheSessionCompletes_EndsTheCompletionToo()
@@ -540,6 +613,9 @@ public sealed class CompanionSignInBrowserTests
       Assert.Null(await SignInWorld.EndsAsync(running));
       Assert.Equal(CompanionSignInState.BrowserCanceled, signIn.State);
       Assert.False(signIn.IsBusy);
+      Assert.False(signIn.HasSession);
+      Assert.True(session.Disposed);
+      Assert.Contains(Discarded, world.Log.Entries, StringComparer.Ordinal);
    }
 
 

@@ -45,10 +45,10 @@ public enum CompanionSignInState
    /// <summary>The password sign-in was not completed; <see cref="CompanionSignIn.Failure"/> gives the reason, which never says which part was wrong. The session is kept for another attempt.</summary>
    PasswordFailed,
 
-   /// <summary>The operator cancelled the browser sign-in. The session is kept for another attempt.</summary>
+   /// <summary>The operator cancelled the browser sign-in. The session is kept for another attempt when the callback had not yet been handed to it, and discarded otherwise.</summary>
    BrowserCanceled,
 
-   /// <summary>The browser sign-in was given up after its time limit. The session is kept for another attempt.</summary>
+   /// <summary>The browser sign-in was given up after its time limit. The session is kept for another attempt when the callback had not yet been handed to it, and discarded otherwise.</summary>
    BrowserTimedOut,
 
    /// <summary>The browser sign-in was not completed; <see cref="CompanionSignIn.Failure"/> gives the reason. The session is kept for another attempt.</summary>

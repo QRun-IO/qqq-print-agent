@@ -30,8 +30,10 @@ this build: the connection dialog still runs on the existing flow, whose only ch
   read under is given with each read. It offers only the methods that the service's check and its own read both
   found, and logs a difference. It stops when the description names another sign-in provider than the check
   reported. When this Windows account refuses a certificate the service accepted, or the sign-in provider's
-  certificate, it says which of the two it was and keeps the refused certificate for the wizard to show. A cancelled
-  or timed-out browser sign-in keeps its session, so the next attempt needs no new read.
+  certificate, it says which of the two it was and keeps the refused certificate for the wizard to show. A browser
+  sign-in that is cancelled or times out before its callback has been handed to the session keeps the session, so
+  the next attempt needs no new read. Once the callback has been handed over the server may complete the sign-in,
+  so an attempt that is cancelled, times out or is stopped after that discards the session.
 - `BrowserCallbackDispatcher` owns the one browser callback inbox. A sign-in or a provider sign-out registers the
   OAuth state it sent and waits for the callback that carries it, so two servers can be signing in at once. A
   callback that carries no state, more than one, or a state nobody waits for is dropped, and the log says only that

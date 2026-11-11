@@ -396,9 +396,10 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
    /// Releases the sign-in after an operation. A sign-in that was disposed, or whose session was asked to be
    /// discarded, while the operation ran discards the session here, now that no call is using it. An operation that
    /// ended without an outcome of its own (its caller stopped waiting, or it threw something unexpected) leaves the
-   /// state that matches what is held. The state is settled first and the sign-in released after it, so a subscriber
-   /// that starts the next operation when the sign-in becomes free does not have its state overwritten, and the
-   /// release happens even when a subscriber throws.
+   /// state that matches what is held; when it was a browser sign-in that had already handed its callback to the
+   /// session, the session is discarded first, as it is for one the operator cancelled. The state is settled first
+   /// and the sign-in released after it, so a subscriber that starts the next operation when the sign-in becomes
+   /// free does not have its state overwritten, and the release happens even when a subscriber throws.
    /// </summary>
    private void End(CancellationTokenSource? wait)
    {
@@ -413,11 +414,13 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
          }
          else if(_state is CompanionSignInState.Preparing or CompanionSignInState.SigningIn or CompanionSignInState.WaitingForBrowser)
          {
+            DropHandedOverSession();
             Settle(_session is null ? CompanionSignInState.NotPrepared : CompanionSignInState.Ready);
          }
       }
       finally
       {
+         _handedOver = false;
          wait?.Dispose();
          _operating = false;
          OnPropertyChanged(nameof(IsBusy));
