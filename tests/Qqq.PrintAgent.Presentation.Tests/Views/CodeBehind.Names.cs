@@ -12,8 +12,9 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// automation identifier when it has no other, so a name that is not written out is an identifier made at run time,
 /// which only the generated forms may be, and those are set with <c>SetAutomationId</c>.
 /// <para>
-/// A name is given by an assignment to <c>Name</c>: in the initializer of a <c>new</c>, as a statement of the class
-/// (with or without <c>this</c>), or on something else (<c>row.Name = ...</c>). Each is returned with the kind of
+/// A name is given by an assignment to <c>Name</c>, plain or compound (<c>=</c>, <c>+=</c>, <c>??=</c>): in the
+/// initializer of a <c>new</c>, as a statement of the class (with or without <c>this</c>), or on something else
+/// (<c>row.Name = ...</c>). Each is returned with the kind of
 /// what is named, as far as the file says it: the type created, the class the statement is in, or the one type the
 /// file declares the receiver with; and without a kind where the file does not say. The contract fails on every one
 /// that is not known to be something else than an element. Left alone are a value that is a plain string literal,
@@ -144,8 +145,8 @@ internal static partial class CodeBehind
 
 
 
-   /// <summary>An assignment to something called Name.</summary>
-   [GeneratedRegex("""(?<!\w)Name\s*=(?![=>])""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   /// <summary>An assignment to something called Name, also one that appends to it or fills it when it is null.</summary>
+   [GeneratedRegex("""(?<!\w)Name\s*(\+|\?\?)?=(?![=>])""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex NameAssigned();
 
 

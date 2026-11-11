@@ -427,6 +427,8 @@ public sealed class ViewContractReaderTests
                Children.Add(new Button { Name = "Literal", Content = job.Title });
                bool same = Name == job.Title;
                Func<string> later = () => Name = job.Title;
+               Name += job.JobId;
+               Name ??= job.Title;
             }
          }
          """);
@@ -435,7 +437,7 @@ public sealed class ViewContractReaderTests
 
       Assert.Equal(
          ["Sample.cs:6 this Row", "Sample.cs:7 this Row", "Sample.cs:9 _late Button", "Sample.cs:10 profile Profile", "Sample.cs:11 an expression ", "Sample.cs:12 a new TextBlock TextBlock", "Sample.cs:13 cell TextBlock",
-            "Sample.cs:14 a new object Border", "Sample.cs:17 the member an initializer fills ", "Sample.cs:21 this Row"],
+            "Sample.cs:14 a new object Border", "Sample.cs:17 the member an initializer fills ", "Sample.cs:21 this Row", "Sample.cs:22 this Row", "Sample.cs:23 this Row"],
          names.Select(name => $"{name.Where} {name.On} {name.Kind}"), StringComparer.Ordinal);
       Assert.Equal("$\"JobRow{job.JobId}\"", names[0].Value);
    }

@@ -15,8 +15,9 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// <para>
 /// The views are read as text: the project links the companion's markup and code-behind beside the tests and
 /// references neither WinUI nor the companion. An identifier here is one the source writes out, with
-/// <c>AutomationProperties.AutomationId</c> in markup or <c>SetAutomationId</c> in code. An <c>x:Name</c> is not one,
-/// although WinUI reports it as the identifier when no other is set: it names a field, and a field is renamed freely.
+/// <c>AutomationProperties.AutomationId</c> in markup or <c>SetAutomationId</c> in code. An <c>x:Name</c> is not one
+/// (nor is a <c>Name</c> attribute, which is read as one), although WinUI reports it as the identifier when no other
+/// is set: it names a field, and a field is renamed freely.
 /// </para>
 /// <para>
 /// A kind that is in none of the contract's lists fails until it is put in one, in markup and in code alike. (The

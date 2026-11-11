@@ -9,8 +9,8 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 
 /// <summary>
 /// What the C# of the companion does to controls, read from its text: the identifiers it sets (this file), the
-/// controls it creates (CodeBehind.Creations.cs), and the texts it writes, the live regions it declares and the
-/// announcements it raises (CodeBehind.Texts.cs).
+/// controls it creates (CodeBehind.Creations.cs), the names it gives while it runs (CodeBehind.Names.cs), and the
+/// texts it writes, the live regions it declares and the announcements it raises (CodeBehind.Texts.cs).
 /// <para>
 /// An identifier is set by <c>SetAutomationId(target, value)</c> and in no other way. The value is a string literal;
 /// a choice between two literals; or a parameter of the method the call is in, and then every call of that method, in
