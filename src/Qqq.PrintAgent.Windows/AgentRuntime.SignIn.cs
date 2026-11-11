@@ -182,7 +182,7 @@ public sealed partial class AgentRuntime
          }
          catch(Exception exception)
          {
-            _log.Failure("The server session could not be ended; local sign-out still completes", exception);
+            _log.Failure(postLogoutRedirect is null ? "The server session could not be ended; local sign-out still completes" : "Sign-out did not finish on the server side: either the server session could not be ended, or it was ended and the sign-in provider's sign-out could not be prepared (the session entries before this one say which); local sign-out still completes", exception);
             throw;
          }
          finally
