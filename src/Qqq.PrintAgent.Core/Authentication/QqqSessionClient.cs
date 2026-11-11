@@ -111,7 +111,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    internal bool EvaluateCertificate(Uri address, X509Certificate2? certificate, SslPolicyErrors errors)
    {
       Uri? origin = QqqOrigin.Of(address);
-      string host = origin?.Authority ?? ShownText(address.Authority);
+      string host = QqqOrigin.ShownAuthority(address);
       string summary = certificate is null ? "no certificate presented"
          : $"subject '{ShownText(certificate.Subject)}', issuer '{ShownText(certificate.Issuer)}', valid {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd} to {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}, thumbprint {certificate.Thumbprint}";
       if(errors == SslPolicyErrors.None)
@@ -474,7 +474,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       _diagnostics.Info($"Authentication metadata: type {Shown(metadata.Type)}, provider '{Shown(metadata.Name)}', native browser sign-in {(grant is null ? "not offered" : "offered")}.");
       _diagnostics.Debug(() => grant is null
          ? $"Provider values present: {metadata.Values is not null}; client id {(string.IsNullOrEmpty(metadata.Values?.ClientId) ? "(none)" : "present")}; scopes '{Shown(metadata.Values?.Scopes)}'."
-         : $"Native grant: flow {Shown(grant.Flow)}, challenge {Shown(grant.CodeChallengeMethod)}, prompt {Shown(grant.Prompt)}, issuer {ShownText(grant.Issuer)}, discovery {ShownText(grant.DiscoveryUrl)}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{ShownAddresses(grant.RedirectUris)}], scopes '{Shown(metadata.Values?.Scopes)}'.");
+         : $"Native grant: flow {Shown(grant.Flow)}, challenge {Shown(grant.CodeChallengeMethod)}, prompt {Shown(grant.Prompt)}, issuer {ShownAddress(grant.Issuer)}, discovery {ShownAddress(grant.DiscoveryUrl)}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{ShownAddresses(grant.RedirectUris)}], scopes '{Shown(metadata.Values?.Scopes)}'.");
       return metadata;
    }
 
@@ -986,6 +986,19 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
    /// <summary>The same for longer text the server can influence: an address, a certificate name, an error description, a failure's message, or an identity value, which the contract lets run to 200 characters and which an operator compares with another.</summary>
    private static string ShownText(string? value) => QqqCompatibilityProblem.Printable(value, QqqCompatibilityProblem.TextLimit);
+
+
+
+   /// <summary>
+   /// The same for an address a server supplied as text, where the line says what this client accepted or will use:
+   /// the issuer and discovery address of a sign-in provider, and the provider's own issuer and authorization
+   /// endpoint. An address that has an origin is shown as <see cref="QqqSessionDiagnostics.Describe(Uri)"/> shows any
+   /// address, with its host as the ASCII name the connection is made to and without user information, query or
+   /// fragment, so a look-alike letter in the host reads as the "xn--" name it is in every line. Text that is not
+   /// such an address is shown as it was written. A line that refuses two texts for not matching exactly quotes both
+   /// through <see cref="ShownText"/> instead, because there the difference between them is the point.
+   /// </summary>
+   private static string ShownAddress(string? value) => ShownText(Uri.TryCreate(value, UriKind.Absolute, out Uri? address) && QqqOrigin.Of(address) is not null ? QqqSessionDiagnostics.Describe(address) : value);
 
 
 

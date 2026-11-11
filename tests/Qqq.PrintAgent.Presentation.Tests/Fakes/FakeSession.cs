@@ -110,8 +110,13 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
 
 
 
+   /// <summary>The host and port of the provider page, as the server's provider wrote them; a test sets a name outside ASCII to see how it is shown.</summary>
+   internal string ProviderAuthority { get; set; } = "id.example.com";
+
+
+
    /// <summary>The provider page of the latest browser attempt; its query stands for that attempt's secret state.</summary>
-   internal Uri Authorization => new("https://id.example.com/authorize?state=secret-state-" + _attempts);
+   internal Uri Authorization => new("https://" + ProviderAuthority + "/authorize?state=secret-state-" + _attempts);
 
 
 

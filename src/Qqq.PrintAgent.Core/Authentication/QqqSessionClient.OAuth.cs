@@ -108,7 +108,7 @@ public sealed partial class QqqSessionClient
       string? providerAuthorization = provider.TryGetProperty("authorization_endpoint", out JsonElement authorization) && authorization.ValueKind == JsonValueKind.String ? authorization.GetString() : null;
       bool s256 = provider.TryGetProperty("code_challenge_methods_supported", out JsonElement methods) && methods.ValueKind == JsonValueKind.Array
          && methods.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && string.Equals(value.GetString(), "S256", StringComparison.Ordinal));
-      _diagnostics.Info($"Provider discovery: issuer {ShownText(providerIssuer)}, authorization endpoint {ShownText(providerAuthorization)}, S256 {(s256 ? "supported" : "not listed")}.");
+      _diagnostics.Info($"Provider discovery: issuer {ShownAddress(providerIssuer)}, authorization endpoint {ShownAddress(providerAuthorization)}, S256 {(s256 ? "supported" : "not listed")}.");
       if(!string.Equals(providerIssuer, grant.Issuer, StringComparison.Ordinal))
       {
          _diagnostics.Info($"Browser sign-in refused: the provider's issuer '{ShownText(providerIssuer)}' does not exactly match the issuer QQQ advertises '{ShownText(grant.Issuer)}'.");
@@ -258,7 +258,7 @@ public sealed partial class QqqSessionClient
          throw QqqApiDiscovery.Configuration();
       }
       QqqAuthenticationMetadata.NativeGrant grant = metadata.Values!.NativeSessionLogin!;
-      _diagnostics.Info($"Native browser sign-in grant accepted: issuer {ShownText(grant.Issuer)}, {grant.RedirectUris.Count} redirect address(es).");
+      _diagnostics.Info($"Native browser sign-in grant accepted: issuer {ShownAddress(grant.Issuer)}, {grant.RedirectUris.Count} redirect address(es).");
       return grant;
    }
 

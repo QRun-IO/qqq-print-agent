@@ -43,6 +43,26 @@ public static class QqqOrigin
 
 
    /// <summary>
+   /// The host and port of an address in the form they are shown in, in a log line or on a screen: the authority of
+   /// the address's origin (see <see cref="Of"/>), so a name outside ASCII appears as the "xn--" name the connection
+   /// is really made to and a default port is left out. An address that has no origin is shown as it was written,
+   /// with every character that could end a line, reorder the text or show as nothing replaced by a space, and an
+   /// address that names no host (a relative one, or the browser callback's custom scheme) is shown as nothing. This
+   /// is the one place a host is formed for display, so a provider's host reads the same in every line that names
+   /// it. The result never holds user information, a path, a query or a fragment.
+   /// </summary>
+   public static string ShownAuthority(Uri address)
+   {
+      ArgumentNullException.ThrowIfNull(address);
+      if(Of(address) is { } origin)
+      { return origin.Authority; }
+      string written = address.IsAbsoluteUri ? address.Authority : "";
+      return written.Length == 0 ? "" : QqqCompatibilityProblem.Printable(written, QqqCompatibilityProblem.TextLimit);
+   }
+
+
+
+   /// <summary>
    /// Returns the ASCII name of an absolute address's host, the name a connection to it is made to, or null when the
    /// host has none. The platform refuses to name some hosts (it throws for one that holds a line separator) and
    /// leaves others in Unicode (a name it does not treat as a domain name); neither is a name that may be compared

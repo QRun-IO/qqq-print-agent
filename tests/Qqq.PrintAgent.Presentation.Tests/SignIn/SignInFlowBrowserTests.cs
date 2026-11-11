@@ -87,6 +87,33 @@ public sealed class SignInFlowBrowserTests
 
 
 
+   /// <summary>
+   /// The provider's page is at an address the server's provider wrote. The log names its host by the ASCII name the
+   /// browser will really go to, the form every other line uses for it: a look-alike letter (a Cyrillic "o" in
+   /// "login") reads as the "xn--" name, the port is kept, and nothing of the path or the query is logged. The browser
+   /// is given the address exactly as the session returned it.
+   /// </summary>
+   [Fact]
+   public async Task ProviderPageWithALookAlikeHost_IsLoggedByItsAsciiName()
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      FakeSession session = fixture.Sessions[0];
+      session.ProviderAuthority = "l\u043Egin.example.com:9443";
+
+      Task running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.ClaimLegacyDevice);
+      FakeInbox inbox = Assert.Single(fixture.Inboxes);
+      Assert.Equal(new Uri("https://l\u043Egin.example.com:9443/authorize?state=secret-state-1"), Assert.Single(fixture.Opened));
+      inbox.Deliver(session.CallbackForLatestAttempt);
+      await running;
+
+      Assert.Equal(SignInStage.SignedIn, fixture.Flow.Stage);
+      Assert.Contains("INFO Opening the identity provider's sign-in page in the default browser (xn--lgin-55d.example.com:9443).", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.All(fixture.Log.Entries, entry => Assert.All(entry, character => Assert.InRange(character, ' ', '~')));
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("secret-state", StringComparison.Ordinal) || entry.Contains("/authorize", StringComparison.Ordinal));
+   }
+
+
+
    /// <summary>A server that does not list this application's callback is never sent to the browser: the sign-in is reported as not completed, and the log names the callbacks the server does list.</summary>
    [Fact]
    public async Task ServerThatDoesNotListTheCallback_IsNotOpenedInTheBrowser()

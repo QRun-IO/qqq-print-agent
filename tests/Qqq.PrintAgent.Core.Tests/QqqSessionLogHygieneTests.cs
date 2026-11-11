@@ -118,6 +118,51 @@ public sealed class QqqSessionLogHygieneTests
 
 
    /// <summary>
+   /// A sign-in provider whose host has a look-alike letter (a Cyrillic "o" in "login") is named by the ASCII name
+   /// the connection is made to in every line of a browser sign-in and a provider sign-out, at info and debug level:
+   /// the grant that was accepted, the discovery document that is fetched and the request for it, what the provider
+   /// answered, the authorization page and the end-session page. An operator reading the log beside the certificate
+   /// warning, which has always used that name, therefore sees one host and not two. Nothing outside printable ASCII
+   /// reaches the log at all, and no line carries more of an address than its scheme, host, port and path.
+   /// </summary>
+   [Fact]
+   public async Task ProviderHostWithALookAlikeLetterIsShownByItsAsciiNameInEveryLine()
+   {
+      const string Written = "l\u043Egin.example.com";
+      const string Shown = "https://xn--lgin-55d.example.com/";
+      string provider = ScriptedServer.Provider.Replace("id.example.invalid", Written, StringComparison.Ordinal);
+      var lines = new List<string>();
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery).Add(ScriptedServer.OAuth.Replace("id.example.invalid", Written, StringComparison.Ordinal)).Add(provider)
+         .Add("{}", cookie: "sessionUUID=browser-session; Path=/; HttpOnly; Secure");
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: Diagnostics(lines));
+      QqqBrowserLogin attempt = await client.BeginBrowserLoginAsync(Redirect);
+      string state = attempt.AuthorizationUri.Query[1..].Split('&').Single(pair => pair.StartsWith("state=", StringComparison.Ordinal))[6..];
+      await client.CompleteBrowserLoginAsync(attempt, new Uri(ScriptedServer.Callback + "?code=synthetic-code&state=" + state));
+      server.Add("{\"nativeLogoutData\":{\"issuer\":\"https://" + Written + "/application/\",\"endSessionEndpoint\":\"https://" + Written + "/end-session\",\"postLogoutRedirectUri\":\""
+         + ScriptedServer.Callback + "\",\"idTokenHint\":\"synthetic.id-token.hint\"}}").Add(provider);
+      Assert.NotNull(await client.SignOutWithProviderAsync(Redirect));
+
+      Assert.All(lines, line => Assert.All(line, character => Assert.InRange(character, ' ', '~')));
+      Assert.DoesNotContain(lines, line => line.Contains("synthetic.id-token.hint", StringComparison.Ordinal) || line.Contains(state, StringComparison.Ordinal));
+      string document = Shown + "application/.well-known/openid-configuration";
+      Assert.All(new[]
+      {
+         "Native browser sign-in grant accepted: issuer " + Shown + "application/, 1 redirect address(es).",
+         "Fetching the identity provider's discovery document from " + document + ".",
+         "Provider discovery: issuer " + Shown + "application/, authorization endpoint " + Shown + "authorize, S256 supported.",
+         "Browser sign-in attempt started: the authorization page is " + Shown + "authorize (query not logged); waiting for the callback, which expires after five minutes.",
+         "Fetching the identity provider's discovery document from " + document + " for its end-session endpoint.",
+         "Provider sign-out ready: the end-session page is " + Shown + "end-session (query not logged).",
+      }, expected => Assert.Contains(expected, lines, StringComparer.Ordinal));
+      Assert.Equal(2, lines.Count(line => line.StartsWith("HTTP GET " + document + ": ", StringComparison.Ordinal)));
+      Assert.Equal(2, lines.Count(line => line.StartsWith("HTTP GET " + document + " -> 200 ", StringComparison.Ordinal)));
+      Assert.Contains(lines, line => line.StartsWith("Native grant: ", StringComparison.Ordinal) && line.Contains(", issuer " + Shown + "application/, discovery " + document + ", 1 redirect address(es) ", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
    /// A browser callback arrives from outside the process. Its parameter names, the provider's error and the error
    /// description are logged in printable form. (A callback carrying control characters is refused before anything of
    /// it is logged, so the value here uses the line separator and the override, which are not control characters.)

@@ -77,6 +77,47 @@ public sealed class QqqOriginTests
 
 
    /// <summary>
+   /// The host and port of an address are shown in one form wherever a line names them. An address with an origin is
+   /// shown by that origin: a look-alike letter (a Cyrillic "o" in "login") reads as the "xn--" name the connection
+   /// is made to, letter case is folded, a default port is left out, and no user information, path, query or
+   /// fragment comes with it. An address with no origin is shown as it was written, with a line separator replaced
+   /// by a space, so it cannot end a log line. An address that names no host, the browser callback or a relative
+   /// address, is shown as nothing.
+   /// </summary>
+   [Theory]
+   [InlineData("https://l\u043Egin.example.com:9443/realms/dev?code=1#top", "xn--lgin-55d.example.com:9443")]
+   [InlineData("https://operator:secret@ID.example.invalid:443/authorize", "id.example.invalid")]
+   [InlineData("wss://dev.example.invalid/qqq/v1/qbit/printing/device/realtime", "dev.example.invalid")]
+   [InlineData("https://[::1]:8443/x", "[::1]:8443")]
+   [InlineData("https://id\u2028.example.invalid:8443/application/", "id .example.invalid:8443")]
+   [InlineData("custom://dev.example.invalid:81/x", "dev.example.invalid:81")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback", "")]
+   [InlineData("/qqq/v1/version", "")]
+   public void HostIsShownByItsAsciiNameOrPrintableAsWritten(string address, string shown)
+   {
+      Assert.Equal(shown, QqqOrigin.ShownAuthority(new Uri(address, UriKind.RelativeOrAbsolute)));
+   }
+
+
+
+   /// <summary>
+   /// A described address is its scheme, its host in the shown form and its path: the query, the fragment and any
+   /// user information are left out, and a host a server wrote with a look-alike letter reads as its "xn--" name. The
+   /// browser callback, which has no host, and a relative address are described as they always were.
+   /// </summary>
+   [Theory]
+   [InlineData("https://l\u043Egin.example.com/realms/dev/authorize?state=secret#top", "https://xn--lgin-55d.example.com/realms/dev/authorize")]
+   [InlineData("https://operator:secret@id.example.invalid:8443/end-session?id_token_hint=secret", "https://id.example.invalid:8443/end-session")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code=secret", "io.qrun.qqq-print-agent:///oauth/callback")]
+   [InlineData("/qqq/v1/version", "/qqq/v1/version")]
+   public void DescribedAddressNamesItsHostInTheShownForm(string address, string described)
+   {
+      Assert.Equal(described, QqqSessionDiagnostics.Describe(new Uri(address, UriKind.RelativeOrAbsolute)));
+   }
+
+
+
+   /// <summary>
    /// The session client holds a sign-in provider's endpoints to its issuer's origin, and every address in that
    /// comparison is text a server supplied. An address with no nameable origin is not the same origin as anything, so
    /// each of the five places it can appear is a refusal the caller can report (a configuration problem, or an

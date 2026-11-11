@@ -18,9 +18,9 @@ namespace Qqq.PrintAgent.Presentation.Tests.SignIn;
 public sealed class SignInFlowSignOutTests
 {
    /// <summary>Scripts the service to answer a sign-out with the identity provider's own sign-out attached.</summary>
-   private static SignInFixture WithProviderSignOut()
+   private static SignInFixture WithProviderSignOut(string provider = "id.example.com")
    {
-      QqqProviderLogout logout = new(new Uri("https://id.example.com/logout?id_token_hint=secret-hint"), new Uri(SignInFixture.Callback), "state-1");
+      QqqProviderLogout logout = new(new Uri("https://" + provider + "/logout?id_token_hint=secret-hint"), new Uri(SignInFixture.Callback), "state-1");
       return new SignInFixture { Service = _ => Task.FromResult(JsonSerializer.Serialize(new PipeSignOutResult("Signed out of QQQ.", logout), PrintApiClient.JsonOptions)) };
    }
 
@@ -265,6 +265,30 @@ public sealed class SignInFlowSignOutTests
       Assert.Contains("INFO Opening the identity provider's sign-out page in the default browser (id.example.com).", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Contains("INFO Identity provider sign-out callback matched.", fixture.Log.Entries, StringComparer.Ordinal);
       Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("secret-hint", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// The provider's sign-out page is at an address the server passed on from its provider. The log names its host by
+   /// the ASCII name the browser will really go to: a look-alike letter (a Cyrillic "o" in "login") reads as the
+   /// "xn--" name, the port is kept, and nothing of the path or the token hint is logged. The browser is given the
+   /// address as it arrived.
+   /// </summary>
+   [Fact]
+   public async Task ProviderSignOutPageWithALookAlikeHost_IsLoggedByItsAsciiName()
+   {
+      SignInFixture fixture = WithProviderSignOut("l\u043Egin.example.com:9443");
+
+      Task<bool> running = fixture.Flow.SignOutAsync();
+      FakeInbox inbox = Assert.Single(fixture.Inboxes);
+      Assert.Equal(new Uri("https://l\u043Egin.example.com:9443/logout?id_token_hint=secret-hint"), Assert.Single(fixture.Opened));
+      inbox.Deliver(new Uri(SignInFixture.Callback + "?state=state-1"));
+
+      Assert.True(await running);
+      Assert.Contains("INFO Opening the identity provider's sign-out page in the default browser (xn--lgin-55d.example.com:9443).", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.All(fixture.Log.Entries, entry => Assert.All(entry, character => Assert.InRange(character, ' ', '~')));
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("secret-hint", StringComparison.Ordinal) || entry.Contains("/logout", StringComparison.Ordinal));
    }
 
 

@@ -21,7 +21,8 @@ The development-only certificate exception now covers two origins at most (2.0, 
   zero-width character is not in it, and a host that has no ASCII name (one holding a line separator, for example)
   is not an origin: nothing is added to the exception for it and nothing of it is shown. A name written in Unicode
   and the same name in `xn--` form are one origin. The log line for a refused or excepted certificate names the
-  host the same way.
+  host the same way, and so does every other line that names the provider's address during sign-in and sign-out,
+  in the service's log and the companion's.
 - A refused certificate is reported with the origin that presented it and the time, so a caller can tell a refusal
   from the server from one from its sign-in provider. The management contract's certificate description takes both
   from that record and no longer accepts them from its caller.
