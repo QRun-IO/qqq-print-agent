@@ -69,10 +69,10 @@ public sealed partial class AgentStore
 
 
 
-   /// <summary>Creates the profile table on first use under this journal's schema lock, so concurrent stores of the same journal cannot race creating it.</summary>
+   /// <summary>Creates the profile table on first use under this journal's lock, so concurrent stores of the same journal cannot race creating it.</summary>
    private void EnsureMetadataTable()
    {
-      lock(SchemaLock)
+      lock(JournalDatabase.LockFor(_directory))
       {
          using SqliteCommand command = _database.CreateCommand();
          command.CommandText = "CREATE TABLE IF NOT EXISTS local_metadata(profile_key TEXT PRIMARY KEY,json TEXT NOT NULL)";

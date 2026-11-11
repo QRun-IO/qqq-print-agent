@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -20,45 +19,10 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public sealed partial class AgentStore : IJobJournal, IDisposable
 {
-   /// <summary>Selects the Windows system SQLite library once, so the agent ships no native SQLite binary of its own.</summary>
-   static AgentStore() => SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_winsqlite3());
-
-
-
    private readonly SqliteConnection _database;
    private readonly string _directory;
-   private static readonly ConcurrentDictionary<string, Lock> SchemaLocks = new(StringComparer.OrdinalIgnoreCase);
    private string _connectionScope = "unenrolled";
    private bool _configurationRecoveryRequired;
-
-
-
-   /// <summary>
-   /// The lock that serializes schema creation and migration for the journal in a folder. Every store this process opens on
-   /// that folder shares it, so two of them cannot both add a column or a table. Stores on different folders do not wait for
-   /// each other: their journals are separate files, and a single lock for the whole process made every open queue behind
-   /// every other one. The lock is found by the folder's full path without a trailing separator, compared without regard to
-   /// letter case. That covers one path written relative or absolute, in another letter case, or with a trailing separator.
-   /// It does not cover other routes to the same folder: a short (8.3) name, a junction or a substituted drive letter each
-   /// get a lock of their own.
-   /// </summary>
-   internal static Lock SchemaLockFor(string directory)
-      => SchemaLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)), static _ => new Lock());
-
-
-
-   /// <summary>The schema lock of this store's journal.</summary>
-   private Lock SchemaLock => SchemaLockFor(_directory);
-
-
-
-   /// <summary>
-   /// The connection string every store uses for the journal in a folder. SQLite keeps one pool of idle connections per
-   /// connection string, so this text also names the journal's pool; a test that must delete a journal releases that pool by
-   /// it, and no other.
-   /// </summary>
-   internal static string JournalConnectionString(string directory)
-      => new SqliteConnectionStringBuilder { DataSource = Path.Combine(Path.GetFullPath(directory), "journal.db") }.ToString();
 
 
 
@@ -66,33 +30,16 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    /// Opens (creating if needed) the journal under the protected state directory and brings its schema up to date. With
    /// recovery enabled, an unreadable saved connection no longer blocks opening: the store switches to an isolated scope so
    /// old evidence is kept but never attached to a replacement identity. On any failure the connection is closed. The
-   /// connection is opened under the journal's schema lock, which keeps two stores from being handed one database connection.
+   /// connection is opened under the journal's lock, which keeps two stores from being handed one database connection.
    /// </summary>
    public AgentStore(string directory, bool recoverUnreadableConfiguration = false)
    {
       _directory = Path.GetFullPath(directory);
       Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(_directory);
       Directory.CreateDirectory(_directory);
-      _database = new SqliteConnection(JournalConnectionString(_directory));
+      _database = JournalDatabase.Open(_directory);
       try
       {
-         /////////////////////////////////////////////////////////////////////
-         // Open must stay inside this lock. Microsoft.Data.Sqlite 10.0.0   //
-         // takes a pooled connection and only afterwards, outside the      //
-         // pool's own lock, records which SqliteConnection owns it. When   //
-         // another thread opens the same journal in that gap and finds     //
-         // the pool empty, the pool takes the first connection for         //
-         // abandoned and hands it to the second thread as well. Both       //
-         // stores then share one native handle: one store's transaction    //
-         // can swallow or roll back the other's writes. Every open of one  //
-         // journal goes through this constructor, and the lock is at       //
-         // least as wide as the pool, so with Open inside it no opener     //
-         // can be in that gap while another asks the pool.                 //
-         /////////////////////////////////////////////////////////////////////
-         lock(SchemaLock)
-         {
-            _database.Open();
-         }
          InitializeDatabase(recoverUnreadableConfiguration);
       }
       catch
@@ -105,13 +52,13 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
 
    /// <summary>
-   /// Creates or migrates the schema under this journal's schema lock: events, exposure, per-job summaries, and the added
+   /// Creates or migrates the schema under this journal's lock: events, exposure, per-job summaries, and the added
    /// timestamp and scope columns, with legacy rows assigned to the current scope. Job summaries are rebuilt from the latest
    /// event only the first time that table appears. The migration runs in a transaction so a failure leaves the old schema usable.
    /// </summary>
    private void InitializeDatabase(bool recoverUnreadableConfiguration)
    {
-      lock(SchemaLock)
+      lock(JournalDatabase.LockFor(_directory))
       {
          using SqliteCommand command = _database.CreateCommand();
          command.CommandText = "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, json TEXT NOT NULL, acknowledged INTEGER NOT NULL DEFAULT 0);";

@@ -6,7 +6,6 @@
 // The store's type under the name tests use for it. Every test declares a store as JournalStore, so when the product type
 // is renamed, this line and OpenStore below change and no test does.
 global using JournalStore = Qqq.PrintAgent.Windows.AgentStore;
-using System.Runtime.CompilerServices;
 using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Windows;
 
@@ -34,16 +33,9 @@ internal static class TestState
    /// a question the store has no call for. The connection is not pooled. A pooled one would share the pool of the stores on
    /// that journal without taking the journal's lock as they do, and the SQLite library can then hand one connection to two
    /// openers (see "Testing the service runtime" in docs/DEVELOPMENT.md). Unpooled, it has a native handle no store can be
-   /// given, and closing it releases the file at once. The store's type is initialized first because that is what selects
-   /// the SQLite library, which a test that opens a journal before any store would otherwise find missing.
+   /// given, and closing it releases the file at once.
    /// </summary>
-   internal static SqliteConnection OpenJournal(string directory)
-   {
-      RuntimeHelpers.RunClassConstructor(typeof(AgentStore).TypeHandle);
-      SqliteConnection journal = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "journal.db"), Pooling = false }.ToString());
-      journal.Open();
-      return journal;
-   }
+   internal static SqliteConnection OpenJournal(string directory) => JournalDatabase.OpenUnpooled(directory);
 
 
 
@@ -51,10 +43,10 @@ internal static class TestState
    /// The connection string the stores use for the journal in a folder. It names the journal's pool of idle connections, which
    /// is how <see cref="JournalFiles"/> empties that pool and no other before a folder is deleted.
    /// </summary>
-   internal static string JournalConnectionString(string directory) => AgentStore.JournalConnectionString(directory);
+   internal static string JournalConnectionString(string directory) => JournalDatabase.ConnectionString(directory);
 
 
 
    /// <summary>The lock every store takes while it opens the journal in a folder, for the tests that hold it to show what an open waits for.</summary>
-   internal static Lock SchemaLockFor(string directory) => AgentStore.SchemaLockFor(directory);
+   internal static Lock SchemaLockFor(string directory) => JournalDatabase.LockFor(directory);
 }
