@@ -376,6 +376,70 @@ public sealed class ShellPollingTests
 
 
 
+   /// <summary>
+   /// A snapshot after a change is never one that was already on its way, whoever sent that one. Something other
+   /// than the shell, as the wizard will, has a snapshot in flight when a page asks for a read after its change:
+   /// the shell is not handed that answer. The client waits it out and sends another, and that one is shown.
+   /// </summary>
+   [Fact]
+   public async Task RefreshAfterChange_WhileAnotherCallersSnapshotIsInFlight_IsNotHandedThatOne()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1, "Warehouse"));
+      TaskCompletionSource<ManagementReplyParse> sentEarlier = fixture.Pipe.Hold();
+      TaskCompletionSource<ManagementReplyParse> sentAfter = fixture.Pipe.Hold();
+      Task<ServiceResult<ServiceSnapshot>> another = fixture.Client.SnapshotAsync();
+
+      Task afterChange = fixture.Shell.RefreshAfterChangeAsync();
+
+      Assert.Equal("snapshot snapshot", Operations(fixture));
+      sentEarlier.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Sent before the call"))));
+      await another;
+      await fixture.Pipe.Arrived(3);
+      Assert.False(afterChange.IsCompleted);
+      Assert.Equal("Warehouse", fixture.ServerNames);
+
+      sentAfter.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse east"))));
+      await afterChange;
+
+      Assert.Equal("Warehouse east", fixture.ServerNames);
+      Assert.Equal("snapshot snapshot snapshot", Operations(fixture));
+   }
+
+
+
+   /// <summary>
+   /// A read after a change is never skipped. With as many requests in flight as the client allows itself, where a
+   /// tick's read is skipped, it waits its turn: nothing is sent and nothing is shown until a place is free, and
+   /// then the snapshot is read and shown.
+   /// </summary>
+   [Fact]
+   public async Task RefreshAfterChange_AtTheClientsCeiling_WaitsItsTurn_IsNotSkipped()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1, "Warehouse"));
+      fixture.Pipe.HoldEverything();
+      Task[] inFlight = [.. Enumerable.Range(0, ManagementClient.MaximumRequestsInFlight).Select(index => fixture.Client.AcknowledgeJobAsync(Snapshots.Id(1), "job-" + index))];
+      int sent = fixture.Pipe.Sent.Count;
+
+      Task afterChange = fixture.Shell.RefreshAfterChangeAsync();
+
+      Assert.False(afterChange.IsCompleted);
+      Assert.Equal(sent, fixture.Pipe.Sent.Count);
+
+      fixture.Pipe.Held[0].SetResult(Replies.Failure(ManagementErrorCode.InternalError));
+      await inFlight[0];
+      await fixture.Pipe.Arrived(sent + 1);
+      Assert.Equal("snapshot", fixture.Pipe.Sent[^1].Op);
+      fixture.Pipe.Held[^1].SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse east"))));
+      await afterChange;
+
+      Assert.Equal("Warehouse east", fixture.ServerNames);
+      Assert.Equal(sent + 1, fixture.Pipe.Sent.Count);
+   }
+
+
+
    /// <summary>With no read in flight the snapshot after a change is asked for at once; while it is in flight a tick starts nothing and is handed it; a shell that was disposed reads nothing, and neither does a call made while a snapshot is being shown that was answered before the tick's own call returned, as only a scripted pipe answers.</summary>
    [Fact]
    public async Task RefreshAfterChange_WithNoReadInFlight_ReadsAtOnce()

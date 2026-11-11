@@ -70,9 +70,10 @@ public sealed partial class ShellViewModel
    /// server that changed since it was asked for is not shown), and only then is a new read made. Several callers
    /// that wait behind the same read share the one read that follows it: that read is sent after each of their
    /// calls, so it is newer than every one of them. This holds for a call made from a handler of
-   /// <see cref="SnapshotApplied"/> too: the read being shown is waited for and a new one follows. The one case in
-   /// which nothing is started is a call made while a read is being shown that was answered before the call that
-   /// started it returned, which a pipe does not do; the next tick then brings the snapshot.
+   /// <see cref="SnapshotApplied"/> too: the read being shown is waited for and a new one follows. The new read is
+   /// never skipped: when the client has as many requests in flight as it allows itself, it waits its turn. The one
+   /// case in which nothing is started is a call made while a read is being shown that was answered before the call
+   /// that started it returned, which a pipe does not do; the next tick then brings the snapshot.
    /// </summary>
    public Task RefreshAfterChangeAsync()
    {
@@ -162,15 +163,11 @@ public sealed partial class ShellViewModel
 
    /// <summary>
    /// Asks the client for a snapshot whose request is sent after this call is made, never one that was already in
-   /// flight. The client gets exactly that in the fix round of its review, as
-   /// <c>SnapshotAsync(sentAfterTheCall: true)</c>, which waits its turn and is never skipped. This branch stands on
-   /// the client as it was before that round, so today this is the read the timer makes, and what makes it newer
-   /// than the call is that <see cref="RefreshAfterChangeAsync"/> has first waited for the shell's own read in
-   /// flight to end. Today it can therefore still be skipped when the client has too many requests in flight, and
-   /// the next tick then shows the change. When this branch is rebased onto the client's fix round, the body of
-   /// this method becomes <c>_client.SnapshotAsync(sentAfterTheCall: true)</c> and nothing else changes.
+   /// flight, whoever sent that one: the client waits out a snapshot that is in the air, the wizard's included, and
+   /// then sends another. At the client's ceiling the request waits its turn and is not skipped, so a read after a
+   /// change always ends with an answer from the service or with the reason there is none.
    /// </summary>
-   private Task<ServiceResult<ServiceSnapshot>> SnapshotSentAfterTheCallAsync() => _client.SnapshotAsync();
+   private Task<ServiceResult<ServiceSnapshot>> SnapshotSentAfterTheCallAsync() => _client.SnapshotAsync(sentAfterTheCall: true);
 
 
 
