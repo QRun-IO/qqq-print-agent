@@ -41,6 +41,48 @@ public sealed class PrintingSupportTests
 
 
 
+   /// <summary>
+   /// The list without media and the lookup of one printer let through exactly what the full discovery does: a printer
+   /// that is shared and has a usable format. The list carries no media profiles; the lookup carries the printer's own.
+   /// A shared printer without a format, and a shared identifier no printer has, read as absent. A printer that is not
+   /// shared reads as absent without the inner backend being asked about it at all. The shared set is read afresh each
+   /// time, and each read asks the inner backend by that read and no other.
+   /// </summary>
+   [Fact]
+   public void ExposureFilterAppliesItsOneRuleToTheListAndTheLookup()
+   {
+      var inner = new FakePrinterBackend();
+      PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
+      inner.Printers[0] = inner.Printers[0] with { MediaProfiles = [profile] };
+      inner.Printers.Add(new PrinterInfo("no-formats", "Print to file", "Driver", "FILE:", "READY", []));
+      inner.Printers.Add(new PrinterInfo("unshared", "Back office", "Driver", "USB002", "READY", ["PDF"]));
+      var shared = new HashSet<string>(StringComparer.Ordinal) { "printer1", "no-formats", "not-installed" };
+      var backend = new ExposedPrinterBackend(inner, () => shared);
+
+      PrinterInfo listed = Assert.Single(backend.ListWithoutMedia());
+      Assert.Equal("printer1", listed.PrinterId);
+      Assert.Null(listed.MediaProfiles);
+      Assert.Equal((0, 1), (inner.Discoveries, inner.Listings));
+      Assert.Empty(inner.Lookups);
+
+      PrinterInfo found = Assert.IsType<PrinterInfo>(backend.FindWithMedia("printer1"));
+      Assert.Equal("printer1", found.PrinterId);
+      Assert.Equal(profile, Assert.Single(found.MediaProfiles!));
+      Assert.Null(backend.FindWithMedia("no-formats"));
+      Assert.Null(backend.FindWithMedia("not-installed"));
+      Assert.Equal(["printer1", "no-formats", "not-installed"], inner.Lookups, StringComparer.Ordinal);
+      Assert.Null(backend.FindWithMedia("unshared"));
+      Assert.Equal(3, inner.Lookups.Count);
+
+      shared.Clear();
+      Assert.Empty(backend.ListWithoutMedia());
+      Assert.Null(backend.FindWithMedia("printer1"));
+      Assert.Equal(3, inner.Lookups.Count);
+      Assert.Equal((0, 2), (inner.Discoveries, inner.Listings));
+   }
+
+
+
    /// <summary>A job is submitted only while its printer is still shared: the check is made again at submission, the staged file and its submission limit reach the inner backend unchanged, and a refusal never reaches it. The refusal has its own type and says that nothing was submitted, because it is made before the inner backend is called.</summary>
    [Fact]
    public async Task ExposureFilterRechecksSharingAtSubmission()

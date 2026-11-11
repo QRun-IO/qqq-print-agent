@@ -35,9 +35,9 @@ public sealed class PrintWorkerTests
       await using var harness = new WorkerHarness();
       FakePrinterBackend printer = harness.Printer;
       printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile] };
-      printer.Discovering = () =>
+      printer.Finding = _ =>
       {
-         if(discoveryDrift && printer.Discoveries > 1)
+         if(discoveryDrift)
          { printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile with { Revision = new string('b', 64) }] }; }
       };
       if(nativeDrift)
