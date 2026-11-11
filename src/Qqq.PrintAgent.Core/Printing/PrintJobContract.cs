@@ -45,7 +45,11 @@ internal static class PrintJobContract
    /// usable identifier the failure carries a stand-in for it, so the worker can answer for the job instead of being
    /// offered it again forever; only a response that names no job the agent can answer for throws without one. A job
    /// nested deeper than <see cref="ProtocolJson.ReaderDepth"/> is such an identified failure; a response nested
-   /// deeper than <see cref="ProtocolJson.ParseDepth"/> is not JSON to the parser and names nothing.
+   /// deeper than <see cref="ProtocolJson.ParseDepth"/> is not JSON to the parser and names nothing. Text the JSON
+   /// library cannot read (an unpaired surrogate escape, bytes that are not UTF-8) breaks the contract like any other
+   /// fault, and never stops the job from being identified: in a member name beside the job or where the agent reads
+   /// the job's members, and in a text member the agent reads, where the stand-in then leaves that member empty. A
+   /// response that offers no job is not looked through for such names; there is nothing in it to refuse.
    /// </summary>
    internal static PrintJob? ReadClaim(ReadOnlyMemory<byte> body)
    {
@@ -64,6 +68,8 @@ internal static class PrintJobContract
       // them, so every refusal below can name the job it is about           //
       /////////////////////////////////////////////////////////////////////////
       PrintJob? named = StandIn(Text(element, "jobId"), Text(element, "printerId"), Text(element, "title"), Text(element, "format"), Text(element, "createdAt"));
+      if(ProtocolJson.HasUnreadableName(document.RootElement) || HasUnreadableName(element))
+      { throw Violation("The claim has a member name that is not readable text.", named); }
       if(ProtocolJson.NestsDeeperThan(element, ProtocolJson.ReaderDepth - 1))
       { throw Violation("The claimed job is nested deeper than the agent reads.", named); }
       if(RepeatsReadMember(element))
@@ -126,6 +132,24 @@ internal static class PrintJobContract
       { return false; }
       return ProtocolJson.RepeatsMember(options, OptionMembers)
          || (ProtocolJson.Members(options, "mediaProfile") is [{ ValueKind: JsonValueKind.Object } media] && ProtocolJson.RepeatsMember(media, MediaMembers));
+   }
+
+
+
+   /// <summary>
+   /// True when a claimed job has a member whose name is not readable text where the agent reads members: in the job
+   /// itself, in its options or in its media selection. The JSON library skips some such names and fails on others,
+   /// so without this check whether the job printed would depend on how the name was spelled. Names deeper inside a
+   /// field the agent does not read are not looked at, like everything else in such a field.
+   /// </summary>
+   private static bool HasUnreadableName(JsonElement job)
+   {
+      if(ProtocolJson.HasUnreadableName(job))
+      { return true; }
+      if(ProtocolJson.Members(job, "options") is not [{ ValueKind: JsonValueKind.Object } options])
+      { return false; }
+      return ProtocolJson.HasUnreadableName(options)
+         || (ProtocolJson.Members(options, "mediaProfile") is [{ ValueKind: JsonValueKind.Object } media] && ProtocolJson.HasUnreadableName(media));
    }
 
 
@@ -214,9 +238,9 @@ internal static class PrintJobContract
 
 
 
-   /// <summary>Reads the text member the contract names, or null when it is missing, not text, or given more than once so that it is not clear which value is meant.</summary>
+   /// <summary>Reads the text member the contract names, or null when it is missing, not text, not readable text, or given more than once so that it is not clear which value is meant.</summary>
    private static string? Text(JsonElement element, string name)
-      => ProtocolJson.Members(element, name) is [{ ValueKind: JsonValueKind.String } member] ? member.GetString() : null;
+      => ProtocolJson.Members(element, name) is [{ ValueKind: JsonValueKind.String } member] ? ProtocolJson.Text(member) : null;
 
 
 

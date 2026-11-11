@@ -74,16 +74,20 @@ relays a submitter's options unchanged. The response itself is parsed to 1,024
 levels, so that a job nested too deep to read can still be identified.
 
 - **Malformed job.** A job that breaks the contract (a missing or unusable
-  member, a member the client reads given twice in any letter case, or nesting
-  deeper than 64 levels) but still names itself with one usable job identifier
-  is refused, not skipped. The worker records RECEIVED and then FAILED with the
-  reason and "No bytes were submitted", delivers both events, never downloads
-  or submits the document, and the lane goes on to the next job. A malformed
-  replay of a job the journal already knows, in any state, changes nothing and
-  is logged.
+  member, a member the client reads given twice in any letter case, nesting
+  deeper than 64 levels, or text that cannot be read) but still names itself
+  with one usable job identifier is refused, not skipped. The worker records
+  RECEIVED and then FAILED with the reason and "No bytes were submitted",
+  delivers both events, never downloads or submits the document, and the lane
+  goes on to the next job. A malformed replay of a job the journal already
+  knows, in any state, changes nothing and is logged. Text that cannot be read
+  is a surrogate escape without its partner or bytes that are not UTF-8, both
+  of which the JSON parser accepts. It is refused in a text member the client
+  reads and in a member name beside the job, in the job, in its options or in
+  its media selection; inside a field the client does not read it is ignored.
 - **Claim that cannot be identified.** A claim response that names no single
-  job (not JSON, no usable identifier, the identifier given twice) cannot be
-  answered for: the lane stops with an error, the next wake-up claims again,
+  job (not JSON, no usable identifier, the identifier not readable text or
+  given twice) cannot be answered for: the lane stops with an error, the next wake-up claims again,
   and the server offers the same job until it is cancelled there. The one such
   response a submitter could in principle cause is a job nested deeper than the
   1,024 levels the response is parsed to. That depth is derived from the

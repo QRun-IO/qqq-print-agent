@@ -108,14 +108,15 @@ internal static class ProtocolJson
    /// <summary>
    /// True when the object spells one of the given member names more than once. Names are compared ignoring case because
    /// that is how the deserializer matches them: "copies" and "Copies" are the same member to it, so a job carrying
-   /// both could print a different number of copies than the server meant. A name outside the list may repeat freely.
+   /// both could print a different number of copies than the server meant. A name outside the list may repeat freely,
+   /// and so may a name that is not readable text, which is none of the listed ones.
    /// </summary>
    internal static bool RepeatsMember(JsonElement value, IReadOnlyList<string> names)
    {
       var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
       foreach(JsonProperty property in value.EnumerateObject())
       {
-         if(names.Contains(property.Name, StringComparer.OrdinalIgnoreCase) && !seen.Add(property.Name))
+         if(Name(property) is { } name && names.Contains(name, StringComparer.OrdinalIgnoreCase) && !seen.Add(name))
          { return true; }
       }
       return false;
@@ -127,14 +128,61 @@ internal static class ProtocolJson
    /// Finds the candidates for the member the contract names: every member spelled exactly as the contract spells it,
    /// because that is the one the server itself reads, or, when there is none, every member that matches ignoring
    /// case, as the deserializer would take it. One candidate is the member, none means it is absent, and more than one
-   /// means the message does not say which value it means.
+   /// means the message does not say which value it means. A member whose name is not readable text is never a
+   /// candidate, and never stops the others from being found.
    /// </summary>
    internal static JsonElement[] Members(JsonElement value, string name)
    {
-      JsonElement[] exact = [.. value.EnumerateObject().Where(property => property.NameEquals(name)).Select(property => property.Value)];
+      JsonElement[] exact = [.. value.EnumerateObject().Where(property => IsNamed(property, name)).Select(property => property.Value)];
       return exact.Length != 0
          ? exact
-         : [.. value.EnumerateObject().Where(property => string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)).Select(property => property.Value)];
+         : [.. value.EnumerateObject().Where(property => string.Equals(Name(property), name, StringComparison.OrdinalIgnoreCase)).Select(property => property.Value)];
+   }
+
+
+
+   /// <summary>True when the object has a member whose name is not readable text, as <see cref="Name"/> judges it.</summary>
+   internal static bool HasUnreadableName(JsonElement value) => value.EnumerateObject().Any(property => Name(property) is null);
+
+
+
+   /// <summary>
+   /// The member's name, or null when it is not readable text. The parser accepts as valid JSON a name it cannot turn
+   /// into text: one with a surrogate escape that has no partner (a lone <c>\ud800</c> or <c>\udc00</c>, or the two
+   /// the wrong way round) or with bytes that are not UTF-8. Asking for such a name throws, and not as a JSON failure.
+   /// The readers of a job ask here instead, because a job must be read far enough to learn which job it is before
+   /// it can be refused. The judgement is the JSON library's own; nothing here decides what readable means. A thrown
+   /// exception is the only way the library gives it, so each such name costs one each time it is asked for; the
+   /// 2 MiB limit on a response bounds how many there can be.
+   /// </summary>
+   internal static string? Name(JsonProperty property)
+   {
+      try
+      { return property.Name; }
+      catch(InvalidOperationException)
+      { return null; }
+   }
+
+
+
+   /// <summary>The text of a JSON string, or null when it is not readable text, as <see cref="Name"/> describes. The caller has checked that the value is a string.</summary>
+   internal static string? Text(JsonElement value)
+   {
+      try
+      { return value.GetString(); }
+      catch(InvalidOperationException)
+      { return null; }
+   }
+
+
+
+   /// <summary>True when the member is spelled exactly as given. A name that is not readable text is spelled as nothing.</summary>
+   private static bool IsNamed(JsonProperty property, string name)
+   {
+      try
+      { return property.NameEquals(name); }
+      catch(InvalidOperationException)
+      { return false; }
    }
 
 
