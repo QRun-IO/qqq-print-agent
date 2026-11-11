@@ -449,6 +449,47 @@ public sealed class JournalMigrationTests
 
 
    /// <summary>
+   /// The state folder's name can hold characters that mean something in the address SQLite is given for the read-only
+   /// version read: a space, a number sign, a percent sign, a name that looks like an escape already, and letters outside
+   /// ASCII, alone and together. For each such folder the journal is migrated, and the second call then has to read the
+   /// version of that same journal: it finds it migrated, runs no step and leaves no file beside the journal. A journal a
+   /// newer build stamped is recognized through the same read. The third name is the one that used to fail: a literal
+   /// percent-escape beside a letter outside ASCII was passed on unescaped, and SQLite looked for another folder.
+   /// </summary>
+   [Fact]
+   public void Migrate_FolderNameWithReservedCharacters_VersionIsStillRead()
+   {
+      string root = NewFolder();
+      try
+      {
+         foreach(string name in (string[])["a b", "a#b", "c%20d é", "a b#c%20d é", "100%", "x%2523y", "é ü", "+&=;,'"])
+         {
+            string directory = Path.Combine(root, name);
+            Assert.IsType<StateStatus.Ready>(TestState.Migrate(directory));
+            int runs = 0;
+            IReadOnlyList<Action<JournalMigrationContext>> counting = [context =>
+            {
+               runs++;
+               TestState.MigrationSteps[0](context);
+            }];
+
+            Assert.IsType<StateStatus.Ready>(TestState.Migrate(directory, counting));
+
+            Assert.Equal((name, 0), (name, runs));
+            Assert.Equal(["journal.db"], JournalProbe.FileHashes(directory).Keys, StringComparer.Ordinal);
+            _ = new LegacyStateBuilder(directory).WithJournalSql("PRAGMA user_version=5");
+            Assert.Equal(new StateStatus.NewerBuild(FoundVersion: 5, SupportedVersion: 1), TestState.Migrate(directory, counting));
+         }
+      }
+      finally
+      {
+         JournalFiles.Delete(root);
+      }
+   }
+
+
+
+   /// <summary>
    /// Two callers migrate one journal at the same moment and the step runs once. The first caller's step signals that it
    /// has started and then waits to be released, while it holds the journal's lock and its open transaction. The second
    /// caller is started only then, and is seen to block: the only thing it can be waiting for is that lock. It has not

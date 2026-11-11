@@ -153,7 +153,19 @@ internal static class JournalDatabase
    private static string ReadOnlyConnectionString(string path)
    {
       FileInfo log = new(path + "-wal");
-      string source = log.Exists && log.Length > 0 ? path : new Uri(path).AbsoluteUri + "?immutable=1";
+      string source = log.Exists && log.Length > 0 ? path : ImmutableAddress(path);
       return new SqliteConnectionStringBuilder { DataSource = source, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString();
    }
+
+
+
+   /// <summary>
+   /// The address by which SQLite opens a journal file as immutable: the file's full path as a <c>file:</c> URI with the
+   /// <c>immutable</c> parameter, which only a URI can carry. Each part of the path is escaped by itself, so every
+   /// character of a folder name reaches SQLite as the character it is. A name may hold a percent sign, a number sign,
+   /// a space or a letter outside ASCII, and a name that already looks escaped (<c>c%20d</c>) is escaped again, not taken
+   /// for an escape. The drive's colon is escaped with the rest; SQLite reads the escaped form as the same path.
+   /// </summary>
+   private static string ImmutableAddress(string path)
+      => "file:///" + string.Join('/', path.Split(Path.DirectorySeparatorChar).Select(Uri.EscapeDataString)) + "?immutable=1";
 }
