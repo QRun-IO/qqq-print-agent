@@ -124,8 +124,12 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>Raised after a snapshot was read and everything here follows it, so a page can take what it shows from <see cref="Snapshot"/>.</summary>
-   public event EventHandler? SnapshotApplied;
+   /// <summary>
+   /// Raised after a snapshot was read and everything here follows it, so a page can take what it shows from
+   /// <see cref="Snapshot"/>. It says which servers' entries were held back because the server was changed from this
+   /// window after the snapshot was asked for; a page leaves what it shows of such a server as it is.
+   /// </summary>
+   public event EventHandler<SnapshotAppliedEventArgs>? SnapshotApplied;
 
 
 
@@ -168,7 +172,12 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>The snapshot the window shows: the last one read, except that a server changed from this window since it was asked for keeps what the window had. Null until one was read.</summary>
+   /// <summary>
+   /// The snapshot the window shows: the last one read, except that a server changed from this window since that
+   /// snapshot was asked for keeps the entry the window had, which is the one from before the change (the same
+   /// object as before), until a snapshot asked for after the change arrives. <see cref="SnapshotApplied"/> names
+   /// those servers. Null until one was read.
+   /// </summary>
    public ServiceSnapshot? Snapshot
    {
       get => _snapshot;

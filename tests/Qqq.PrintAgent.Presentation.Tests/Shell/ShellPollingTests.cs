@@ -248,7 +248,135 @@ public sealed class ShellPollingTests
 
 
 
-   /// <summary>With no read in flight the snapshot after a change is asked for at once; while it is in flight a tick starts nothing and is handed it; a shell that was disposed, and a call made while a snapshot is being shown, read nothing.</summary>
+   /// <summary>
+   /// Several pages ask for a snapshot after a change while one read is in flight. They share the one read that
+   /// follows it, which is sent after each of their calls, so one further request is sent and not one for each of
+   /// them. A page that asks once that read has been sent needs a later one, and gets its own. The shell is used
+   /// on one thread here, as a window uses it, so the order of what happens is the order the window would see.
+   /// </summary>
+   [Fact]
+   public void RefreshAfterChange_SeveralWaitersBehindOneRead_ShareTheOneThatFollows()
+   {
+      using PumpContext context = new();
+      context.Run(async () =>
+      {
+         using ShellFixture fixture = new();
+         await fixture.Tick(Snapshots.Server(1, "Warehouse"));
+         TaskCompletionSource<ManagementReplyParse> sentEarlier = fixture.Pipe.Hold();
+         TaskCompletionSource<ManagementReplyParse> sentAfter = fixture.Pipe.Hold();
+         TaskCompletionSource<ManagementReplyParse> sentLast = fixture.Pipe.Hold();
+         Task tick = fixture.Shell.RefreshAsync();
+
+         Task first = fixture.Shell.RefreshAfterChangeAsync();
+         Task second = fixture.Shell.RefreshAfterChangeAsync();
+         Task third = fixture.Shell.RefreshAfterChangeAsync();
+         sentEarlier.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse"))));
+         await tick;
+
+         Assert.Equal("snapshot snapshot snapshot", Operations(fixture));
+         Assert.False(first.IsCompleted || second.IsCompleted || third.IsCompleted);
+
+         Task later = fixture.Shell.RefreshAfterChangeAsync();
+         sentAfter.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse east"))));
+         await first;
+
+         Assert.True(second.IsCompleted && third.IsCompleted);
+         Assert.Equal("Warehouse east", fixture.ServerNames);
+         await fixture.Pipe.Arrived(4);
+         Assert.Equal("snapshot snapshot snapshot snapshot", Operations(fixture));
+         Assert.False(later.IsCompleted);
+
+         sentLast.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse north"))));
+         await later;
+
+         Assert.Equal("Warehouse north", fixture.ServerNames);
+         Assert.Equal("snapshot snapshot snapshot snapshot", Operations(fixture));
+      });
+   }
+
+
+
+   /// <summary>A page that asks for a snapshot after a change from inside the shell's own telling that a snapshot was shown is not told "nothing": the read being shown is waited for, and a new one follows it.</summary>
+   [Fact]
+   public void RefreshAfterChange_AskedForWhileASnapshotIsBeingShown_ReadsAgainAfterIt()
+   {
+      using PumpContext context = new();
+      context.Run(async () =>
+      {
+         using ShellFixture fixture = new();
+         TaskCompletionSource<ManagementReplyParse> shown = fixture.Pipe.Hold();
+         fixture.Pipe.Answer(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse east"))));
+         List<Task> asked = [];
+         fixture.Shell.SnapshotApplied += (_, _) =>
+         {
+            if(asked.Count == 0)
+            {
+               asked.Add(fixture.Shell.RefreshAfterChangeAsync());
+            }
+         };
+         Task tick = fixture.Shell.RefreshAsync();
+
+         shown.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse"))));
+         await tick;
+         Assert.False(Assert.Single(asked).IsCompleted);
+         await asked[0];
+
+         Assert.Equal("snapshot snapshot", Operations(fixture));
+         Assert.Equal("Warehouse east", fixture.ServerNames);
+      });
+   }
+
+
+
+   /// <summary>
+   /// A page is told, with each snapshot that is shown, which servers' entries were held back because the server
+   /// was changed from this window after the snapshot was asked for, and whether the computer's part and the order
+   /// were. The entry the window keeps for such a server is the one from before the change, the same object. A
+   /// snapshot that was asked for after the change holds nothing back, and neither does a read that brought none.
+   /// </summary>
+   [Fact]
+   public void Snapshot_Applied_SaysWhichServersWereHeldBack()
+   {
+      using PumpContext context = new();
+      context.Run(async () =>
+      {
+         using ShellFixture fixture = new();
+         List<string> heldBack = [];
+         fixture.Shell.SnapshotApplied += (_, applied) => heldBack.Add(string.Join(',', applied.HeldBack));
+         await fixture.Tick(Snapshots.Server(1, "Warehouse"), Snapshots.Server(2, "Bench"));
+         ServerSnapshot before = fixture.Shell.Snapshot!.Servers[0];
+         TaskCompletionSource<ManagementReplyParse> held = fixture.Pipe.Hold();
+         Task tick = fixture.Shell.RefreshAsync();
+         Assert.True(fixture.Shell.TryBeginCommand(Snapshots.Id(1), "Renaming Warehouse.", out IDisposable? rename));
+         rename.Dispose();
+         Assert.True(fixture.Shell.TryBeginCommand(OperationGate.Computer, "Moving Warehouse down.", out IDisposable? reorder));
+         reorder.Dispose();
+
+         held.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(2, "Bench east"), Snapshots.Server(1, "Stale name"))));
+         await tick;
+
+         Assert.Equal(["", Snapshots.Id(1) + "," + OperationGate.Computer], heldBack);
+         Assert.Same(before, fixture.Shell.Snapshot!.Servers[0]);
+         Assert.Equal("Warehouse,Bench east", fixture.ServerNames);
+
+         held = fixture.Pipe.Hold();
+         tick = fixture.Shell.RefreshAsync();
+         Assert.True(fixture.Shell.TryBeginCommand(Snapshots.Id(2), "Renaming Bench.", out rename));
+         rename.Dispose();
+         held.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse east"), Snapshots.Server(2, "Stale name"))));
+         await tick;
+         await fixture.Tick(Snapshots.Server(1, "Warehouse east"), Snapshots.Server(2, "Bench north"));
+         await fixture.TickFailing(new IOException("The pipe is broken."));
+
+         Assert.Equal(["", Snapshots.Id(1) + "," + OperationGate.Computer, Snapshots.Id(2), "", ""], heldBack);
+         Assert.Equal("Warehouse east,Bench north", fixture.ServerNames);
+         Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("another thread", StringComparison.Ordinal));
+      });
+   }
+
+
+
+   /// <summary>With no read in flight the snapshot after a change is asked for at once; while it is in flight a tick starts nothing and is handed it; a shell that was disposed reads nothing, and neither does a call made while a snapshot is being shown that was answered before the tick's own call returned, as only a scripted pipe answers.</summary>
    [Fact]
    public async Task RefreshAfterChange_WithNoReadInFlight_ReadsAtOnce()
    {

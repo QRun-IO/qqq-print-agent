@@ -31,13 +31,16 @@ internal static class SnapshotMerge
    /// The snapshot to show: the new one, with the entry the window has kept for every server (and for the computer)
    /// that <paramref name="changedSince"/> says has been changed locally since the new one was asked for. A server
    /// that changed and is missing from the new list stays, at the place it had; when the computer changed, the
-   /// servers stay in the order the window has, with any new ones after them.
+   /// servers stay in the order the window has, with any new ones after them. <paramref name="heldBack"/> names
+   /// what was kept in place of the new snapshot's: the identifier of every server whose entry is the one the
+   /// window had, and <see cref="OperationGate.Computer"/> when the computer's part and the order are.
    /// </summary>
-   internal static ServiceSnapshot Apply(ServiceSnapshot? previous, ServiceSnapshot fresh, Func<string, bool> changedSince)
+   internal static ServiceSnapshot Apply(ServiceSnapshot? previous, ServiceSnapshot fresh, Func<string, bool> changedSince, out IReadOnlyList<string> heldBack)
    {
       IReadOnlyList<ServerSnapshot> usable = Usable(fresh.Servers);
       if(previous is null)
       {
+         heldBack = [];
          return new ServiceSnapshot(fresh.Computer, usable);
       }
       List<ServerSnapshot> merged = [.. usable.Select(server => changedSince(server.ServerId) && Find(previous, server.ServerId) is { } kept ? kept : server)];
@@ -49,10 +52,13 @@ internal static class SnapshotMerge
             merged.Insert(Math.Min(index, merged.Count), before);
          }
       }
+      List<string> kept = [.. merged.Where(server => ReferenceEquals(server, Find(previous, server.ServerId))).Select(server => server.ServerId)];
+      heldBack = kept;
       if(!changedSince(OperationGate.Computer))
       {
          return new ServiceSnapshot(fresh.Computer, merged);
       }
+      kept.Add(OperationGate.Computer);
       return new ServiceSnapshot(previous.Computer, [.. merged.OrderBy(server => Place(previous, server.ServerId))]);
    }
 

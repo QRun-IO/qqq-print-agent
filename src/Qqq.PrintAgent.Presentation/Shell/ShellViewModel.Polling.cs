@@ -25,6 +25,9 @@ public sealed partial class ShellViewModel
    /// <summary>The snapshot read that was started last; null before the first.</summary>
    private Task? _refresh;
 
+   /// <summary>A read after a change that is waiting for the read in flight to end and has not been sent yet; null when none is. Everyone who asks for a read after a change meanwhile shares it.</summary>
+   private Task? _afterChange;
+
    /// <summary>The transport read that was started last; null before the first.</summary>
    private Task? _transportRefresh;
 
@@ -61,14 +64,45 @@ public sealed partial class ShellViewModel
    /// Reads a snapshot that is newer than this call and shows it. A page calls this when a command of its own has
    /// ended, so the window shows what the service says after the change and not what a read that was already on
    /// its way says. A read the shell has in flight was sent before the call: it is waited for (what it says about a
-   /// server that changed since it was asked for is not shown), and only then is a new read made. Called while a
-   /// snapshot is being shown, it starts nothing, as <see cref="RefreshAsync"/> does.
+   /// server that changed since it was asked for is not shown), and only then is a new read made. Several callers
+   /// that wait behind the same read share the one read that follows it: that read is sent after each of their
+   /// calls, so it is newer than every one of them. This holds for a call made from a handler of
+   /// <see cref="SnapshotApplied"/> too: the read being shown is waited for and a new one follows. The one case in
+   /// which nothing is started is a call made while a read is being shown that was answered before the call that
+   /// started it returned, which a pipe does not do; the next tick then brings the snapshot.
    /// </summary>
-   public async Task RefreshAfterChangeAsync()
+   public Task RefreshAfterChangeAsync()
    {
-      while(_refreshing && _refresh is { IsCompleted: false } sentEarlier)
+      if(_disposed)
       {
-         await sentEarlier;
+         return Task.CompletedTask;
+      }
+      if(_afterChange is { } notSentYet)
+      {
+         return notSentYet;
+      }
+      if(_refreshing)
+      {
+         return _refresh is { IsCompleted: false } ? _afterChange = ReadAfterTheReadInFlightAsync() : Task.CompletedTask;
+      }
+      return _refresh = ReadSnapshotAsync(newerThanTheCall: true);
+   }
+
+
+
+   /// <summary>Waits until no read the shell sent earlier is in flight and then makes a new one. From the moment the new one is about to be sent it is no longer shared: a later caller needs a later read.</summary>
+   private async Task ReadAfterTheReadInFlightAsync()
+   {
+      try
+      {
+         while(_refreshing && _refresh is { IsCompleted: false } sentEarlier)
+         {
+            await sentEarlier;
+         }
+      }
+      finally
+      {
+         _afterChange = null;
       }
       if(!_disposed && !_refreshing)
       {
@@ -169,10 +203,11 @@ public sealed partial class ShellViewModel
    /// <summary>Takes the result of a snapshot read that was asked for at a mark. What is said of the service comes from the computer's part that is shown, which is the window's own when the computer was changed from this window after the read was asked for.</summary>
    private void Apply(ServiceResult<ServiceSnapshot> result, long asked)
    {
+      IReadOnlyList<string> heldBack = [];
       if(result.Succeeded)
       {
          NoteUnusable(result.Payload.Servers);
-         Snapshot = SnapshotMerge.Apply(Snapshot, result.Payload, key => Busy.ChangedSince(key, asked));
+         Snapshot = SnapshotMerge.Apply(Snapshot, result.Payload, key => Busy.ChangedSince(key, asked), out heldBack);
       }
       if(ServiceAvailability.From(result, _time, ServiceControlGuidance, Snapshot?.Computer) is not { } availability)
       {
@@ -185,7 +220,7 @@ public sealed partial class ShellViewModel
       }
       Availability = availability;
       Render();
-      SnapshotApplied?.Invoke(this, EventArgs.Empty);
+      SnapshotApplied?.Invoke(this, new SnapshotAppliedEventArgs(heldBack));
    }
 
 
