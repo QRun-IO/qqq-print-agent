@@ -471,11 +471,12 @@ public sealed class ManagementClientOperationsTests
 
 
    /// <summary>
-   /// The client refuses what the contract's own check and reader refuse, and adds no rule of its own. Values the
-   /// contract's records accept are sent, whatever the service will think of them: text that is not an identifier
-   /// inside the list of servers to reorder, an enrollment code, a printer and a format that are empty, and log
-   /// limits that are negative. The service answers those; if the contract comes to refuse one of them, it is
-   /// refused here from then on, and this test says so.
+   /// The client refuses what the contract's own check and reader refuse, and adds no rule of its own about the
+   /// values of a request; its one rule is about the check the operator saw, and the two tests of that check hold
+   /// it. Values the contract's records accept are sent, whatever the service will think of them: text that is not
+   /// an identifier inside the list of servers to reorder, an enrollment code, a printer and a format that are
+   /// empty, and log limits that are negative. The service answers those; if the contract comes to refuse one of
+   /// them, it is refused here from then on, and this test says so.
    /// </summary>
    [Fact]
    public async Task ValueTheContractsReaderAccepts_IsSent_BecauseTheClientAddsNoRuleOfItsOwn()

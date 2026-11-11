@@ -16,7 +16,8 @@ sees changes. The connection wizard and the server tree will be built on it.
 - **What the contract refuses is not sent.** A request is put to the contract's own check and its arguments are
   read back the way the service reads them, so a server that is not named by its full identifier, a value a
   request needs and was not given, and an address the address rule refuses are answered at once as
-  `invalid_request`. The client adds no rule of its own to the contract's.
+  `invalid_request`. The client adds one rule of its own to the contract's, about the check the operator saw
+  (below): it must be given wherever something is accepted, and a server is not added with one that failed.
 - **A reply is read only for what was asked.** A rename answered with another server, an add answered with
   another address, a reorder answered with other servers and job details for another job are unreadable replies,
   so nothing is shown under the wrong server or row.

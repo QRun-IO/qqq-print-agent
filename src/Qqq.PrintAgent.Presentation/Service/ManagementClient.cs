@@ -318,7 +318,9 @@ public sealed partial class ManagementClient
    /// (<see cref="ManagementJson.TryReadArguments"/>). Arguments the contract's own reader does not take are refused
    /// here, as an argument that is wrong, so they are never sent: a value that is missing where the record needs one
    /// (a credential, a code, a profile, a list), and a list with nothing where an item belongs. What that reader
-   /// accepts is sent, whatever else the service may think of it; this client adds no rule of its own.
+   /// accepts is sent, whatever else the service may think of it. The client has one rule of its own, about the
+   /// check the operator saw, and it is not applied here: <see cref="AddServerAsync"/> and
+   /// <see cref="SetTrustAsync"/> say where the check must be given, and the first refuses one that failed.
    /// </summary>
    private static ManagementRequest WithArguments<TArguments>(string operation, string? serverId, TArguments arguments)
       where TArguments : class
@@ -368,6 +370,9 @@ public sealed partial class ManagementClient
          return ServiceResult<TResult>.Skipped();
       }
       Task turn = _ceiling.EnterAsync(cancellationToken);
+      // Completed successfully, and not merely completed: a wait that began with its token already cancelled is over
+      // at once too, as a cancelled task, and that is no place. Only a token cancelled between its caller's look at
+      // it and this line gets there, which no test can arrange, so this word is held by reading and not by a test.
       if(turn.IsCompletedSuccessfully)
       {
          return null;
@@ -441,9 +446,10 @@ public sealed partial class ManagementClient
    /// the envelope looks like, and a reply in another version need not be a refusal of the version. So only a read,
    /// which changes nothing whoever answered, is reported as having nothing to check
    /// (<see cref="IsRead"/>); every other operation is unconfirmed, and its message says so. JSON without a version
-   /// has no known sender (a version 1 service never answers in JSON), so it is an answer that arrived and could not
-   /// be read, as every other problem is: the service may have acted. The entry names the problem and never the
-   /// reply, which this client is never given as text.
+   /// has no known sender (a version 1 service never answers a version 2 request in JSON; it answers requests of
+   /// its own version that way, a snapshot for one, and this client sends none of those), so it is an answer that
+   /// arrived and could not be read, as every other problem is: the service may have acted. The entry names the
+   /// problem and never the reply, which this client is never given as text.
    /// </summary>
    private ServiceResult<TResult> Unusable<TResult>(ManagementRequest request, ManagementEnvelopeProblem problem)
    {
