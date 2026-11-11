@@ -26,6 +26,31 @@ public sealed class AgentRuntimePrinterReadsTests
 
 
 
+   /// <summary>How the error the service logs when the inventory cannot be read begins, in every case.</summary>
+   private const string Unread = "The printer inventory could not be read";
+
+
+
+   /// <summary>What that error goes on to say on a connection that has already delivered an inventory. It says the failure stops no job, and does not say that jobs are being claimed, which dispatch being paused can prevent.</summary>
+   private const string Delivered = ", so none was sent to the server. This does not stop jobs: they are claimed and printed as before, on the inventory this connection already delivered. ";
+
+
+
+   /// <summary>What that error goes on to say on a connection that has delivered no inventory yet.</summary>
+   private const string NotDelivered = ", so none was sent to the server. No job is claimed on this connection until the inventory can be read. ";
+
+
+
+   /// <summary>How that error ends before the reason: it names both kinds of cause, a printer and the service's own stored data, because both are caught by the one read.</summary>
+   private const string Causes = "One printer whose driver does not answer is enough to cause this, and so is a failure to read the service's own stored data. Reason: ";
+
+
+
+   /// <summary>How the line the service logs when the inventory can be read again begins.</summary>
+   private const string ReadAgain = "The printer inventory can be read again";
+
+
+
    /// <summary>
    /// The full discovery starts failing on a connection that has already delivered its inventory. The connection stays
    /// up, nothing is sent in place of the inventory, and jobs go on being claimed and printed: each is listed for
@@ -61,9 +86,8 @@ public sealed class AgentRuntimePrinterReadsTests
       Assert.Equal(2, fixture.Printer.Lookups);
       Assert.InRange(fixture.Printer.Listings, 2, int.MaxValue);
       Assert.Equal(inventories, fixture.Count("INVENTORY"));
-      string error = Assert.Single(fixture.Logs, line => line.StartsWith("The printers on this computer could not be read", StringComparison.Ordinal));
-      Assert.Equal("The printers on this computer could not be read, so no printer inventory was sent to the server. Jobs are still claimed and printed on the inventory this connection already delivered. "
-         + "One printer whose driver does not answer is enough to cause this. Reason: TimeoutException: " + Unreadable, error);
+      string error = Assert.Single(fixture.Logs, line => line.StartsWith(Unread, StringComparison.Ordinal));
+      Assert.Equal(Unread + Delivered + Causes + "TimeoutException: " + Unreadable, error);
       Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
       Assert.False(connection.Completion.IsCompleted);
       Assert.False(fixture.Running.IsCompleted);
@@ -74,8 +98,8 @@ public sealed class AgentRuntimePrinterReadsTests
 
       fixture.Printer.DiscoveryFailure = null;
       await connection.SendAsync("JOB_AVAILABLE", new { });
-      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith("The printers on this computer can be read again", StringComparison.Ordinal)));
-      AgentLogEntry logged = Assert.Single(fixture.Runtime.GetSnapshot().Logs, entry => entry.Message.StartsWith("The printers on this computer could not be read", StringComparison.Ordinal));
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith(ReadAgain, StringComparison.Ordinal)));
+      AgentLogEntry logged = Assert.Single(fixture.Runtime.GetSnapshot().Logs, entry => entry.Message.StartsWith(Unread, StringComparison.Ordinal));
       Assert.Equal("ERROR", logged.Level);
       Assert.Equal(inventories, fixture.Count("INVENTORY"));
       Assert.Equal(0, fixture.ForbiddenPolls);
@@ -97,7 +121,7 @@ public sealed class AgentRuntimePrinterReadsTests
       ScriptedPrintServer.Connection connection = await fixture.ConnectAsync(restricted: true);
       fixture.AddJob("waiting");
       await connection.SendAsync("JOB_AVAILABLE", new { });
-      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith("The printers on this computer could not be read", StringComparison.Ordinal)));
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith(Unread, StringComparison.Ordinal)));
       int listed = fixture.Printer.Listings;
       int failed = fixture.Printer.Discoveries;
       await connection.SendAsync("JOB_AVAILABLE", new { });
@@ -110,9 +134,8 @@ public sealed class AgentRuntimePrinterReadsTests
       Assert.Equal(0, fixture.Count("INVENTORY"));
       Assert.Null(fixture.State("waiting"));
       Assert.Equal(0, fixture.Printer.Prints);
-      string error = Assert.Single(fixture.Logs, line => line.StartsWith("The printers on this computer could not be read", StringComparison.Ordinal));
-      Assert.Equal("The printers on this computer could not be read, so no printer inventory was sent to the server. No job is claimed on this connection until the printers can be read. "
-         + "One printer whose driver does not answer is enough to cause this. Reason: IOException: " + Unreadable, error);
+      string error = Assert.Single(fixture.Logs, line => line.StartsWith(Unread, StringComparison.Ordinal));
+      Assert.Equal(Unread + NotDelivered + Causes + "IOException: " + Unreadable, error);
       Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
       Assert.False(connection.Completion.IsCompleted);
       Assert.False(fixture.Running.IsCompleted);
@@ -122,7 +145,7 @@ public sealed class AgentRuntimePrinterReadsTests
       await fixture.WaitAsync(() => string.Equals(fixture.State("waiting"), "SPOOLED", StringComparison.Ordinal));
       Assert.Equal(1, fixture.Count("INVENTORY"));
       Assert.Equal(1, fixture.Printer.Prints);
-      Assert.Contains(fixture.Logs, line => line.StartsWith("The printers on this computer can be read again", StringComparison.Ordinal));
+      Assert.Contains(fixture.Logs, line => line.StartsWith(ReadAgain, StringComparison.Ordinal));
    }
 
 
@@ -144,13 +167,75 @@ public sealed class AgentRuntimePrinterReadsTests
       fixture.Printer.DiscoveryFailure = () => new IOException("Synthetic: the printer worker stopped.");
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.EndsWith("Reason: IOException: Synthetic: the printer worker stopped.", StringComparison.Ordinal)));
-      Assert.Equal(2, fixture.Logs.Count(line => line.StartsWith("The printers on this computer could not be read", StringComparison.Ordinal)));
+      Assert.Equal(2, fixture.Logs.Count(line => line.StartsWith(Unread, StringComparison.Ordinal)));
       Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
 
       fixture.Printer.DiscoveryFailure = () => new OperationCanceledException("Synthetic: the read was cancelled.");
       await connection.SendAsync("JOB_AVAILABLE", new { });
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith("Realtime connection stopped: OperationCanceledException", StringComparison.Ordinal)));
-      Assert.Equal(2, fixture.Logs.Count(line => line.StartsWith("The printers on this computer could not be read", StringComparison.Ordinal)));
+      Assert.Equal(2, fixture.Logs.Count(line => line.StartsWith(Unread, StringComparison.Ordinal)));
+      Assert.False(fixture.Running.IsCompleted);
+   }
+
+
+
+   /// <summary>
+   /// The error is true while the administrator has paused dispatch. The connection has delivered its inventory, so the
+   /// line is the one for that case: it says the failure stops no job and that jobs go on as before. It does not say
+   /// that jobs are being claimed, and none is: the job the server holds stays unclaimed because of the pause, as it
+   /// would have without the failure.
+   /// </summary>
+   [Fact]
+   public async Task ErrorIsTrueWhileDispatchIsPaused()
+   {
+      await using RealtimeRuntimeFixture fixture = new();
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync(desiredState: new DeviceDesiredState(1, true, "CONNECTED"));
+      await fixture.WaitAsync(() => fixture.Count("INVENTORY") >= 1);
+      fixture.Printer.DiscoveryFailure = () => new TimeoutException(Unreadable);
+      fixture.AddJob("held");
+      await connection.SendAsync("JOB_AVAILABLE", new { });
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith(Unread, StringComparison.Ordinal)));
+
+      string error = Assert.Single(fixture.Logs, line => line.StartsWith(Unread, StringComparison.Ordinal));
+      Assert.Equal(Unread + Delivered + Causes + "TimeoutException: " + Unreadable, error);
+      Assert.Equal(0, fixture.Claims);
+      Assert.Null(fixture.State("held"));
+      Assert.Equal(0, fixture.Printer.Prints);
+      Assert.False(connection.Completion.IsCompleted);
+   }
+
+
+
+   /// <summary>
+   /// The read that fails is not always a printer's. The same read takes the service's own record of which printers are
+   /// shared from the journal, and a failure there is caught and logged by the same line. Here the journal's table of
+   /// shared printers is put out of reach while the printers themselves answer. The line gives the journal's failure as
+   /// its reason and names the service's stored data as a possible cause, so it does not send the operator looking
+   /// only for a driver. The connection is kept, and when the table is back the end of the failure is logged once.
+   /// </summary>
+   [Fact]
+   public async Task FailureToReadTheServicesOwnStoredDataIsLoggedByTheSameLineWithItsReason()
+   {
+      var clock = new ManualTimeProvider();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: clock);
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
+      await fixture.WaitAsync(() => fixture.Count("INVENTORY") >= 1 && fixture.LastClaimWasEmpty);
+      MoveSharedPrintersTable(fixture, outOfReach: true);
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith(Unread, StringComparison.Ordinal)));
+
+      string error = Assert.Single(fixture.Logs, line => line.StartsWith(Unread, StringComparison.Ordinal));
+      Assert.StartsWith(Unread + Delivered + Causes + "SqliteException: ", error, StringComparison.Ordinal);
+      Assert.Contains("exposed_printers", error, StringComparison.Ordinal);
+      Assert.Null(fixture.Printer.DiscoveryFailure);
+      Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
+      Assert.False(connection.Completion.IsCompleted);
+
+      MoveSharedPrintersTable(fixture, outOfReach: false);
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => fixture.Logs.Any(line => line.StartsWith(ReadAgain, StringComparison.Ordinal)));
+      Assert.Single(fixture.Logs, line => line.StartsWith(ReadAgain, StringComparison.Ordinal));
+      Assert.Single(fixture.Logs, line => line.StartsWith(Unread, StringComparison.Ordinal));
       Assert.False(fixture.Running.IsCompleted);
    }
 
@@ -372,6 +457,20 @@ public sealed class AgentRuntimePrinterReadsTests
       Assert.Equal(label, document.Bytes.ToArray());
       Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
       Assert.False(fixture.Running.IsCompleted);
+   }
+
+
+
+   /// <summary>
+   /// Renames the table of shared printers in the running service's journal through a connection of the test's own:
+   /// away, which puts it out of the service's reach so that reading the shared printers fails, or back.
+   /// </summary>
+   private static void MoveSharedPrintersTable(RealtimeRuntimeFixture fixture, bool outOfReach)
+   {
+      using Microsoft.Data.Sqlite.SqliteConnection journal = TestState.OpenJournal(fixture.DirectoryPath);
+      using Microsoft.Data.Sqlite.SqliteCommand rename = journal.CreateCommand();
+      rename.CommandText = outOfReach ? "ALTER TABLE exposed_printers RENAME TO exposed_printers_out_of_reach" : "ALTER TABLE exposed_printers_out_of_reach RENAME TO exposed_printers";
+      _ = rename.ExecuteNonQuery();
    }
 
 

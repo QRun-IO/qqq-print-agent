@@ -97,14 +97,18 @@ public sealed partial class AgentRuntime
 
 
    /// <summary>
-   /// Reads the shared printers with their media for the inventory report, which asks every queue's driver. A read that
-   /// fails (a driver that hangs until the helper's limit, a helper that died, a spooler that cannot list its queues)
-   /// returns null: the caller then sends nothing, so a station that cannot be read is never reported as a station with
-   /// no printers, and the connection is kept. Jobs go on being claimed on the inventory this connection already
-   /// delivered; on a connection that has delivered none yet, nothing is claimed until a read succeeds, because
-   /// dispatch waits for the server to have the inventory. The failure is logged as an error when its reason is not the
-   /// one logged last, and its end is logged once, so a printer that stays broken does not fill the log. Cancellation
-   /// is not a failed read and is passed on.
+   /// Reads the shared printers with their media for the inventory report. That is two reads in one: every queue's
+   /// settings, which asks every queue's driver, and the service's own record of which printers are shared and what the
+   /// operator named them, which comes from the journal. A read that fails (a driver that hangs until the helper's
+   /// limit, a helper that died, a spooler that cannot list its queues, or a journal that cannot be read) returns null:
+   /// the caller then sends nothing, so a station that cannot be read is never reported as a station with no printers,
+   /// and the connection is kept. The inventory this connection already delivered stays in force, so jobs are claimed
+   /// on it as they were before the failure, and not at all while dispatch is paused; on a connection that has
+   /// delivered none yet, nothing is claimed until a read succeeds, because dispatch waits for the server to have the
+   /// inventory. The failure is logged as an error when its reason is not the one logged last, and its end is logged
+   /// once, so a printer that stays broken does not fill the log. The line names both kinds of cause and gives the
+   /// reason, because the two are caught together and only the reason says which it was. Cancellation is not a failed
+   /// read and is passed on.
    /// </summary>
    private IReadOnlyList<PrinterInfo>? TryReadInventory(AgentStore store, ref string? lastFailure)
    {
@@ -112,7 +116,7 @@ public sealed partial class AgentRuntime
       {
          IReadOnlyList<PrinterInfo> inventory = new ExposedPrinterBackend(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds).Discover();
          if(lastFailure is not null)
-         { _log.Write("INFO", "The printers on this computer can be read again; the printer inventory is reported to the server as usual."); }
+         { _log.Write("INFO", "The printer inventory can be read again and is reported to the server as usual."); }
          lastFailure = null;
          return inventory;
       }
@@ -124,9 +128,9 @@ public sealed partial class AgentRuntime
             bool delivered;
             lock(_stateLock)
             { delivered = _inventoryReady; }
-            _log.Write("ERROR", "The printers on this computer could not be read, so no printer inventory was sent to the server. "
-               + (delivered ? "Jobs are still claimed and printed on the inventory this connection already delivered. " : "No job is claimed on this connection until the printers can be read. ")
-               + "One printer whose driver does not answer is enough to cause this. Reason: " + reason);
+            _log.Write("ERROR", "The printer inventory could not be read, so none was sent to the server. "
+               + (delivered ? "This does not stop jobs: they are claimed and printed as before, on the inventory this connection already delivered. " : "No job is claimed on this connection until the inventory can be read. ")
+               + "One printer whose driver does not answer is enough to cause this, and so is a failure to read the service's own stored data. Reason: " + reason);
             _log.Write("DEBUG", "Printer inventory read detail: " + exception);
          }
          lastFailure = reason;
