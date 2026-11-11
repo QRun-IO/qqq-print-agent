@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+Version 2 of the management pipe: the contract's gaps are closed (2.0). The contract is a set of types that
+nothing serves or sends yet, so none of the first seven items changes what the installed product does; they change
+what the service and its clients will be able to build on. The last two are about logging.
+
+- **Error messages.** An error carries a message that is printable and at most 512 UTF-16 units, however the reply
+  is built and however it is read; this used to hold only for replies built by two functions. A cut adds no mark
+  (a message could be 515 units, and an identity value 203), a value that is missing is absent instead of the words
+  "(missing)", and a failure with no message cannot be built.
+- **Error codes.** A failure can be built only with a code from the contract's table and with exactly the details
+  that table names for the code. A client still reads a code it does not know.
+- **The envelope.** A request or a reply is read only by the contract's two parsing functions and written only by
+  its writing function. The JSON serializer refuses both, whatever options it is given; it used to refuse reading
+  for the contract's own options only. The text on the wire is unchanged.
+- **Accounts.** The principal and the tenant are carried one way wherever a reply names an account (a snapshot,
+  the result of adding a server or signing in, the details of a changed identity): printable, at most 200 units,
+  left out when missing.
+- **Server names.** A name is 1 to 64 characters of visible text after trimming, without square brackets, and not
+  shaped like a server identifier or the first eight or more characters of one. `servers.add` and `servers.rename`
+  refuse any other name as `invalid_request`.
+- **Adding a server.** `servers.add` carries the sign-in provider's address that `servers.check` reported, for
+  comparison only. When the service reads another provider from the server, nothing is stored and the answer is
+  the new error code `provider_changed`; the client checks the server again.
+- **Printer discovery.** The operation table marks `printers.discover` as single-flight: one discovery runs at a
+  time, and a request that arrives during it shares its result. The discovery itself is built with the pipe.
+- **Log redaction recognises more shapes.** As with the two shapes below, this changes what a log line shows only
+  for a line that holds one of them, and no line the product writes today does. The values of `id_token_hint`,
+  `code_verifier`, `sessionUUID` and `sessionId` are replaced by `[REDACTED]` wherever they stand, and the names
+  stay. An `Authorization:` or `Proxy-Authorization:` header line loses its whole value to the end of the line,
+  whatever its scheme; a line that began with `Authorization: Bearer` and went on with other text used to keep
+  that text. A callback's `code` and `state` are also redacted when the value is quoted or the callback is
+  percent-encoded inside another address.
+- **Service log.** The entries the service keeps in memory are stamped by the service's own clock, and a
+  per-server view of the log, which nothing uses yet, would prefix a server's lines with the first eight characters
+  of its identifier, never with its name.
+
 One printer whose driver does not answer no longer stops jobs for the other printers (2.0). What such a printer
 still affects is listed at the end of this entry; one case is not covered at all, a printer reached through a
 print server that is switched off or unreachable. Until now the service asked Windows about every printer
