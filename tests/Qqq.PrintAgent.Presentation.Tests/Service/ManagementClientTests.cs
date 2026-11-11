@@ -155,6 +155,48 @@ public sealed class ManagementClientTests
 
 
    /// <summary>
+   /// A read that is refused with the same unknown code on every tick warns once: the first refusal is a warning and
+   /// the same code repeating is a debug line, as a repeated failure is. Another unknown code is a warning again, and
+   /// so is the same one after the operation was answered in any other way: by a refusal with a code this version
+   /// knows, and by a result. The same operation on another server warns for itself. The steps here are, on one
+   /// server: one code twice, another code, a known refusal, that code again, a result, and that code twice more.
+   /// </summary>
+   [Fact]
+   public async Task UnknownCode_Repeating_IsAWarningOnce()
+   {
+      RecordingLog log = new();
+      ManagementReplyParse quota = Replies.Text("""{"v":2,"ok":false,"error":{"code":"quota_exceeded","message":"The server's quota is used up."}}""");
+      ManagementReplyParse paused = Replies.Text("""{"v":2,"ok":false,"error":{"code":"paused_by_owner","message":"Paused."}}""");
+      FakePipe pipe = new FakePipe().Answer(quota).Answer(quota).Answer(quota).Answer(paused).Answer(Replies.Failure(ManagementErrorCode.Busy)).Answer(paused)
+         .Answer(Replies.Success(new ReconnectResult(ReconnectResult.Requested))).Answer(paused).Answer(paused);
+      ManagementClient client = new(pipe.SendAsync, log);
+
+      _ = await client.ReconnectAsync(Server);
+      _ = await client.ReconnectAsync(Server);
+      ServiceResult<ReconnectResult> elsewhere = await client.ReconnectAsync(OtherServer);
+      ServiceResult<ReconnectResult> last = elsewhere;
+      for(int attempt = 0; attempt < 6; attempt++)
+      {
+         last = await client.ReconnectAsync(Server);
+      }
+
+      Assert.Equal((ManagementErrorCode.InternalError, "The server's quota is used up."), (elsewhere.Code, elsewhere.Message));
+      Assert.Equal((ManagementErrorCode.InternalError, "Paused."), (last.Code, last.Message));
+      Assert.Equal(
+      [
+         $"WARN Management request connection.reconnect on {Server} was refused with a code this version does not know (quota_exceeded); it is handled as internal_error.",
+         $"DEBUG Management request connection.reconnect on {Server} was refused with a code this version does not know (quota_exceeded); it is handled as internal_error.",
+         $"WARN Management request connection.reconnect on {OtherServer} was refused with a code this version does not know (quota_exceeded); it is handled as internal_error.",
+         $"WARN Management request connection.reconnect on {Server} was refused with a code this version does not know (paused_by_owner); it is handled as internal_error.",
+         $"WARN Management request connection.reconnect on {Server} was refused with a code this version does not know (paused_by_owner); it is handled as internal_error.",
+         $"WARN Management request connection.reconnect on {Server} was refused with a code this version does not know (paused_by_owner); it is handled as internal_error.",
+         $"DEBUG Management request connection.reconnect on {Server} was refused with a code this version does not know (paused_by_owner); it is handled as internal_error.",
+      ], log.Entries);
+   }
+
+
+
+   /// <summary>
    /// A reply that is not JSON, or is JSON without a version, is what a version 1 service answers. That service knows
    /// none of this version's operations, so it carried nothing out: the result says the service is the older side and
    /// that there is nothing to check before repeating. The log names the problem and not the reply.
@@ -415,9 +457,11 @@ public sealed class ManagementClientTests
 
    /// <summary>
    /// The same failure repeating for one operation on one server is a warning once and a debug line afterwards, a
-   /// different failure is a warning again, and the first answer after a failure, a refusal included, is noted once;
-   /// a read that fails every second therefore does not flood the activity log. The same operation on another server
-   /// is another matter and warns for itself. Every pipe failure keeps its full exception as debug detail.
+   /// different failure is a warning again, and the first answer after a failure is noted once; a read that fails
+   /// every second therefore does not flood the activity log. A refusal is an answer: it is noted as one, and a
+   /// failure after it starts over, which the last three steps here show (a refusal, a failure, a result: two notes
+   /// of an answer and not one). The same operation on another server is another matter and warns for itself. Every
+   /// pipe failure keeps its full exception as debug detail.
    /// </summary>
    [Fact]
    public async Task RepeatedFailure_IsAWarningOnce()
@@ -425,13 +469,13 @@ public sealed class ManagementClientTests
       RecordingLog log = new();
       FakePipe pipe = new FakePipe().Fail(new IOException("down")).Fail(new IOException("down")).Fail(new IOException("down"))
          .Fail(new AgentPipeNotSentException(new UnauthorizedAccessException("refused"))).Answer(Replies.Text("not a reply")).Answer(Replies.Text("still not a reply"))
-         .Answer(Replies.Failure(ManagementErrorCode.Busy)).Answer(Replies.Success(new ReconnectResult(ReconnectResult.Requested)));
+         .Answer(Replies.Failure(ManagementErrorCode.Busy)).Fail(new IOException("down")).Answer(Replies.Success(new ReconnectResult(ReconnectResult.Requested)));
       ManagementClient client = new(pipe.SendAsync, log);
 
       _ = await client.ReconnectAsync(Server);
       _ = await client.ReconnectAsync(Server);
       _ = await client.ReconnectAsync(OtherServer);
-      for(int attempt = 0; attempt < 5; attempt++)
+      for(int attempt = 0; attempt < 6; attempt++)
       {
          _ = await client.ReconnectAsync(Server);
       }
@@ -445,8 +489,10 @@ public sealed class ManagementClientTests
          $"WARN Management request connection.reconnect on {Server} got a reply that could not be used (OlderService: NotJson).",
          $"DEBUG Management request connection.reconnect on {Server} got a reply that could not be used (OlderService: NotJson).",
          $"INFO Management request connection.reconnect on {Server} is answering again.",
+         $"WARN Management request connection.reconnect on {Server} did not complete (Disconnected, request sent): IOException: down",
+         $"INFO Management request connection.reconnect on {Server} is answering again.",
       ], log.Entries.Where(entry => !entry.Contains("failure detail", StringComparison.Ordinal)).ToList());
-      Assert.Equal(4, log.Entries.Count(entry => entry.Contains(" failure detail: ", StringComparison.Ordinal)));
+      Assert.Equal(5, log.Entries.Count(entry => entry.Contains(" failure detail: ", StringComparison.Ordinal)));
    }
 
 

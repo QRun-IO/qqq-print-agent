@@ -13,7 +13,8 @@ sees changes. The connection wizard and the server tree are built on it.
   update service sends itself. What each method sends is held to the contract's golden files.
 - **A refusal carries the contract's code.** A result says why the service refused as one of the contract's
   codes, with typed details for the codes that have them, so nothing is decided by a message's text. A code this
-  version does not know is handled as `internal_error` and shows the service's message.
+  version does not know is handled as `internal_error` and shows the service's message; the log warns of it once
+  while it repeats.
 - **An older and a newer service are told apart.** A reply from a service that speaks version 1, and one in a
   later version, each say which side has to be updated, and neither is reported as a request that may have been
   carried out. A reply of this version that cannot be read still is.

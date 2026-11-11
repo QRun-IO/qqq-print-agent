@@ -64,6 +64,11 @@ public sealed partial class ManagementClient
 
 
 
+   /// <summary>The entry for a refusal with a code this version does not know.</summary>
+   private const string UnknownCodeEntry = "Management request {Operation} on {Target} was refused with a code this version does not know ({Code}); it is handled as {HandledAs}.";
+
+
+
    /// <summary>Sends one request over the pipe and returns the parsed reply.</summary>
    private readonly Func<ManagementRequest, Task<ManagementReplyParse>> _send;
 
@@ -91,6 +96,11 @@ public sealed partial class ManagementClient
 
    /// <summary>The operations that are failing, each with how it last failed, so a failure that repeats is a warning once.</summary>
    private readonly ConcurrentDictionary<(string Operation, string? Server), (ServiceFailure Failure, bool Unconfirmed)> _failing = new();
+
+
+
+   /// <summary>The operations whose last answer was a refusal with a code this version does not know, each with that code as an entry shows it, so the same code repeating is a warning once.</summary>
+   private readonly ConcurrentDictionary<(string Operation, string? Server), string> _unknownCodes = new();
 
 
 
@@ -264,7 +274,6 @@ public sealed partial class ManagementClient
       }
       if(parse.Reply.Error is { } error)
       {
-         Answered(request);
          return Refused<TResult>(request, error);
       }
       if(ManagementJson.TryReadResult(parse.Reply, out TResult? result) && (fits is null || fits(result)))
@@ -308,15 +317,32 @@ public sealed partial class ManagementClient
    /// <summary>
    /// The result for a refusal. A code this version does not know is handled as
    /// <see cref="ManagementErrorCode.InternalError"/>, as the contract says: the result carries that code and the
-   /// service's own message, and no details, because their type is not known either.
+   /// service's own message, and no details, because their type is not known either. The log says which code
+   /// arrived. The first such refusal of an operation on a target is a warning; the same code repeating is a debug
+   /// line instead, as a repeated failure is, so a read that is refused with one on every tick does not flood the
+   /// log. Another unknown code, or the same one after the operation was answered in any other way, is a warning
+   /// again.
    /// </summary>
    private ServiceResult<TResult> Refused<TResult>(ManagementRequest request, ManagementError error)
    {
       if(ManagementErrorCode.All.Contains(error.Code, StringComparer.Ordinal))
       {
+         Answered(request);
          return ServiceResult<TResult>.Refusal(error.Code, error.Message, error);
       }
-      _log.Warning("Management request {Operation} on {Target} was refused with a code this version does not know ({Code}); it is handled as {HandledAs}.", request.Op, Target(request.Server), Shown(error.Code), ManagementErrorCode.InternalError);
+      string shown = Shown(error.Code);
+      bool repeated = _unknownCodes.TryGetValue((request.Op, request.Server), out string? previous) && string.Equals(previous, shown, StringComparison.Ordinal);
+      Answered(request);
+      _unknownCodes[(request.Op, request.Server)] = shown;
+      object?[] values = [request.Op, Target(request.Server), shown, ManagementErrorCode.InternalError];
+      if(repeated)
+      {
+         _log.Debug(UnknownCodeEntry, values);
+      }
+      else
+      {
+         _log.Warning(UnknownCodeEntry, values);
+      }
       return ServiceResult<TResult>.Refusal(ManagementErrorCode.InternalError, error.Message);
    }
 
@@ -354,9 +380,10 @@ public sealed partial class ManagementClient
 
 
 
-   /// <summary>Notes that the service answered this operation, with a result or a refusal, and says so once in the log when it had been failing.</summary>
+   /// <summary>Notes that the service answered this operation, with a result or a refusal, and says so once in the log when it had been failing. Whatever unknown code it was last refused with is forgotten; a refusal with one records it again afterwards.</summary>
    private void Answered(ManagementRequest request)
    {
+      _unknownCodes.TryRemove((request.Op, request.Server), out _);
       if(_failing.TryRemove((request.Op, request.Server), out _))
       {
          _log.Info("Management request {Operation} on {Target} is answering again.", request.Op, Target(request.Server));
