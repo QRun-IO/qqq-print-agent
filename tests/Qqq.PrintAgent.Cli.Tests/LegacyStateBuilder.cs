@@ -70,7 +70,7 @@ internal sealed class LegacyStateBuilder
 
 
    /// <summary>
-   /// Writes the pairing as 1.x did (transcribed from <c>AgentStore.SaveConfiguration</c> at tag v1.2.1): the configuration
+   /// Writes the pairing as 1.x did (transcribed from the store's <c>SaveConfiguration</c> at tag v1.2.1): the configuration
    /// as JSON with the print API's serializer options, protected with DPAPI for the current account, in
    /// <c>connection.dpapi</c>. The service account's protection is the test account's here.
    /// </summary>
