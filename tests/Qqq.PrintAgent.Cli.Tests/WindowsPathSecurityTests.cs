@@ -1,0 +1,116 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
+using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using Qqq.PrintAgent.Windows;
+
+namespace Qqq.PrintAgent.Cli.Tests;
+
+/// <summary>
+/// The real folder security adapter, run in a temporary folder: a folder it creates has the descriptor it was given from
+/// the moment it exists, and it reads back the descriptors Windows holds for a folder and for a file. The descriptor used
+/// here names only the account the tests run as, so no administrator rights are needed and nothing outside the temporary
+/// folder is touched.
+/// </summary>
+public sealed class WindowsPathSecurityTests
+{
+   /// <summary>
+   /// A folder created with a protected descriptor that allows one account has exactly that access list when read back,
+   /// with nothing inherited from its parent, and a file then created inside it has that same rule by inheritance.
+   /// </summary>
+   [Fact]
+   public void FolderIsCreatedWithItsDescriptorAndDescriptorsAreReadBack()
+   {
+      string root = Path.Combine(Path.GetTempPath(), "qqq-path-security-" + Guid.NewGuid().ToString("N"));
+      Directory.CreateDirectory(root);
+      try
+      {
+         using var identity = WindowsIdentity.GetCurrent();
+         SecurityIdentifier me = identity.User!;
+         DirectorySecurity descriptor = new();
+         descriptor.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+         descriptor.AddAccessRule(new FileSystemAccessRule(me, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+         var security = new WindowsPathSecurity();
+         string folder = Path.Combine(root, "Protected");
+         security.CreateDirectory(folder, descriptor);
+         FileSystemSecurity ofFolder = security.ReadDirectorySecurity(folder);
+         Assert.True(ofFolder.AreAccessRulesProtected);
+         FileSystemAccessRule own = Assert.Single(Rules(ofFolder));
+         Assert.Equal((me.Value, FileSystemRights.FullControl, AccessControlType.Allow, false), (own.IdentityReference.Value, own.FileSystemRights, own.AccessControlType, own.IsInherited));
+         string file = Path.Combine(folder, "inside.txt");
+         File.WriteAllText(file, "synthetic");
+         FileSystemSecurity ofFile = security.ReadFileSecurity(file);
+         FileSystemAccessRule inherited = Assert.Single(Rules(ofFile));
+         Assert.Equal((me.Value, FileSystemRights.FullControl, AccessControlType.Allow, true), (inherited.IdentityReference.Value, inherited.FileSystemRights, inherited.AccessControlType, inherited.IsInherited));
+         Assert.NotNull(ofFile.GetOwner(typeof(SecurityIdentifier)));
+      }
+      finally
+      {
+         Directory.Delete(root, recursive: true);
+      }
+   }
+
+
+
+   /// <summary>
+   /// The identity it reports is the one of the test process: a well-formed security identifier that is the one of the
+   /// process token, and an administrator flag that agrees with the token read another way, by whether the
+   /// administrators group is among its enabled groups.
+   /// </summary>
+   [Fact]
+   public void IdentityIsTheOneOfTheRunningProcess()
+   {
+      var security = new WindowsPathSecurity();
+      using var identity = WindowsIdentity.GetCurrent();
+      Assert.Matches("^S-1-\\d+(-\\d+)+$", security.CurrentUserSid);
+      Assert.Equal(identity.User!.Value, security.CurrentUserSid);
+      Assert.Equal(identity.Groups!.Contains(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)), security.IsAdministrator);
+   }
+
+
+
+   /// <summary>
+   /// An ordinary file and an ordinary folder are not links, and a junction is. The junction is made inside the
+   /// temporary folder with the command interpreter's own mklink, which needs no administrator rights, and points at a
+   /// folder beside it; it is removed again before the folder is.
+   /// </summary>
+   [Fact]
+   public void JunctionIsALinkAndAnOrdinaryFileOrFolderIsNot()
+   {
+      string root = Path.Combine(Path.GetTempPath(), "qqq-path-security-" + Guid.NewGuid().ToString("N"));
+      string target = Path.Combine(root, "target");
+      string junction = Path.Combine(root, "junction");
+      Directory.CreateDirectory(target);
+      try
+      {
+         string file = Path.Combine(target, "inside.txt");
+         File.WriteAllText(file, "synthetic");
+         using(Process mklink = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), ["/d", "/c", "mklink", "/J", junction, target]) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })!)
+         {
+            string said = mklink.StandardOutput.ReadToEnd() + mklink.StandardError.ReadToEnd();
+            mklink.WaitForExit();
+            Assert.True(mklink.ExitCode == 0, "The junction this test needs could not be made in its temporary folder: " + said);
+         }
+         var security = new WindowsPathSecurity();
+         Assert.True(security.IsLink(junction));
+         Assert.False(security.IsLink(target));
+         Assert.False(security.IsLink(file));
+         Directory.Delete(junction);
+         Assert.True(File.Exists(file));
+      }
+      finally
+      {
+         Directory.Delete(root, recursive: true);
+      }
+   }
+
+
+
+   /// <summary>The access rules of a descriptor, explicit and inherited, by security identifier.</summary>
+   private static FileSystemAccessRule[] Rules(FileSystemSecurity security)
+      => [.. security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()];
+}

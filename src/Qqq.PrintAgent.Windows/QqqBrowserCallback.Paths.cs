@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Diagnostics.CodeAnalysis;
 using System.Security.AccessControl;
 
 namespace Qqq.PrintAgent.Windows;
@@ -28,29 +29,35 @@ public sealed partial class QqqBrowserCallback
 
 
 
-   /// <summary>Returns the companion's path after validating that both this helper and the companion are installed in trusted locations, and throws otherwise.</summary>
+   /// <summary>The companion's path for this process as installed on this computer; see the overload for what is checked.</summary>
+   [ExcludeFromCodeCoverage(Justification = "Binds the installation check to the path of the running process, this computer's Program Files folder and the real security descriptors under it. A test does not run from the installed location. It only passes the call on; the check itself is tested through the overload below with temporary folders and a fake of IPathSecurity.")]
    private static string InstalledCompanionPath()
+      => InstalledCompanionPath(Environment.ProcessPath, Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), new WindowsPathSecurity());
+
+
+
+   /// <summary>Returns the companion's path after validating that both this helper and the companion are installed in trusted locations, and throws otherwise.</summary>
+   internal static string InstalledCompanionPath(string? processPath, string programFiles, IPathSecurity security)
    {
-      string executable = Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate the installed callback helper.");
+      string executable = processPath ?? throw new InvalidOperationException("Cannot locate the installed callback helper.");
       string companion = CompanionSibling(executable);
-      ValidateCallbackInstallation(executable);
-      ValidateCallbackInstallation(companion);
+      ValidateCallbackInstallation(executable, programFiles, security);
+      ValidateCallbackInstallation(companion, programFiles, security);
       return companion;
    }
 
 
 
    /// <summary>Requires a path to be inside Program Files with no link or junction, and every folder from it up to Program Files to have a trusted access list, so an ordinary user cannot substitute the program that receives the callback.</summary>
-   private static void ValidateCallbackInstallation(string path)
+   private static void ValidateCallbackInstallation(string path, string boundary, IPathSecurity security)
    {
-      string boundary = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
       MsiUpdateInstaller.ValidateContainedPath(path, boundary, allowRoot: false);
       MsiUpdateInstaller.ValidateNoReparseComponents(path);
       string? current = Path.GetFullPath(path);
       while(current is not null && !string.Equals(current, Path.GetDirectoryName(boundary), StringComparison.OrdinalIgnoreCase))
       {
-         FileSystemSecurity security = Directory.Exists(current) ? new DirectoryInfo(current).GetAccessControl() : new FileInfo(current).GetAccessControl();
-         MsiUpdateInstaller.ValidateTrustedAcl(security, administratorSid: null);
+         FileSystemSecurity descriptor = Directory.Exists(current) ? security.ReadDirectorySecurity(current) : security.ReadFileSecurity(current);
+         MsiUpdateInstaller.ValidateTrustedAcl(descriptor, administratorSid: null);
          current = Path.GetDirectoryName(current);
       }
    }
