@@ -17,7 +17,9 @@ companion's: the choices inside a combo box (one of the fifteen in the markup ha
 through their box; the buttons of a dialog, which are the platform's and carry its names; the views of AppKit (the
 About dialog's frame, the splash, the log viewer), which are AppKit's to identify: it sets two identifiers,
 `AboutVersionText` on the About dialog's version line and `AppKitSplash` on the splash, and none in the log viewer,
-whose toolbar the UI tests find by name; and the tray icon's menu, which Windows draws as a native menu.
+whose toolbar the UI tests find by name (one button in that toolbar is the companion's and has an identifier: the
+companion inserts "Clear logs" there, `ClearLogsFromViewer`); and the tray icon's menu, which Windows draws as a
+native menu.
 
 A new test in the presentation suite, `XamlContractTests`, reads the companion's markup and code-behind as text. It
 fails when a control an operator acts on has no identifier, in markup or created in code (a button, a list, a menu
