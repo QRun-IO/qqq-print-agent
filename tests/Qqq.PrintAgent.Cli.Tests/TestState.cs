@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+// The store's type under the name tests use for it. Every test declares a store as JournalStore, so when the product type
+// is renamed, this line and OpenStore below change and no test does.
+global using JournalStore = Qqq.PrintAgent.Windows.AgentStore;
 using System.Runtime.CompilerServices;
 using Microsoft.Data.Sqlite;
 using Qqq.PrintAgent.Windows;
@@ -12,8 +15,9 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// How tests reach the service's state on disk. This is the only place in the test project that constructs the store, so when
 /// the store is opened for one server out of a registry, the way a test names "the store in this folder" changes here and
-/// nowhere else. It is also the only place a test gets a connection of its own to a journal, because such a connection has
-/// to stay out of the pool the stores of that journal share.
+/// nowhere else. Tests name the store's type by the alias declared above, never by the product's name. This is also the
+/// only place a test gets a connection of its own to a journal, because such a connection has to stay out of the pool the
+/// stores of that journal share.
 /// </summary>
 internal static class TestState
 {

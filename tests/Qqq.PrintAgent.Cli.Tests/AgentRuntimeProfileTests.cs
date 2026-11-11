@@ -50,7 +50,7 @@ public sealed class AgentRuntimeProfileTests
       await fixture.HeartbeatAsync(clock);
       await fixture.WaitAsync(() => DescribedDevice(fixture) is not null);
       Assert.Equal(device, DescribedDevice(fixture));
-      using AgentStore persisted = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore persisted = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal(device, persisted.GetDeviceProfile());
       Assert.Equal(printer, persisted.GetPrinterProfile("printer"));
       Assert.Equal("device", persisted.LoadConfiguration()!.DeviceId);

@@ -19,7 +19,7 @@ public sealed class JobCreationTimeTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-created-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using AgentStore store = TestState.OpenStore(directory);
+         using JournalStore store = TestState.OpenStore(directory);
          PrintJob older = new("older", "printer", "Older job", "PDF", "00", 1, new PrintOptions(), "2026-01-01T05:00:00-05:00", "CLAIMED");
          store.TrackJob(older, "Laser");
          store.Record(older.JobId, new PrintEvent("received", "RECEIVED"));
@@ -53,7 +53,7 @@ public sealed class JobCreationTimeTests
       string directory = Path.Combine(Path.GetTempPath(), "qqq-created-migration-" + Guid.NewGuid().ToString("N"));
       try
       {
-         using(AgentStore store = TestState.OpenStore(directory))
+         using(JournalStore store = TestState.OpenStore(directory))
          {
             store.Record("events", new PrintEvent("first", "RECEIVED"));
             store.Record("events", new PrintEvent("last", "SPOOLED"));
@@ -67,14 +67,14 @@ public sealed class JobCreationTimeTests
             DROP INDEX jobs_display_createdAt;
             ALTER TABLE local_jobs DROP COLUMN created_at;
             """);
-         using(AgentStore migrated = TestState.OpenStore(directory))
+         using(JournalStore migrated = TestState.OpenStore(directory))
          {
             Assert.Equal("2020-01-01T00:00:00.0000000+00:00", migrated.GetJobDetails("events")!.Job.CreatedAt);
             Assert.Equal("2021-01-01T00:00:00.0000000+00:00", migrated.GetJobDetails("pruned")!.Job.CreatedAt);
             migrated.Record("events", new PrintEvent("late", "SPOOLER_COMPLETED"));
          }
          Execute(directory, "UPDATE events SET recorded_at='2099-01-01T00:00:00.0000000+00:00'; UPDATE local_jobs SET updated_at='2099-01-01T00:00:00.0000000+00:00'");
-         using AgentStore reopened = TestState.OpenStore(directory);
+         using JournalStore reopened = TestState.OpenStore(directory);
          Assert.Equal("2020-01-01T00:00:00.0000000+00:00", reopened.GetJobDetails("events")!.Job.CreatedAt);
          Assert.Equal("2021-01-01T00:00:00.0000000+00:00", reopened.GetJobDetails("pruned")!.Job.CreatedAt);
       }

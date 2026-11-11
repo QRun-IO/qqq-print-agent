@@ -43,14 +43,14 @@ public sealed class AgentStoreOpenRaceTests
       try
       {
          // Loads the SQLite provider and the store's types, so the thread below has nothing else to wait for.
-         using(AgentStore warm = TestState.OpenStore(Path.Combine(root, "warm")))
+         using(JournalStore warm = TestState.OpenStore(Path.Combine(root, "warm")))
          { Assert.Null(warm.GetState("none")); }
          Exception? failure = null;
          var opening = new Thread(() =>
          {
             try
             {
-               using AgentStore store = TestState.OpenStore(folder);
+               using JournalStore store = TestState.OpenStore(folder);
                _ = store.GetState("none");
             }
             catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException)
@@ -101,7 +101,7 @@ public sealed class AgentStoreOpenRaceTests
       try
       {
          // Kept open so that closing the round's stores never closes the journal, which would checkpoint it every round.
-         using AgentStore keeper = TestState.OpenStore(directory);
+         using JournalStore keeper = TestState.OpenStore(directory);
          using var writing = new SemaphoreSlim(1, 1);
          using var together = new Barrier(Workers, _ => JournalFiles.Release(directory));
          Thread[] threads = Enumerable.Range(0, Workers).Select(worker => new Thread(() => RunRounds(directory, worker, together, writing, failures))).ToArray();
@@ -135,7 +135,7 @@ public sealed class AgentStoreOpenRaceTests
             { throw new TimeoutException("The threads did not all become ready to open."); }
             if(!failures.IsEmpty)
             { continue; }
-            using AgentStore store = TestState.OpenStore(directory);
+            using JournalStore store = TestState.OpenStore(directory);
             for(int query = 0; query < 4; query++)
             { _ = store.QueryJobs(new JobQuery()); }
             if(round % WriteEvery == worker)
@@ -151,7 +151,7 @@ public sealed class AgentStoreOpenRaceTests
 
 
    /// <summary>Records an event and saves a profile through the store, then reads both back; one thread writes at a time.</summary>
-   private static void WriteAndReadBack(AgentStore store, int worker, int round, SemaphoreSlim writing, ConcurrentQueue<string> failures)
+   private static void WriteAndReadBack(JournalStore store, int worker, int round, SemaphoreSlim writing, ConcurrentQueue<string> failures)
    {
       writing.Wait();
       try

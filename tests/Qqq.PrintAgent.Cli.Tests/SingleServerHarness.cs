@@ -171,5 +171,5 @@ internal sealed class SingleServerHarness : IDisposable
 
 
    /// <summary>One page of the job list: the journal's jobs merged, under one sort, with the server's queued jobs that the journal does not hold yet.</summary>
-   internal static JobPage QueryJobsWithQueue(AgentStore store, JobQuery query, IReadOnlyList<JobSnapshot> queued) => AgentRuntime.QueryJobsWithQueue(store, query, queued);
+   internal static JobPage QueryJobsWithQueue(JournalStore store, JobQuery query, IReadOnlyList<JobSnapshot> queued) => AgentRuntime.QueryJobsWithQueue(store, query, queued);
 }

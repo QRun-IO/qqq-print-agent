@@ -84,7 +84,7 @@ public sealed class AgentRemoteControlTests
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") == 1);
       await connection.SendAsync("COMMAND", command);
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") == 2);
-      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal("OUTCOME_UNKNOWN", store.GetControlReceipt("command")!.Outcome);
       Assert.All(Receipts(fixture), receipt => Assert.Equal("OUTCOME_UNKNOWN", receipt.GetProperty("outcome").GetString()));
       Assert.Equal(1, fixture.Printer.Cancellations);
@@ -114,7 +114,7 @@ public sealed class AgentRemoteControlTests
       fixture.RefuseWith = message => message.Type is "COMMAND_RECEIPT" ? "NOT_FOUND" : null;
       ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
       await fixture.WaitAsync(() => PendingReceipts(fixture) == 0);
-      using(AgentStore inspected = TestState.OpenStore(fixture.DirectoryPath))
+      using(JournalStore inspected = TestState.OpenStore(fixture.DirectoryPath))
       { Assert.Equal(receipt, inspected.GetControlReceipt(old.CommandId)); }
       Assert.Equal(0, fixture.Printer.Cancellations);
       fixture.RefuseWith = null;
@@ -237,7 +237,7 @@ public sealed class AgentRemoteControlTests
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") >= 2);
       Assert.Equal(0, fixture.Printer.Cancellations);
       Assert.Single(ReceiptMessageIds(fixture).Distinct(StringComparer.Ordinal));
-      using AgentStore inspected = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore inspected = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal("OUTCOME_UNKNOWN", inspected.GetControlReceipt("command")!.Outcome);
       Assert.Equal("SPOOLED", inspected.GetState("job"));
    }
@@ -261,7 +261,7 @@ public sealed class AgentRemoteControlTests
       await fixture.WaitAsync(() => fixture.Logs.Any(line => line.Contains(Stopped, StringComparison.Ordinal) && line.Contains("Synthetic unexpected spooler failure", StringComparison.Ordinal)));
       Assert.Equal(1, fixture.Printer.Cancellations);
       Assert.Equal(0, fixture.Count("COMMAND_RECEIPT"));
-      using(AgentStore interrupted = TestState.OpenStore(fixture.DirectoryPath))
+      using(JournalStore interrupted = TestState.OpenStore(fixture.DirectoryPath))
       { Assert.Null(interrupted.GetControlReceipt("command")); }
       fixture.Printer.CancellationFailure = null;
       ScriptedPrintServer.Connection second = await fixture.ConnectAsync();
@@ -269,7 +269,7 @@ public sealed class AgentRemoteControlTests
       await fixture.WaitAsync(() => HasReceipt(fixture, "command", "OUTCOME_UNKNOWN") && PendingReceipts(fixture) == 0);
       Assert.Equal(1, fixture.Printer.Cancellations);
       Assert.Equal(1, fixture.Count("COMMAND_RECEIPT"));
-      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Contains("No command was automatically repeated", store.GetControlReceipt("command")!.Message, StringComparison.Ordinal);
       Assert.Equal("SPOOLED", store.GetState("job"));
       Assert.False(fixture.Running.IsCompleted);
@@ -288,7 +288,7 @@ public sealed class AgentRemoteControlTests
       await connection.SendAsync("COMMAND", RealtimeRuntimeFixture.Command(expired: expired));
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") > 0);
       Assert.True(HasReceipt(fixture, "command", expected));
-      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal(expected, store.GetControlReceipt("command")!.Outcome);
       Assert.Equal(0, fixture.Printer.Cancellations);
    }
@@ -308,7 +308,7 @@ public sealed class AgentRemoteControlTests
       await fixture.WaitAsync(() => fixture.Count("COMMAND_RECEIPT") > 0);
       Assert.True(HasReceipt(fixture, "command", outcome));
       Assert.Equal(1, fixture.Printer.Cancellations);
-      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal(outcome, store.GetControlReceipt("command")!.Outcome);
    }
 
@@ -396,7 +396,7 @@ public sealed class AgentRemoteControlTests
    public async Task ControlStateSavedByThePollingPrereleaseIsReadButNotHonored()
    {
       await using RealtimeRuntimeFixture fixture = new();
-      using(AgentStore store = TestState.OpenStore(fixture.DirectoryPath))
+      using(JournalStore store = TestState.OpenStore(fixture.DirectoryPath))
       { store.SaveControlState(AgentControlState.Initial); }
       using(Microsoft.Data.Sqlite.SqliteConnection journal = TestState.OpenJournal(fixture.DirectoryPath))
       {
@@ -424,7 +424,7 @@ public sealed class AgentRemoteControlTests
       DeviceDesiredState live = fixture.Runtime.GetSnapshot().Control!.DesiredState;
       Assert.True(live.DispatchPaused);
       Assert.Equal(5, live.Revision);
-      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       DeviceDesiredState saved = store.LoadControlState().DesiredState;
       Assert.True(saved.DispatchPaused);
       Assert.Equal(5, saved.Revision);
@@ -455,7 +455,7 @@ public sealed class AgentRemoteControlTests
    /// <summary>How many receipts the store still holds for delivery.</summary>
    private static int PendingReceipts(RealtimeRuntimeFixture fixture)
    {
-      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       return store.PendingControlReceipts().Count;
    }
 }

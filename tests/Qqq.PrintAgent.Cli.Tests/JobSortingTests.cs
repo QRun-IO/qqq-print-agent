@@ -46,7 +46,7 @@ public sealed class JobSortingTests
    /// Compares database pages and merged database-plus-queue pages with an independent in-memory sort of the same jobs. The merged
    /// total must exclude queue entries already stored locally and must report that the server queue was limited.
    /// </summary>
-   private static void VerifyPages(AgentStore store, JobSnapshot[] local, JobSnapshot[] cloud, JobQuery query)
+   private static void VerifyPages(JournalStore store, JobSnapshot[] local, JobSnapshot[] cloud, JobQuery query)
    {
       var comparer = Comparer<JobSnapshot>.Create((left, right) => JobSorting.Compare(left, right, query));
       JobSnapshot[] expectedLocal = local.Order(comparer).ToArray();
@@ -113,7 +113,7 @@ public sealed class JobSortingTests
    {
       private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-sort-" + Guid.NewGuid().ToString("N"));
       private readonly SqliteConnection _database;
-      public AgentStore Store { get; }
+      public JournalStore Store { get; }
 
 
 

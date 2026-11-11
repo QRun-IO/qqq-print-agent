@@ -19,12 +19,12 @@ public sealed class MetadataTests : IDisposable
    [Fact]
    public void Profiles_SurviveReopenAndRemainSeparateFromTechnicalQueueIdentity()
    {
-      using(AgentStore store = TestState.OpenStore(_directory))
+      using(JournalStore store = TestState.OpenStore(_directory))
       {
          store.SaveDeviceProfile(new DeviceProfile(" Packing station 7 ", "First line\nSecond line", "West warehouse"));
          store.SavePrinterProfile("stable-queue-id", new PrinterProfile("Shipping labels", "Thermal printer", "Dock 2"));
       }
-      using AgentStore reopened = TestState.OpenStore(_directory);
+      using JournalStore reopened = TestState.OpenStore(_directory);
       Assert.Equal(new DeviceProfile("Packing station 7", "First line\nSecond line", "West warehouse"), reopened.GetDeviceProfile());
       Assert.Equal("Shipping labels", reopened.GetPrinterProfile("stable-queue-id").DisplayName);
       Assert.Null(reopened.GetPrinterProfile("different-queue-id").DisplayName);
@@ -36,7 +36,7 @@ public sealed class MetadataTests : IDisposable
    [Fact]
    public void ExplicitClear_DiffersFromUnconfiguredMetadata()
    {
-      using AgentStore store = TestState.OpenStore(_directory);
+      using JournalStore store = TestState.OpenStore(_directory);
       Assert.Null(store.GetDeviceProfile().Name);
       store.SaveDeviceProfile(new DeviceProfile("Old name", "Old description", "Old location"));
       store.SaveDeviceProfile(new DeviceProfile("", "", ""));
@@ -52,7 +52,7 @@ public sealed class MetadataTests : IDisposable
    [InlineData("description")]
    public void OversizedMetadata_IsRejectedWithoutChangingStoredProfile(string field)
    {
-      using AgentStore store = TestState.OpenStore(_directory);
+      using JournalStore store = TestState.OpenStore(_directory);
       DeviceProfile previous = new("Original", "Description", "Location");
       store.SaveDeviceProfile(previous);
       DeviceProfile invalid = field switch
@@ -71,7 +71,7 @@ public sealed class MetadataTests : IDisposable
    [Fact]
    public void NamesAndLocations_RejectEmbeddedLineBreaks()
    {
-      using AgentStore store = TestState.OpenStore(_directory);
+      using JournalStore store = TestState.OpenStore(_directory);
       Assert.Throws<ArgumentException>(() => store.SaveDeviceProfile(new DeviceProfile("First\nSecond")));
       Assert.Throws<ArgumentException>(() => store.SavePrinterProfile("queue", new PrinterProfile(Location: "First\tSecond")));
    }

@@ -23,7 +23,7 @@ public sealed class AgentRealtimeTransitionTests
       _ = await fixture.ConnectAsync();
       Assert.Equal(0, fixture.LastHelloSettingsRevision);
       Assert.True(fixture.Runtime.GetSnapshot().Authentication!.Authorized);
-      using AgentStore store = TestState.OpenStore(fixture.DirectoryPath);
+      using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
       Assert.Equal("replacement-device", store.LoadConfiguration()!.DeviceId);
       Assert.Equal(0, store.LoadRealtimeSettings().Revision);
    }

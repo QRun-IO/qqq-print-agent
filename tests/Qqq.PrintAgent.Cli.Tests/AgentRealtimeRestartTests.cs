@@ -4,7 +4,6 @@
  */
 
 using Qqq.PrintAgent.Core.Printing;
-using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
@@ -86,7 +85,7 @@ public sealed class AgentRealtimeRestartTests
 
 
    /// <summary>Writes the journal a crashed service leaves behind for one job: it was claimed and the listed states were recorded and delivered, the last of them being where the service stopped.</summary>
-   private static void SeedInterrupted(AgentStore store, string jobId, params string[] states)
+   private static void SeedInterrupted(JournalStore store, string jobId, params string[] states)
    {
       store.TrackJob(new PrintJob(jobId, "printer", "Synthetic " + jobId, "PDF", "unused", 1, new PrintOptions(), RealtimeRuntimeFixture.Now(), "CLAIMED"), "Synthetic");
       foreach(string state in states)

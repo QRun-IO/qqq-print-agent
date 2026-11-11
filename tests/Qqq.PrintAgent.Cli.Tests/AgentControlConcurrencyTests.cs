@@ -127,7 +127,7 @@ public sealed class AgentControlConcurrencyTests
          Assert.Equal(arriving, live.DesiredState);
          Assert.Equal("REFRESH_INVENTORY", live.LastCommand);
          Assert.Equal("INVENTORY_REFRESHED", live.LastOutcome);
-         using(AgentStore store = TestState.OpenStore(fixture.DirectoryPath))
+         using(JournalStore store = TestState.OpenStore(fixture.DirectoryPath))
          {
             AgentControlState saved = store.LoadControlState();
             Assert.Equal(arriving, saved.DesiredState);
