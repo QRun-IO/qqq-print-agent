@@ -399,14 +399,14 @@ Checked against the 1.x window (`MainWindow.xaml`, `MainWindow.xaml.cs`), `Shell
 | Reply unreadable | The red sentence | "Cannot read the local service's answer" |
 | Not authorized | "<edition> authorization required" | "<server name> authorization required" |
 | Not paired | "<edition> authorization required" when the service reported a sign-in status that was not authorized, and otherwise the red sentence | "Not paired" |
-| Stored state unreadable | The red sentence | "Stored data for this server cannot be read · see Connection" |
+| Stored state of one server unreadable | Not a state the 1.x snapshot reported; the footer followed the health word | "Stored data for this server cannot be read · see Connection" |
 | Being removed | Did not exist | "Being removed", with the health the service reports |
 | Orange, not connected | Could not occur: a 1.x service that is not connected is red | "Waiting for the server connection" |
 | Orange, connected, shared printers ready | Could not occur: orange meant connected with a printer issue | "Not ready · see Connection" |
 | Health word this build does not know | Red, the red sentence | Unknown, "State not known to this version · update the companion" |
 | Update's pause | The health's own sentence | "Printing paused while an update is installed", never green |
 
-The tray differs too. The 1.x tooltip and the first line of its menu carried the health's own sentence and the product's name, never the footer's sentence: a computer whose administrator had paused dispatch said "Connected · printers need attention" there while its footer said "Dispatch paused by administrator". The tooltip and the menu's first line now say what the footer says. That is more exact, and it is not what 1.x showed.
+The tray differs too. The 1.x tooltip was the health's own sentence and the product's name, and the first line of its menu was the health's own sentence; neither was the footer's sentence. A computer whose administrator had paused dispatch went on saying what its health said there, for example "Connected and ready", while its footer said "Dispatch paused by administrator". The tooltip and the menu's first line now say what the footer says. That is more exact, and it is not what 1.x showed.
 
 **For the step that joins the shell and the wizard (binding)**
 
