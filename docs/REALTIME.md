@@ -95,6 +95,29 @@ gates the lanes share and the leases a job holds. The runtime, not the worker,
 reports at start the jobs a previous run left unfinished, and sends inventory
 and heartbeats.
 
+A printer backend has three reads, and a job uses the two that do not depend on
+every printer. The full discovery reads the settings of every queue through its
+driver; it is for the inventory report, the companion's list and sharing
+changes. The list without media names every queue from the spooler's
+enumeration alone and asks no driver anything. The lookup reads the settings of
+one queue. A lane lists before it claims (the list names the job's printer in
+the journal), looks up the claimed job's own printer once after the download
+and before SUBMITTING is recorded, and the print helper looks the same printer
+up again before it prints. So for one job Windows is asked about that job's
+queue and no other; a queue whose driver hangs or fails stops only its own
+jobs, which are refused before submission. Each read through the service is a
+helper of its own with a 20 second limit.
+
+What still asks every queue is the inventory report. A report that cannot be
+read (one queue's driver is enough) sends nothing and is logged once per
+reason; the connection stays up and jobs continue on the inventory it already
+delivered. A connection that has delivered no inventory yet claims nothing
+until one full discovery succeeds and the server accepted it, so after a
+restart or a reconnect a driver that fails every time still stops printing.
+The enumeration itself asks the spooler about every local queue and every
+connection, so a spooler that cannot enumerate stops every pass before it
+claims.
+
 Documents stream over separate authenticated HTTPS requests into owned files in
 the protected service staging directory. Length and SHA-256 are checked while
 streaming; only a complete verified file can reach the native printer worker.
@@ -190,7 +213,7 @@ levels, so that a job nested too deep to read can still be identified.
 - **After spool acceptance.** Once a job is recorded as SPOOLED it stays
   SPOOLED. A failure while releasing its staging reservation or printer turn
   afterwards is logged and is not written over the record.
-- **One way to print.** A printer backend lists printers and prints one
+- **One way to print.** A printer backend reads printers and prints one
   verified staged file under a submission limit; it has no other print
   operation. Version 2.0 deleted the submission of a document from memory, and
   with it the separate interface for backends that take files, so every
@@ -198,8 +221,11 @@ levels, so that a job nested too deep to read can still be identified.
   worker can no longer be built with a backend that cannot print its staged
   file, and a wrapper can no longer refuse a file after SUBMITTING was
   recorded because the backend inside it takes none. The print helper accepts
-  three operations (discover, print a staged file by its path, cancel one
-  spool job); it no longer accepts a document inside a request.
+  five operations (the three reads: discover, list without media, find one
+  queue with its media; print a staged file by its path; cancel one spool
+  job); it no longer accepts a document inside a request. The queue to find
+  is named by its identifier, and a request whose identifier is not 24
+  hexadecimal digits in lower case is refused before any queue is asked.
 
 ## Administrator settings
 
