@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Diagnostics.CodeAnalysis;
 using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Windows.Management;
@@ -17,8 +18,14 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// accepted is what the service uses: the request states what the check showed, the service compares, and when they
 /// differ it stores nothing and answers <see cref="ManagementErrorCode.ProviderChanged"/>. The value is only ever
 /// compared: what the service stores is its own read.
+/// <para>
+/// <see cref="TryRead"/> is public because the rule is for both ends. A client is told the provider by a check before
+/// any request states it, and has to judge that text exactly as the arguments will: a client that judged it by a
+/// rule of its own could show the operator an address, and let them accept it, that no request can state. The
+/// comparison and the refusal are the service's and the argument records' own and stay internal.
+/// </para>
 /// </summary>
-internal static class SignInProviderOrigin
+public static class SignInProviderOrigin
 {
    /// <summary>
    /// True when what the operator was shown is what the service read. An origin that is absent states that the check
@@ -53,6 +60,22 @@ internal static class SignInProviderOrigin
    /// </summary>
    internal static string? Require(string? shown, string parameter)
       => shown is null || OriginOf(shown) is not null ? shown : throw new ArgumentException("The provider's origin is the origin the check reported, or is left out when the check named no provider.", parameter);
+
+
+
+   /// <summary>
+   /// Reads the provider a check reported (<see cref="ServerCheckResult.ProviderOrigin"/>) by the rule the arguments
+   /// are held to: true exactly for text <see cref="Require"/> accepts as an origin, with the origin in the one form
+   /// an origin is kept, compared and shown in (scheme, the host's ASCII name and port, with the path "/"). It is
+   /// false for text that names no origin, an IPv6 literal with a zone among it, and for no text at all; a caller
+   /// that must tell "the check named no provider" from "the check named something that is no origin" asks whether
+   /// the text was null first. Nothing is logged or thrown, whatever the text holds.
+   /// </summary>
+   public static bool TryRead(string? text, [NotNullWhen(true)] out Uri? origin)
+   {
+      origin = text is null ? null : OriginOf(text);
+      return origin is not null;
+   }
 
 
 

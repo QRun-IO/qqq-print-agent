@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+The connection wizard's frame and its Server step exist in the presentation assembly (2.0;
+[ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md)). The window does not use them yet: it still shows
+the connection dialog, so nothing an operator sees changes. The steps after the first (sign in, pair, printers,
+done) are not built; the frame knows them and shows nothing for them.
+
+- **The frame.** The five steps with the step indicator, the primary action and Cancel (Enter and Escape), Back
+  where the step before stored nothing, where the focus belongs, and how a run ends: cancelled, on the Computer
+  page, or on a server. The wizard is not started without an answer from the service, while the stored data is not
+  ready, or at eight servers, counting one that is being removed, and it says which.
+- **The Server step.** The address is read by the contract's address rule, and the name follows the contract's
+  proposal for the address until one is typed; a name that breaks the name rule disables Next and says which part
+  of the rule it breaks. A check is one request to the service. Its result shows the five stages in order, each
+  passed, failed with its reasons, or not reached; the sign-in methods; or that the address is already a server,
+  with a way to open it. A stage shows at most five reasons and then says how many more there are, and a stage
+  the service reported twice shows the worse outcome. A check that was not answered says so and can be repeated;
+  a second check while one runs is refused out loud; Cancel during a check stops waiting. Editing the address
+  removes the result, and a check is only ever sent for the address that is in the box. A check that passes
+  while the typed name breaks the name rule says what is wrong with the name and does not point at Next. Back
+  from the next step says the result again.
+- **A refused certificate.** The certificate is shown with the address that presented it, its subject, issuer,
+  validity, fingerprint and why Windows refused it. For each reason the step says what can be done: installing
+  the issuing authority's root certificate is named only for an authority Windows does not trust; for a
+  certificate issued for another name, for no certificate and for a reason this version does not know, the
+  operator is sent to the address or to the server's administrator. The development-only exception is offered
+  only when the reasons include an authority Windows does not trust. Its warning names the server's address and
+  says that the sign-in provider's address follows after the check, or names both when the provider is already
+  known; the re-check shows every address the exception covers before Next can be used. An acceptance is for
+  one check: a check under it that does not pass, an edit of the address and declining all forget it, and
+  nothing a warning said is remembered for a later check. A sign-in provider is shown, and can be accepted, only
+  when the contract takes it for an origin: the wizard reads it with the contract's own rule
+  (`SignInProviderOrigin.TryRead`, now public), so an address no request could state, such as an IPv6 literal
+  with a zone, is never shown with part of it dropped. Nothing is stored by this step.
+- **Every refusal has a reaction.** One table says what the wizard does with each code of the contract for a
+  check, and a test walks the contract's own list, so a code added later fails the build until the wizard has a
+  reaction to it.
+- **Said once.** A result is announced once, after the stages and the buttons are in place. `Announcement` (a
+  text and one event per thing said, which carries its sentence) and `OperationGate` (one command at a time per
+  server, for the computer and for the wizard; a second command is refused with a sentence, never dropped or
+  queued) were added for this and for the server tree.
+- **Text from the service.** A stage's reasons and a certificate's subject, issuer and fingerprint are shown in
+  the contract's printable form, which the contract now lets a client apply (`ManagementText.Bounded`). The
+  wizard holds no password, enrollment code or credential, and its log entries name the server only by the origin
+  the address rule returned.
+
 The companion has a client for version 2 of the management pipe (2.0). The window does not use it yet: it still
 talks to the service through the version 1 client, and no service answers version 2 yet, so nothing an operator
 sees changes. The connection wizard and the server tree will be built on it.

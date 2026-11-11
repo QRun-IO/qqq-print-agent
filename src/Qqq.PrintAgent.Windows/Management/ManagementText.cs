@@ -18,16 +18,25 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <item>Applying the rule to its own result changes nothing, so the reader of a reply applies it again without harm.</item>
 /// <item>No words stand in for a value that is missing. A member that may be absent stays absent, and a member that must say something refuses to be built from nothing.</item>
 /// </list>
+/// <para>
+/// <see cref="Bounded"/> is public because the rule is for both ends: the reader of a reply applies it again, so a
+/// client holds printable, bounded text even from a service that did not send it so. The records that apply it when
+/// they are built (an error's message, an identity value) need nothing more from a client. The members that are
+/// plain text on the wire (a check stage's reasons, a refused certificate's subject and issuer, a server's status)
+/// are given this form by the client that shows them. The two other forms are the service's own and stay internal.
+/// </para>
 /// </summary>
-internal static class ManagementText
+public static class ManagementText
 {
    /// <summary>
    /// Makes text printable and cuts it at the limit, in UTF-16 units. A code point that would pass the limit is left
    /// out whole and reading stops there, so the result is never longer than the limit, never ends in half a surrogate
    /// pair, and costs the same for a value of any length.
    /// </summary>
-   internal static string Bounded(string value, int limit)
+   public static string Bounded(string value, int limit)
    {
+      ArgumentNullException.ThrowIfNull(value);
+      ArgumentOutOfRangeException.ThrowIfNegative(limit);
       StringBuilder shown = new(Math.Min(value.Length, limit));
       foreach(Rune rune in value.EnumerateRunes())
       {

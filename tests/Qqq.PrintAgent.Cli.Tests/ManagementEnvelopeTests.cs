@@ -1002,6 +1002,65 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>
+   /// A client reads the provider a check reported by the rule the arguments are held to, so it can never show an
+   /// operator, or let them accept, a provider that no request can state. Text the argument records accept is read
+   /// as the origin in the one form origins are compared in, and that origin agrees with the text as the check
+   /// reported it; text they refuse is not read, an IPv6 literal with a zone among it; and no text at all is not
+   /// read either, which a caller tells apart by asking for null first.
+   /// </summary>
+   [Theory]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test/")]
+   [InlineData("HTTPS://Sign-In.Example.Test:443/realms/dev?x=1#f", "https://sign-in.example.test/")]
+   [InlineData("https://operator:secret@sign-in.example.test:8443", "https://sign-in.example.test:8443/")]
+   [InlineData("https://b\u00FCcher.example", "https://xn--bcher-kva.example/")]
+   [InlineData("http://sign-in.example.test", "http://sign-in.example.test/")]
+   [InlineData("https://[FE80::1]", "https://[fe80::1]/")]
+   [InlineData(null, null)]
+   [InlineData("", null)]
+   [InlineData("none", null)]
+   [InlineData("sign-in.example.test", null)]
+   [InlineData("ftp://sign-in.example.test", null)]
+   [InlineData("https://id\u2028.example.test", null)]
+   [InlineData("https://[fe80::1%25eth0]", null)]
+   [InlineData("https://[fe80::1%eth0]:8443", null)]
+   public void AClientReadsTheProviderACheckReported_ByTheRuleTheArgumentsAreHeldTo(string? text, string? origin)
+   {
+      bool read = SignInProviderOrigin.TryRead(text, out Uri? found);
+
+      Assert.Equal(origin is not null, read);
+      Assert.Equal(origin, found?.AbsoluteUri);
+      if(text is null)
+      {
+         return;
+      }
+      if(!read)
+      {
+         Assert.Throws<ArgumentException>(() => new TrustSetArgs(AcceptCertificateException: true, text));
+         Assert.Throws<ArgumentException>(() => new ServersAddArgs(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, text));
+         return;
+      }
+      string shown = found!.GetLeftPart(UriPartial.Authority);
+      Assert.Equal(text, new TrustSetArgs(AcceptCertificateException: true, text).ProviderOrigin);
+      Assert.True(new TrustSetArgs(AcceptCertificateException: true, text).ProviderAgrees(shown));
+      Assert.True(new ServersAddArgs(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, text).ProviderAgrees(shown));
+      Assert.True(SignInProviderOrigin.TryRead(shown, out Uri? again));
+      Assert.Equal(found, again);
+   }
+
+
+
+   /// <summary>Reading is the one part of the provider rule a client calls, so it is the one part that is public: the comparison and the refusal stay the contract's own.</summary>
+   [Fact]
+   public void ReadingTheProvider_IsTheOnlyPartOfTheRuleAClientCanCall()
+   {
+      Assert.True(typeof(SignInProviderOrigin).IsPublic);
+      Assert.Equal([nameof(SignInProviderOrigin.TryRead)], typeof(SignInProviderOrigin).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly)
+         .Select(method => method.Name), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
    /// "The check named no provider" is said in two ways on the wire, and both are read as the same statement: the
    /// member left out, and the member given as null. Either agrees with a service that reads no provider and with no
    /// other, for servers.add and for trust.set. Written back, the member is left out.
