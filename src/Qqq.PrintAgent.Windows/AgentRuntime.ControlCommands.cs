@@ -97,6 +97,7 @@ public sealed partial class AgentRuntime
    /// Cancels one job on the server's request, but only when it can be done safely: a job still downloading is cancelled before it
    /// reaches the printer; a spooled job is cancelled by its exact recorded spooler receipt on its recorded printer; every other state
    /// (no receipt, already completed, unknown, unsupported backend, missing printer) is refused with a specific outcome and nothing is changed.
+   /// The recorded printer's queue name comes from the list that reads no queue's settings, so no driver is asked before the cancellation.
    /// </summary>
    private async Task<(string Outcome, string Message)> CancelRemoteSpoolAsync(AgentStore store, string jobId, CancellationToken token)
    {
@@ -125,7 +126,7 @@ public sealed partial class AgentRuntime
       {
          return ("UNSUPPORTED", "This printer backend does not support verified spool cancellation.");
       }
-      PrinterInfo? printer = _printers.Discover().SingleOrDefault(value => string.Equals(value.PrinterId, job.PrinterId, StringComparison.Ordinal));
+      PrinterInfo? printer = _printers.ListWithoutMedia().SingleOrDefault(value => string.Equals(value.PrinterId, job.PrinterId, StringComparison.Ordinal));
       if(printer is null)
       {
          return ("FAILED", "The recorded printer is unavailable. No other printer queue was changed.");

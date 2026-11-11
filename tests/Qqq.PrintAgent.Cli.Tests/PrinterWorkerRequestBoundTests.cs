@@ -143,6 +143,16 @@ public sealed class PrinterWorkerRequestBoundTests
 
 
 
+      /// <summary>Never reached by these tests; it has nothing to list.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia() => throw new InvalidOperationException("This backend has no printer.");
+
+
+
+      /// <summary>Never reached by these tests; it has nothing to find.</summary>
+      public PrinterInfo? FindWithMedia(string printerId) => throw new InvalidOperationException("This backend has no printer.");
+
+
+
       /// <summary>Never reached by these tests; it has nothing to print on.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
          => throw new InvalidOperationException("This backend has no printer.");

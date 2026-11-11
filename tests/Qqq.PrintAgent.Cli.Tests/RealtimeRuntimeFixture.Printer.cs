@@ -15,7 +15,8 @@ internal sealed partial class RealtimeRuntimeFixture
    /// <summary>
    /// A printer that takes the staged file the service submits, counts and orders the jobs it receives, and remembers the
    /// submission timeout it was given. A test can hold a submission open inside the printer, and can script how a spooler
-   /// cancellation ends.
+   /// cancellation ends. It counts each of the three reads separately, and a test can make the full discovery fail the way
+   /// it does when one queue's driver does not answer, while the other two reads, which do not ask that driver, go on working.
    /// </summary>
    internal sealed class SyntheticFilePrinter : IPrinterBackend, IPrinterJobControl
    {
@@ -26,6 +27,21 @@ internal sealed partial class RealtimeRuntimeFixture
       internal int Submissions;
       internal TimeSpan LastSubmissionTimeout;
       internal ConcurrentQueue<string> Order { get; } = new();
+
+
+
+      /// <summary>How often the full discovery was asked for, the read that asks every queue's driver.</summary>
+      internal int Discoveries;
+
+
+
+      /// <summary>How often the list without media was asked for, the read that asks no driver.</summary>
+      internal int Listings;
+
+
+
+      /// <summary>How often one queue was looked up with its media.</summary>
+      internal int Lookups;
 
 
 
@@ -69,8 +85,40 @@ internal sealed partial class RealtimeRuntimeFixture
 
 
 
-      /// <summary>Reports two ready queues, "printer" and "other", each accepting PDF and ZPL.</summary>
-      public IReadOnlyList<PrinterInfo> Discover() => [new("printer", "Synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"]), new("other", "Other synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"])];
+      /// <summary>When set, the full discovery throws what this makes, each time it is asked; the list without media and the lookup of one queue are not affected.</summary>
+      internal Func<Exception>? DiscoveryFailure { get; set; }
+
+
+
+      /// <summary>The two ready queues, "printer" and "other", each accepting PDF and ZPL; neither has media.</summary>
+      private static PrinterInfo[] Queues => [new("printer", "Synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"]), new("other", "Other synthetic", "Fixture", "None", "READY", ["PDF", "ZPL"])];
+
+
+
+      /// <summary>Counts the call and reports the two queues, or fails as the test said.</summary>
+      public IReadOnlyList<PrinterInfo> Discover()
+      {
+         Interlocked.Increment(ref Discoveries);
+         return DiscoveryFailure is null ? Queues : throw DiscoveryFailure();
+      }
+
+
+
+      /// <summary>Counts the call and reports the same two queues.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia()
+      {
+         Interlocked.Increment(ref Listings);
+         return Queues;
+      }
+
+
+
+      /// <summary>Counts the call and returns the queue with that identifier, or null when it is neither of the two.</summary>
+      public PrinterInfo? FindWithMedia(string printerId)
+      {
+         Interlocked.Increment(ref Lookups);
+         return Queues.SingleOrDefault(queue => string.Equals(queue.PrinterId, printerId, StringComparison.Ordinal));
+      }
 
 
 

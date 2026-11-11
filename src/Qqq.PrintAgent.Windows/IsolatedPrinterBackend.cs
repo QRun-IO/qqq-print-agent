@@ -33,9 +33,45 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IPrinterBa
 
 
 
-   /// <summary>Discovery remains synchronous for the backend contract but cannot block beyond 20 seconds.</summary>
-   public IReadOnlyList<PrinterInfo> Discover()
-      => InvokeAsync(new PrinterWorkerHost.Request("discover"), TimeSpan.FromSeconds(20), CancellationToken.None).GetAwaiter().GetResult().Printers
+   /// <summary>
+   /// Discovery remains synchronous for the backend contract but cannot block beyond 20 seconds. Its helper reads the settings of
+   /// every queue, so one queue whose driver hangs uses up the whole limit and the discovery fails.
+   /// </summary>
+   public IReadOnlyList<PrinterInfo> Discover() => ReadPrinters(new PrinterWorkerHost.Request("discover"));
+
+
+
+   /// <summary>Lists the queues without their media through a helper of its own, with the same 20 second limit and the same failures as discovery. That helper asks no driver anything.</summary>
+   public IReadOnlyList<PrinterInfo> ListWithoutMedia() => ReadPrinters(new PrinterWorkerHost.Request("list-without-media"));
+
+
+
+   /// <summary>
+   /// Looks up one queue with its media through a helper of its own, with the same 20 second limit and the same failures as
+   /// discovery; that helper reads the settings of this queue only. Text that does not have the form of a queue identifier names
+   /// no queue, so it reads as absent and no helper is started for it; the request therefore always carries 24 characters. The
+   /// helper answers with no printer or with one, and an answer that holds more than one, or one that was not asked for, is
+   /// refused.
+   /// </summary>
+   public PrinterInfo? FindWithMedia(string printerId)
+   {
+      if(!WindowsPrinters.IsQueueIdentifier(printerId))
+      {
+         return null;
+      }
+      IReadOnlyList<PrinterInfo> found = ReadPrinters(new PrinterWorkerHost.Request("find-with-media", PrinterId: printerId));
+      if(found.Count > 1 || found.Any(printer => !string.Equals(printer.PrinterId, printerId, StringComparison.Ordinal)))
+      {
+         throw new InvalidDataException("Printer worker returned a printer that was not asked for.");
+      }
+      return found.Count == 0 ? null : found[0];
+   }
+
+
+
+   /// <summary>Runs one of the three reads in a helper, waits for it for at most 20 seconds, and returns the printers it answered with; an answer that claims success and carries no list is refused.</summary>
+   private IReadOnlyList<PrinterInfo> ReadPrinters(PrinterWorkerHost.Request request)
+      => InvokeAsync(request, TimeSpan.FromSeconds(20), CancellationToken.None).GetAwaiter().GetResult().Printers
          ?? throw new InvalidDataException("Printer worker returned no inventory.");
 
 

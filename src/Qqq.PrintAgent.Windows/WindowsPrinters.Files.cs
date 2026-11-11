@@ -18,8 +18,10 @@ public sealed partial class WindowsPrinters
 {
    /// <summary>
    /// Prints a staged file. The path must be an absolute, regular file (no link), and its length and SHA-256 are checked against the job
-   /// again here, because it is the last step before the spooler. The queue and options are then validated (copies, no per-job paper
-   /// dimensions, a format the queue offers), and the document goes to the RAW ZPL or PDF path. Nothing is guessed or defaulted,
+   /// again here, because it is the last step before the spooler. The job's own queue is then looked up, and no other queue on the
+   /// computer is opened or has its driver asked, so a queue that hangs cannot hold a document meant for another. The queue and
+   /// options are validated (copies, no per-job paper dimensions, a format the queue offers), and the document goes to the RAW ZPL
+   /// or PDF path. Nothing is guessed or defaulted,
    /// because a wrong guess prints on the wrong stock. The submission limit is not applied here: a driver call cannot be interrupted
    /// from inside its own process, so the limit belongs to the service, which runs this adapter in a helper process and ends that
    /// process when the limit passes.
@@ -36,7 +38,12 @@ public sealed partial class WindowsPrinters
          throw new InvalidDataException("Staged document integrity check failed.");
       }
       input.Position = 0;
-      PrinterInfo printer = Discover().Single(item => string.Equals(item.PrinterId, job.PrinterId, StringComparison.Ordinal));
+      ///////////////////////////////////////////////////////////////////////////
+      // only the job's own queue is read. a job whose queue is gone fails as  //
+      // it always has, with the words of the search that used to find nothing //
+      // in the whole list, so what the service records for it is unchanged    //
+      ///////////////////////////////////////////////////////////////////////////
+      PrinterInfo printer = FindWithMedia(job.PrinterId) ?? throw new InvalidOperationException("Sequence contains no matching element");
       RequireJobPaperSupport(job);
       if(job.Options.Copies is < 1 or > 32767 || !printer.Formats.Contains(job.Format, StringComparer.Ordinal))
       {

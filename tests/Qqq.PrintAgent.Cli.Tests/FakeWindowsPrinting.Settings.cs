@@ -73,6 +73,7 @@ internal sealed partial class FakeWindowsPrinting
    public int DeviceCapabilities(string device, string port, ushort capability, byte[] devMode)
    {
       Calls.Add($"DeviceCapabilities({device}, {port}, {capability}, count)");
+      Ask(device);
       CapabilityModes.Add(devMode.ToArray());
       FakeQueue queue = Find(device) ?? throw new InvalidOperationException("A capability was asked of a queue that does not exist.");
       return queue.CountAnswers.TryGetValue(capability, out int answer) ? answer : Entries(queue, capability);
@@ -87,6 +88,7 @@ internal sealed partial class FakeWindowsPrinting
    public int DeviceCapabilities(string device, string port, ushort capability, int outputBytes, byte[] devMode, out byte[] output)
    {
       Calls.Add($"DeviceCapabilities({device}, {port}, {capability}, {outputBytes} bytes)");
+      Ask(device);
       CapabilityModes.Add(devMode.ToArray());
       FakeQueue queue = Find(device) ?? throw new InvalidOperationException("A capability was asked of a queue that does not exist.");
       output = new byte[outputBytes];

@@ -18,7 +18,9 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Handles the job-related pipe commands. A list request merges local history with the bounded cloud preview; details and
    /// review read or update the local journal; cancelling a job already spooled goes to the Windows spooler by its recorded
-   /// receipt, and every other cancel, retry or test goes to the server through <c>SendOperatorActionAsync</c>.
+   /// receipt, and every other cancel, retry or test goes to the server through <c>SendOperatorActionAsync</c>. The spooler
+   /// cancel needs only the name of the job's queue, so it takes it from the list that reads no queue's settings: a queue
+   /// whose driver hangs, the job's own included, cannot keep the operator from cancelling.
    /// </summary>
    private async Task<string> HandleJobCommandAsync(PipeRequest request, CancellationToken token)
    {
@@ -47,7 +49,7 @@ public sealed partial class AgentRuntime
          JobSnapshot? job = store.GetJobDetails(RequiredJob(request))?.Job;
          if(job is { Status: "SPOOLED", SpoolerJobId: not null, PrinterId: not null })
          {
-            PrinterInfo printer = _printers.Discover().Single(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal));
+            PrinterInfo printer = _printers.ListWithoutMedia().Single(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal));
             if(_printers is not IPrinterJobControl control)
             {
                throw new InvalidOperationException("Restart with the current installed service to use bounded spooler cancellation.");
@@ -64,8 +66,9 @@ public sealed partial class AgentRuntime
 
    /// <summary>
    /// Sends a test print, retry or cancel to the server as an explicit operator action. It is refused while ordinary traffic is
-   /// not allowed; a test print also needs the printer to be shared locally and to support the chosen format. A cancelled job is
-   /// removed from the cloud preview at once and the queue generation advances so a slower refresh cannot bring it back.
+   /// not allowed; a test print also needs the printer to be shared locally and to support the chosen format, which the list
+   /// that reads no queue's settings answers. A cancelled job is removed from the cloud preview at once and the queue generation
+   /// advances so a slower refresh cannot bring it back.
    /// </summary>
    private async Task<string> SendOperatorActionAsync(AgentStore store, PipeRequest request, CancellationToken token)
    {
@@ -76,7 +79,7 @@ public sealed partial class AgentRuntime
       _ = store.LoadConfiguration() ?? throw new InvalidOperationException("Connect this device in Settings first.");
       if(string.Equals(request.Operation, "test-print", StringComparison.Ordinal))
       {
-         PrinterInfo printer = _printers.Discover().SingleOrDefault(p => string.Equals(p.PrinterId, request.PrinterId, StringComparison.Ordinal))
+         PrinterInfo printer = _printers.ListWithoutMedia().SingleOrDefault(p => string.Equals(p.PrinterId, request.PrinterId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException("Select an available printer.");
          if(!store.GetExposedPrinterIds().Contains(printer.PrinterId) || !printer.Formats.Contains(request.Format ?? "", StringComparer.Ordinal))
          {

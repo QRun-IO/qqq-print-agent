@@ -65,6 +65,16 @@ internal sealed class EnrolledStateFixture : IDisposable
 
 
 
+      /// <summary>Reports the same queue; it has no media to leave out.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia() => Discover();
+
+
+
+      /// <summary>Returns the queue when it is the one asked for.</summary>
+      public PrinterInfo? FindWithMedia(string printerId) => Discover().SingleOrDefault(printer => string.Equals(printer.PrinterId, printerId, StringComparison.Ordinal));
+
+
+
       /// <summary>Always throws: no test on this state may submit a document.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Tests on enrolled local state must never print.");

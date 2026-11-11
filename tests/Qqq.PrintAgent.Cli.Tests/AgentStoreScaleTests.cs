@@ -245,6 +245,16 @@ public sealed class AgentStoreScaleTests(ITestOutputHelper output)
 
 
 
+      /// <summary>Reports the same empty inventory.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia() => [];
+
+
+
+      /// <summary>Has no queue to find.</summary>
+      public PrinterInfo? FindWithMedia(string printerId) => null;
+
+
+
       /// <summary>Always throws: scale tests must not print.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken) => throw new InvalidOperationException("Scale tests must not print.");
    }

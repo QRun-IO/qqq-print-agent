@@ -97,6 +97,16 @@ public sealed class AgentTransportTests
 
 
 
+      /// <summary>Always throws: transport observation must not list printers.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia() => throw new InvalidOperationException("Transport observation must not list printers.");
+
+
+
+      /// <summary>Always throws: transport observation must not look up a printer.</summary>
+      public PrinterInfo? FindWithMedia(string printerId) => throw new InvalidOperationException("Transport observation must not look up a printer.");
+
+
+
       /// <summary>Always throws: physical printing is forbidden here.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
          => throw new InvalidOperationException("Physical printing is forbidden in this test.");
