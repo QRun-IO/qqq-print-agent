@@ -21,6 +21,9 @@ public sealed class IsolatedPrinterBackendTests
 {
    private static readonly PrintJob Job = new("job-1", "fixture", "Synthetic", "PDF", new string('0', 64), 1, new PrintOptions(), "2026-11-01T00:00:00Z", "QUEUED");
 
+
+
+   /// <summary>The fixture helper's executable, which the build puts beside the tests; it has no printer and never prints.</summary>
    private static string FixtureExecutable => Path.ChangeExtension(typeof(WorkerFixture.Program).Assembly.Location, ".exe");
 
 

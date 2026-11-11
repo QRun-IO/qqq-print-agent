@@ -14,7 +14,13 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>One native printer operation in a disposable process. A document reaches it only as the path of a verified staged file, never as content.</summary>
 public static class PrinterWorkerHost
 {
+   /// <summary>
+   /// The environment variable in which the service hands a helper the service's own process id. The helper refuses to run
+   /// without it and has that process watched, so that it ends when the service is gone.
+   /// </summary>
    internal const string ParentEnvironmentVariable = "QQQ_PRINT_WORKER_PARENT";
+
+
 
    /// <summary>
    /// The most characters a request may have. A request is one small JSON object (an operation, a job's description and the

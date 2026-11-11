@@ -54,7 +54,10 @@ public sealed partial class WindowsPrinters : IPrinterBackend
    /// </summary>
    public IReadOnlyList<PrinterInfo> Discover()
    {
-      // 6 is PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS: the queues installed here and the connections this identity has.
+      ////////////////////////////////////////////////////////////////////
+      // 6 is PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS: the queues //
+      // installed here and the connections this identity has           //
+      ////////////////////////////////////////////////////////////////////
       bool probeSucceeded = _spooler.EnumPrintersSize(6, out uint needed);
       ValidateDiscoveryProbe(probeSucceeded, Marshal.GetLastWin32Error(), needed);
       if(needed == 0)
@@ -233,10 +236,16 @@ public sealed partial class WindowsPrinters : IPrinterBackend
          x = (availableWidth - width) / 2;
          y = (availableHeight - height) / 2;
       }
-      // A negative height tells GDI the first row is the top one; one plane, 32 bits a pixel.
+      ///////////////////////////////////////////////////////////////
+      // a negative height tells GDI the first row is the top one; //
+      // one plane, 32 bits a pixel                                //
+      ///////////////////////////////////////////////////////////////
       GdiBitmapHeader header = new((int)bitmap.PixelWidth, -(int)bitmap.PixelHeight, 1, 32);
       Check(_gdi.StartPage(dc) > 0);
-      // 4 is HALFTONE; 0 is DIB_RGB_COLORS and 0x00CC0020 is SRCCOPY: the whole bitmap, copied as it is.
+      ///////////////////////////////////////////////////////////////////
+      // 4 is HALFTONE; 0 is DIB_RGB_COLORS and 0x00CC0020 is SRCCOPY: //
+      // the whole bitmap, copied as it is                             //
+      ///////////////////////////////////////////////////////////////////
       Check(_gdi.SetStretchBltMode(dc, 4) != 0);
       int result = _gdi.StretchDIBits(dc, x, y, width, height, 0, 0, (int)bitmap.PixelWidth, (int)bitmap.PixelHeight, bitmap.Pixels, header, 0, 0x00CC0020);
       Check(result is not (0 or -1));
