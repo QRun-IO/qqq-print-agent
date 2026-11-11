@@ -377,8 +377,8 @@ public sealed class JournalMigrationTests
 
 
    /// <summary>
-   /// Migrating a migrated journal does nothing. The second call is given a step that counts its runs, and it never runs;
-   /// the journal file has the same bytes afterwards and no other file has appeared.
+   /// Migrating a migrated journal does nothing. The second call is given the product's own steps, each wrapped to count
+   /// its runs, and none runs; the journal file has the same bytes afterwards and no other file has appeared.
    /// </summary>
    [Fact]
    public void Migrate_Twice_SecondDoesNothing()
@@ -390,8 +390,13 @@ public sealed class JournalMigrationTests
          Assert.IsType<StateStatus.Ready>(TestState.Migrate(directory));
          IReadOnlyDictionary<string, string> hashesBefore = JournalProbe.FileHashes(directory);
          int runs = 0;
+         IReadOnlyList<Action<JournalMigrationContext>> counting = [.. TestState.MigrationSteps.Select(step => (Action<JournalMigrationContext>)(context =>
+         {
+            runs++;
+            step(context);
+         }))];
 
-         StateStatus second = TestState.Migrate(directory, [_ => runs++]);
+         StateStatus second = TestState.Migrate(directory, counting);
 
          Assert.IsType<StateStatus.Ready>(second);
          Assert.Equal(0, runs);
@@ -547,6 +552,7 @@ public sealed class JournalMigrationTests
          catch(OperationCanceledException) { }
       }
    }
+
 
 
    /// <summary>The three cases of the stored state say the same thing in the form the management contract's snapshot carries, and only a ready state refuses nothing.</summary>
