@@ -214,21 +214,23 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
    /// <summary>
    /// The operator chose a page. A page of a server that is not in the tree is not shown, and the answer is false.
-   /// Choosing the wizard's page is asking to add a server (<see cref="StartAddServer"/>). Choosing the page that
-   /// is already on screen changes nothing: its message stays and no wizard is asked for a second time, so a view
-   /// may pass every selection of its tree on, including the one that follows the shell's own move.
+   /// Choosing the wizard's page while no wizard is open is asking to add a server (<see cref="StartAddServer"/>).
+   /// While a wizard is open it only shows the wizard's page again, so the operator gets back to the one in
+   /// progress, whichever kind it is, and the launcher is not asked for anything. Choosing the page that is already
+   /// on screen changes nothing: its message stays and no wizard is asked for a second time, so a view may pass
+   /// every selection of its tree on, including the one that follows the shell's own move.
    /// </summary>
    public bool Select(PageKey page)
    {
       ArgumentNullException.ThrowIfNull(page);
+      if(page == PageKey.Wizard && !WizardOpen)
+      {
+         return StartAddServer();
+      }
       if(page == Selected)
       {
          _operatorChose = true;
          return true;
-      }
-      if(page == PageKey.Wizard)
-      {
-         return StartAddServer();
       }
       if(!Show(page))
       {
@@ -248,10 +250,12 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
    /// <summary>
-   /// The operator asked to add a server. When one can be added now, the wizard's page is shown and the wizard is
-   /// asked for. When none can and a wizard is open, its page is shown, so the operator gets back to the one in
-   /// progress, and nothing new is asked for. Otherwise the request is refused out loud with the reason: the service
-   /// has not answered or its stored data is not ready, or the computer has as many servers as it may hold.
+   /// The operator asked for the wizard that adds a server, in so many words: a button that says so, not the tree's
+   /// node (<see cref="Select"/>). When one can be added now, the wizard's page is shown and the wizard is asked
+   /// for, also while another wizard is open: its owner decides what becomes of that one. When none can be added
+   /// and a wizard is open, its page is shown, so the operator gets back to the one in progress, and nothing new is
+   /// asked for. Otherwise the request is refused out loud with the reason: the service has not answered or its
+   /// stored data is not ready, or the computer has as many servers as it may hold.
    /// </summary>
    public bool StartAddServer()
    {
@@ -271,7 +275,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>The operator asked to sign in again to a server. Refused out loud when the server is gone or being removed, or when the service has not answered or its stored data is not ready.</summary>
+   /// <summary>The operator asked to sign in again to a server. Refused out loud when the server is not in the tree or is being removed, or when the service has not answered or its stored data is not ready. How many servers the computer has does not matter: the limit is on adding one, and a computer at the limit must still be able to sign in again.</summary>
    public bool StartRepair(string serverId)
    {
       if(ReasonNotToChange(serverId) is { } reason)
@@ -285,7 +289,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>The operator asked to pair this computer with a server. Refused out loud as <see cref="StartRepair"/> is.</summary>
+   /// <summary>The operator asked to pair this computer with a server. Refused out loud as <see cref="StartRepair"/> is, and like it not held to the limit on adding a server.</summary>
    public bool StartPairing(string serverId)
    {
       if(ReasonNotToChange(serverId) is { } reason)
@@ -304,17 +308,20 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
    /// as the server it added. A server the tree does not list yet (the wizard has just added it, and no snapshot
    /// has been read since) is shown as soon as a snapshot lists it, and the Computer page stands in until then.
    /// When no page is given and the wizard's page is on screen, the window goes where it would land: the first
-   /// server's Printers page, the Computer page when the stored data is not ready, or, with no server, a new
-   /// wizard, because a computer with no server shows the wizard.
+   /// server's Printers page, or the Computer page when the stored data is not ready. With no server and the stored
+   /// data ready that is the wizard again, because a computer with no server shows the wizard; the new one is not
+   /// asked for here, inside the call of a wizard that is still ending, but when the next snapshot has been read
+   /// (and at once if the operator chooses Add server first). Until then the wizard's page stays, with no wizard
+   /// open. Nothing in here calls the launcher.
    /// </summary>
    public void WizardEnded(PageKey? open = null)
    {
       SetWizardOpen(false);
       if(open is null || open == PageKey.Wizard)
       {
-         if(Selected == PageKey.Wizard)
+         if(Selected == PageKey.Wizard && Landing() is var landing && landing != PageKey.Wizard)
          {
-            GoTo(Landing());
+            Show(landing);
          }
       }
       else if(Show(open))
@@ -378,25 +385,33 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>Goes to a page the shell chose itself. Going to the wizard's page asks for the wizard that adds a server, unless one is open.</summary>
+   /// <summary>
+   /// Goes to a page the shell chose itself. Going to the wizard's page asks for the wizard that adds a server,
+   /// unless one is open. A wizard is recorded as open before its page is selected, so a view that passes the
+   /// selection on finds one open and asks for nothing, and the launcher is called last.
+   /// </summary>
    private void GoTo(PageKey page)
    {
-      Show(page);
-      if(page == PageKey.Wizard && !WizardOpen)
+      bool ask = page == PageKey.Wizard && !WizardOpen;
+      if(ask)
       {
          SetWizardOpen(true);
+      }
+      Show(page);
+      if(ask)
+      {
          _wizard.AddServer();
       }
    }
 
 
 
-   /// <summary>Shows the wizard's page for a wizard the operator asked for.</summary>
+   /// <summary>Shows the wizard's page for a wizard the operator asked for, recorded as open before its page is selected, as in <see cref="GoTo"/>.</summary>
    private void OpenWizard()
    {
       _operatorChose = true;
-      Show(PageKey.Wizard);
       SetWizardOpen(true);
+      Show(PageKey.Wizard);
    }
 
 

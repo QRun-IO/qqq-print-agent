@@ -145,7 +145,11 @@ public sealed class ShellNavigationTests
 
 
 
-   /// <summary>Asking to add a server shows the wizard's page and then asks for the wizard; choosing the Add server node is the same request.</summary>
+   /// <summary>
+   /// Asking to add a server shows the wizard's page and then asks for the wizard. Going back to the wizard's page
+   /// through the Add server node while that wizard is open only shows the page: the launcher is not asked again.
+   /// Asking for the wizard that adds a server in so many words is a new request, which the launcher answers.
+   /// </summary>
    [Fact]
    public async Task StartAddServer_ShowsTheWizardsPage_ThenAsksForTheWizard()
    {
@@ -163,6 +167,71 @@ public sealed class ShellNavigationTests
 
       fixture.Shell.Select(PageKey.Logs);
       Assert.True(fixture.Shell.Select(PageKey.Wizard));
+
+      Assert.Equal(["add on Wizard"], fixture.Wizard.Requests);
+      Assert.Equal(PageKey.Wizard, fixture.Shell.Selected);
+
+      fixture.Shell.Select(PageKey.Logs);
+      Assert.True(fixture.Shell.StartAddServer());
+
+      Assert.Equal(["add on Wizard", "add on Wizard"], fixture.Wizard.Requests);
+      Assert.Equal(PageKey.Wizard, fixture.Shell.Selected);
+   }
+
+
+
+   /// <summary>
+   /// A repair wizard is open and the operator is on a server's Jobs page. Choosing the Add server node, which says
+   /// "in progress", takes them back to the wizard's page and asks the launcher for nothing: the launcher was called
+   /// once in all, for the repair, so the wizard in progress is not restarted or replaced. A server the wizard
+   /// asked the shell to show later is not opened over the operator's choice.
+   /// </summary>
+   [Fact]
+   public async Task Select_TheAddServerNode_WhileAWizardIsOpen_OnlyShowsItsPage()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1), Snapshots.Server(2));
+      fixture.Shell.StartRepair(Snapshots.Id(1));
+      fixture.Shell.Select(PageKey.ForServer(PageKind.Jobs, Snapshots.Id(2)));
+
+      Assert.True(fixture.Shell.Select(PageKey.Wizard));
+
+      Assert.Equal(PageKey.Wizard, fixture.Shell.Selected);
+      Assert.Equal([$"repair {Snapshots.Id(1)} on Wizard"], fixture.Wizard.Requests);
+      Assert.True(fixture.Shell.WizardOpen);
+      Assert.True(fixture.Shell.Tree.AddServer.IsSelected);
+   }
+
+
+
+   /// <summary>
+   /// A view may pass every selection of its tree on to the shell, including the one that follows the shell's own
+   /// move. A wizard is recorded as open before its page is selected, so the selection that is passed on while the
+   /// page is being shown asks for nothing: each wizard is asked for once, when the window lands on it and when the
+   /// operator asks for it.
+   /// </summary>
+   [Fact]
+   public async Task Select_PassedOnByAViewForEveryMove_AsksForEachWizardOnce()
+   {
+      using ShellFixture fixture = new();
+      int depth = 0;
+      fixture.Shell.PropertyChanged += (_, change) =>
+      {
+         if(string.Equals(change.PropertyName, nameof(ShellViewModel.Selected), StringComparison.Ordinal))
+         {
+            Assert.True(++depth < 8, "Passing a selection on led to the same selection again, without end.");
+            fixture.Shell.Select(fixture.Shell.Selected);
+            depth--;
+         }
+      };
+
+      await fixture.Tick();
+
+      Assert.Equal(["add on Wizard"], fixture.Wizard.Requests);
+
+      await fixture.Tick(Snapshots.Server(1));
+      fixture.Shell.WizardEnded(PageKey.Server(Snapshots.Id(1)));
+      fixture.Shell.StartAddServer();
 
       Assert.Equal(["add on Wizard", "add on Wizard"], fixture.Wizard.Requests);
       Assert.Equal(PageKey.Wizard, fixture.Shell.Selected);
@@ -217,6 +286,52 @@ public sealed class ShellNavigationTests
       Assert.Equal(2, fixture.Wizard.Requests.Count);
       Assert.Equal(["repair", "pairing", "repair", "pairing"],
          fixture.Log.Entries.Where(entry => entry.StartsWith("INFO The wizard was asked for", StringComparison.Ordinal)).Select(entry => entry.Split('(', ')')[1]), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The limit of eight servers is a limit on adding one. At eight servers a repair and a pairing of a server that
+   /// exists still start, each with one request to the launcher, so an operator at the limit can sign in again;
+   /// only the wizard that adds a server is refused, with the limit as the reason.
+   /// </summary>
+   [Fact]
+   public async Task StartRepairAndPairing_AtEightServers_AreNotHeldToTheLimitOnAdding()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.WithServers(8));
+      Assert.False(fixture.Shell.Tree.AddServer.IsEnabled);
+
+      Assert.True(fixture.Shell.StartRepair(Snapshots.Id(3)));
+      fixture.Shell.WizardEnded(PageKey.Server(Snapshots.Id(3)));
+      Assert.True(fixture.Shell.StartPairing(Snapshots.Id(4)));
+
+      Assert.Equal([$"repair {Snapshots.Id(3)} on Wizard", $"pair {Snapshots.Id(4)} on Wizard"], fixture.Wizard.Requests);
+      Assert.Null(fixture.Shell.Messages.Current);
+
+      fixture.Shell.WizardEnded();
+      Assert.False(fixture.Shell.StartAddServer());
+
+      Assert.Equal(new FeedbackMessage("Cannot start now", ShellMessages.ServerLimit, FeedbackSeverity.Warning), fixture.Shell.Messages.Current);
+      Assert.Equal(2, fixture.Wizard.Requests.Count);
+   }
+
+
+
+   /// <summary>When the last server goes while a wizard is open, the wizard's page is shown, as for a computer with no server, and the wizard that is open stays the only one: no second one is asked for.</summary>
+   [Fact]
+   public async Task LastServerGoes_WhileAWizardIsOpen_NoSecondWizardIsAskedFor()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1));
+      fixture.Shell.StartRepair(Snapshots.Id(1));
+      fixture.Shell.Select(PageKey.ForServer(PageKind.Connection, Snapshots.Id(1)));
+
+      await fixture.Tick();
+
+      Assert.Equal(PageKey.Wizard, fixture.Shell.Selected);
+      Assert.Equal([$"repair {Snapshots.Id(1)} on Wizard"], fixture.Wizard.Requests);
+      Assert.True(fixture.Shell.WizardOpen);
    }
 
 
@@ -277,8 +392,9 @@ public sealed class ShellNavigationTests
    /// <summary>
    /// When the wizard ended without a page to open (it was cancelled) and its page is on screen, the window goes
    /// where it would land: the first server's Printers page; with no server, a new wizard, because a computer with
-   /// no server shows the wizard; and the Computer page when the stored data is no longer ready. When the operator
-   /// is on another page, they stay there.
+   /// no server shows the wizard; and the Computer page when the stored data is no longer ready. The new wizard is
+   /// not asked for inside the call that says the old one has ended: the wizard's page stays, with no wizard open,
+   /// and the next snapshot asks. When the operator is on another page, they stay there.
    /// </summary>
    [Fact]
    public async Task WizardEnded_WithNoPage_GoesWhereTheWindowWouldLand()
@@ -301,6 +417,13 @@ public sealed class ShellNavigationTests
       await empty.Tick();
       empty.Shell.WizardEnded();
       Assert.Equal(PageKey.Wizard, empty.Shell.Selected);
+      Assert.Equal(["add on Wizard"], empty.Wizard.Requests);
+      Assert.False(empty.Shell.WizardOpen);
+      Assert.False(empty.Shell.Tree.AddServer.InProgress);
+      Assert.True(empty.Shell.Tree.AddServer.IsEnabled);
+
+      await empty.Tick();
+      Assert.Equal(PageKey.Wizard, empty.Shell.Selected);
       Assert.Equal(["add on Wizard", "add on Wizard"], empty.Wizard.Requests);
       Assert.True(empty.Shell.WizardOpen);
       Assert.True(empty.Shell.Tree.AddServer.InProgress);
@@ -310,5 +433,106 @@ public sealed class ShellNavigationTests
       Assert.Equal(PageKey.Computer, empty.Shell.Selected);
       Assert.False(empty.Shell.WizardOpen);
       Assert.Equal(2, empty.Wizard.Requests.Count);
+   }
+
+
+
+   /// <summary>
+   /// A wizard that ends with nothing to show on a computer with no server leaves its page on screen with no wizard
+   /// open, and what happens next is decided outside the call that ended it. The operator who chooses Add server
+   /// gets a wizard at once. Otherwise the next snapshot decides: a server it lists (one the wizard left in place)
+   /// is where the window goes, with no wizard; and when the service has stopped answering, the Computer page.
+   /// </summary>
+   [Fact]
+   public async Task WizardEnded_WithNothingToShow_TheNextSnapshotOrTheOperatorDecides()
+   {
+      using ShellFixture chosen = new();
+      await chosen.Tick();
+      chosen.Shell.WizardEnded();
+      Assert.True(chosen.Shell.Select(PageKey.Wizard));
+      Assert.Equal(["add on Wizard", "add on Wizard"], chosen.Wizard.Requests);
+      Assert.True(chosen.Shell.WizardOpen);
+      await chosen.Tick();
+      Assert.Equal(2, chosen.Wizard.Requests.Count);
+
+      using ShellFixture kept = new();
+      await kept.Tick();
+      kept.Shell.WizardEnded();
+      await kept.Tick(Snapshots.Server(1));
+      Assert.Equal(PageKey.ForServer(PageKind.Printers, Snapshots.Id(1)), kept.Shell.Selected);
+      Assert.Equal(["add on Wizard"], kept.Wizard.Requests);
+      Assert.False(kept.Shell.WizardOpen);
+
+      using ShellFixture stopped = new();
+      await stopped.Tick();
+      stopped.Shell.WizardEnded();
+      await stopped.TickFailing(new IOException("The pipe is broken."));
+      Assert.Equal(PageKey.Computer, stopped.Shell.Selected);
+      Assert.Equal(["add on Wizard"], stopped.Wizard.Requests);
+   }
+
+
+
+   /// <summary>
+   /// A launcher whose wizard ends at once, inside the call that asked for it, is not asked again from inside that
+   /// call, however often it ends: each snapshot asks once. If the shell asked from inside
+   /// <see cref="ShellViewModel.WizardEnded"/>, the two would call each other without end.
+   /// </summary>
+   [Fact]
+   public async Task WizardEnded_InsideTheLaunchersOwnCall_IsNotAnsweredWithANewRequest()
+   {
+      ShellFixture fixture = new();
+      EndsAtOnce launcher = new();
+      using ShellViewModel shell = new(fixture.Client, fixture.Gate, launcher, fixture.Log, TestData.Time, ShellFixture.Product);
+      launcher.Shell = shell;
+      fixture.Dispose();
+
+      fixture.Pipe.Answer(Replies.Success(Snapshots.Of()));
+      await shell.RefreshAsync();
+
+      Assert.Equal(1, launcher.Asked);
+      Assert.Equal(PageKey.Wizard, shell.Selected);
+      Assert.False(shell.WizardOpen);
+
+      fixture.Pipe.Answer(Replies.Success(Snapshots.Of()));
+      await shell.RefreshAsync();
+
+      Assert.Equal(2, launcher.Asked);
+   }
+
+
+
+   /// <summary>A launcher whose wizard ends, with nothing to show, inside the call that asks for it. It refuses to be asked more often than a test can mean, so a shell that asks from inside the ending fails the test instead of the run.</summary>
+   private sealed class EndsAtOnce : IWizardLauncher
+   {
+      /// <summary>The shell that is told that the wizard ended.</summary>
+      internal ShellViewModel? Shell { get; set; }
+
+
+
+      /// <summary>How often the wizard that adds a server was asked for.</summary>
+      internal int Asked { get; private set; }
+
+
+
+      /// <summary>Counts the request and ends the wizard at once.</summary>
+      public void AddServer()
+      {
+         if(++Asked > 4)
+         {
+            throw new InvalidOperationException("The wizard was asked for again from inside the call that ended it.");
+         }
+         Shell!.WizardEnded();
+      }
+
+
+
+      /// <summary>Not used.</summary>
+      public void Repair(string serverId) => throw new NotSupportedException();
+
+
+
+      /// <summary>Not used.</summary>
+      public void Pair(string serverId) => throw new NotSupportedException();
    }
 }
