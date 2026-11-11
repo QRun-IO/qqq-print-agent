@@ -34,4 +34,32 @@ public sealed class BrandingPlacesTests
       places.Note("Something was left alone.");
       Assert.Equal(new[] { "[Installer] Something was left alone." }, log, StringComparer.Ordinal);
    }
+
+
+
+   /// <summary>
+   /// A note written the careful way reaches the log like any other, and when the log refuses it or its disk fails the
+   /// caller is not failed: an install or an uninstall that has done its work is not undone by its log. Any other
+   /// failure of the log is not hidden.
+   /// </summary>
+   [Fact]
+   public void NoteThatCannotBeWrittenDoesNotFailTheCaller()
+   {
+      List<string> log = [];
+      Exception? failure = null;
+      var places = new BrandingPlaces("companion", "programs", "state", _ => { }, _ => new RuntimeBranding(), note =>
+      {
+         if(failure is not null)
+         { throw failure; }
+         log.Add(note);
+      });
+      places.TryNote("first");
+      failure = new UnauthorizedAccessException("Synthetic: the log refuses.");
+      places.TryNote("refused");
+      failure = new IOException("Synthetic: the log's disk fails.");
+      places.TryNote("lost");
+      failure = new InvalidOperationException("Synthetic: something else.");
+      Assert.Same(failure, Assert.Throws<InvalidOperationException>(() => places.TryNote("not hidden")));
+      Assert.Equal(new[] { "first" }, log, StringComparer.Ordinal);
+   }
 }

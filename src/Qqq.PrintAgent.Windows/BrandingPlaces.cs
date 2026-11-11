@@ -25,4 +25,22 @@ internal sealed record BrandingPlaces(string InstalledExecutable, string StartMe
    internal static BrandingPlaces Installed(Action<string> log)
       => new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent", "App", "Qqq.PrintAgent.exe"),
          Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), AgentStore.DefaultDirectory, MachineStateDirectory.EnsureForPath, RuntimeBranding.LoadMachine, note => log("[Installer] " + note));
+
+
+
+   /// <summary>
+   /// Writes a note without ever failing the caller. A note is for whoever reads the log afterwards: when the log
+   /// refuses or its disk fails, an install or an uninstall that has done its work is not undone by that.
+   /// </summary>
+   internal void TryNote(string note)
+   {
+      try
+      {
+         Note(note);
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         // The log being unavailable is no reason to fail what the note is about.
+      }
+   }
 }

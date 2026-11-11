@@ -241,20 +241,13 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
 
    /// <summary>
    /// Writes the notes of a run once its work is done, so no note describes something that then did not happen. A note
-   /// is for whoever reads the log afterwards: one that cannot be written never fails an install or an uninstall.
+   /// that cannot be written never fails an install or an uninstall; see <see cref="BrandingPlaces.TryNote"/>.
    /// </summary>
    private void WriteNotes(List<string> notes)
    {
       foreach(string note in notes)
       {
-         try
-         {
-            places.Note(note);
-         }
-         catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
-         {
-            // The run has done its work; the log being unavailable does not undo it.
-         }
+         places.TryNote(note);
       }
    }
 }

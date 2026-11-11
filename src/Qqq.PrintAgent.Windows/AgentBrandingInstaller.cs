@@ -5,7 +5,6 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
@@ -15,12 +14,18 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public static class AgentBrandingInstaller
 {
-   private static readonly AgentBrandingShortcuts Installed = new(new WindowsShortcutShell(), new WindowsPathSecurity(), new RegistryShortcutRecord(), BrandingPlaces.Installed(WarnInMachineLog));
+   /// <summary>The places of the installed product, with the machine activity log as the place notes go.</summary>
+   private static readonly BrandingPlaces Places = BrandingPlaces.Installed(WarnInMachineLog);
+
+
+
+   /// <summary>The rules bound to the real shell, folder security, the product's registry key and the installed places; the record's warnings go where the notes go.</summary>
+   private static readonly AgentBrandingShortcuts Installed = new(new WindowsShortcutShell(), new WindowsPathSecurity(), RegistryShortcutRecord.Machine(Places.TryNote), Places);
 
 
 
    /// <summary>Writes one warning to the machine activity log; branding uses it for the notes of a run that left something alone.</summary>
-   [ExcludeFromCodeCoverage(Justification = "Opens the machine activity log under ProgramData and writes one warning entry to it. A test must not write that log: it belongs to the installed product and is protected from ordinary users. It passes the text on unchanged and decides nothing but that a note is a warning. When a note is written and what it says is decided in AgentBrandingShortcuts, and its installer mark is added in BrandingPlaces.Installed; both are tested with a list in place of the log, as is a log that cannot be written.")]
+   [ExcludeFromCodeCoverage(Justification = "Opens the machine activity log under ProgramData and writes one warning entry to it. A test must not write that log: it belongs to the installed product and is protected from ordinary users. It passes the text on unchanged and decides nothing but that a note is a warning. When a note is written and what it says is decided in AgentBrandingShortcuts and RegistryShortcutRecord, its installer mark is added in BrandingPlaces.Installed, and a log that cannot be written is handled in BrandingPlaces.TryNote; all are tested with a list in place of the log.")]
    private static void WarnInMachineLog(string text) => AgentActivityLog.Create(AgentStore.DefaultDirectory).Warning(text);
 
 
