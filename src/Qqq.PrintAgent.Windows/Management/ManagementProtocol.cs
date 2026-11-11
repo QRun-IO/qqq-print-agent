@@ -39,7 +39,7 @@ public static class ManagementProtocol
 
 
 
-   /// <summary>The most UTF-16 units of an error's message that are sent, whatever the code; a longer message is cut there and marked with an ellipsis. One bound for all, so no code's message can flood a log or a screen.</summary>
+   /// <summary>The most UTF-16 units of an error's message that are sent, whatever the code. A longer message is cut there, never inside a surrogate pair, and nothing is added to mark the cut, so the bound is exact (<see cref="ManagementText"/>). One bound for all, so no code's message can flood a log or a screen.</summary>
    public const int MaximumMessageCharacters = 512;
 
 

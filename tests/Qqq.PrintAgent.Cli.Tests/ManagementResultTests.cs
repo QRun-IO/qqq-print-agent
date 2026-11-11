@@ -178,10 +178,11 @@ public sealed class ManagementResultTests
 
 
    /// <summary>
-   /// The approved account in the details of a changed identity came from the server, so the only way to build the
-   /// details makes both values printable and cuts each at 200 UTF-16 units, never inside a surrogate pair. The record
-   /// has no public constructor and no member that can be set afterwards, and it still reads back from the wire. The
-   /// characters are written as escapes here so this file holds none of them.
+   /// The approved account in the details of a changed identity came from the server, so the record's one constructor
+   /// makes both values printable and cuts each at 200 UTF-16 units exactly, never inside a surrogate pair and with
+   /// nothing added to mark the cut. The record has no public constructor and no member that can be set afterwards,
+   /// and it reads back from the wire as it was written. The characters are written as escapes here so this file
+   /// holds none of them.
    /// </summary>
    [Fact]
    public void IdentityChangedDetails_AreBuiltOnlyPrintableAndBounded()
@@ -190,18 +191,62 @@ public sealed class ManagementResultTests
       var hostile = IdentityChangedDetails.For("principal\u202E4\u0007\u2066x\u2069", "tenant\n2\u2028\u200B");
       var tooLong = IdentityChangedDetails.For(new string('p', 300), new string('t', 199) + Pair + "tail");
       var fitting = IdentityChangedDetails.For(new string('p', 198) + Pair, new string('t', 200));
-      var missing = IdentityChangedDetails.For(null, "");
       ManagementReply reply = ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Sign in as the approved account.", hostile))).Reply!;
 
       Assert.Equal(("principal 4  x ", "tenant 2  "), (hostile.ApprovedPrincipalId, hostile.ApprovedTenantId));
-      Assert.Equal((new string('p', 200) + "...", new string('t', 199) + "..."), (tooLong.ApprovedPrincipalId, tooLong.ApprovedTenantId));
+      Assert.Equal((new string('p', 200), new string('t', 199)), (tooLong.ApprovedPrincipalId, tooLong.ApprovedTenantId));
       Assert.Equal((new string('p', 198) + Pair, new string('t', 200)), (fitting.ApprovedPrincipalId, fitting.ApprovedTenantId));
-      Assert.Equal(("(missing)", "(missing)"), (missing.ApprovedPrincipalId, missing.ApprovedTenantId));
+      Assert.Equal(200, ManagementProtocol.MaximumIdentityCharacters);
       Assert.Empty(typeof(IdentityChangedDetails).GetConstructors());
       Assert.All(typeof(IdentityChangedDetails).GetProperties(), member => Assert.Null(member.SetMethod));
       Assert.True(ManagementJson.TryReadDetails(reply.Error!, out IdentityChangedDetails? read));
       Assert.Equal(hostile, read);
-      Assert.False(ManagementJson.TryReadDetails(ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Changed.\",\"details\":{}}}").Reply!.Error!, out IdentityChangedDetails? _));
+      Assert.Equal(tooLong, IdentityChangedDetails.For(tooLong.ApprovedPrincipalId, tooLong.ApprovedTenantId));
+   }
+
+
+
+   /// <summary>
+   /// An approved account the pairing does not record is absent, not replaced by words: a value that is missing, empty
+   /// or has nothing to show once it is printable is null, is left out of the text, and reads back as null, so a client
+   /// never has to tell a missing account from one named "(missing)". An account that really has that name is carried
+   /// as it is.
+   /// </summary>
+   [Fact]
+   public void IdentityChangedDetails_LeaveOutAValueThatIsMissing()
+   {
+      var missing = IdentityChangedDetails.For(null, "");
+      var blank = IdentityChangedDetails.For("  ", "\u200B\n");
+      var half = IdentityChangedDetails.For("principal-4", null);
+      var literal = IdentityChangedDetails.For("(missing)", "tenant-2");
+      string written = ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Sign in as the approved account.", missing));
+
+      Assert.Equal((null, null), (missing.ApprovedPrincipalId, missing.ApprovedTenantId));
+      Assert.Equal(missing, blank);
+      Assert.Equal(("principal-4", null), (half.ApprovedPrincipalId, half.ApprovedTenantId));
+      Assert.Equal("(missing)", literal.ApprovedPrincipalId);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Sign in as the approved account.\",\"details\":{}}}", written);
+      Assert.Contains("\"details\":{\"approvedPrincipalId\":\"principal-4\"}}", ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Sign in as the approved account.", half)), StringComparison.Ordinal);
+      Assert.True(ManagementJson.TryReadDetails(ManagementJson.ParseReply(written).Reply!.Error!, out IdentityChangedDetails? read));
+      Assert.Equal(missing, read);
+   }
+
+
+
+   /// <summary>
+   /// A client holds bounded, printable identity values even when a service did not send them so: the details are
+   /// read through the same constructor that builds them, so a principal of 2,028 units and a tenant with a character
+   /// that reorders text arrive cut and clean. A value of the wrong kind still makes the details unreadable.
+   /// </summary>
+   [Fact]
+   public void IdentityChangedDetails_ReadFromTheWire_AreBoundedToo()
+   {
+      string raw = "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Changed.\",\"details\":{\"approvedPrincipalId\":\"" + new string('p', 2028) + "\",\"approvedTenantId\":\"tenant\\u202E2\"}}}";
+
+      Assert.True(ManagementJson.TryReadDetails(ManagementJson.ParseReply(raw).Reply!.Error!, out IdentityChangedDetails? read));
+
+      Assert.Equal((new string('p', 200), "tenant 2"), (read.ApprovedPrincipalId, read.ApprovedTenantId));
+      Assert.False(ManagementJson.TryReadDetails(ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Changed.\",\"details\":{\"approvedPrincipalId\":7}}}").Reply!.Error!, out IdentityChangedDetails? _));
    }
 
 

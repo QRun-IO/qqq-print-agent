@@ -106,7 +106,7 @@ public static class ManagementErrorCode
 
 
 
-   /// <summary>The server bound the pairing for a different account than the one approved for it. The details are an <see cref="IdentityChangedDetails"/> naming the approved account, printable and bounded by the only factory that builds them.</summary>
+   /// <summary>The server bound the pairing for a different account than the one approved for it. The details are an <see cref="IdentityChangedDetails"/> naming the approved account, printable and bounded by the record's one constructor.</summary>
    public const string IdentityChanged = "identity_changed";
 
 

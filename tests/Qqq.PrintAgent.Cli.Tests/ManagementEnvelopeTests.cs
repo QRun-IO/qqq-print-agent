@@ -807,8 +807,9 @@ public sealed class ManagementEnvelopeTests
    /// Every error message is made printable and cut at 512 UTF-16 units by both factories, whatever the code, because a
    /// message may repeat what a server said. Control characters, the bidirectional overrides, embeddings and isolates,
    /// the zero-width characters, the line and paragraph separators and a private-use character each become a space;
-   /// visible text in any script is kept; a surrogate without its partner is shown as the replacement character. The
-   /// characters are written as escapes here so this file holds none of them.
+   /// visible text in any script is kept, and so are the no-break and the ideographic space, which are visible gaps;
+   /// a surrogate without its partner is shown as the replacement character. The characters are written as escapes
+   /// here so this file holds none of them.
    /// </summary>
    [Fact]
    public void FailureMessage_IsMadePrintable_ByBothFactories()
@@ -827,7 +828,7 @@ public sealed class ManagementEnvelopeTests
       Assert.EndsWith("private caf\u00E9 \u4E2D\u6587", plain.Error.Message, StringComparison.Ordinal);
       Assert.Equal("a b", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\u202Eb").Error!.Message);
       Assert.Equal("a\uFFFDb", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\uD83Db").Error!.Message);
-      Assert.Equal("(missing)", ManagementReply.Failure(ManagementErrorCode.InternalError, "").Error!.Message);
+      Assert.Equal("a\u00A0b\u3000c", ManagementReply.Failure(ManagementErrorCode.ServerRefused, "a\u00A0b\u3000c").Error!.Message);
       Assert.DoesNotContain("\\u202E", written, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("\\u001B", written, StringComparison.OrdinalIgnoreCase);
       Assert.DoesNotContain("\\u2028", written, StringComparison.OrdinalIgnoreCase);
@@ -839,25 +840,65 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>
-   /// An error message longer than 512 UTF-16 units is cut there and marked, and the cut never falls inside a surrogate
-   /// pair: a pair that would straddle the limit is left out whole, and one that ends exactly on it is kept whole.
+   /// An error message longer than 512 UTF-16 units is cut there, exactly: nothing is added to mark the cut, so no
+   /// message is longer than the bound. The cut never falls inside a surrogate pair: a pair that would straddle the
+   /// limit is left out whole, which leaves 511 units, and one that ends exactly on it is kept whole. A client that
+   /// reads the reply applies the same rule again and holds the same text.
    /// </summary>
    [Fact]
-   public void FailureMessage_IsCutAtTheLimit_NeverInsideASurrogatePair()
+   public void FailureMessage_IsCutAtTheLimitExactly_NeverInsideASurrogatePair()
    {
       const string Pair = "\uD83D\uDE00";
       string tooLong = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 600)).Error!.Message;
       string straddling = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 511) + Pair + "tail").Error!.Message;
       string fitting = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 510) + Pair + "tail").Error!.Message;
       string exact = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 512)).Error!.Message;
+      string oneOver = ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 513)).Error!.Message;
 
-      Assert.Equal(new string('x', 512) + "...", tooLong);
-      Assert.Equal(new string('x', 511) + "...", straddling);
-      Assert.Equal(new string('x', 510) + Pair + "...", fitting);
+      Assert.Equal(new string('x', 512), tooLong);
+      Assert.Equal(new string('x', 511), straddling);
+      Assert.Equal(new string('x', 510) + Pair, fitting);
       Assert.Equal(new string('x', 512), exact);
-      Assert.Equal(ManagementProtocol.MaximumMessageCharacters, exact.Length);
-      Assert.All(new[] { tooLong, straddling, fitting }, message => Assert.False(char.IsHighSurrogate(message[^4])));
+      Assert.Equal(new string('x', 512), oneOver);
+      Assert.Equal(512, ManagementProtocol.MaximumMessageCharacters);
+      Assert.All(new[] { tooLong, straddling, fitting, exact, oneOver }, message =>
+      {
+         Assert.True(message.Length <= ManagementProtocol.MaximumMessageCharacters);
+         Assert.False(char.IsHighSurrogate(message[^1]));
+         Assert.Equal(message, ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.ServerRefused, message))).Reply!.Error!.Message);
+      });
       Assert.True(ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.ServerRefused, new string('x', 100000)))).Succeeded());
+   }
+
+
+
+   /// <summary>
+   /// A failure the service builds must say something. A message that is missing, empty, blank, or blank once it is
+   /// printable is refused by every way of building an error, and no words such as "(missing)" are sent in its place:
+   /// a server that refused "with no reason" leaves the handler to say so in its own words. A client still reads a
+   /// reply whose message is empty, so that it learns the code.
+   /// </summary>
+   [Theory]
+   [InlineData("")]
+   [InlineData("   ")]
+   [InlineData("\u00A0\u3000")]
+   [InlineData("\n\t\r")]
+   [InlineData("\u202E\u200B\uFEFF")]
+   public void FailureMessage_WithNothingToShow_IsRefused(string message)
+   {
+      CancelRefusedDetails details = new(CancelRefusedDetails.DocumentGone);
+
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.ServerRefused, message));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.CancelRefused, message, details));
+      Assert.Throws<ArgumentException>(() => new ManagementError(ManagementErrorCode.InternalError, message));
+      Assert.Throws<ArgumentException>(() => ManagementError.WithDetails(ManagementErrorCode.CancelRefused, message, details));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(ManagementErrorCode.ServerRefused, null!));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(ManagementErrorCode.CancelRefused, null!, details));
+      ManagementReplyParse read = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"server_refused\",\"message\":" + JsonSerializer.Serialize(message) + "}}");
+      Assert.True(read.Succeeded());
+      Assert.Equal(ManagementErrorCode.ServerRefused, read.Reply.Error!.Code);
+      Assert.True(string.IsNullOrWhiteSpace(read.Reply.Error.Message));
+      Assert.DoesNotContain("missing", read.Reply.Error.Message, StringComparison.Ordinal);
    }
 
 
@@ -882,7 +923,7 @@ public sealed class ManagementEnvelopeTests
       string expected = ManagementReply.Failure(ManagementErrorCode.ServerRefused, hostile).Error!.Message;
 
       Assert.StartsWith("refused gnp.exe next line xxx", expected, StringComparison.Ordinal);
-      Assert.InRange(expected.Length, ManagementProtocol.MaximumMessageCharacters, ManagementProtocol.MaximumMessageCharacters + 3);
+      Assert.Equal(ManagementProtocol.MaximumMessageCharacters, expected.Length);
       Assert.All(new[] { built, byConstructor.Error!, byWith.Error!, byFactory.Error!, read }, error => Assert.Equal(expected, error.Message));
       Assert.All(new[] { byConstructor, byWith, byFactory }, reply =>
       {

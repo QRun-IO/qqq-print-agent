@@ -4,7 +4,6 @@
  */
 
 using System.Text.Json.Serialization;
-using Qqq.PrintAgent.Core.Authentication;
 
 namespace Qqq.PrintAgent.Windows.Management;
 
@@ -23,27 +22,30 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// </para>
 /// <para>
 /// The message may repeat what a server said, so it is never held as given: every way of building an error ends in one
-/// place that makes it printable and cuts it at <see cref="ManagementProtocol.MaximumMessageCharacters"/>, and nothing
-/// can change it afterwards, because no member can be set once the error exists (a <c>with</c> expression can only copy
-/// it). That holds for an error the service builds and for one a client reads from the wire, so text a server supplied
-/// reaches neither the wire nor a client's screen raw.
+/// place that gives it the form of text on the wire (<see cref="ManagementText"/>: printable, and cut at
+/// <see cref="ManagementProtocol.MaximumMessageCharacters"/> exactly), and nothing can change it afterwards, because
+/// no member can be set once the error exists (a <c>with</c> expression can only copy it). That holds for an error the
+/// service builds and for one a client reads from the wire, so text a server supplied reaches neither the wire nor a
+/// client's screen raw. An error the service builds must also say something: a message with nothing to show is
+/// refused, and no stand-in text is sent in its place. What a client reads is not refused for that, so that it still
+/// learns the code.
 /// </para>
 /// </summary>
 [JsonConverter(typeof(ManagementJson.NotBySerializer<ManagementError>))]
 public sealed record ManagementError
 {
-   /// <summary>Builds an error with a code that carries no details. A code that is not in the table, or one whose table entry promises details, is refused.</summary>
-   public ManagementError(string code, string message) : this(Known(code, detailsType: null), message, null)
+   /// <summary>Builds an error with a code that carries no details. A code that is not in the table, or one whose table entry promises details, is refused, and so is a message with nothing to show.</summary>
+   public ManagementError(string code, string message) : this(Known(code, detailsType: null), ManagementText.Message(message), null)
    {
    }
 
 
 
-   /// <summary>Stores an error. The message is made printable and cut here, the only place an error's message is ever set.</summary>
+   /// <summary>Stores an error. The message is made printable and cut here, the only place an error's message is ever set; for a message that already has that form, this changes nothing.</summary>
    private ManagementError(string code, string message, ManagementPayload? details)
    {
       Code = code;
-      Message = QqqCompatibilityProblem.Printable(message, ManagementProtocol.MaximumMessageCharacters);
+      Message = ManagementText.Bounded(message, ManagementProtocol.MaximumMessageCharacters);
       Details = details;
    }
 
@@ -54,7 +56,7 @@ public sealed record ManagementError
 
 
 
-   /// <summary>What went wrong, for people: printable, and bounded by <see cref="ManagementProtocol.MaximumMessageCharacters"/>.</summary>
+   /// <summary>What went wrong, for people: printable, and at most <see cref="ManagementProtocol.MaximumMessageCharacters"/> UTF-16 units.</summary>
    public string Message { get; }
 
 
@@ -68,13 +70,13 @@ public sealed record ManagementError
    /// Builds an error with one of the codes that carry details, writing the details record the way the wire carries it.
    /// The record must be exactly the type the table names for the code (<see cref="ManagementErrorCode.DetailsType"/>):
    /// a code that is not in the table, a code that carries no details, another record and an object of no declared
-   /// type are all refused.
+   /// type are all refused, and so is a message with nothing to show.
    /// </summary>
    public static ManagementError WithDetails<TDetails>(string code, string message, TDetails details)
       where TDetails : class
    {
       ArgumentNullException.ThrowIfNull(details);
-      return new ManagementError(Known(code, typeof(TDetails)), message, ManagementPayload.From(details));
+      return new ManagementError(Known(code, typeof(TDetails)), ManagementText.Message(message), ManagementPayload.From(details));
    }
 
 
@@ -82,7 +84,7 @@ public sealed record ManagementError
    /// <summary>
    /// Holds an error as a client read it from the wire: the code as it came, known or not, with whatever details came
    /// with it. Only the parser calls this. The message is still made printable and cut, so a service that did not bound
-   /// it cannot put raw text on a client's screen.
+   /// it cannot put raw text on a client's screen; an empty one is held as it came.
    /// </summary>
    internal static ManagementError FromWire(string code, string message, ManagementPayload? details) => new(code, message, details);
 
