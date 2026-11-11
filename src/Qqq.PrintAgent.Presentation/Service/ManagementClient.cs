@@ -188,25 +188,66 @@ public sealed partial class ManagementClient
 
 
    /// <summary>
-   /// Builds the request, or says that it cannot be built. The contract's records and its request refuse some values
-   /// when they are built, with fixed text that never repeats what was given; the service would answer the same
-   /// values <see cref="ManagementErrorCode.InvalidRequest"/>. The entry names the operation and nothing that was
-   /// given.
+   /// Builds the request, or says that it cannot be built, by the contract's own rules and no others. The contract's
+   /// records and its request refuse some values when they are built (a name that breaks the name rule, text that is
+   /// no server identifier or no origin); the arguments are then read back the way the service reads them
+   /// (<see cref="WithArguments"/>), which refuses a value that is missing; and the request is put to the check the
+   /// service routes by (<see cref="ManagementOperations.Check"/>), which refuses an operation on one server that
+   /// names none. The service would answer each of these <see cref="ManagementErrorCode.InvalidRequest"/>. The
+   /// refusals are fixed text that never repeats what was given, and the entry names the operation and nothing that
+   /// was given.
    /// </summary>
    private bool TryBuild(string operation, Func<string, ManagementRequest> build, [NotNullWhen(true)] out ManagementRequest? request)
    {
       try
       {
          request = build(operation);
-         return true;
       }
       catch(ArgumentException)
       {
-         _log.Warning("Management request {Operation} was not sent: a value given for it is one the contract refuses.", operation);
          request = null;
-         return false;
       }
+      if(request is not null && ManagementOperations.Check(request, out _) is null)
+      {
+         return true;
+      }
+      _log.Warning("Management request {Operation} was not sent: a value given for it is one the contract refuses.", operation);
+      request = null;
+      return false;
    }
+
+
+
+   /// <summary>
+   /// Builds a request with arguments, and reads the arguments back the way the service will
+   /// (<see cref="ManagementJson.TryReadArguments"/>). Arguments the contract's own reader does not take are refused
+   /// here, as an argument that is wrong, so they are never sent: a value that is missing where the record needs one
+   /// (a credential, a code, a profile, a list), and a list with nothing where an item belongs. What that reader
+   /// accepts is sent, whatever else the service may think of it; this client adds no rule of its own.
+   /// </summary>
+   private static ManagementRequest WithArguments<TArguments>(string operation, string? serverId, TArguments arguments)
+      where TArguments : class
+   {
+      var request = ManagementRequest.For(operation, serverId, arguments);
+      return ManagementJson.TryReadArguments<TArguments>(request, out _) ? request : throw new ArgumentException("The arguments are not ones the contract reads.", nameof(arguments));
+   }
+
+
+
+   /// <summary>
+   /// The address a request carries for a server's origin: the origin as the contract's one address rule
+   /// (<see cref="ServerAddress.TryRead"/>) judges it, written as scheme, host and port with no path. An address that
+   /// rule refuses, and none at all, is refused here as an argument that is wrong, with fixed text.
+   /// </summary>
+   private static string AddressOf(Uri? origin)
+      => origin is { IsAbsoluteUri: true } && ServerAddress.TryRead(origin.AbsoluteUri, out Uri? judged, out _) ? judged.GetLeftPart(UriPartial.Authority)
+         : throw new ArgumentException("The address is not one a server may have.", nameof(origin));
+
+
+
+   /// <summary>True when the address a reply names is the origin that was asked about, each judged by the contract's one address rule, so one place written two ways is one place.</summary>
+   private static bool IsAddress(string named, Uri asked)
+      => ServerAddress.TryRead(named, out Uri? origin, out _) && string.Equals(AddressOf(origin), AddressOf(asked), StringComparison.Ordinal);
 
 
 

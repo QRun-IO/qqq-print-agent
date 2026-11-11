@@ -40,7 +40,7 @@ internal static class CompanionCalls
       Call(ManagementOperations.PrintersDiscover, nameof(ManagementClient.DiscoverPrintersAsync), (client, _, stop) => client.DiscoverPrintersAsync(stop)),
       Call(ManagementOperations.LogsGetSettings, nameof(ManagementClient.GetLogSettingsAsync), (client, _, stop) => client.GetLogSettingsAsync(stop)),
       Call(ManagementOperations.LogsSetSettings, nameof(ManagementClient.SetLogSettingsAsync),
-         (client, _, stop) => client.SetLogSettingsAsync(retentionDays: 14, maxFileMegabytes: 50, segmentsPerDay: 5, debugLogging: true, stop)),
+         (client, _, stop) => client.SetLogSettingsAsync(new LogsSetSettingsArgs(RetentionDays: 14, MaxFileMegabytes: 50, SegmentsPerDay: 5, DebugLogging: true), stop)),
       Call(ManagementOperations.LogsClear, nameof(ManagementClient.ClearLogsAsync), (client, _, stop) => client.ClearLogsAsync(stop)),
       Call(ManagementOperations.ServersRename, nameof(ManagementClient.RenameServerAsync), (client, values, stop) => client.RenameServerAsync(values.ServerId, values.NewName, stop)),
       Call(ManagementOperations.ServersRemove, nameof(ManagementClient.RemoveServerAsync), (client, values, stop) => client.RemoveServerAsync(values.ServerId, stop)),

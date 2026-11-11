@@ -132,27 +132,81 @@ public sealed class ManagementClientOperationsTests
 
 
 
-   /// <summary>A reply that holds another job's details than the one asked for is unreadable, so details can never be shown under the wrong row; the same reply for the job that was asked for is read.</summary>
+   /// <summary>
+   /// A reply that holds another job's details than the one asked for is unreadable, so details can never be shown
+   /// under the wrong row; the same reply for the job that was asked for is read. A job's identifier is compared
+   /// exactly: one that differs only in the case of its letters is another job.
+   /// </summary>
    [Fact]
    public async Task JobDetailsForAnotherJob_AreUnreadable()
    {
       RecordingLog log = new();
-      FakePipe pipe = new FakePipe().Answer(Replies.Golden("jobs.details.reply.json")).Answer(Replies.Golden("jobs.details.reply.json"));
+      FakePipe pipe = new FakePipe().Answer(Replies.Golden("jobs.details.reply.json")).Answer(Replies.Golden("jobs.details.reply.json")).Answer(Replies.Golden("jobs.details.reply.json"));
       ManagementClient client = new(pipe.SendAsync, log);
 
       ServiceResult<JobDetailsSnapshot> another = await client.JobDetailsAsync(Server, "job-205");
+      ServiceResult<JobDetailsSnapshot> inAnotherCase = await client.JobDetailsAsync(Server, "JOB-204");
       ServiceResult<JobDetailsSnapshot> asked = await client.JobDetailsAsync(Server, "job-204");
 
       Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.UnreadableReply, true), (another.Outcome, another.Failure, another.Unconfirmed));
+      Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.UnreadableReply, true), (inAnotherCase.Outcome, inAnotherCase.Failure, inAnotherCase.Unconfirmed));
       Assert.Null(another.Payload);
+      Assert.Null(inAnotherCase.Payload);
       Assert.Equal("The service's reply could not be read.", another.Message);
       Assert.True(asked.Succeeded);
       Assert.Equal("job-204", asked.Payload.Job.JobId);
       Assert.Equal(
       [
          $"WARN Management request jobs.details on {Server} succeeded, but its result could not be read as JobDetailsSnapshot.",
+         $"DEBUG Management request jobs.details on {Server} succeeded, but its result could not be read as JobDetailsSnapshot.",
          $"INFO Management request jobs.details on {Server} is answering again.",
       ], log.Entries);
+   }
+
+
+
+   /// <summary>
+   /// A reply that names its subject is the answer only when the subject is the one that was asked about; any other
+   /// is unreadable, and unconfirmed, because the service did something and what it did is not known here. A rename
+   /// answered with another server's summary would put the name on the wrong server. An add answered with another
+   /// address is not the server that was added; the address is compared as an origin, so one place written two ways
+   /// is one place. A reorder answered with other servers than those given is not the list that was ordered; the
+   /// order itself is the service's to say.
+   /// </summary>
+   [Fact]
+   public async Task ReplyForAnotherSubject_IsUnreadable()
+   {
+      RecordingLog log = new();
+      ManagementReplyParse renamed = Replies.Golden("servers.rename.reply.json");
+      ManagementReplyParse added = Replies.Golden("servers.add.reply.json");
+      ManagementReplyParse reordered = Replies.Golden("servers.reorder.reply.json");
+      FakePipe pipe = new FakePipe().Answer(renamed).Answer(added).Answer(added).Answer(reordered).Answer(reordered).Answer(reordered).Answer(renamed).Answer(added).Answer(reordered);
+      ManagementClient client = new(pipe.SendAsync, log);
+      SampleValues given = SampleValues.Golden;
+
+      CallResult[] forAnother =
+      [
+         CallResult.Of(await client.RenameServerAsync(given.SecondServerId, given.NewName)),
+         CallResult.Of(await client.AddServerAsync(new Uri("https://bench.example.test"), given.Name, acceptCertificateException: false, given.Check, given.Credential)),
+         CallResult.Of(await client.AddServerAsync(new Uri("https://qqq.example.test:8443"), given.Name, acceptCertificateException: false, given.Check, given.Credential)),
+         CallResult.Of(await client.ReorderServersAsync([given.ServerId])),
+         CallResult.Of(await client.ReorderServersAsync([given.ServerId, "3f2b8c1e-1111-4f6b-9a7c-0e1d2c3b4a61"])),
+         CallResult.Of(await client.ReorderServersAsync([given.ServerId, given.ServerId])),
+      ];
+      CallResult[] forTheOneAsked =
+      [
+         CallResult.Of(await client.RenameServerAsync(given.ServerId, given.NewName)),
+         CallResult.Of(await client.AddServerAsync(new Uri("HTTPS://QQQ.Example.Test:443/"), given.Name, acceptCertificateException: false, given.Check, given.Credential)),
+         CallResult.Of(await client.ReorderServersAsync([given.ServerId, given.SecondServerId])),
+      ];
+
+      Assert.All(forAnother, result => Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.UnreadableReply, true, "The service's reply could not be read."), (result.Outcome, result.Failure, result.Unconfirmed, result.Message)));
+      Assert.All(forAnother, result => Assert.Null(result.Payload));
+      Assert.All(forTheOneAsked, result => Assert.Equal(ServiceOutcome.Success, result.Outcome));
+      Assert.Equal(9, pipe.Sent.Count);
+      Assert.Contains($"WARN Management request servers.rename on {given.SecondServerId} succeeded, but its result could not be read as ServerSummary.", log.Entries, StringComparer.Ordinal);
+      Assert.Contains("WARN Management request servers.add on the computer succeeded, but its result could not be read as ServerAddResult.", log.Entries, StringComparer.Ordinal);
+      Assert.Contains("WARN Management request servers.reorder on the computer succeeded, but its result could not be read as ServerListResult.", log.Entries, StringComparer.Ordinal);
    }
 
 
@@ -182,9 +236,7 @@ public sealed class ManagementClientOperationsTests
       ];
 
       Assert.Empty(pipe.Sent);
-      Assert.All(results, result => Assert.Equal(
-         (ServiceOutcome.Rejected, ServerName.RefusalCode, "The request was not sent: one of its values is not one the service accepts.", false, ServiceFailure.None),
-         (result.Outcome, result.Code, result.Message, result.Unconfirmed, result.Failure)));
+      Assert.All(results, AssertRefusedBeforeSending);
       Assert.Equal(ManagementErrorCode.InvalidRequest, ServerName.RefusalCode);
       Assert.Equal(
       [
@@ -193,6 +245,157 @@ public sealed class ManagementClientOperationsTests
          "WARN Management request trust.set was not sent: a value given for it is one the contract refuses.",
          .. Enumerable.Repeat("WARN Management request connection.reconnect was not sent: a value given for it is one the contract refuses.", 2),
       ], log.Entries);
+   }
+
+
+
+   /// <summary>
+   /// Every method that acts on one server refuses, before anything is sent, a server that is not named and text that
+   /// is not a server's full identifier: the contract's own check refuses an operation on one server that names none,
+   /// and the request cannot be built around text that is no identifier. Without that a request with no server would
+   /// leave as a request on the computer. The sixteen methods are those the contract's table gives the scope of one
+   /// server.
+   /// </summary>
+   [Theory]
+   [InlineData(null)]
+   [InlineData("")]
+   [InlineData("CANARY-not-an-identifier")]
+   [InlineData("{3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f}")]
+   public async Task ServerThatIsNotNamedByItsFullIdentifier_IsNotSent_ByAnyOfTheSixteenMethodsOnOneServer(string? serverId)
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new();
+      ManagementClient client = new(pipe.SendAsync, log);
+      CompanionCall[] onOneServer = [.. CompanionCalls.All.Where(call => ManagementOperations.TryFind(call.Operation, out ManagementOperationInfo? operation) && operation.Scope == ManagementScope.Server)];
+
+      List<CallResult> results = [];
+      foreach(CompanionCall call in onOneServer)
+      {
+         results.Add(await call.Send(client, SampleValues.Golden with { ServerId = serverId! }, CancellationToken.None));
+      }
+
+      Assert.Equal(16, onOneServer.Length);
+      Assert.Empty(pipe.Sent);
+      Assert.All(results, AssertRefusedBeforeSending);
+      Assert.Equal(onOneServer.Select(call => $"WARN Management request {call.Operation} was not sent: a value given for it is one the contract refuses."), log.Entries, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// A value a request needs and was not given is not sent: the arguments are read back the way the service reads
+   /// them, and the contract's reader refuses a record with a hole in it. That is a credential, a code, a job, a
+   /// printer, a format, a profile, a query, the log settings, the list of servers, and an item of that list. Sent
+   /// all the same, each of these would leave as a request with an argument missing, which the service refuses.
+   /// </summary>
+   [Fact]
+   public async Task ValueThatIsMissing_IsNotSent()
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new();
+      ManagementClient client = new(pipe.SendAsync, log);
+      SampleValues given = SampleValues.Golden;
+
+      CallResult[] results =
+      [
+         CallResult.Of(await client.SignInAsync(Server, null!)),
+         CallResult.Of(await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, given.Check, null!)),
+         CallResult.Of(await client.AddServerAsync(given.Address, null!, acceptCertificateException: false, given.Check, given.Credential)),
+         CallResult.Of(await client.EnrollAsync(Server, null!)),
+         CallResult.Of(await client.ReorderServersAsync(null!)),
+         CallResult.Of(await client.ReorderServersAsync([Server, null!])),
+         CallResult.Of(await client.SetComputerProfileAsync(null!)),
+         CallResult.Of(await client.SetLogSettingsAsync(null!)),
+         CallResult.Of(await client.RenameServerAsync(Server, null!)),
+         CallResult.Of(await client.SharePrinterAsync(Server, null!, shared: true)),
+         CallResult.Of(await client.SetPrinterProfileAsync(Server, given.PrinterId, null!)),
+         CallResult.Of(await client.TestPrintAsync(Server, given.PrinterId, null!, testProfile: null)),
+         CallResult.Of(await client.QueryJobsAsync(Server, null!)),
+         CallResult.Of(await client.JobDetailsAsync(Server, null!)),
+         CallResult.Of(await client.RetryJobAsync(Server, null!, confirmDuplicateRisk: true)),
+         CallResult.Of(await client.CancelJobAsync(Server, null!)),
+         CallResult.Of(await client.AcknowledgeJobAsync(Server, null!)),
+      ];
+
+      Assert.Empty(pipe.Sent);
+      Assert.All(results, AssertRefusedBeforeSending);
+      Assert.Equal(results.Length, log.Entries.Count);
+      Assert.All(log.Entries, entry => Assert.EndsWith(" was not sent: a value given for it is one the contract refuses.", entry, StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// An address the contract's one address rule refuses is not sent, by the check and by the add: none at all, a
+   /// relative one, one with a path, a query, a fragment or user information, one that is not secure, and one whose
+   /// scheme is not a web one. What is sent for an address the rule accepts is the origin it judged, as scheme, host
+   /// and port: a default port and a trailing slash are left out, and a host written outside ASCII is the name the
+   /// connection is made to.
+   /// </summary>
+   [Fact]
+   public async Task AddressTheContractsRuleRefuses_IsNotSent_AndAnAcceptedOneIsSentAsItsOrigin()
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, log);
+      SampleValues given = SampleValues.Golden;
+      Uri?[] refused =
+      [
+         null, new Uri("/servers/one", UriKind.Relative), new Uri("https://qqq.example.test/CANARY-path"), new Uri("https://qqq.example.test/?CANARY=1"), new Uri("https://qqq.example.test/#CANARY"),
+         new Uri("https://CANARY@qqq.example.test"), new Uri("http://qqq.example.test"), new Uri("ftp://qqq.example.test"),
+      ];
+
+      List<CallResult> results = [];
+      foreach(Uri? address in refused)
+      {
+         results.Add(CallResult.Of(await client.CheckServerAsync(address!, acceptCertificateException: false)));
+         results.Add(CallResult.Of(await client.AddServerAsync(address!, given.Name, acceptCertificateException: false, given.Check, given.Credential)));
+      }
+      Assert.Empty(pipe.Sent);
+      _ = client.CheckServerAsync(new Uri("HTTPS://Qqq.Example.Test:443/"), acceptCertificateException: false);
+      _ = client.CheckServerAsync(new Uri("https://b\u00fccher.example:8443"), acceptCertificateException: false);
+      _ = client.CheckServerAsync(new Uri("http://localhost:18581/"), acceptCertificateException: false);
+      await pipe.Arrived(3);
+
+      Assert.All(results, AssertRefusedBeforeSending);
+      Assert.Equal(16, log.Entries.Count);
+      Assert.DoesNotContain(log.Entries, entry => entry.Contains(SampleValues.Mark, StringComparison.OrdinalIgnoreCase));
+      Assert.Equal(
+      [
+         """{"v":2,"op":"servers.check","args":{"address":"https://qqq.example.test","acceptCertificateException":false}}""",
+         """{"v":2,"op":"servers.check","args":{"address":"https://xn--bcher-kva.example:8443","acceptCertificateException":false}}""",
+         """{"v":2,"op":"servers.check","args":{"address":"http://localhost:18581","acceptCertificateException":false}}""",
+      ], pipe.Sent.Select((_, index) => pipe.Wire(index)), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The client refuses what the contract's own check and reader refuse, and adds no rule of its own. Values the
+   /// contract's records accept are sent, whatever the service will think of them: text that is not an identifier
+   /// inside the list of servers to reorder, an enrollment code, a printer and a format that are empty, and log
+   /// limits that are negative. The service answers those; if the contract comes to refuse one of them, it is
+   /// refused here from then on, and this test says so.
+   /// </summary>
+   [Fact]
+   public async Task ValueTheContractsReaderAccepts_IsSent_BecauseTheClientAddsNoRuleOfItsOwn()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+
+      _ = client.ReorderServersAsync([Server, "not-an-identifier"]);
+      _ = client.EnrollAsync(Server, "");
+      _ = client.TestPrintAsync(Server, "", "", testProfile: null);
+      _ = client.SetLogSettingsAsync(new LogsSetSettingsArgs(RetentionDays: -1, MaxFileMegabytes: 0, SegmentsPerDay: int.MaxValue, DebugLogging: true));
+      await pipe.Arrived(4);
+
+      Assert.Equal(
+      [
+         $$$"""{"v":2,"op":"servers.reorder","args":{"serverIds":["{{{Server}}}","not-an-identifier"]}}""",
+         $$$"""{"v":2,"op":"pairing.enroll","server":"{{{Server}}}","args":{"enrollmentCode":""}}""",
+         $$$"""{"v":2,"op":"printers.testPrint","server":"{{{Server}}}","args":{"printerId":"","format":""}}""",
+         """{"v":2,"op":"logs.setSettings","args":{"retentionDays":-1,"maxFileMegabytes":0,"segmentsPerDay":2147483647,"debugLogging":true}}""",
+      ], pipe.Sent.Select((_, index) => pipe.Wire(index)), StringComparer.Ordinal);
    }
 
 
@@ -257,6 +460,40 @@ public sealed class ManagementClientOperationsTests
 
 
    /// <summary>
+   /// Adding a server with a check that failed is refused as an argument that is wrong, and nothing is sent or
+   /// logged: the operator goes on only from a check in which every stage passed, so a failed check is never the one
+   /// the operator went on from, and sending it would state a provider (or none) that the operator did not accept.
+   /// Both kinds of failure are refused, with or without the exception. Switching a server's exception on is not
+   /// held to that: a server whose own certificate is refused is the one an exception is for, so a failed check is
+   /// sent there, stating what it reported.
+   /// </summary>
+   [Fact]
+   public async Task AddingWithACheckThatFailed_IsRefused_AndSwitchingTheExceptionOnWithOneIsSent()
+   {
+      RecordingLog log = new();
+      FakePipe pipe = new FakePipe().Answer(Replies.Golden("trust.set.reply.json"));
+      ManagementClient client = new(pipe.SendAsync, log);
+      SampleValues given = SampleValues.Golden;
+      ServerCheckResult certificateRefused = FailedCheck("error.certificate_untrusted.json");
+      ServerCheckResult stageFailed = FailedCheck("error.server_incompatible.json");
+      Assert.Equal((ManagementErrorCode.CertificateUntrusted, ManagementErrorCode.ServerIncompatible), (certificateRefused.FailureCode(), stageFailed.FailureCode()));
+
+      ArgumentException withTheRefusedCertificate = await Assert.ThrowsAsync<ArgumentException>(() => client.AddServerAsync(given.Address, given.Name, acceptCertificateException: true, certificateRefused, given.Credential));
+      ArgumentException withTheFailedStage = await Assert.ThrowsAsync<ArgumentException>(() => client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, stageFailed, given.Credential));
+      Assert.Empty(pipe.Sent);
+      ServiceResult<TrustResult> switchedOn = await client.SetTrustAsync(Server, acceptCertificateException: true, certificateRefused);
+
+      Assert.Equal((ShownCheck, ShownCheck), (withTheRefusedCertificate.ParamName, withTheFailedStage.ParamName));
+      Assert.StartsWith("The check given is one that failed. A server is added only after a check in which every stage passed.", withTheRefusedCertificate.Message, StringComparison.Ordinal);
+      Assert.True(switchedOn.Succeeded);
+      Assert.Equal($$$"""{"v":2,"op":"trust.set","server":"{{{Server}}}","args":{"acceptCertificateException":true,"providerOrigin":"https://sign-in.example.test"}}""", pipe.Wire(0));
+      Assert.Single(pipe.Sent);
+      Assert.Empty(log.Entries);
+   }
+
+
+
+   /// <summary>
    /// The provider a request states comes from the check the operator saw and from nowhere else: each of the two
    /// methods takes that check's result, with no default, so a call that leaves it out does not compile, and takes
    /// no origin as text, which could hold another read of the provider. Adding a server always needs the check;
@@ -293,13 +530,14 @@ public sealed class ManagementClientOperationsTests
 
       _ = client.CheckServerAsync(given.Address, acceptCertificateException: false);
       _ = client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, CheckNaming(null), given.Credential);
-      _ = client.SetLogSettingsAsync(retentionDays: 7, maxFileMegabytes: 20, segmentsPerDay: 3, debugLogging: false);
+      _ = client.SetLogSettingsAsync(new LogsSetSettingsArgs(RetentionDays: 7, MaxFileMegabytes: 20, SegmentsPerDay: 3, DebugLogging: false));
       _ = client.SignInAsync(Server, given.Credential);
       _ = client.SignOutAsync(Server, postLogoutRedirectUri: null);
       _ = client.SharePrinterAsync(Server, given.PrinterId, shared: false);
       _ = client.TestPrintAsync(Server, given.PrinterId, "ZPL", testProfile: null);
       _ = client.RetryJobAsync(Server, given.JobId, confirmDuplicateRisk: false);
-      await pipe.Arrived(8);
+      _ = client.SignInAsync(Server, given.Credential, SignInRepair.NewPairing);
+      await pipe.Arrived(9);
 
       Assert.Equal(
       [
@@ -311,8 +549,62 @@ public sealed class ManagementClientOperationsTests
          $$$"""{"v":2,"op":"printers.share","server":"{{{Server}}}","args":{"printerId":"printer-a1","shared":false}}""",
          $$$"""{"v":2,"op":"printers.testPrint","server":"{{{Server}}}","args":{"printerId":"printer-a1","format":"ZPL"}}""",
          $$$"""{"v":2,"op":"jobs.retry","server":"{{{Server}}}","args":{"jobId":"job-204","confirmDuplicateRisk":false}}""",
+         $$$"""{"v":2,"op":"session.signIn","server":"{{{Server}}}","args":{"sessionCredential":""" + credential + ",\"repair\":\"newPairing\"}}",
       ], pipe.Sent.Select((_, index) => pipe.Wire(index)), StringComparer.Ordinal);
    }
+
+
+
+   /// <summary>
+   /// A repair is one of the contract's two values and no other: the type that stands for it has exactly those two,
+   /// carrying the contract's own constants, and no way to make a third, so a caller cannot pass text of its own
+   /// where the service expects one of the two.
+   /// </summary>
+   [Fact]
+   public void Repair_IsOneOfTheContractsTwoValues_AndNoOtherCanBeMade()
+   {
+      Assert.Equal((SessionSignInArgs.AssociatePairing, SessionSignInArgs.NewPairing), (SignInRepair.AssociatePairing.Value, SignInRepair.NewPairing.Value));
+      Assert.True(typeof(SignInRepair).IsSealed);
+      Assert.Empty(typeof(SignInRepair).GetConstructors(BindingFlags.Public | BindingFlags.Instance));
+      Assert.Equal([nameof(SignInRepair.AssociatePairing), nameof(SignInRepair.NewPairing)],
+         typeof(SignInRepair).GetProperties(BindingFlags.Public | BindingFlags.Static).Select(property => property.Name).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.DoesNotContain(typeof(SignInRepair).GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly), member => member.MemberType is MemberTypes.Property or MemberTypes.Field);
+      Assert.Equal(typeof(SignInRepair), typeof(ManagementClient).GetMethod(nameof(ManagementClient.SignInAsync))!.GetParameters()[2].ParameterType);
+   }
+
+
+
+   /// <summary>
+   /// The methods take the contract's own types where the contract has one, so a caller cannot put values in the
+   /// wrong order or give text where a judged value belongs: the log limits are the contract's record, and a
+   /// server's address is the origin the contract's address rule returned, not the text an operator typed.
+   /// </summary>
+   [Fact]
+   public void Methods_TakeTheContractsOwnTypes_NotLooseValues()
+   {
+      static Type[] Parameters(string method) => [.. typeof(ManagementClient).GetMethod(method)!.GetParameters().Select(parameter => parameter.ParameterType)];
+
+      Assert.Equal([typeof(LogsSetSettingsArgs), typeof(CancellationToken)], Parameters(nameof(ManagementClient.SetLogSettingsAsync)));
+      Assert.Equal(typeof(Uri), Parameters(nameof(ManagementClient.CheckServerAsync))[0]);
+      Assert.Equal(typeof(Uri), Parameters(nameof(ManagementClient.AddServerAsync))[0]);
+   }
+
+
+
+   /// <summary>The result of a check that failed, as the service reports one: the details of a golden refusal.</summary>
+   private static ServerCheckResult FailedCheck(string goldenFile)
+   {
+      Assert.True(ManagementJson.TryReadDetails(Replies.Golden(goldenFile).Reply!.Error!, out ServerCheckResult? check));
+      return check;
+   }
+
+
+
+   /// <summary>Requires the result of a request that was not sent because the contract refuses a value in it: the refusal the service would give, with a fixed message and nothing to check.</summary>
+   private static void AssertRefusedBeforeSending(CallResult result)
+      => Assert.Equal(
+         (ServiceOutcome.Rejected, ManagementErrorCode.InvalidRequest, "The request was not sent: one of its values is not one the service accepts.", false, ServiceFailure.None),
+         (result.Outcome, result.Code, result.Message, result.Unconfirmed, result.Failure));
 
 
 

@@ -45,9 +45,16 @@ public sealed partial class ManagementClient
    /// What the check reports as the sign-in provider (<see cref="ServerCheckResult.ProviderOrigin"/>) is what the
    /// operator is shown, and the result the operator was shown is what <see cref="AddServerAsync"/> and
    /// <see cref="SetTrustAsync"/> must be given. An operator asks for it once, so over the ceiling it waits its turn.
+   /// <para>
+   /// <paramref name="address"/> is the server's origin as <see cref="ServerAddress.TryRead"/> returned it for the
+   /// text the operator typed, not that text: only the origin is what was judged, and what is stored and shown.
+   /// The request carries it as scheme, host and port. An address that rule refuses (a path, a query, a scheme that
+   /// is not secure) is not sent: the result is the refusal the service would give,
+   /// <see cref="ManagementErrorCode.InvalidRequest"/>.
+   /// </para>
    /// </summary>
-   public Task<ServiceResult<ServerCheckResult>> CheckServerAsync(string address, bool acceptCertificateException, CancellationToken cancellationToken = default)
-      => AskAsync<ServerCheckResult>(ManagementOperations.ServersCheck, operation => ManagementRequest.For(operation, null, new ServersCheckArgs(address, acceptCertificateException)), cancellationToken);
+   public Task<ServiceResult<ServerCheckResult>> CheckServerAsync(Uri address, bool acceptCertificateException, CancellationToken cancellationToken = default)
+      => AskAsync<ServerCheckResult>(ManagementOperations.ServersCheck, operation => WithArguments(operation, null, new ServersCheckArgs(AddressOf(address), acceptCertificateException)), cancellationToken);
 
 
 
@@ -68,31 +75,61 @@ public sealed partial class ManagementClient
    /// refusal the server is checked again and the operator is shown the new result.
    /// </para>
    /// <para>
-   /// A name that breaks the name rule (<see cref="ServerName"/>), or a check whose provider is text that names no
-   /// origin, is not sent: the result is the refusal the service would give,
+   /// What the type of that argument guarantees, and what it does not. It keeps text from being passed by accident,
+   /// and a check that failed (<see cref="ServerCheckResult.FailureCode"/> is not null) is refused here as an
+   /// argument that is wrong, with nothing sent: the operator goes on only from a check in which every stage passed,
+   /// so a failed one is never the check the operator went on from. It does not show that the result is the one the
+   /// service returned: the record is public, and a result changed with a <c>with</c> expression is sent as changed.
+   /// Nor does it show that the check was of this address: the record does not name the address it was for, so a
+   /// check of another server that names the same provider is not detected. The caller has to keep the check with
+   /// the address it was made for.
+   /// </para>
+   /// <para>
+   /// <paramref name="address"/> is the server's origin as <see cref="ServerAddress.TryRead"/> returned it, as for
+   /// <see cref="CheckServerAsync"/>. An address that rule refuses, a name that breaks the name rule
+   /// (<see cref="ServerName"/>), a check whose provider is text that names no origin, and a credential that is
+   /// missing are not sent: the result is the refusal the service would give,
    /// <see cref="ManagementErrorCode.InvalidRequest"/>. The credential is passed on once and neither kept nor
-   /// logged. Over the ceiling the request waits its turn.
+   /// logged. Over the ceiling the request waits its turn. A reply that names another address than the one asked
+   /// for is unreadable.
    /// </para>
    /// </summary>
-   public Task<ServiceResult<ServerAddResult>> AddServerAsync(string address, string name, bool acceptCertificateException, ServerCheckResult checkTheOperatorSaw,
+   public Task<ServiceResult<ServerAddResult>> AddServerAsync(Uri address, string name, bool acceptCertificateException, ServerCheckResult checkTheOperatorSaw,
       QqqSessionCredential sessionCredential, CancellationToken cancellationToken = default)
    {
       ArgumentNullException.ThrowIfNull(checkTheOperatorSaw);
+      if(checkTheOperatorSaw.FailureCode() is not null)
+      {
+         throw new ArgumentException("The check given is one that failed. A server is added only after a check in which every stage passed.", nameof(checkTheOperatorSaw));
+      }
       return AskAsync<ServerAddResult>(ManagementOperations.ServersAdd,
-         operation => ManagementRequest.For(operation, null, new ServersAddArgs(address, name, acceptCertificateException, sessionCredential, checkTheOperatorSaw.ProviderOrigin)), cancellationToken);
+         operation => WithArguments(operation, null, new ServersAddArgs(AddressOf(address), name, acceptCertificateException, sessionCredential, checkTheOperatorSaw.ProviderOrigin)), cancellationToken,
+         added => IsAddress(added.Server.Address, address));
    }
 
 
 
-   /// <summary>Puts the servers in a new order: every server's identifier, each once. The result is the list in the order that is now stored. Over the ceiling it waits its turn.</summary>
+   /// <summary>
+   /// Puts the servers in a new order: every server's identifier, each once. The result is the list in the order that
+   /// is now stored. Over the ceiling it waits its turn. A list that is missing, or that has nothing where an
+   /// identifier belongs, is not sent. A reply that does not name exactly the servers that were given is unreadable;
+   /// the order it names them in is the service's to say and is not compared.
+   /// </summary>
    public Task<ServiceResult<ServerListResult>> ReorderServersAsync(IReadOnlyList<string> serverIds, CancellationToken cancellationToken = default)
-      => AskAsync<ServerListResult>(ManagementOperations.ServersReorder, operation => ManagementRequest.For(operation, null, new ServersReorderArgs(serverIds)), cancellationToken);
+      => AskAsync<ServerListResult>(ManagementOperations.ServersReorder, operation => WithArguments(operation, null, new ServersReorderArgs(serverIds)), cancellationToken,
+         list => NamesExactly(list, serverIds));
+
+
+
+   /// <summary>True when a list of servers a reply holds names exactly the servers that were asked about, each as often as it was given, in whatever order.</summary>
+   private static bool NamesExactly(ServerListResult list, IReadOnlyList<string> serverIds)
+      => list.Servers.Select(server => server.ServerId).Order(StringComparer.Ordinal).SequenceEqual(serverIds.Order(StringComparer.Ordinal), StringComparer.Ordinal);
 
 
 
    /// <summary>Changes this computer's name, description and location. A member left out keeps what is stored; empty text clears it. The result is the profile as it is now stored. Over the ceiling it waits its turn.</summary>
    public Task<ServiceResult<DeviceProfile>> SetComputerProfileAsync(DeviceProfile profile, CancellationToken cancellationToken = default)
-      => AskAsync<DeviceProfile>(ManagementOperations.ComputerSetProfile, operation => ManagementRequest.For(operation, null, new ComputerSetProfileArgs(profile)), cancellationToken);
+      => AskAsync<DeviceProfile>(ManagementOperations.ComputerSetProfile, operation => WithArguments(operation, null, new ComputerSetProfileArgs(profile)), cancellationToken);
 
 
 
@@ -108,10 +145,9 @@ public sealed partial class ManagementClient
 
 
 
-   /// <summary>Changes the four log limits, all of them. The result is the settings as they are now stored, with the current file's size. Over the ceiling it waits its turn.</summary>
-   public Task<ServiceResult<LogSettings>> SetLogSettingsAsync(int retentionDays, int maxFileMegabytes, int segmentsPerDay, bool debugLogging, CancellationToken cancellationToken = default)
-      => AskAsync<LogSettings>(ManagementOperations.LogsSetSettings,
-         operation => ManagementRequest.For(operation, null, new LogsSetSettingsArgs(retentionDays, maxFileMegabytes, segmentsPerDay, debugLogging)), cancellationToken);
+   /// <summary>Changes the four log limits, all of them, given as the contract's own record. The result is the settings as they are now stored, with the current file's size. Over the ceiling it waits its turn.</summary>
+   public Task<ServiceResult<LogSettings>> SetLogSettingsAsync(LogsSetSettingsArgs settings, CancellationToken cancellationToken = default)
+      => AskAsync<LogSettings>(ManagementOperations.LogsSetSettings, operation => WithArguments(operation, null, settings), cancellationToken);
 
 
 

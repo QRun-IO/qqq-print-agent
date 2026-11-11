@@ -11,15 +11,17 @@ namespace Qqq.PrintAgent.Presentation.Service;
 
 /// <summary>
 /// The operations on one server other than its jobs. Each takes the server's full identifier, as the snapshot gives
-/// it; text that is not one is not sent, and the result is the refusal the service would give,
-/// <see cref="ManagementErrorCode.InvalidRequest"/>. None of them is repeated on a timer, so over the ceiling each
-/// waits its turn, the one read among them (<see cref="GetTrustAsync"/>) included.
+/// it; text that is not one, and none at all, is not sent, and the result is the refusal the service would give,
+/// <see cref="ManagementErrorCode.InvalidRequest"/>. The same holds for a value the request needs and was not given.
+/// None of them is repeated on a timer, so over the ceiling each waits its turn, the one read among them
+/// (<see cref="GetTrustAsync"/>) included.
 /// </summary>
 public sealed partial class ManagementClient
 {
-   /// <summary>Changes a server's name. A name that breaks the name rule (<see cref="ServerName"/>) is not sent. The result is the server as it is now stored. Over the ceiling it waits its turn.</summary>
+   /// <summary>Changes a server's name. A name that breaks the name rule (<see cref="ServerName"/>) is not sent. The result is the server as it is now stored; a reply that holds another server than the one named is unreadable, so a name can never be shown on the wrong server. Over the ceiling it waits its turn.</summary>
    public Task<ServiceResult<ServerSummary>> RenameServerAsync(string serverId, string name, CancellationToken cancellationToken = default)
-      => AskAsync<ServerSummary>(ManagementOperations.ServersRename, operation => ManagementRequest.For(operation, serverId, new ServersRenameArgs(name)), cancellationToken);
+      => AskAsync<ServerSummary>(ManagementOperations.ServersRename, operation => WithArguments(operation, serverId, new ServersRenameArgs(name)), cancellationToken,
+         renamed => string.Equals(renamed.ServerId, serverId, StringComparison.Ordinal));
 
 
 
@@ -32,12 +34,12 @@ public sealed partial class ManagementClient
    /// <summary>
    /// Gives a server that already exists the session from a sign-in the companion has completed. Without a repair the
    /// saved pairing is bound as it is; only after that was refused with <see cref="ManagementErrorCode.BindRefused"/>
-   /// is the repair the operator chose given, <see cref="SessionSignInArgs.AssociatePairing"/> or
-   /// <see cref="SessionSignInArgs.NewPairing"/>. The credential is passed on once and neither kept nor logged.
-   /// Over the ceiling the request waits its turn.
+   /// is the repair the operator chose given, <see cref="SignInRepair.AssociatePairing"/> or
+   /// <see cref="SignInRepair.NewPairing"/>, which are the only two there are. The credential is passed on once and
+   /// neither kept nor logged; one that is missing is not sent. Over the ceiling the request waits its turn.
    /// </summary>
-   public Task<ServiceResult<SignInResult>> SignInAsync(string serverId, QqqSessionCredential sessionCredential, string? repair = null, CancellationToken cancellationToken = default)
-      => AskAsync<SignInResult>(ManagementOperations.SessionSignIn, operation => ManagementRequest.For(operation, serverId, new SessionSignInArgs(sessionCredential, repair)), cancellationToken);
+   public Task<ServiceResult<SignInResult>> SignInAsync(string serverId, QqqSessionCredential sessionCredential, SignInRepair? repair = null, CancellationToken cancellationToken = default)
+      => AskAsync<SignInResult>(ManagementOperations.SessionSignIn, operation => WithArguments(operation, serverId, new SessionSignInArgs(sessionCredential, repair?.Value)), cancellationToken);
 
 
 
@@ -48,17 +50,18 @@ public sealed partial class ManagementClient
    /// nowhere else, and this client neither keeps nor logs it. Over the ceiling the request waits its turn.
    /// </summary>
    public Task<ServiceResult<SignOutResult>> SignOutAsync(string serverId, string? postLogoutRedirectUri, CancellationToken cancellationToken = default)
-      => AskAsync<SignOutResult>(ManagementOperations.SessionSignOut, operation => ManagementRequest.For(operation, serverId, new SessionSignOutArgs(postLogoutRedirectUri)), cancellationToken);
+      => AskAsync<SignOutResult>(ManagementOperations.SessionSignOut, operation => WithArguments(operation, serverId, new SessionSignOutArgs(postLogoutRedirectUri)), cancellationToken);
 
 
 
    /// <summary>
    /// Pairs this computer with a server using a one-time enrollment code. When the outcome is not known the refusal is
-   /// <see cref="ManagementErrorCode.EnrollmentUnconfirmed"/>, whose details say what was left behind. The code is
-   /// passed on once and neither kept nor logged. Over the ceiling the request waits its turn.
+   /// <see cref="ManagementErrorCode.EnrollmentUnconfirmed"/>, whose details say what was left behind: that refusal
+   /// does not mean nothing was done. The code is passed on once and neither kept nor logged; one that is missing is
+   /// not sent. Over the ceiling the request waits its turn.
    /// </summary>
    public Task<ServiceResult<EnrollResult>> EnrollAsync(string serverId, string enrollmentCode, CancellationToken cancellationToken = default)
-      => AskAsync<EnrollResult>(ManagementOperations.PairingEnroll, operation => ManagementRequest.For(operation, serverId, new PairingEnrollArgs(enrollmentCode)), cancellationToken);
+      => AskAsync<EnrollResult>(ManagementOperations.PairingEnroll, operation => WithArguments(operation, serverId, new PairingEnrollArgs(enrollmentCode)), cancellationToken);
 
 
 
@@ -95,6 +98,16 @@ public sealed partial class ManagementClient
    /// what to give, and the request states no provider. A check that is given all the same is not used.
    /// </para>
    /// <para>
+   /// What the type of that argument guarantees, and what it does not. It keeps text from being passed by accident,
+   /// and no more. It does not show that the result is the one the service returned: the record is public, and a
+   /// result changed with a <c>with</c> expression is sent as changed. It does not show that the check was of this
+   /// server: the record does not name the address it was for, so a check of another server that names the same
+   /// provider is not detected. And, unlike <see cref="AddServerAsync"/>, a check that failed is not refused here:
+   /// a server whose own certificate is refused is exactly the one an exception is switched on for, and whether the
+   /// check of such a server can pass is the service's to say. The caller has to keep the check with the server it
+   /// was made for.
+   /// </para>
+   /// <para>
    /// A check whose provider is text that names no origin is not sent when the exception is switched on: the result
    /// is the refusal the service would give, <see cref="ManagementErrorCode.InvalidRequest"/>. Over the ceiling the
    /// request waits its turn.
@@ -108,20 +121,20 @@ public sealed partial class ManagementClient
       }
       string? providerTheOperatorAccepted = acceptCertificateException ? checkTheOperatorSaw?.ProviderOrigin : null;
       return AskAsync<TrustResult>(ManagementOperations.TrustSet,
-         operation => ManagementRequest.For(operation, serverId, new TrustSetArgs(acceptCertificateException, providerTheOperatorAccepted)), cancellationToken);
+         operation => WithArguments(operation, serverId, new TrustSetArgs(acceptCertificateException, providerTheOperatorAccepted)), cancellationToken);
    }
 
 
 
    /// <summary>Shares a Windows printer with a server, or stops sharing it. Over the ceiling it waits its turn.</summary>
    public Task<ServiceResult<NoResult>> SharePrinterAsync(string serverId, string printerId, bool shared, CancellationToken cancellationToken = default)
-      => AskAsync<NoResult>(ManagementOperations.PrintersShare, operation => ManagementRequest.For(operation, serverId, new PrintersShareArgs(printerId, shared)), cancellationToken);
+      => AskAsync<NoResult>(ManagementOperations.PrintersShare, operation => WithArguments(operation, serverId, new PrintersShareArgs(printerId, shared)), cancellationToken);
 
 
 
    /// <summary>Changes the name, description and location a server is given for a printer shared with it. Over the ceiling it waits its turn.</summary>
    public Task<ServiceResult<NoResult>> SetPrinterProfileAsync(string serverId, string printerId, PrinterProfile profile, CancellationToken cancellationToken = default)
-      => AskAsync<NoResult>(ManagementOperations.PrintersSetProfile, operation => ManagementRequest.For(operation, serverId, new PrintersSetProfileArgs(printerId, profile)), cancellationToken);
+      => AskAsync<NoResult>(ManagementOperations.PrintersSetProfile, operation => WithArguments(operation, serverId, new PrintersSetProfileArgs(printerId, profile)), cancellationToken);
 
 
 
@@ -131,5 +144,5 @@ public sealed partial class ManagementClient
    /// for a job to be queued; it does not say that anything was printed. Over the ceiling the request waits its turn.
    /// </summary>
    public Task<ServiceResult<JobQueuedResult>> TestPrintAsync(string serverId, string printerId, string format, string? testProfile, CancellationToken cancellationToken = default)
-      => AskAsync<JobQueuedResult>(ManagementOperations.PrintersTestPrint, operation => ManagementRequest.For(operation, serverId, new PrintersTestPrintArgs(printerId, format, testProfile)), cancellationToken);
+      => AskAsync<JobQueuedResult>(ManagementOperations.PrintersTestPrint, operation => WithArguments(operation, serverId, new PrintersTestPrintArgs(printerId, format, testProfile)), cancellationToken);
 }

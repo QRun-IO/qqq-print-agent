@@ -65,8 +65,8 @@ public sealed class ManagementClientTests
       ServiceResult<JobCancelResult> cancel = await client.CancelJobAsync(Server, "job-204");
       ServiceResult<SignInResult> signIn = await client.SignInAsync(Server, SampleValues.Golden.Credential);
       ServiceResult<EnrollResult> enroll = await client.EnrollAsync(Server, "code");
-      ServiceResult<ServerCheckResult> untrusted = await client.CheckServerAsync("https://qqq.example.test", acceptCertificateException: false);
-      ServiceResult<ServerCheckResult> incompatible = await client.CheckServerAsync("https://qqq.example.test", acceptCertificateException: false);
+      ServiceResult<ServerCheckResult> untrusted = await client.CheckServerAsync(SampleValues.Golden.Address, acceptCertificateException: false);
+      ServiceResult<ServerCheckResult> incompatible = await client.CheckServerAsync(SampleValues.Golden.Address, acceptCertificateException: false);
 
       Assert.Equal((ServiceOutcome.Rejected, ManagementErrorCode.CancelRefused, Replies.Message, ServiceFailure.None), (cancel.Outcome, cancel.Code, cancel.Message, cancel.Failure));
       Assert.False(cancel.Succeeded || cancel.Unconfirmed);
