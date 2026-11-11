@@ -17,15 +17,22 @@ namespace Qqq.PrintAgent.Presentation.Wizard;
 /// forwards Enter, Escape and its buttons; it decides nothing.
 /// <para>
 /// This part is the frame every step shares: the steps of the run and the step indicator, the primary and the cancel
-/// action (Enter and Escape), Back, the one result announcement, the focus target, and how a run ends. Each step's
-/// own behavior is in its own part of the class. So far that is the Server step; on any other step the frame shows
-/// the step's title and offers no primary action, because nothing is built there yet.
+/// action (Enter and Escape), Back, the one result announcement, the focus target, waiting for the service, and how
+/// a run ends. Each step's own behavior is in its own part of the class. So far that is the Server step; on any
+/// other step the frame shows the step's title and offers no primary action, because nothing is built there yet.
+/// </para>
+/// <para>
+/// Waiting for the service is the frame's, so every step waits the same way (<see cref="TryBeginWait"/>,
+/// <see cref="EndWait"/>): one request at a time under the wizard's key of the window's gate, a second one refused
+/// out loud, and an answer shown only when its wait was not ended meanwhile, by the step itself (an edit of what
+/// the request was about), by Cancel or by disposal.
 /// </para>
 /// <para>
 /// One wizard exists at a time and the window owns it. It is used from one thread, the window's, and raises every
 /// change and every announcement on the thread that called it. It never holds or exposes a password, an enrollment
-/// code or a session credential. Disposing it only cancels: what is still running ends by itself, and from then on
-/// nothing is announced, neither a result nor a property change.
+/// code or a session credential. Disposing it only cancels and frees the wizard's gate: what is still running ends
+/// by itself, and from then on nothing is announced, neither a result nor a property change. Once the run has
+/// ended or the wizard was disposed, nothing it is asked for does anything.
 /// </para>
 /// </summary>
 public sealed partial class ConnectionWizard : ObservableObject, IDisposable
@@ -81,6 +88,9 @@ public sealed partial class ConnectionWizard : ObservableObject, IDisposable
 
    /// <summary>True once the wizard was disposed; nothing is started or announced after that.</summary>
    private bool _disposed;
+
+   /// <summary>The wait for the service that is running; null when the wizard waits for nothing.</summary>
+   private ServiceWait? _wait;
 
 
 
@@ -161,12 +171,17 @@ public sealed partial class ConnectionWizard : ObservableObject, IDisposable
 
 
    /// <summary>True while the wizard waits for the service.</summary>
-   public bool IsBusy => _checkWait is not null;
+   public bool IsBusy => _wait is not null;
 
 
 
    /// <summary>True while the run can still do something: it has not ended and the wizard was not disposed.</summary>
    private bool Active => !_disposed && _end is null;
+
+
+
+   /// <summary>True while the run can still do something and the Server step is shown. Everything the Server step offers asks this first, so none of it can change that step's result from under a later step.</summary>
+   private bool OnServerStep => Active && _step == WizardStep.Server;
 
 
 
@@ -224,14 +239,14 @@ public sealed partial class ConnectionWizard : ObservableObject, IDisposable
    /// passed. Pressing it when it cannot be used is never silent there: the wizard says why. A step that is not
    /// built yet has no primary action.
    /// </summary>
-   public Task InvokePrimaryAsync() => Active && _step == WizardStep.Server ? InvokeServerPrimaryAsync() : Task.CompletedTask;
+   public Task InvokePrimaryAsync() => OnServerStep ? InvokeServerPrimaryAsync() : Task.CompletedTask;
 
 
 
    /// <summary>What Escape does: it cancels the wizard, except while the certificate warning is open, where it closes the warning only.</summary>
    public void InvokeCancel()
    {
-      if(_exceptionWarning is not null)
+      if(OnServerStep && _exceptionWarning is not null)
       {
          DeclineException();
          return;
@@ -257,18 +272,32 @@ public sealed partial class ConnectionWizard : ObservableObject, IDisposable
 
 
 
-   /// <summary>Goes back one step, where the step offers that (<see cref="CanGoBack"/>); otherwise nothing happens.</summary>
+   /// <summary>
+   /// Goes back one step, where the step offers that (<see cref="CanGoBack"/>); otherwise nothing happens. The
+   /// Server step comes back as it was left, and says its result again: changing step cleared what was said, and an
+   /// operator who returns must hear what Next would go on from, the certificate exception and the addresses it
+   /// covers among it.
+   /// </summary>
    public void GoBack()
    {
-      if(CanGoBack)
+      if(!CanGoBack)
       {
-         GoTo(s_back[_step]);
+         return;
+      }
+      GoTo(s_back[_step]);
+      if(_step == WizardStep.Server)
+      {
+         SayServerResultAgain();
       }
    }
 
 
 
-   /// <summary>Ends the wizard. It only cancels: a wait that is running ends itself. After this nothing is announced.</summary>
+   /// <summary>
+   /// Ends the wizard. It only cancels: a request that is running ends by itself, and what it finds is not shown.
+   /// The wizard's gate comes free here, not when that request has ended, so a wizard opened next is not refused by
+   /// one that is gone. After this nothing is announced.
+   /// </summary>
    public void Dispose()
    {
       if(_disposed)
@@ -277,6 +306,7 @@ public sealed partial class ConnectionWizard : ObservableObject, IDisposable
       }
       _disposed = true;
       _lifetime.Cancel();
+      AbandonWait();
       _lifetime.Dispose();
    }
 
@@ -284,10 +314,16 @@ public sealed partial class ConnectionWizard : ObservableObject, IDisposable
 
    /// <summary>
    /// Shows another step: the result of the step that is left is cleared, because a step shows only its own, and the
-   /// focus goes to the new step's first input. This is how a step hands over to the next one.
+   /// focus goes to the new step's first input. This is how a step hands over to the next one. Once the run has
+   /// ended or the wizard was disposed it does nothing, so a step that hands over after waiting for something need
+   /// not ask first whether the wizard is still there.
    /// </summary>
    internal void GoTo(WizardStep step)
    {
+      if(!Active)
+      {
+         return;
+      }
       Result.Clear();
       ResultSeverity = FeedbackSeverity.Informational;
       Step = step;
@@ -365,11 +401,151 @@ public sealed partial class ConnectionWizard : ObservableObject, IDisposable
 
 
 
-   /// <summary>Ends the run: every wait stops, and the window is told what to show instead.</summary>
+   /// <summary>
+   /// Starts waiting for the service, for one request of a step. The request holds the wizard's key of the window's
+   /// gate from now until <see cref="EndWait"/>, and <paramref name="whileBusy"/> is what a second request is
+   /// refused with meanwhile. When the gate is held, this request is refused: the holder's sentence is said, the
+   /// refusal is logged, and nothing is started.
+   /// <para>
+   /// The wait exists before the gate is entered. Entering tells whoever listens to the gate, and a listener may
+   /// change the step (edit what the request is about, cancel, dispose). Whatever ends a wait ends this one too,
+   /// and a request whose wait ended while the gate was being entered is given up before anything is sent: what
+   /// the step read for it is no longer what is on screen. <paramref name="request"/> names the request in the log,
+   /// in fixed words.
+   /// </para>
+   /// </summary>
+   private bool TryBeginWait(string request, string whileBusy, [NotNullWhen(true)] out ServiceWait? wait)
+   {
+      ServiceWait? running = _wait;
+      ServiceWait entering = new(_lifetime.Token);
+      wait = null;
+      _wait = entering;
+      if(!_gate.TryEnter(OperationGate.Wizard, whileBusy, out IDisposable? hold, out string? refusal))
+      {
+         _wait = running;
+         entering.Dispose();
+         _log.Info("{Request} was asked for and not started: the wizard is still waiting for the service.", request);
+         Say(refusal, FeedbackSeverity.Warning);
+         return false;
+      }
+      entering.Holds(hold);
+      if(entering.Ended)
+      {
+         _log.Debug("{Request} was asked for and given up before anything was sent: the step changed while the wizard's gate was being entered.", request);
+         EndWait(entering);
+         return false;
+      }
+      wait = entering;
+      return true;
+   }
+
+
+
+   /// <summary>
+   /// Ends a wait, before anything about its answer is shown or said: the wizard's gate comes free and the wizard is
+   /// no longer busy. It says whether the answer may be shown. It may not when the wait was ended meanwhile, by an
+   /// edit of what the request was about, by Cancel or by disposal: such an answer is about something that is no
+   /// longer on screen, or about a wizard that is gone. The buttons are then told that the wizard is free again;
+   /// when the answer is shown, showing it does that. The wait that ends is the only one there is: it holds the
+   /// wizard's gate until here, so no other can have begun.
+   /// </summary>
+   private bool EndWait(ServiceWait wait)
+   {
+      _wait = null;
+      bool wanted = !wait.Ended;
+      wait.Dispose();
+      if(!wanted)
+      {
+         NotifyActions();
+      }
+      return wanted;
+   }
+
+
+
+   /// <summary>Stops waiting for the answer of the request that is running, because what it was asked about has changed. The request itself is not taken back; its answer is not shown (<see cref="EndWait"/>).</summary>
+   private void StopWaiting() => _wait?.End();
+
+
+
+   /// <summary>Gives up the wait that is running, when the run ends or the wizard is disposed. The wizard's gate comes free now and the wizard is no longer busy; the request that was running finds its wait ended and shows nothing.</summary>
+   private void AbandonWait()
+   {
+      ServiceWait? wait = _wait;
+      _wait = null;
+      wait?.Release();
+   }
+
+
+
+   /// <summary>Ends the run: every wait stops, the wizard's gate comes free, and the window is told what to show instead. A run that has ended, or a wizard that was disposed, cannot be ended again.</summary>
    private void Close(WizardEnd end)
    {
+      if(!Active)
+      {
+         return;
+      }
       _lifetime.Cancel();
+      AbandonWait();
       End = end;
       NotifyActions();
+   }
+
+
+
+   /// <summary>
+   /// One wait for the service: what ends it, and the hold on the wizard's gate that goes with it. Ending it does
+   /// not take the request back; it only means that the answer is no longer wanted. The hold is released once,
+   /// however often it is asked for.
+   /// </summary>
+   private sealed class ServiceWait : IDisposable
+   {
+      /// <summary>Ends with the wizard's lifetime, or when the step ends the wait.</summary>
+      private readonly CancellationTokenSource _source;
+
+      /// <summary>The hold on the wizard's gate; null until the gate was entered.</summary>
+      private IDisposable? _hold;
+
+
+
+      /// <summary>Starts a wait that ends with the wizard's lifetime at the latest.</summary>
+      internal ServiceWait(CancellationToken lifetime)
+      {
+         _source = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+      }
+
+
+
+      /// <summary>What the request is given, so that it stops waiting when the wait ends.</summary>
+      internal CancellationToken Cancellation => _source.Token;
+
+
+
+      /// <summary>True once the wait was ended, by the step, by Cancel or by disposal.</summary>
+      internal bool Ended => _source.IsCancellationRequested;
+
+
+
+      /// <summary>Records the hold on the wizard's gate, once the gate was entered.</summary>
+      internal void Holds(IDisposable hold) => _hold = hold;
+
+
+
+      /// <summary>Ends the wait.</summary>
+      internal void End() => _source.Cancel();
+
+
+
+      /// <summary>Frees the wizard's gate.</summary>
+      internal void Release() => _hold?.Dispose();
+
+
+
+      /// <summary>Frees the wizard's gate and what the wait itself holds.</summary>
+      public void Dispose()
+      {
+         Release();
+         _source.Dispose();
+      }
    }
 }

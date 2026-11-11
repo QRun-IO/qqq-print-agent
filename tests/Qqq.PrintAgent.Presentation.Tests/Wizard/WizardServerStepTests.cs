@@ -741,7 +741,8 @@ public sealed class WizardServerStepTests
       Assert.DoesNotContain(nameof(ConnectionWizard.FocusTarget), fixture.Changes, StringComparer.Ordinal);
       Assert.Single(fixture.Pipe.Sent);
       Assert.Equal(ServerStepState.Checking, wizard.ServerState);
-      Assert.Equal(2, fixture.Log.Entries.Count(entry => string.Equals(entry, "WARN A check of the server was asked for and not started: the wizard is still waiting for the service.", StringComparison.Ordinal)));
+      Assert.Equal(2, fixture.Log.Entries.Count(entry => string.Equals(entry, "INFO A check of the server was asked for and not started: the wizard is still waiting for the service.", StringComparison.Ordinal)));
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.StartsWith("WARN", StringComparison.Ordinal) || entry.StartsWith("ERROR", StringComparison.Ordinal));
 
       held.SetResult(Replies.Success(WizardFixture.Check()));
       await first.WaitAsync(WizardFixture.Limit);
@@ -1318,6 +1319,378 @@ public sealed class WizardServerStepTests
 
 
 
+   /// <summary>Enter after a check that did not pass checks again: it never goes on to signing in, and it never runs under the exception.</summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public async Task Enter_AfterACheckThatDidNotPass_ChecksAgain(bool certificateRefused)
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      ManagementReplyParse reply = certificateRefused ? WizardFixture.CertificateRefused(WizardFixture.Provider) : Replies.Failure(ManagementErrorCode.ServerIncompatible, Replies.Message, WizardFixture.Check(2));
+      await fixture.CheckAsync(reply);
+      Assert.Equal(certificateRefused ? ServerStepState.CertificateRefused : ServerStepState.Failed, wizard.ServerState);
+      Assert.Equal(new WizardAction("Check again", true), wizard.PrimaryAction);
+      fixture.Pipe.Answer(reply);
+
+      await wizard.InvokePrimaryAsync();
+
+      Assert.Equal(WizardStep.Server, wizard.Step);
+      Assert.Equal("Step 1 of 5: Server", wizard.StepTitle);
+      Assert.Equal(2, fixture.Pipe.Sent.Count);
+      Assert.Equal(new ServersCheckArgs(WizardFixture.Address, AcceptCertificateException: false), fixture.Sent(1));
+      Assert.Equal(certificateRefused ? ServerStepState.CertificateRefused : ServerStepState.Failed, wizard.ServerState);
+      Assert.Null(wizard.PassedCheck);
+      Assert.False(wizard.ExceptionAccepted);
+      Assert.Equal(2, fixture.Announced.Count(said => string.Equals(said, WizardMessages.Checking, StringComparison.Ordinal)));
+   }
+
+
+
+   /// <summary>
+   /// A check that passes while the typed name breaks the name rule cannot be gone on from, so it does not say
+   /// "Choose Next" and does not point the focus at a button that cannot be used: the sentence ends with what is
+   /// wrong with the name, and the focus belongs on the name. Correcting the name is all it takes.
+   /// </summary>
+   [Fact]
+   public async Task Check_PassesWhileTheNameBreaksTheRule_SaysTheNameProblem_AndPointsAtTheName()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      wizard.Address = WizardFixture.Address;
+      wizard.Name = "Dock [2]";
+
+      await fixture.CheckAsync(Replies.Success(WizardFixture.Check()));
+
+      Assert.Equal(ServerStepState.Passed, wizard.ServerState);
+      Assert.NotNull(wizard.PassedCheck);
+      Assert.Equal(new WizardAction("Next", false), wizard.PrimaryAction);
+      Assert.Equal("The server passed all five checks. It offers sign-in with a user name and password, and sign-in through the browser. Nothing is stored yet."
+         + " Before you can go on, correct the server's name. The name must not contain square brackets. Remove them.", wizard.Result.Text);
+      Assert.DoesNotContain("Choose Next", wizard.Result.Text, StringComparison.Ordinal);
+      Assert.Equal(FocusTarget.ServerName, wizard.FocusTarget);
+      Assert.Equal(FeedbackSeverity.Warning, wizard.ResultSeverity);
+      Assert.Equal(new WizardFixture.Moment(wizard.Result.Text, ServerStepState.Passed, 5, new WizardAction("Next", false), Busy: false, GateHeld: false, FeedbackSeverity.Warning, FocusTarget.ServerName), fixture.Moments[^1]);
+
+      wizard.Name = "Dock 2";
+
+      Assert.Equal(new WizardAction("Next", true), wizard.PrimaryAction);
+      await wizard.InvokePrimaryAsync();
+      Assert.Equal(WizardStep.SignIn, wizard.Step);
+   }
+
+
+
+   /// <summary>The same under the certificate exception: the sentence still says what the exception covers and how to drop it, and ends with what is wrong with the name instead of pointing at Next.</summary>
+   [Fact]
+   public async Task Check_PassesUnderTheExceptionWhileTheNameBreaksTheRule_SaysTheNameProblem()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      wizard.Address = WizardFixture.Address;
+      wizard.Name = "   ";
+      await fixture.CheckAsync(WizardFixture.CertificateRefused());
+      wizard.RequestException();
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: WizardFixture.Provider)));
+
+      await wizard.AcceptExceptionAsync();
+
+      Assert.Equal(ServerStepState.ExceptionReview, wizard.ServerState);
+      Assert.True(wizard.ExceptionAccepted);
+      Assert.Equal(new WizardAction("Next", false), wizard.PrimaryAction);
+      Assert.Equal("The server passed all five checks with the development-only certificate exception. Before you go on, look at what the exception covers."
+         + " It accepts a certificate Windows does not trust from two addresses: https://qqq.example.test, the server, and https://sign-in.example.test, the sign-in provider the server names."
+         + " It offers sign-in with a user name and password, and sign-in through the browser. Nothing is stored yet: the exception is stored with the server when it is added."
+         + " Choose Drop the exception to remove this result and check the server without it. To go on with the exception, correct the server's name first. Enter a name for this server.", wizard.Result.Text);
+      Assert.DoesNotContain("Choose Next", wizard.Result.Text, StringComparison.Ordinal);
+      Assert.Equal(FocusTarget.ServerName, wizard.FocusTarget);
+      Assert.Equal(FeedbackSeverity.Warning, wizard.ResultSeverity);
+   }
+
+
+
+   /// <summary>
+   /// Once the run has ended or the wizard was disposed, handing over to another step does nothing: the step stays,
+   /// nothing is announced as changed, and what was said is not cleared. A step that hands over after waiting for
+   /// something therefore cannot move a wizard that is gone.
+   /// </summary>
+   [Fact]
+   public async Task GoTo_AfterTheRunEndedOrTheWizardWasDisposed_DoesNothing()
+   {
+      using WizardFixture ended = new();
+      await ended.CheckAsync(Replies.Success(WizardFixture.Check()));
+      string said = ended.Wizard.Result.Text;
+      ended.Wizard.Cancel();
+      ended.Changes.Clear();
+
+      ended.Wizard.GoTo(WizardStep.Pairing);
+
+      Assert.Equal(WizardStep.Server, ended.Wizard.Step);
+      Assert.Equal("Step 1 of 5: Server", ended.Wizard.StepTitle);
+      Assert.Empty(ended.Changes);
+      Assert.Equal(said, ended.Wizard.Result.Text);
+      Assert.Equal(FocusTarget.PrimaryAction, ended.Wizard.FocusTarget);
+
+      WizardFixture disposed = new();
+      await disposed.CheckAsync(Replies.Success(WizardFixture.Check()));
+      List<string?> resultChanges = [];
+      disposed.Wizard.Result.PropertyChanged += (_, change) => resultChanges.Add(change.PropertyName);
+      disposed.Wizard.Dispose();
+      disposed.Changes.Clear();
+
+      disposed.Wizard.GoTo(WizardStep.Pairing);
+
+      Assert.Equal(WizardStep.Server, disposed.Wizard.Step);
+      Assert.Empty(disposed.Changes);
+      Assert.Empty(resultChanges);
+      Assert.Equal(said, disposed.Wizard.Result.Text);
+   }
+
+
+
+   /// <summary>
+   /// A check is sent for the address that is in the box, and for no other. Entering the wizard's gate tells
+   /// whoever listens to the gate; a listener that edits the address at that moment ends the check that was being
+   /// started, before anything is sent. Nothing is shown about the address that was in the box before, the
+   /// exception that had been accepted for it is forgotten and is not used for the new address, and the gate is
+   /// free again. The next check is for the address in the box, without the exception.
+   /// </summary>
+   [Fact]
+   public async Task AddressEditedWhileTheGateIsBeingEntered_TheCheckIsGivenUp_NothingIsAboutAnotherAddress()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused());
+      wizard.RequestException();
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: WizardFixture.Provider)));
+      await wizard.AcceptExceptionAsync();
+      Assert.True(wizard.ExceptionAccepted);
+      bool edited = false;
+      fixture.Gate.Changed += (_, change) =>
+      {
+         if(!edited && fixture.Gate.IsBusy(change.Key))
+         {
+            edited = true;
+            wizard.Address = "https://other.example.test";
+         }
+      };
+      fixture.Announced.Clear();
+
+      await wizard.CheckAsync();
+
+      Assert.True(edited);
+      Assert.Equal(2, fixture.Pipe.Sent.Count);
+      Assert.Equal("https://other.example.test", wizard.Address);
+      Assert.Equal(ServerStepState.Editing, wizard.ServerState);
+      Assert.Empty(wizard.Stages);
+      Assert.Null(wizard.PassedCheck);
+      Assert.Null(wizard.CheckedOrigin);
+      Assert.False(wizard.ExceptionAccepted);
+      Assert.Empty(wizard.ExceptionOrigins);
+      Assert.Empty(fixture.Announced);
+      Assert.Equal("", wizard.Result.Text);
+      Assert.False(wizard.IsBusy);
+      Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+      Assert.Equal(new WizardAction("Check", true), wizard.CheckAction);
+      Assert.Contains("DEBUG A check of the server was asked for and given up before anything was sent: the step changed while the wizard's gate was being entered.", fixture.Log.Entries, StringComparer.Ordinal);
+
+      await fixture.CheckAsync(Replies.Success(WizardFixture.Check()));
+
+      Assert.Equal(new ServersCheckArgs("https://other.example.test", AcceptCertificateException: false), fixture.Sent(2));
+      Assert.Equal(new Uri("https://other.example.test/"), wizard.CheckedOrigin);
+      Assert.Equal(ServerStepState.Passed, wizard.ServerState);
+      Assert.False(wizard.ExceptionAccepted);
+   }
+
+
+
+   /// <summary>A listener of the gate that disposes the wizard while a check is being started ends that check too: nothing is sent, nothing is said, and the gate comes free although the wizard was gone before it held the gate.</summary>
+   [Fact]
+   public async Task WizardDisposedWhileTheGateIsBeingEntered_NothingIsSent_AndTheGateComesFree()
+   {
+      WizardFixture fixture = new();
+      fixture.Wizard.Address = WizardFixture.Address;
+      fixture.Gate.Changed += (_, change) =>
+      {
+         if(change.Busy)
+         {
+            fixture.Wizard.Dispose();
+         }
+      };
+
+      await fixture.Wizard.CheckAsync();
+
+      Assert.Empty(fixture.Pipe.Sent);
+      Assert.Empty(fixture.Announced);
+      Assert.False(fixture.Wizard.IsBusy);
+      Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+   }
+
+
+
+   /// <summary>
+   /// Disposing the wizard during a check frees the wizard's gate there and then, not when the abandoned check has
+   /// ended. In a window the abandoned check learns that its wait ended only later, and a wizard opened in between
+   /// must not be refused by one that is gone. The abandoned check's own end then frees nothing that is not its
+   /// own: the second wizard still holds the gate for its check.
+   /// </summary>
+   [Fact]
+   public void Dispose_DuringTheCheck_FreesTheGateItself_TheNextWizardIsNotRefused()
+   {
+      WizardFixture fixture = new();
+      using PumpContext pump = new();
+      pump.Run(async () =>
+      {
+         fixture.Wizard.Address = WizardFixture.Address;
+         fixture.Pipe.Hold();
+         Task abandoned = fixture.Wizard.CheckAsync();
+         Assert.True(fixture.Gate.IsBusy(OperationGate.Wizard));
+
+         fixture.Wizard.Dispose();
+
+         Assert.False(abandoned.IsCompleted);
+         Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+         Assert.False(fixture.Wizard.IsBusy);
+         Assert.True(ConnectionWizard.TryStartAddServer(WizardFixture.Snapshot(), fixture.Client, fixture.Gate, fixture.Log, out ConnectionWizard? second, out _, TestData.Time));
+         using ConnectionWizard next = second;
+         next.Address = "https://second.example.test";
+         TaskCompletionSource<ManagementReplyParse> held = fixture.Pipe.Hold();
+         Task check = next.CheckAsync();
+         Assert.Equal(ServerStepState.Checking, next.ServerState);
+         Assert.Equal(2, fixture.Pipe.Sent.Count);
+
+         await abandoned.WaitAsync(WizardFixture.Limit);
+
+         Assert.True(fixture.Gate.IsBusy(OperationGate.Wizard));
+         Assert.True(next.IsBusy);
+         held.SetResult(Replies.Success(WizardFixture.Check()));
+         await check.WaitAsync(WizardFixture.Limit);
+         Assert.Equal(ServerStepState.Passed, next.ServerState);
+         Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+      });
+   }
+
+
+
+   /// <summary>Ending the run during a check frees the wizard's gate there and then as well, and the wizard is no longer busy, before the abandoned check has learned that its wait ended.</summary>
+   [Fact]
+   public void Cancel_DuringTheCheck_FreesTheGateItself()
+   {
+      using WizardFixture fixture = new();
+      using PumpContext pump = new();
+      pump.Run(async () =>
+      {
+         fixture.Wizard.Address = WizardFixture.Address;
+         fixture.Pipe.Hold();
+         Task abandoned = fixture.Wizard.CheckAsync();
+
+         fixture.Wizard.Cancel();
+
+         Assert.False(abandoned.IsCompleted);
+         Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+         Assert.False(fixture.Wizard.IsBusy);
+         Assert.Equal(WizardEnd.Cancelled, fixture.Wizard.End);
+         await abandoned.WaitAsync(WizardFixture.Limit);
+      });
+
+      Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+   }
+
+
+
+   /// <summary>
+   /// A view that disposes the wizard when it hears that the stored data is not ready does not make the check fail:
+   /// a wizard that was disposed is not ended as well, so the check ends quietly, with the gate free.
+   /// </summary>
+   [Fact]
+   public async Task DisposedWhenStoredDataNotReadyIsSaid_TheRunIsNotEndedAsWell()
+   {
+      WizardFixture fixture = new();
+      fixture.Wizard.Address = WizardFixture.Address;
+      fixture.Wizard.Result.Raised += (_, said) =>
+      {
+         if(string.Equals(said.Text, WizardMessages.StoredDataNotReady, StringComparison.Ordinal))
+         {
+            fixture.Wizard.Dispose();
+         }
+      };
+
+      await fixture.CheckAsync(WizardFixture.Refusal(ManagementErrorCode.StateNewer));
+
+      Assert.Equal([WizardMessages.Checking, WizardMessages.StoredDataNotReady], fixture.Announced);
+      Assert.Null(fixture.Wizard.End);
+      Assert.False(fixture.Wizard.CancelAction.Enabled);
+      Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+   }
+
+
+
+   /// <summary>
+   /// A view that disposes the wizard in the middle of a result being put in place is told nothing after that:
+   /// neither that a property changed nor that one is about to change, although the result goes on being put in
+   /// place, and the result is not announced.
+   /// </summary>
+   [Fact]
+   public async Task DisposedWhileAResultIsBeingPutInPlace_NothingIsAnnouncedAfterwards_NotEvenAsAboutToChange()
+   {
+      WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      wizard.Address = WizardFixture.Address;
+      bool disposed = false;
+      List<string> afterwards = [];
+      wizard.PropertyChanging += (_, change) =>
+      {
+         if(disposed)
+         {
+            afterwards.Add("about to change: " + change.PropertyName);
+         }
+      };
+      wizard.PropertyChanged += (_, change) =>
+      {
+         if(disposed)
+         {
+            afterwards.Add("changed: " + change.PropertyName);
+         }
+         if(string.Equals(change.PropertyName, nameof(ConnectionWizard.Stages), StringComparison.Ordinal) && wizard.Stages.Count == 5)
+         {
+            disposed = true;
+            wizard.Dispose();
+         }
+      };
+
+      await fixture.CheckAsync(Replies.Success(WizardFixture.Check()));
+
+      Assert.True(disposed);
+      Assert.Equal(ServerStepState.Passed, wizard.ServerState);
+      Assert.Empty(afterwards);
+      Assert.Equal([WizardMessages.Checking], fixture.Announced);
+   }
+
+
+
+   /// <summary>When the run ends, every button is told that it may have changed, after the end is set: Cancel, Check, Next and Back can no longer be used.</summary>
+   [Fact]
+   public async Task WhenTheRunEnds_TheButtonsAreToldThatTheyChanged()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(Replies.Success(WizardFixture.Check()));
+      List<(string? Property, bool Ended, bool Cancel, bool Next, bool Check)> seen = [];
+      wizard.PropertyChanged += (_, change) => seen.Add((change.PropertyName, wizard.End is not null, wizard.CancelAction.Enabled, wizard.NextAction.Enabled, wizard.CheckAction.Enabled));
+      fixture.Changes.Clear();
+
+      wizard.Cancel();
+
+      Assert.Equal(
+      [
+         nameof(ConnectionWizard.End), nameof(ConnectionWizard.IsBusy), nameof(ConnectionWizard.PrimaryAction), nameof(ConnectionWizard.CheckAction), nameof(ConnectionWizard.NextAction),
+         nameof(ConnectionWizard.CancelAction), nameof(ConnectionWizard.CanGoBack), nameof(ConnectionWizard.CanRequestException),
+      ], fixture.Changes);
+      Assert.All(seen, moment => Assert.Equal((true, false, false, false), (moment.Ended, moment.Cancel, moment.Next, moment.Check)));
+   }
+
+
+
    /// <summary>
    /// Something the client does not turn into a result is a programming error and is left to propagate, but it does
    /// not leave the step stuck: it is editing again, not busy, and the gate is free.
@@ -1407,7 +1780,8 @@ public sealed class WizardServerStepTests
    /// <summary>
    /// Back is offered only where the step it leaves and the one it returns to stored nothing in between: from signing
    /// in back to the server, and from the summary back to the printers. The Server step comes back as it was left,
-   /// with its check still on screen.
+   /// with its check still on screen, and says its result again with the focus on Next: changing step cleared what
+   /// was said.
    /// </summary>
    [Fact]
    public async Task Back_IsOfferedOnlyFromSignInAndDone()
@@ -1430,8 +1804,10 @@ public sealed class WizardServerStepTests
       Assert.Equal(5, wizard.Stages.Count);
       Assert.NotNull(wizard.PassedCheck);
       Assert.Equal(new WizardAction("Next", true), wizard.PrimaryAction);
-      Assert.Equal(FocusTarget.StepStart, wizard.FocusTarget);
-      Assert.Equal("", wizard.Result.Text);
+      Assert.Equal(FocusTarget.PrimaryAction, wizard.FocusTarget);
+      Assert.Equal("The server passed all five checks. It offers sign-in with a user name and password, and sign-in through the browser. Nothing is stored yet. Choose Next to sign in.", wizard.Result.Text);
+      Assert.Equal(wizard.Result.Text, fixture.Announced[^1]);
+      Assert.Equal(FeedbackSeverity.Success, wizard.ResultSeverity);
       Assert.False(wizard.CanGoBack);
 
       wizard.GoTo(WizardStep.Pairing);
@@ -1445,8 +1821,11 @@ public sealed class WizardServerStepTests
       wizard.GoTo(WizardStep.Done);
       Assert.Equal("Step 5 of 5: Done", wizard.StepTitle);
       Assert.True(wizard.CanGoBack);
+      fixture.Announced.Clear();
       wizard.GoBack();
       Assert.Equal(WizardStep.Printers, wizard.Step);
+      Assert.Empty(fixture.Announced);
+      Assert.Equal(FocusTarget.StepStart, wizard.FocusTarget);
       Assert.Single(fixture.Pipe.Sent);
    }
 

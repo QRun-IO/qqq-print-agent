@@ -448,6 +448,240 @@ public sealed class WizardCertificateTests
 
 
    /// <summary>
+   /// What a warning said belongs to the check it was opened for. A warning for one address that named the provider
+   /// and was accepted does not make the review of another address skip: after the address is edited, the next
+   /// check runs without the exception, its warning says that the provider is not known yet, and when the re-check
+   /// then names the very provider the earlier warning named, the operator is asked to look before going on.
+   /// </summary>
+   [Fact]
+   public async Task Exception_WarningForAnEarlierAddress_DoesNotSkipTheReviewOfThisOne()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused(Provider));
+      wizard.RequestException();
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: Provider)));
+      await wizard.AcceptExceptionAsync();
+      Assert.Equal(ServerStepState.Passed, wizard.ServerState);
+      Assert.True(wizard.ExceptionAccepted);
+
+      wizard.Address = "https://second.example.test";
+      Assert.False(wizard.ExceptionAccepted);
+      fixture.Pipe.Answer(WizardFixture.CertificateRefused());
+      await wizard.CheckAsync();
+
+      Assert.Equal(new ServersCheckArgs("https://second.example.test", AcceptCertificateException: false), fixture.Sent(2));
+      wizard.RequestException();
+      Assert.Contains("is not known yet", wizard.ExceptionWarning!.Message, StringComparison.Ordinal);
+      Assert.DoesNotContain(Provider, wizard.ExceptionWarning.Message, StringComparison.Ordinal);
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: Provider)));
+
+      await wizard.AcceptExceptionAsync();
+
+      Assert.Equal(new ServersCheckArgs("https://second.example.test", AcceptCertificateException: true), fixture.Sent(3));
+      Assert.Equal(ServerStepState.ExceptionReview, wizard.ServerState);
+      Assert.Equal(["https://second.example.test", Provider], wizard.ExceptionOrigins);
+      Assert.Contains("Before you go on, look at what the exception covers.", wizard.Result.Text, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// A warning that was declined leaves nothing behind. It named the provider and was declined; a later check
+   /// reports no provider, so its warning says that the provider is not known yet; when the re-check then names
+   /// the provider the declined warning had named, the operator is asked to look before going on.
+   /// </summary>
+   [Fact]
+   public async Task Exception_DeclinedWarningThatNamedTheProvider_DoesNotSkipALaterReview()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused(Provider));
+      wizard.RequestException();
+      Assert.Contains(Provider, wizard.ExceptionWarning!.Message, StringComparison.Ordinal);
+      wizard.DeclineException();
+      fixture.Pipe.Answer(WizardFixture.CertificateRefused());
+      await wizard.CheckAsync();
+      Assert.False(fixture.Sent(1).AcceptCertificateException);
+      wizard.RequestException();
+      Assert.Contains("is not known yet", wizard.ExceptionWarning!.Message, StringComparison.Ordinal);
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: Provider)));
+
+      await wizard.AcceptExceptionAsync();
+
+      Assert.True(fixture.Sent(2).AcceptCertificateException);
+      Assert.Equal(ServerStepState.ExceptionReview, wizard.ServerState);
+      Assert.Equal([Server, Provider], wizard.ExceptionOrigins);
+      Assert.Contains("Before you go on, look at what the exception covers.", wizard.Result.Text, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// Only accepting the warning makes a check run under the exception. A warning that named the provider and was
+   /// declined, and one that is still open when the operator checks again (the Check button, or Enter), both lead to
+   /// a check without the exception, whose pass is not an accepted one; and Enter closes the warning it left open,
+   /// so that accepting afterwards does nothing.
+   /// </summary>
+   [Theory]
+   [InlineData("declined")]
+   [InlineData("open, then Check")]
+   [InlineData("open, then Enter")]
+   public async Task Exception_WarningThatWasNotAccepted_NeverMakesACheckRunUnderIt(string how)
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused(Provider));
+      wizard.RequestException();
+      Assert.NotNull(wizard.ExceptionWarning);
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: Provider)));
+
+      if(string.Equals(how, "declined", StringComparison.Ordinal))
+      {
+         wizard.DeclineException();
+         await wizard.CheckAsync();
+      }
+      else if(string.Equals(how, "open, then Check", StringComparison.Ordinal))
+      {
+         await wizard.CheckAsync();
+      }
+      else
+      {
+         await wizard.InvokePrimaryAsync();
+      }
+
+      Assert.Equal(new ServersCheckArgs(Server, AcceptCertificateException: false), fixture.Sent(1));
+      Assert.Null(wizard.ExceptionWarning);
+      Assert.Equal(ServerStepState.Passed, wizard.ServerState);
+      Assert.False(wizard.ExceptionAccepted);
+      Assert.Empty(wizard.ExceptionOrigins);
+      await wizard.AcceptExceptionAsync();
+      Assert.Equal(2, fixture.Pipe.Sent.Count);
+      Assert.False(wizard.ExceptionAccepted);
+   }
+
+
+
+   /// <summary>
+   /// What the Server step offers does nothing once the wizard is on another step, so nothing can pull the result
+   /// out from under the step that is using it. On the Sign in step after a pass under the exception, dropping the
+   /// exception, asking for it, accepting, opening an existing server and Escape's closing of a warning all leave
+   /// the result, the acceptance and what was said as they are; Escape cancels the wizard, as it does on every step.
+   /// </summary>
+   [Fact]
+   public async Task OffTheServerStep_ItsCommandsDoNothing()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused());
+      wizard.RequestException();
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: Provider)));
+      await wizard.AcceptExceptionAsync();
+      ServerCheckResult passed = wizard.PassedCheck!;
+      await wizard.InvokePrimaryAsync();
+      Assert.Equal(WizardStep.SignIn, wizard.Step);
+      fixture.Changes.Clear();
+      fixture.Announced.Clear();
+
+      wizard.DeclineException();
+      wizard.RequestException();
+      await wizard.AcceptExceptionAsync();
+      wizard.OpenExistingServer();
+
+      Assert.Empty(fixture.Changes);
+      Assert.Empty(fixture.Announced);
+      Assert.Equal(WizardStep.SignIn, wizard.Step);
+      Assert.Equal(ServerStepState.ExceptionReview, wizard.ServerState);
+      Assert.True(wizard.ExceptionAccepted);
+      Assert.Equal([Server, Provider], wizard.ExceptionOrigins);
+      Assert.Same(passed, wizard.PassedCheck);
+      Assert.False(wizard.CanRequestException);
+      Assert.Null(wizard.End);
+      Assert.Equal(2, fixture.Pipe.Sent.Count);
+   }
+
+
+
+   /// <summary>
+   /// The same for the commands that need a refused certificate or an existing server on screen, which a later step
+   /// can only meet when a step hands over by itself: asking for the exception, accepting or declining a warning
+   /// that is open, and opening the existing server do nothing off the Server step, and Escape there cancels the
+   /// wizard and does not merely close the warning.
+   /// </summary>
+   [Fact]
+   public async Task OffTheServerStep_TheWarningAndTheExistingServerCannotBeUsed()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused());
+      wizard.GoTo(WizardStep.SignIn);
+
+      Assert.False(wizard.CanRequestException);
+      wizard.RequestException();
+      Assert.Null(wizard.ExceptionWarning);
+
+      wizard.GoTo(WizardStep.Server);
+      wizard.RequestException();
+      ConfirmationPrompt warning = Assert.IsType<ConfirmationPrompt>(wizard.ExceptionWarning);
+      wizard.GoTo(WizardStep.SignIn);
+      await wizard.AcceptExceptionAsync();
+      wizard.DeclineException();
+
+      Assert.Same(warning, wizard.ExceptionWarning);
+      Assert.Single(fixture.Pipe.Sent);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("declined", StringComparison.Ordinal) || entry.Contains("accepted the development-only", StringComparison.Ordinal));
+
+      using WizardFixture existing = new();
+      await existing.CheckAsync(Replies.Success(WizardFixture.Check(existing: WizardFixture.ServerId)));
+      existing.Wizard.GoTo(WizardStep.SignIn);
+      existing.Wizard.OpenExistingServer();
+      Assert.Null(existing.Wizard.End);
+
+      wizard.InvokeCancel();
+
+      Assert.Equal(WizardEnd.Cancelled, wizard.End);
+   }
+
+
+
+   /// <summary>
+   /// Back to the Server step says its result again, because changing step cleared what was said: the pass, the
+   /// certificate exception and the addresses it covers, and that the operator is to look at them, with the focus
+   /// on Next. The result that is kept is the very one that was there, and nothing is sent.
+   /// </summary>
+   [Fact]
+   public async Task Back_ToTheServerStep_SaysThePassAndWhatTheExceptionCoversAgain()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused());
+      wizard.RequestException();
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: Provider)));
+      await wizard.AcceptExceptionAsync();
+      string said = wizard.Result.Text;
+      ServerCheckResult passed = wizard.PassedCheck!;
+      await wizard.InvokePrimaryAsync();
+      Assert.Equal("", wizard.Result.Text);
+      fixture.Announced.Clear();
+      fixture.Moments.Clear();
+
+      wizard.GoBack();
+
+      Assert.Equal(WizardStep.Server, wizard.Step);
+      Assert.Equal([said], fixture.Announced);
+      Assert.StartsWith("The server passed all five checks with the development-only certificate exception. Before you go on, look at what the exception covers."
+         + " It accepts a certificate Windows does not trust from two addresses: https://qqq.example.test, the server, and https://sign-in.example.test, the sign-in provider the server names.", said, StringComparison.Ordinal);
+      WizardFixture.Moment moment = Assert.Single(fixture.Moments);
+      Assert.Equal(new WizardFixture.Moment(said, ServerStepState.ExceptionReview, 5, new WizardAction("Next", true), Busy: false, GateHeld: false, FeedbackSeverity.Success, FocusTarget.PrimaryAction), moment);
+      Assert.True(wizard.ExceptionAccepted);
+      Assert.Equal([Server, Provider], wizard.ExceptionOrigins);
+      Assert.Same(passed, wizard.PassedCheck);
+      Assert.Equal(2, fixture.Pipe.Sent.Count);
+   }
+
+
+
+   /// <summary>
    /// A declined exception is forgotten. Declined in the warning, nothing was accepted and the next check runs
    /// without it. Dropped after it was accepted, the result obtained under it goes with it, and the next check runs
    /// without it.
