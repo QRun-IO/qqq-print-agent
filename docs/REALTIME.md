@@ -103,10 +103,13 @@ levels, so that a job nested too deep to read can still be identified.
   as OUTCOME_UNKNOWN.
 - **Claimed job that is already in hand.** A job a lane of this computer
   holds is left to that lane when the server offers it again. A lane holds a
-  job from its claim until it lets go, which is after the final state was
-  recorded and delivered, so a job in hand is being worked on or has just
-  finished. The worker asks the runtime whether the job is in hand before it
-  does anything else with the claim: nothing is recorded or reported, the
+  job from its claim until its pass for that job ends. Normally that is after
+  the final state was recorded and delivered; the delivery is skipped when
+  the pass is cancelled, as when the connection is replaced or the service
+  stops, and a delivery can fail, and the lane lets go all the same. So a job
+  in hand is being worked on or has just finished. The worker asks the
+  runtime whether the job is in hand before it does anything else with the
+  claim: nothing is recorded or reported, the
   job's title and printer in history are not rewritten, the log says once
   that the job was offered again while a lane of this computer still holds
   it, and the lane ends its pass as it does for a job that is submitting.

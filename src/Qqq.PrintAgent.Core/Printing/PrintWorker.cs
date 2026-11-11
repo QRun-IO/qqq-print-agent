@@ -21,8 +21,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// stay invisible. Only when nothing is pending, the connection is synchronized and dispatch is allowed does it
    /// discover printers and claim at most one job. Returns true whenever a claimed job was processed, whatever its
    /// outcome, and when a malformed job was refused and reported, so the lane keeps draining; false when idle,
-   /// paused, blocked, or the claimed job was one the journal already holds as final or as submitting, which ends the
-   /// lane's pass because the server would only offer that job again.
+   /// paused, blocked, or the claimed job was one a lane of this computer already holds, or one the journal already
+   /// holds as final or as submitting, which ends the lane's pass because the server would only offer that job again.
    /// </summary>
    public async Task<bool> RunOnceAsync(CancellationToken token)
    {
@@ -106,10 +106,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// Says whether a claimed job is one this computer must not start on, because it already has, and says so in the
    /// log when the server should not have offered it. A job that is in hand, held by a lane of this computer right
    /// now, is left entirely to that lane: nothing is recorded for it here, not even its display facts. The lane lets
-   /// go of a job only after its final state was recorded and delivered, so a job in hand may be one that has just
-   /// finished, and the log line says "still holds" for that reason and does not claim work is under way. A job the
-   /// journal holds as submitting was handed to a printer once already and has not concluded, and one it holds in a
-   /// final state has; neither is ever submitted a second time.
+   /// go of a job when its pass for that job ends. Normally that is after the job's final state was recorded and
+   /// delivered; delivery is skipped when the pass is cancelled, and it can fail, and the lane lets go all the same.
+   /// So a job in hand may be one that has just finished, and the log line says "still holds" for that reason and
+   /// does not claim work is under way. A job the journal holds as submitting was handed to a printer once already
+   /// and has not concluded, and one it holds in a final state has; neither is ever submitted a second time.
    /// </summary>
    private bool IsReplay(PrintJob job, IReadOnlyList<PrinterInfo> inventory)
    {
