@@ -73,4 +73,52 @@ public sealed class QqqOriginTests
    {
       Assert.Null(QqqOrigin.Of(address is null ? null : new Uri(address, UriKind.RelativeOrAbsolute)));
    }
+
+
+
+   /// <summary>
+   /// The session client holds a sign-in provider's endpoints to its issuer's origin, and every address in that
+   /// comparison is text a server supplied. An address with no nameable origin is not the same origin as anything, so
+   /// each of the four places it can appear is a refusal the caller can report (a configuration problem, or an
+   /// invalid answer for the server's own sign-out data) and never the platform's exception for a host it cannot
+   /// name: the issuer the server advertises, the provider's authorization endpoint, the end-session endpoint the
+   /// server returns at sign-out, and the one in the provider's own discovery.
+   /// </summary>
+   [Theory]
+   [InlineData("issuer", QqqSessionException.FailureKind.ConfigurationRequired)]
+   [InlineData("authorization-endpoint", QqqSessionException.FailureKind.ConfigurationRequired)]
+   [InlineData("logout-endpoint", QqqSessionException.FailureKind.InvalidResponse)]
+   [InlineData("provider-end-session", QqqSessionException.FailureKind.ConfigurationRequired)]
+   public async Task ProviderAddressWithoutANameableOriginIsARefusalNotAnException(string where, QqqSessionException.FailureKind failure)
+   {
+      const string Named = "https://id.example.invalid";
+      string unnameable = "https://id" + (char)0x2028 + ".example.invalid";
+      var callback = new Uri(ScriptedServer.Callback);
+      bool issuer = string.Equals(where, "issuer", StringComparison.Ordinal);
+      string provider = where switch
+      {
+         "issuer" => ScriptedServer.Provider.Replace("\"issuer\":\"" + Named, "\"issuer\":\"" + unnameable, StringComparison.Ordinal),
+         "authorization-endpoint" => ScriptedServer.Provider.Replace(Named + "/authorize", unnameable + "/authorize", StringComparison.Ordinal),
+         _ => ScriptedServer.Provider,
+      };
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery).Add(issuer ? ScriptedServer.OAuth.Replace("\"issuer\":\"" + Named, "\"issuer\":\"" + unnameable, StringComparison.Ordinal) : ScriptedServer.OAuth).Add(provider);
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+      if(where is "issuer" or "authorization-endpoint")
+      {
+         Assert.Equal(failure, (await Assert.ThrowsAsync<QqqSessionException>(() => client.BeginBrowserLoginAsync(callback))).Failure);
+         return;
+      }
+
+      server.Add("{}", cookie: "sessionUUID=browser-session; Path=/; HttpOnly; Secure");
+      QqqBrowserLogin attempt = await client.BeginBrowserLoginAsync(callback);
+      string state = attempt.AuthorizationUri.Query[1..].Split('&').Single(pair => pair.StartsWith("state=", StringComparison.Ordinal))[6..];
+      await client.CompleteBrowserLoginAsync(attempt, new Uri(ScriptedServer.Callback + "?code=synthetic-code&state=" + state));
+      string endSession = (string.Equals(where, "logout-endpoint", StringComparison.Ordinal) ? unnameable : Named) + "/end-session";
+      server.Add("{\"nativeLogoutData\":{\"issuer\":\"" + ScriptedServer.Issuer + "\",\"endSessionEndpoint\":\"" + endSession + "\",\"postLogoutRedirectUri\":\"" + ScriptedServer.Callback + "\",\"idTokenHint\":\"synthetic.id-token.hint\"}}");
+      server.Add(string.Equals(where, "provider-end-session", StringComparison.Ordinal) ? ScriptedServer.Provider.Replace(Named + "/end-session", unnameable + "/end-session", StringComparison.Ordinal) : ScriptedServer.Provider);
+
+      Assert.Equal(failure, (await Assert.ThrowsAsync<QqqSessionException>(() => client.SignOutWithProviderAsync(callback))).Failure);
+      Assert.False(client.IsAuthenticated);
+   }
 }

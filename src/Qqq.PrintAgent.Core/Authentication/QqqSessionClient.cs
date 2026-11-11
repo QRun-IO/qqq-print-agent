@@ -854,10 +854,17 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>Compares scheme, host and port only, ignoring case; used to refuse cross-origin requests.</summary>
-   private static bool SameOrigin(Uri left, Uri right) => left.IsAbsoluteUri && right.IsAbsoluteUri
-      && string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase)
-      && string.Equals(left.IdnHost, right.IdnHost, StringComparison.OrdinalIgnoreCase) && left.Port == right.Port;
+   /// <summary>
+   /// Compares scheme, host and port only, ignoring case; used to refuse cross-origin requests and to hold a sign-in
+   /// provider's endpoints to its issuer's origin. Both addresses are reduced to their origin by
+   /// <see cref="QqqOrigin.Of"/> first, so the host is compared by its ASCII name and an address that has no nameable
+   /// origin is not the same origin as anything, itself included. The addresses compared here can be text a server
+   /// supplied, and the platform throws when asked to name some hosts (one that holds a line separator), so the
+   /// comparison must not be made on the raw address: such an address is a refusal, never an exception.
+   /// </summary>
+   private static bool SameOrigin(Uri left, Uri right) => QqqOrigin.Of(left) is { } first && QqqOrigin.Of(right) is { } second
+      && string.Equals(first.Scheme, second.Scheme, StringComparison.OrdinalIgnoreCase)
+      && string.Equals(first.IdnHost, second.IdnHost, StringComparison.OrdinalIgnoreCase) && first.Port == second.Port;
 
 
 
