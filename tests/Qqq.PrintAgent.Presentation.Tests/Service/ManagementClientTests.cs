@@ -456,7 +456,8 @@ public sealed class ManagementClientTests
    /// failure of the service: the result says "canceled" and "unconfirmed", the log has one debug line and no warning,
    /// and the operation is not counted as failing, so the next answer is not announced as a recovery. When the
    /// abandoned request later fails, the failure is observed and noted instead of being left as an unobserved task
-   /// exception.
+   /// exception. It is noted on whatever thread the pipe fails the request on, which need not be inside the call that
+   /// fails it here, so the test waits for the entry.
    /// </summary>
    [Fact]
    public async Task CallerCancellation_IsAbandoned_AndALateFailureIsObserved()
@@ -479,6 +480,7 @@ public sealed class ManagementClientTests
       Assert.Equal($"DEBUG Management request jobs.retry on {Server} is no longer waited for; the service may still carry it out.", Assert.Single(log.Entries));
 
       held.SetException(new IOException("The request failed after the caller stopped waiting."));
+      await log.Written(entry => entry.Contains(" failed after its wait ended: ", StringComparison.Ordinal));
       Assert.Equal($"DEBUG Management request jobs.retry on {Server} failed after its wait ended: IOException: The request failed after the caller stopped waiting.", log.Entries[^1]);
 
       pipe.Answer(Replies.Success(new JobQueuedResult("job-205")));

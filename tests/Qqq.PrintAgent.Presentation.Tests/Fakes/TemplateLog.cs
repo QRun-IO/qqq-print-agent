@@ -12,13 +12,13 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// </summary>
 internal sealed class TemplateLog : IPresentationLog
 {
-   /// <summary>Every entry written so far as "LEVEL message", oldest first, with the template's holes filled.</summary>
-   internal List<string> Entries { get; } = [];
+   /// <summary>Every entry written so far as "LEVEL message", oldest first, with the template's holes filled. It can be read while the code under test writes on another thread.</summary>
+   internal RecordedList<string> Entries { get; } = new();
 
 
 
    /// <summary>Every value handed over with a template, in the order they were given.</summary>
-   internal List<object?> Values { get; } = [];
+   internal RecordedList<object?> Values { get; } = new();
 
 
 
@@ -62,7 +62,12 @@ internal sealed class TemplateLog : IPresentationLog
 
 
 
-   /// <summary>Keeps the values and the entry's text.</summary>
+   /// <summary>Completes when an entry that is wanted has been written, at once when one already has. An entry that is written on another thread than the test's is waited for here (<see cref="RecordedList{T}.Added"/>).</summary>
+   internal Task Written(Predicate<string> wanted) => Entries.Added(wanted);
+
+
+
+   /// <summary>Keeps the values and the entry's text. The values are kept first, so whoever waited for the entry finds its values too.</summary>
    private void Keep(string level, string template, object?[] values)
    {
       Values.AddRange(values);

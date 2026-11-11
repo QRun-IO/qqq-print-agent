@@ -51,7 +51,12 @@ public sealed class ManagementClientSecrecyTests
 
 
 
-   /// <summary>The same when the caller stops waiting: before the request is made, and while it is in flight, after which the request fails late.</summary>
+   /// <summary>
+   /// The same when the caller stops waiting: before the request is made, and while it is in flight, after which the
+   /// request fails late. The late failure is noted on whatever thread the pipe fails the request on, so the test
+   /// waits for the last entry it brings: for a request of the caller's own, that it failed after its wait ended;
+   /// for a shared read, whose flight is nobody's, the failure's detail, as for any failure.
+   /// </summary>
    [Theory]
    [MemberData(nameof(CompanionCalls.Sent), MemberType = typeof(CompanionCalls))]
    public async Task CredentialCodeAndSignOutRequest_ReachNoLogLine_WhenTheCallerStopsWaiting(string operation)
@@ -67,6 +72,7 @@ public sealed class ManagementClientSecrecyTests
       await leaving.CancelAsync();
       CallResult abandoned = await inFlight;
       held.SetException(new IOException("The pipe closed."));
+      await log.Written(entry => entry.Contains(" failed after its wait ended: ", StringComparison.Ordinal) || entry.Contains(" failure detail: ", StringComparison.Ordinal));
       CallResult notStarted = await call.Send(client, SampleValues.Marked, leaving.Token);
 
       Assert.Equal((ServiceOutcome.Canceled, true), (abandoned.Outcome, abandoned.Unconfirmed));

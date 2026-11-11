@@ -128,7 +128,9 @@ public sealed class ManagementClientLimitsTests
    /// <summary>
    /// A request is in flight until the pipe is done with it, not until its caller stops waiting: it occupies one of
    /// the pipe's instances for that long. So a request nobody waits for any more still counts, and its place is free
-   /// only when the pipe answers or fails it.
+   /// only when the pipe answers or fails it: until then a read is skipped and a change waits its turn, and the
+   /// change leaves when the pipe fails the request nobody waits for. The place is given back on whatever thread
+   /// the pipe fails that request on, so the test waits for the change to arrive at the pipe.
    /// </summary>
    [Fact]
    public async Task RequestNobodyWaitsFor_KeepsItsPlaceUntilThePipeIsDoneWithIt()
@@ -145,14 +147,16 @@ public sealed class ManagementClientLimitsTests
       await leaving.CancelAsync();
       ServiceResult<NoResult> left = await abandoned;
       ServiceResult<JobPage> whileHeld = await AtOnce(client.QueryJobsAsync(Server, new JobQuery()));
+      Task<ServiceResult<ReconnectResult>> waitsItsTurn = client.ReconnectAsync(Server);
+      Assert.Equal(12, pipe.Sent.Count);
       pipe.Held[0].SetException(new IOException("The pipe closed."));
-      Task<ServiceResult<JobPage>> afterwards = client.QueryJobsAsync(Server, new JobQuery());
+      await pipe.Arrived(13);
 
       Assert.Equal((ServiceOutcome.Canceled, true), (left.Outcome, left.Unconfirmed));
       Assert.Equal(ServiceOutcome.Skipped, whileHeld.Outcome);
       Assert.Equal(13, pipe.Sent.Count);
-      Assert.Equal(ManagementOperations.JobsQuery, pipe.Sent[12].Op);
-      Assert.False(afterwards.IsCompleted);
+      Assert.Equal(ManagementOperations.ConnectionReconnect, pipe.Sent[12].Op);
+      Assert.False(waitsItsTurn.IsCompleted);
    }
 
 
