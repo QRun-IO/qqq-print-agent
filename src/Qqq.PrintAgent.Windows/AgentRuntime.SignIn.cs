@@ -37,48 +37,48 @@ public sealed partial class AgentRuntime
       try
       {
          candidate = NewSession(credential.Origin);
-         WriteLog("INFO", "Step 1 of 4: verifying the companion's session with the server.");
+         _log.Write("INFO", "Step 1 of 4: verifying the companion's session with the server.");
          await candidate.RestoreSessionAsync(credential, token).ConfigureAwait(false);
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         using AgentStore store = OpenStore(recover: true);
          AgentConfiguration? configuration = store.LoadConfiguration();
-         WriteLog("INFO", "Step 2 of 4: reading the session identity. Saved pairing: "
+         _log.Write("INFO", "Step 2 of 4: reading the session identity. Saved pairing: "
             + (configuration is null ? "none (this computer has never been enrolled)." : $"server {configuration.ServerUrl}, device {configuration.DeviceId}."));
          QqqSessionBinding binding = await candidate.GetSessionIdentityAsync(token).ConfigureAwait(false);
          if(request.StartNewPairing && binding.DeviceId is not null)
          {
-            WriteLog("WARN", $"Sign-in refused: a new pairing needs a session without device proof, but the session already names device {binding.DeviceId}.");
+            _log.Write("WARN", $"Sign-in refused: a new pairing needs a session without device proof, but the session already names device {binding.DeviceId}.");
             throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, $"New pairing requires a fresh {AppIdentity.ServerName} session without device proof.");
          }
          AgentAuthentication? saved = LoadSavedSession(store, forRecovery: true);
          if(!request.StartNewPairing && configuration is not null && SameOrigin(credential.Origin, configuration.ServerUrl))
          {
-            WriteLog("INFO", $"Step 3 of 4: the session is for the paired server; binding device {configuration.DeviceId}{(request.ClaimLegacyDevice ? " and claiming it as a legacy device" : "")}.");
+            _log.Write("INFO", $"Step 3 of 4: the session is for the paired server; binding device {configuration.DeviceId}{(request.ClaimLegacyDevice ? " and claiming it as a legacy device" : "")}.");
             binding = await candidate.BindDeviceAsync(new QqqDeviceCredential(configuration.DeviceId, configuration.DeviceToken), request.ClaimLegacyDevice, token).ConfigureAwait(false);
             if(saved?.Binding.DeviceId is not null && SameOrigin(saved.Binding.Origin, configuration.ServerUrl))
             {
-               WriteLog("INFO", "Comparing the new identity with the previously approved identity.");
+               _log.Write("INFO", "Comparing the new identity with the previously approved identity.");
                RequireSameIdentity(saved.Binding, binding);
             }
          }
          else
          {
-            WriteLog("INFO", "Step 3 of 4: no device binding. "
+            _log.Write("INFO", "Step 3 of 4: no device binding. "
                + (request.StartNewPairing ? "A new pairing was requested; enroll this computer next."
                   : configuration is null ? "This computer is not enrolled; enroll it next to enable printing."
                   : $"The session is for {credential.Origin.Authority} but the pairing is for {configuration.ServerUrl}; enroll on this server, or sign in to the paired one."));
          }
          IQqqSessionClient? previous = _sessionClient;
          ResetConnectionState();
-         WriteLog("INFO", "Step 4 of 4: making the verified session current and saving it to protected storage.");
+         _log.Write("INFO", "Step 4 of 4: making the verified session current and saving it to protected storage.");
          ActivateSession(candidate, binding, store);
          previous?.Dispose();
          WakeClaims();
-         WriteLog("INFO", "Sign-in complete. " + _authenticationMessage);
+         _log.Write("INFO", "Sign-in complete. " + _authenticationMessage);
          return SignInReply();
       }
       catch(Exception exception)
       {
-         WriteFailure("Sign-in failed; the previous session, pairing and history are unchanged", exception);
+         _log.Failure("Sign-in failed; the previous session, pairing and history are unchanged", exception);
          candidate?.Dispose();
          throw;
       }
@@ -107,10 +107,10 @@ public sealed partial class AgentRuntime
       QqqSessionCredential credential = request.SessionCredential ?? throw new InvalidOperationException($"A {AppIdentity.ServerName} sign-in session is required.");
       if(request.StartNewPairing && request.ClaimLegacyDevice)
       {
-         WriteLog("WARN", "Sign-in refused: the companion asked for both a new pairing and association with the existing pairing.");
+         _log.Write("WARN", "Sign-in refused: the companion asked for both a new pairing and association with the existing pairing.");
          throw new InvalidOperationException("Choose either a new pairing or association with the existing pairing.");
       }
-      WriteLog("INFO", $"Sign-in requested for {credential.Origin.Authority}; pairing choice: "
+      _log.Write("INFO", $"Sign-in requested for {credential.Origin.Authority}; pairing choice: "
          + (request.StartNewPairing ? "start a new pairing." : request.ClaimLegacyDevice ? "associate with the existing pairing (claim legacy device)." : "keep the current pairing."));
       return credential;
    }
@@ -150,13 +150,13 @@ public sealed partial class AgentRuntime
       await _authenticationGate.WaitAsync(token).ConfigureAwait(false);
       try
       {
-         WriteLog("INFO", "Sign-out requested: blocking printing, removing the saved session credential and ending the server session. Pairing and history are kept.");
+         _log.Write("INFO", "Sign-out requested: blocking printing, removing the saved session credential and ending the server session. Pairing and history are kept.");
          BlockAuthorization();
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         using AgentStore store = OpenStore(recover: true);
          AgentAuthentication? saved = LoadSavedSession(store, forRecovery: true);
          bool unreadableSession = store.QuarantineUnreadableAuthentication() || store.StagedPairing is StagedPairingOutcome.CompletedAfterQuarantine or StagedPairingOutcome.SetAside;
          if(unreadableSession)
-         { WriteLog("WARN", $"The saved session data could not be read and was moved aside for recovery; revoke the previous session in {AppIdentity.ServerName}."); }
+         { _log.Write("WARN", $"The saved session data could not be read and was moved aside for recovery; revoke the previous session in {AppIdentity.ServerName}."); }
          if(saved is not null)
          {
             store.SaveAuthentication(new AgentAuthentication(saved.Binding, null));
@@ -166,7 +166,7 @@ public sealed partial class AgentRuntime
          {
             if(_sessionClient is null && saved?.Credential is not null)
             {
-               WriteLog("INFO", $"No live session is held; restoring the saved one for {saved.Credential.Origin.Authority} so the server can end it.");
+               _log.Write("INFO", $"No live session is held; restoring the saved one for {saved.Credential.Origin.Authority} so the server can end it.");
                _sessionClient = NewSession(saved.Credential.Origin);
                await _sessionClient.RestoreSessionAsync(saved.Credential, token).ConfigureAwait(false);
             }
@@ -178,11 +178,11 @@ public sealed partial class AgentRuntime
                { providerLogout = await _sessionClient.SignOutWithProviderAsync(postLogoutRedirect, token).ConfigureAwait(false); }
             }
             else
-            { WriteLog("INFO", "No session to end on the server; local state cleared."); }
+            { _log.Write("INFO", "No session to end on the server; local state cleared."); }
          }
          catch(Exception exception)
          {
-            WriteFailure("The server session could not be ended; local sign-out still completes", exception);
+            _log.Failure("The server session could not be ended; local sign-out still completes", exception);
             throw;
          }
          finally
@@ -190,7 +190,7 @@ public sealed partial class AgentRuntime
             _sessionClient?.Dispose();
             _sessionClient = null;
             ResetConnectionState();
-            WriteLog("INFO", "Signed out locally. Device pairing and print history were preserved.");
+            _log.Write("INFO", "Signed out locally. Device pairing and print history were preserved.");
          }
          string message = unreadableSession
             ? $"Signed out locally. Unreadable session data was preserved for recovery; revoke the previous session in {AppIdentity.ServerName}. Device pairing and print history were preserved."

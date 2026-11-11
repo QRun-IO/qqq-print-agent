@@ -22,7 +22,7 @@ public sealed partial class AgentRuntime
    /// </summary>
    private async Task<string> HandleJobCommandAsync(PipeRequest request, CancellationToken token)
    {
-      using AgentStore store = new(directory);
+      using AgentStore store = OpenStore(recover: false);
       if(string.Equals(request.Operation, "query-jobs", StringComparison.Ordinal))
       {
          JobSnapshot[] queued;
@@ -39,7 +39,7 @@ public sealed partial class AgentRuntime
       if(string.Equals(request.Operation, "acknowledge-job", StringComparison.Ordinal))
       {
          store.AcknowledgeFailure(RequiredJob(request));
-         WriteLog("INFO", "Operator acknowledged a job that needed attention.");
+         _log.Write("INFO", "Operator acknowledged a job that needed attention.");
          return "Job acknowledged. This does not change its delivery outcome or print it again.";
       }
       if(string.Equals(request.Operation, "cancel-job", StringComparison.Ordinal))
@@ -53,7 +53,7 @@ public sealed partial class AgentRuntime
                throw new InvalidOperationException("Restart with the current installed service to use bounded spooler cancellation.");
             }
             await control.CancelAsync(printer.Name, job.JobId, job.SpoolerJobId, token).ConfigureAwait(false);
-            WriteLog("INFO", "Operator requested cancellation of a Windows spooler job.");
+            _log.Write("INFO", "Operator requested cancellation of a Windows spooler job.");
             return "Cancellation requested from Windows. Pages already sent to the printer may still print; inspect the output.";
          }
       }
@@ -94,7 +94,7 @@ public sealed partial class AgentRuntime
             _queuedJobs = _queuedJobs.Where(job => !string.Equals(job.JobId, request.JobId, StringComparison.Ordinal)).ToArray();
          }
       }
-      WriteLog("INFO", "Server accepted operator action " + request.Operation + ".");
+      _log.Write("INFO", "Server accepted operator action " + request.Operation + ".");
       WakeClaims();
       return string.IsNullOrEmpty(queuedJob) ? "The server accepted the cancellation before dispatch." : "Queued on the server. The new job will appear here when this device receives it.";
    }

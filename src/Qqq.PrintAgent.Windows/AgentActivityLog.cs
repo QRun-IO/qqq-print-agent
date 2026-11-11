@@ -90,7 +90,13 @@ public sealed partial class AgentActivityLog : IAgentLog
 
 
 
-   /// <summary>Redacts credential-shaped diagnostics; callers must still never log documents or credential payloads.</summary>
+   /// <summary>
+   /// Redacts credential-shaped diagnostics; callers must still never log documents or credential payloads. What it
+   /// recognises: a bearer credential, a named secret written as name and value, a user name and password inside a web
+   /// address, the value of a cookie header line, and the one-time code and the state of a sign-in callback in the
+   /// query or fragment of an address. It is a second line of defense, not a parser: a secret in a shape it does not
+   /// know passes through.
+   /// </summary>
    public static string Redact(string message)
    {
       try
@@ -99,6 +105,8 @@ public sealed partial class AgentActivityLog : IAgentLog
          string redacted = BearerCredential().Replace(bounded, "Bearer [REDACTED]");
          redacted = NamedCredential().Replace(redacted, "${prefix}[REDACTED]");
          redacted = UrlCredential().Replace(redacted, "${scheme}[REDACTED]@");
+         redacted = CookieHeader().Replace(redacted, "${prefix}[REDACTED]");
+         redacted = CallbackParameter().Replace(redacted, "${prefix}[REDACTED]");
          // Continuations cannot forge another timestamped AppKit log entry.
          return redacted.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\n  ", StringComparison.Ordinal);
       }
@@ -125,6 +133,27 @@ public sealed partial class AgentActivityLog : IAgentLog
    /// <summary>Matches a user name and password embedded in a web address, keeping the scheme so the log still shows that a URL was involved.</summary>
    [GeneratedRegex("""(?<scheme>https?://)[^/\s:@]+:[^/\s@]+@""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex UrlCredential();
+
+
+
+   /// <summary>
+   /// Matches the value of a <c>Cookie:</c> or <c>Set-Cookie:</c> header line, to the end of the line, keeping the header's
+   /// name. The whole value goes because a cookie header carries any number of name and value pairs and the session
+   /// cookie's name is the server's choice; whatever follows on the same line is hidden with it, which errs on the safe side.
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>\b(?:Set-)?Cookie[ \t]*:[ \t]*)[^\r\n]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex CookieHeader();
+
+
+
+   /// <summary>
+   /// Matches the one-time authorization code and the state of a sign-in callback where they are parameters of an
+   /// address: <c>code=</c> or <c>state=</c> straight after the <c>?</c>, <c>&amp;</c> or <c>#</c> that starts a
+   /// parameter, keeping the name. The separator is required on purpose. "code" and "state" are ordinary words in a
+   /// log ("status code: 401", "exit code=1", "state=Paused"), so neither is a keyword on its own the way "token" is.
+   /// </summary>
+   [GeneratedRegex("""(?<prefix>[?&#](?:code|state)=)[^\s&#"'<>]+""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex CallbackParameter();
 
 
 

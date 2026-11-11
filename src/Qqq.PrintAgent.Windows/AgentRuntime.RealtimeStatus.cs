@@ -28,7 +28,7 @@ public sealed partial class AgentRuntime
       {
          if(_realtimeReady)
          {
-            using var store = new AgentStore(directory);
+            using AgentStore store = OpenStore(recover: false);
             await channel.SendAsync("PING", new { }, token: token).ConfigureAwait(false);
             if(NormalTrafficAllowed)
             {
@@ -58,7 +58,7 @@ public sealed partial class AgentRuntime
          await _statusRequested.WaitAsync(token).ConfigureAwait(false);
          if(!_realtimeReady)
          { continue; }
-         using var store = new AgentStore(directory);
+         using AgentStore store = OpenStore(recover: false);
          AgentConfiguration? configuration = store.LoadConfiguration();
          if(configuration is null)
          { continue; }
@@ -78,7 +78,7 @@ public sealed partial class AgentRuntime
                freshInventory = true;
                lock(_stateLock)
                { _inventoryReady = true; }
-               SignalPipeline();
+               _pipelineChanged.Raise();
                WakeClaims();
             }
             // A 2.4 server pushes approval in a PRINTERS frame after this inventory; an older server's operator catalog is read instead.
@@ -139,16 +139,16 @@ public sealed partial class AgentRuntime
             Task changed;
             lock(_stateLock)
             {
+               changed = _pipelineChanged.NextChange;
                if(_realtimeReady)
                { break; }
-               changed = _pipelineChanged.Task;
             }
             await changed.WaitAsync(token).ConfigureAwait(false);
          }
          await _controlExecutionGate.WaitAsync(token).ConfigureAwait(false);
          try
          {
-            using var store = new AgentStore(directory);
+            using AgentStore store = OpenStore(recover: false);
             AgentConfiguration? configuration = store.LoadConfiguration();
             if(configuration is null)
             { throw new InvalidOperationException("Device configuration is unavailable."); }

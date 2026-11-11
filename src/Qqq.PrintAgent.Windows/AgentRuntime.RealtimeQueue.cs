@@ -23,7 +23,7 @@ public sealed partial class AgentRuntime
          { continue; }
          try
          {
-            using var store = new AgentStore(directory);
+            using AgentStore store = OpenStore(recover: false);
             AgentConfiguration? configuration = store.LoadConfiguration();
             if(configuration is null)
             { continue; }
@@ -45,7 +45,7 @@ public sealed partial class AgentRuntime
          }
          catch(Exception exception) when(exception is not OperationCanceledException || !token.IsCancellationRequested)
          {
-            WriteLog("ERROR", "Cloud queue preview could not be refreshed: " + exception.Message);
+            _log.Write("ERROR", "Cloud queue preview could not be refreshed: " + exception.Message);
          }
       }
    }

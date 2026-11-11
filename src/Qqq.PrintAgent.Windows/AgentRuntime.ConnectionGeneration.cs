@@ -22,7 +22,7 @@ public sealed partial class AgentRuntime
    private void ResetConnectionState()
    {
       ResetPrinterCatalog();
-      using var store = new AgentStore(directory, recoverUnreadableConfiguration: true);
+      using AgentStore store = OpenStore(recover: true);
       RealtimeSettings settings = store.LoadRealtimeSettings();
       lock(_stateLock)
       {
@@ -37,6 +37,6 @@ public sealed partial class AgentRuntime
          _realtimeSettings = settings;
          _controlReady = false;
       }
-      SignalPipeline();
+      _pipelineChanged.Raise();
    }
 }

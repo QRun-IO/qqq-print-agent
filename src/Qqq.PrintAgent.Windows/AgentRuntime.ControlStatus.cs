@@ -58,7 +58,7 @@ public sealed partial class AgentRuntime
             if(_reconnectRequested.CurrentCount == 0)
             { _reconnectRequested.Release(); }
          }
-         SignalPipeline();
+         _pipelineChanged.Raise();
          _connectionGate.Release();
       }
    }
@@ -85,7 +85,7 @@ public sealed partial class AgentRuntime
             return "Disconnected by the administrator. The realtime control channel remains active; ask the server administrator to reconnect this device.";
          }
       }
-      using AgentStore store = new(directory);
+      using AgentStore store = OpenStore(recover: false);
       if(store.LoadConfiguration() is null)
       {
          return "Not enrolled. Open Connection settings to connect this device.";
@@ -104,7 +104,7 @@ public sealed partial class AgentRuntime
          if(_reconnectRequested.CurrentCount == 0)
          { _reconnectRequested.Release(); }
       }
-      WriteLog("INFO", "Connection retry requested.");
+      _log.Write("INFO", "Connection retry requested.");
       return "Reconnect requested. Connection status will update after the next server response.";
    }
 

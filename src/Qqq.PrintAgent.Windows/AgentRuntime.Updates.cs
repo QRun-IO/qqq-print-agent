@@ -106,11 +106,11 @@ public sealed partial class AgentRuntime
       }
       if(paused && !transitioning)
       {
-         WriteLog("INFO", "Printing paused for an application update after active submission finished.");
+         _log.Write("INFO", "Printing paused for an application update after active submission finished.");
          return "Ready for update.";
       }
       string why = paused ? "a sign-in, sign-out or enrollment began while preparation was waiting" : "printing was resumed, or the pause ran out, while preparation was waiting";
-      WriteLog("WARN", $"Update preparation was interrupted: {why}. The service is not ready for an update; the updater must prepare again.");
+      _log.Write("WARN", $"Update preparation was interrupted: {why}. The service is not ready for an update; the updater must prepare again.");
       return $"Update preparation was interrupted: {why}. Try the update again.";
    }
 
@@ -135,7 +135,7 @@ public sealed partial class AgentRuntime
          (false, 0) => ("a claim was", "A job it returns will be printed;"),
          _ => ($"a claim and {remaining} job(s) were", "The jobs will finish, and a job the claim returns will be printed;"),
       };
-      WriteLog("WARN", $"Update preparation stopped waiting after {seconds} s: {what} still in progress from before the pause. {outcome} new claims stay paused until the updater resumes printing or the pause runs out.");
+      _log.Write("WARN", $"Update preparation stopped waiting after {seconds} s: {what} still in progress from before the pause. {outcome} new claims stay paused until the updater resumes printing or the pause runs out.");
       return $"Not ready for update: {what} still in progress after {seconds} seconds. {outcome} try the update again afterwards.";
    }
 
@@ -149,9 +149,9 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(_jobTickets.Count == 0)
             { return; }
-            changed = _pipelineChanged.Task;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -167,8 +167,8 @@ public sealed partial class AgentRuntime
          _updatePauseUntil = default;
       }
       WakeClaims();
-      SignalPipeline();
-      WriteLog("INFO", "Printing resumed after the application update attempt.");
+      _pipelineChanged.Raise();
+      _log.Write("INFO", "Printing resumed after the application update attempt.");
       return "Printing resumed.";
    }
 
@@ -187,8 +187,8 @@ public sealed partial class AgentRuntime
          { return; }
          _updatePauseUntil = default;
       }
-      WriteLog("WARN", "The update pause ran out without the updater resuming printing; printing continues.");
+      _log.Write("WARN", "The update pause ran out without the updater resuming printing; printing continues.");
       WakeClaims();
-      SignalPipeline();
+      _pipelineChanged.Raise();
    }
 }

@@ -1,0 +1,724 @@
+/*
+ * Copyright (c) 2026 James Maes
+ * SPDX-License-Identifier: MIT
+ */
+
+using System.Globalization;
+using Qqq.PrintAgent.Core.Authentication;
+using Qqq.PrintAgent.Windows;
+
+namespace Qqq.PrintAgent.Cli.Tests;
+
+/// <summary>
+/// The service's log as a type of its own. It must write exactly what the runtime's own log method wrote before it was
+/// moved here (the same redaction, caps, routing of debug detail, ring and file lines), and a view of it for one server
+/// must add that server's name and change nothing else.
+/// </summary>
+public sealed class ServiceLogTests : IDisposable
+{
+   private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-service-log-tests", Guid.NewGuid().ToString("N"));
+   private readonly string _referenceDirectory = Path.Combine(Path.GetTempPath(), "qqq-service-log-tests", Guid.NewGuid().ToString("N"));
+   private readonly List<string> _sink = [];
+
+
+
+   /// <summary>Removes the two temporary state directories.</summary>
+   public void Dispose()
+   {
+      foreach(string directory in new[] { _directory, _referenceDirectory })
+      {
+         if(Directory.Exists(directory))
+         {
+            Directory.Delete(directory, recursive: true);
+         }
+      }
+   }
+
+
+
+   /// <summary>Creates the log under test over a fresh activity log, with debug detail on or off as the saved settings say.</summary>
+   private (ServiceLog Log, AgentActivityLog File) Create(bool debug = false)
+   {
+      if(debug)
+      {
+         AgentActivityLog.SaveSettings(_directory, new LogSettings(DebugLogging: true));
+      }
+      var file = AgentActivityLog.Create(_directory);
+      return (new ServiceLog(file, _sink.Add), file);
+   }
+
+
+
+   /// <summary>The lines of a log file without their timestamps, so two files written at different moments can be compared.</summary>
+   private static List<string> Lines(AgentActivityLog file)
+      => File.Exists(file.CurrentLogFilePath)
+         ? File.ReadAllLines(file.CurrentLogFilePath).Select(line => line.IndexOf(" [", StringComparison.Ordinal) is int at and >= 0 ? line[at..] : line).ToList()
+         : [];
+
+
+
+   /// <summary>
+   /// What the runtime's log method did before it became this type, transcribed from the runtime as it was: redact, cap at
+   /// 1000 characters (4000 for debug detail), write debug detail to the file only and only while it is on, and write
+   /// everything else to the file under its level with the "[Service]" marker. It is the reference the moved code is held to.
+   /// It redacts through the shared <see cref="AgentActivityLog.Redact"/>, as the runtime did, so it follows the two
+   /// patterns added to that method since (a cookie header line, and the code and state of a callback address) and is
+   /// otherwise the method as it was; <see cref="LinesWithNeitherNewPattern_AreRedactedAsBefore"/> holds the redaction
+   /// of every other kind of line to the text it gave before those patterns were added.
+   /// </summary>
+   private static string? WriteAsTheRuntimeDid(AgentActivityLog file, string level, string message)
+   {
+      bool debug = string.Equals(level, "DEBUG", StringComparison.Ordinal);
+      if(debug && !file.IsDebugEnabled)
+      { return null; }
+      string sanitized = AgentActivityLog.Redact(message);
+      int cap = debug ? 4000 : 1000;
+      string bounded = sanitized.Length <= cap ? sanitized : sanitized[..cap];
+      if(debug)
+      {
+         file.Debug("[Service] " + bounded);
+         return null;
+      }
+      switch(level)
+      {
+         case "ERROR":
+            file.Error("[Service] " + bounded);
+            break;
+         case "WARN":
+            file.Warning("[Service] " + bounded);
+            break;
+         default:
+            file.Info("[Service] " + bounded);
+            break;
+      }
+      return bounded;
+   }
+
+
+
+   /// <summary>
+   /// A varied set of lines (every level, a level the log does not know, secrets of each redacted kind, an over-long line,
+   /// a line with a line break, debug detail) produces a file that is the same, line for line, as the one the runtime's own
+   /// method produced, and hands the host's sink and the ring the same text.
+   /// </summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public void EveryLine_IsWrittenAsTheRuntimeWroteIt(bool debug)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug);
+      if(debug)
+      {
+         AgentActivityLog.SaveSettings(_referenceDirectory, new LogSettings(DebugLogging: true));
+      }
+      var reference = AgentActivityLog.Create(_referenceDirectory);
+      (string Level, string Message)[] lines =
+      [
+         ("INFO", "Print service started."),
+         ("WARN", "Printing blocked: QQQ authorization is required."),
+         ("ERROR", "Local command failed: IOException: Pipe is broken."),
+         ("NOTICE", "A level this log does not know is written as information."),
+         ("INFO", "Authorization: Bearer synthetic-bearer deviceToken=synthetic-device enrollmentCode=\"synthetic-code\""),
+         ("ERROR", "https://operator:synthetic-password@print.example.com/ refused access_token=synthetic-access&refresh_token=synthetic-refresh"),
+         ("INFO", "First line\r\n2026-11-10 12:00:00 [ERROR] forged entry"),
+         ("WARN", new string('w', 1500)),
+         ("DEBUG", "[Session] GET /qqq/v1/metaData token=synthetic-debug-token"),
+         ("DEBUG", new string('d', 5000)),
+      ];
+      List<string> expectedSink = [];
+
+      foreach((string level, string message) in lines)
+      {
+         log.Write(level, message);
+         if(WriteAsTheRuntimeDid(reference, level, message) is string bounded)
+         {
+            expectedSink.Add(bounded);
+         }
+      }
+
+      Assert.Equal(Lines(reference), Lines(file));
+      Assert.Equal(expectedSink, _sink);
+      Assert.Equal(expectedSink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal(["INFO", "WARN", "ERROR", "NOTICE", "INFO", "ERROR", "INFO", "WARN"], log.Entries().Select(entry => entry.Level), StringComparer.Ordinal);
+      Assert.Equal(debug ? 11 : 9, Lines(file).Count);
+   }
+
+
+
+   /// <summary>
+   /// Each kind of secret the service redacts today is gone from all three places a line reaches (the ring, the host's sink
+   /// and the file), with the redaction marker in its place: a bearer credential, a device token, an enrollment code, an
+   /// access or refresh token (including in the query of a callback address), a password, a secret, an API key, document
+   /// content, a user name and password inside an address, the value of a cookie header line, and the one-time code and
+   /// the state of a sign-in callback in the query or the fragment of an address.
+   /// </summary>
+   [Theory]
+   [InlineData("Authorization: Bearer synthetic-value-1", "synthetic-value-1")]
+   [InlineData("deviceToken=synthetic-value-2 was refused", "synthetic-value-2")]
+   [InlineData("enrollmentCode=\"synthetic-value-3\"", "synthetic-value-3")]
+   [InlineData("{\"enrollmentCode\":\"synthetic-value-4\"}", "synthetic-value-4")]
+   [InlineData("callback io.qrun.qqq-print-agent:/oauth/callback?access_token=synthetic-value-5&refresh_token=synthetic-value-6", "synthetic-value-5")]
+   [InlineData("callback io.qrun.qqq-print-agent:/oauth/callback?state=s&refresh_token=synthetic-value-6", "synthetic-value-6")]
+   [InlineData("password='synthetic-value-7'", "synthetic-value-7")]
+   [InlineData("secret: synthetic-value-8", "synthetic-value-8")]
+   [InlineData("api_key=synthetic-value-9 api-key=synthetic-value-9", "synthetic-value-9")]
+   [InlineData("contentBase64=synthetic-value-10", "synthetic-value-10")]
+   [InlineData("token = synthetic-value-11", "synthetic-value-11")]
+   [InlineData("https://operator:synthetic-value-12@print.example.com/qqq", "synthetic-value-12")]
+   [InlineData("Cookie: sessionUUID=synthetic-value-13; theme=dark", "synthetic-value-13")]
+   [InlineData("Set-Cookie: sessionUUID=synthetic-value-14; Path=/; HttpOnly; Secure", "synthetic-value-14")]
+   [InlineData("callback io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-value-15&state=synthetic-value-16", "synthetic-value-15")]
+   [InlineData("callback io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-value-15&state=synthetic-value-16", "synthetic-value-16")]
+   [InlineData("returned to https://print.example.com/signed-in#state=synthetic-value-17&code=synthetic-value-18", "synthetic-value-17")]
+   [InlineData("returned to https://print.example.com/signed-in#state=synthetic-value-17&code=synthetic-value-18", "synthetic-value-18")]
+   public void Secrets_NeverReachTheRingTheSinkOrTheFile(string message, string secret)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("ERROR", message);
+
+      Assert.DoesNotContain(secret, File.ReadAllText(file.CurrentLogFilePath), StringComparison.Ordinal);
+      Assert.DoesNotContain(secret, Assert.Single(_sink), StringComparison.Ordinal);
+      Assert.DoesNotContain(secret, Assert.Single(log.Entries()).Message, StringComparison.Ordinal);
+      Assert.Contains("[REDACTED]", _sink[0], StringComparison.Ordinal);
+      Assert.Equal(AgentActivityLog.Redact(message), _sink[0]);
+   }
+
+
+
+   /// <summary>
+   /// A cookie header line loses its whole value, to the end of that line and no further, and a callback address loses
+   /// the values of its code and state and keeps everything else, in the ring, the host's sink and the file. The header's
+   /// name and the parameters' names stay, so the log still shows what was hidden. A parameter whose name only ends in
+   /// "state" or begins with "code" is another parameter and is left alone.
+   /// </summary>
+   [Theory]
+   [InlineData("Cookie: sessionUUID=synthetic-cookie; theme=dark", "Cookie: [REDACTED]")]
+   [InlineData("Set-Cookie: sessionUUID=synthetic-cookie; Path=/; HttpOnly; Secure", "Set-Cookie: [REDACTED]")]
+   [InlineData("set-cookie:sessionUUID=synthetic-cookie", "set-cookie:[REDACTED]")]
+   [InlineData("Request headers:\nAccept: */*\nCookie: sessionUUID=synthetic-cookie\nUser-Agent: agent", "Request headers:\n  Accept: */*\n  Cookie: [REDACTED]\n  User-Agent: agent")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code&state=synthetic-state", "io.qrun.qqq-print-agent:/oauth/callback?code=[REDACTED]&state=[REDACTED]")]
+   [InlineData("GET https://print.example.com/cb?state=synthetic-state&session_state=kept&code=synthetic-code#top", "GET https://print.example.com/cb?state=[REDACTED]&session_state=kept&code=[REDACTED]#top")]
+   [InlineData("GET https://print.example.com/cb?codec=h264&stateless=true&STATE=synthetic-state", "GET https://print.example.com/cb?codec=h264&stateless=true&STATE=[REDACTED]")]
+   [InlineData("opened \"https://id.example.com/authorize?client_id=agent&state=synthetic-state\" in the browser", "opened \"https://id.example.com/authorize?client_id=agent&state=[REDACTED]\" in the browser")]
+   [InlineData("returned to https://print.example.com/signed-in#code=synthetic-code&state=synthetic-state", "returned to https://print.example.com/signed-in#code=[REDACTED]&state=[REDACTED]")]
+   public void CookieHeadersAndCallbackParameters_AreRedacted(string message, string expected)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(expected, AgentActivityLog.Redact(message));
+      Assert.Equal(expected, Assert.Single(_sink));
+      Assert.Equal(expected, Assert.Single(log.Entries()).Message);
+      string written = File.ReadAllText(file.CurrentLogFilePath);
+      Assert.DoesNotContain("synthetic-", written, StringComparison.Ordinal);
+      Assert.Contains("[REDACTED]", written, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// "code" and "state" are ordinary words in a log, so neither is a keyword on its own the way "token" is: only a
+   /// parameter of an address is redacted. Lines that report a status code, an exit code, an error code or a state, with
+   /// a colon, an equals sign or neither, and lines that only mention a cookie, are written exactly as they were given.
+   /// </summary>
+   [Theory]
+   [InlineData("The server answered with status code: 401")]
+   [InlineData("Print helper ended with exit code 1")]
+   [InlineData("Print helper ended: exit code=1")]
+   [InlineData("Worker exit code = -1073741819")]
+   [InlineData("Windows Installer returned code: 1603 (state: rolled back)")]
+   [InlineData("Printer state=Paused, error code=0x80070005")]
+   [InlineData("Queue state: Ready; jobs: 0")]
+   [InlineData("Unexpected status code 502 from /qqq/v1/metaData")]
+   [InlineData("code=0 state=idle")]
+   [InlineData("Is the printer in a ready state? code 0")]
+   [InlineData("HTTP GET /qqq/v1/session: session cookie yes, device proof no")]
+   [InlineData("The server sent no session cookie; sign in again")]
+   public void OrdinaryLinesAboutCodesStatesAndCookies_AreUntouched(string message)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(message, AgentActivityLog.Redact(message));
+      Assert.Equal(message, Assert.Single(_sink));
+      Assert.Equal(message, Assert.Single(log.Entries()).Message);
+      Assert.Equal(" [INFO] [Service] " + message, Assert.Single(Lines(file)));
+   }
+
+
+
+   /// <summary>
+   /// The redaction of a line that holds neither a cookie header nor a callback's code or state is, to the character,
+   /// what it was before those two patterns were added: each expected text here was produced by the method as it stood
+   /// before them. It is what lets the comparison with the runtime's old method keep its meaning.
+   /// </summary>
+   [Theory]
+   [InlineData("Print service started.", "Print service started.")]
+   [InlineData("Authorization: Bearer synthetic-bearer deviceToken=synthetic-device enrollmentCode=\"synthetic-code\"", "Authorization: Bearer [REDACTED] deviceToken=[REDACTED] enrollmentCode=[REDACTED]")]
+   [InlineData("https://operator:synthetic-password@print.example.com/ refused access_token=synthetic-access&refresh_token=synthetic-refresh", "https://[REDACTED]@print.example.com/ refused access_token=[REDACTED]&refresh_token=[REDACTED]")]
+   [InlineData("First line\r\n2026-11-10 12:00:00 [ERROR] forged entry", "First line\n  2026-11-10 12:00:00 [ERROR] forged entry")]
+   [InlineData("{\"enrollmentCode\":\"synthetic-code\",\"name\":\"Front desk\"}", "{\"enrollmentCode\":[REDACTED],\"name\":\"Front desk\"}")]
+   [InlineData("password='synthetic-secret' contentBase64=synthetic-document, api-key: synthetic-key; secret = synthetic-secret", "password=[REDACTED] contentBase64=[REDACTED], api-key: [REDACTED]; secret = [REDACTED]")]
+   [InlineData("[Session] GET /qqq/v1/metaData token=synthetic-debug-token", "[Session] GET /qqq/v1/metaData token=[REDACTED]")]
+   public void LinesWithNeitherNewPattern_AreRedactedAsBefore(string message, string expected)
+      => Assert.Equal(expected, AgentActivityLog.Redact(message));
+
+
+
+   /// <summary>
+   /// What the redaction still does not recognise, recorded so that each is a known fact and not a surprise. A code or a
+   /// state that is not a parameter of an address (on its own, or as members of a JSON object), a PKCE verifier, a
+   /// session cookie outside a cookie header line (as a bare pair, or as a JSON member), and a Basic credential all pass
+   /// through unchanged. The redaction cannot help with these. They stay out of the log only for as long as nothing
+   /// writes them: the service is handed a session credential and not the callback, the session client logs an address
+   /// without its query (asserted below) and says only whether a cookie or a Basic credential was attached. This test
+   /// does not show that nothing writes them; it shows what would happen if something did.
+   /// </summary>
+   [Theory]
+   [InlineData("code=synthetic-code state=synthetic-state")]
+   [InlineData("{\"code\":\"synthetic-code\",\"state\":\"synthetic-state\"}")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code_verifier=synthetic-verifier")]
+   [InlineData("sessionUUID=synthetic-session")]
+   [InlineData("{\"Cookie\":\"sessionUUID=synthetic-session\"}")]
+   [InlineData("Authorization: Basic c3ludGhldGlj")]
+   public void WhatTheRedactionStillDoesNotRecognise_IsRecorded(string message)
+   {
+      (ServiceLog log, _) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(message, Assert.Single(_sink));
+      Assert.Equal(message, AgentActivityLog.Redact(message));
+      Assert.Equal("io.qrun.qqq-print-agent:///oauth/callback", QqqSessionDiagnostics.Describe(new Uri("io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code&state=synthetic-state")));
+   }
+
+
+
+   /// <summary>An operational line is cut at 1000 characters after redaction, and a line of exactly that length is kept whole.</summary>
+   [Fact]
+   public void OperationalLine_IsCappedAtOneThousandCharacters()
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("INFO", new string('a', 1000));
+      log.Write("INFO", new string('b', 1001));
+      log.Write("INFO", "deviceToken=" + new string('c', 2000));
+
+      Assert.Equal([1000, 1000, "deviceToken=[REDACTED]".Length], _sink.Select(line => line.Length));
+      Assert.Equal(new string('b', 1000), _sink[1]);
+      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Contains(" [INFO] [Service] " + new string('b', 1000), Lines(file), StringComparer.Ordinal);
+      Assert.Equal(1000, ServiceLog.LineLimit);
+   }
+
+
+
+   /// <summary>The ring keeps the newest 100 operational entries in order; the file and the host's sink keep all of them.</summary>
+   [Fact]
+   public void Ring_KeepsTheNewestHundredEntries()
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      for(int index = 1; index <= 130; index++)
+      {
+         log.Write(index % 2 == 0 ? "WARN" : "INFO", "entry " + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      }
+      AgentLogEntry[] entries = log.Entries();
+
+      Assert.Equal(100, entries.Length);
+      Assert.Equal(100, ServiceLog.RingCapacity);
+      Assert.Equal("entry 31", entries[0].Message);
+      Assert.Equal("INFO", entries[0].Level);
+      Assert.Equal("entry 130", entries[^1].Message);
+      Assert.Equal("WARN", entries[^1].Level);
+      Assert.All(entries, entry => Assert.True(DateTimeOffset.TryParseExact(entry.Timestamp, "O", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out _)));
+      Assert.Equal(130, _sink.Count);
+      Assert.Equal(130, Lines(file).Count);
+   }
+
+
+
+   /// <summary>Clearing the ring empties what the companion is shown and nothing else; later lines are kept again.</summary>
+   [Fact]
+   public void ClearingTheRing_EmptiesItAndLaterLinesAreKept()
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+      log.Write("INFO", "before");
+
+      log.ClearEntries();
+      log.Write("INFO", "after");
+
+      Assert.Equal("after", Assert.Single(log.Entries()).Message);
+      Assert.Equal(2, Lines(file).Count);
+   }
+
+
+
+   /// <summary>While debug logging is off, debug detail is dropped: nothing reaches the file, the ring or the host's sink.</summary>
+   [Fact]
+   public void DebugDetail_IsDroppedWhileDebugLoggingIsOff()
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug: false);
+
+      log.Write("DEBUG", "request detail");
+
+      Assert.False(log.IsDebugEnabled);
+      Assert.Empty(Lines(file));
+      Assert.Empty(_sink);
+      Assert.Empty(log.Entries());
+   }
+
+
+
+   /// <summary>
+   /// While debug logging is on, debug detail goes to the file only, marked as debug, redacted and cut at 4000 characters.
+   /// It never enters the ring or the host's sink, so it cannot displace the operational entries the companion shows.
+   /// </summary>
+   [Fact]
+   public void DebugDetail_GoesToTheFileOnly_RedactedAndCappedAtFourThousand()
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug: true);
+      log.Write("INFO", "operational");
+
+      log.Write("DEBUG", "GET /session password=synthetic-debug-secret");
+      log.Write("DEBUG", new string('x', 4500));
+
+      Assert.True(log.IsDebugEnabled);
+      Assert.Equal("operational", Assert.Single(_sink));
+      Assert.Equal("operational", Assert.Single(log.Entries()).Message);
+      Assert.Equal([" [INFO] [Service] operational", " [INFO] [DEBUG] [Service] GET /session password=[REDACTED]", " [INFO] [DEBUG] [Service] " + new string('x', 4000)], Lines(file));
+      Assert.Equal(4000, ServiceLog.DebugLimit);
+   }
+
+
+
+   /// <summary>A failure is one ERROR line with its type, message and inner causes, and its full text as debug detail only while that is on.</summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public void Failure_IsAnErrorLineAndDebugDetail(bool debug)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug);
+      InvalidOperationException failure = new("The session could not be saved.", new IOException("deviceToken=synthetic-inner-secret"));
+
+      log.Failure("Sign-in failed", failure);
+
+      Assert.Equal("Sign-in failed: InvalidOperationException: The session could not be saved. <- IOException: deviceToken=[REDACTED]", Assert.Single(_sink));
+      Assert.Equal("ERROR", Assert.Single(log.Entries()).Level);
+      List<string> lines = Lines(file);
+      Assert.Equal(" [ERROR] [Service] " + _sink[0], lines[0]);
+      Assert.Equal(debug, lines.Any(line => line.StartsWith(" [INFO] [DEBUG] [Service] Sign-in failed detail: System.InvalidOperationException: The session could not be saved.", StringComparison.Ordinal)));
+      Assert.DoesNotContain(lines, line => line.Contains("synthetic-inner-secret", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>The session client's progress goes through the same log: a step is an INFO line marked "[Session]", request detail is debug detail, and the client is told whether debug detail is wanted.</summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public void SessionDiagnostics_WriteThroughTheLog(bool debug)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug);
+      QqqSessionDiagnostics diagnostics = log.SessionDiagnostics();
+      int built = 0;
+
+      diagnostics.Info("Discovery started for print.example.com.");
+      diagnostics.Debug(() =>
+      {
+         built++;
+         return "GET /qqq/v1/metaData token=synthetic-session-secret";
+      });
+
+      Assert.Equal(debug, diagnostics.DebugEnabled);
+      Assert.Equal(debug ? 1 : 0, built);
+      Assert.Equal("[Session] Discovery started for print.example.com.", Assert.Single(_sink));
+      Assert.Equal(debug
+         ? [" [INFO] [Service] [Session] Discovery started for print.example.com.", " [INFO] [DEBUG] [Service] [Session] GET /qqq/v1/metaData token=[REDACTED]"]
+         : new List<string> { " [INFO] [Service] [Session] Discovery started for print.example.com." }, Lines(file));
+   }
+
+
+
+   /// <summary>
+   /// A view for one server writes the same lines with that server's name in front, in the ring, the sink and the file.
+   /// It shares the ring and the file with the log it came from, so lines from the service and from each server appear
+   /// together in the order they were written.
+   /// </summary>
+   [Fact]
+   public void ForServer_PrefixesTheServerNameAndSharesTheRingAndTheFile()
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+      ServiceLog production = log.ForServer("Production");
+      ServiceLog staging = log.ForServer("Staging");
+
+      log.Write("INFO", "Print service started.");
+      production.Write("WARN", "Printing blocked.");
+      staging.Write("ERROR", "Local command failed.");
+      production.Write("INFO", "Signed in.");
+
+      string[] expected = ["Print service started.", "[Production] Printing blocked.", "[Staging] Local command failed.", "[Production] Signed in."];
+      Assert.Equal(expected, _sink, StringComparer.Ordinal);
+      Assert.Equal(expected, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal(expected, staging.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal(["INFO", "WARN", "ERROR", "INFO"], production.Entries().Select(entry => entry.Level), StringComparer.Ordinal);
+      Assert.Equal([" [INFO] [Service] Print service started.", " [WARN] [Service] [Production] Printing blocked.", " [ERROR] [Service] [Staging] Local command failed.", " [INFO] [Service] [Production] Signed in."], Lines(file));
+      staging.ClearEntries();
+      Assert.Empty(log.Entries());
+   }
+
+
+
+   /// <summary>
+   /// A server's view redacts exactly as the log does, and the caps do not grow by the name: the line is still at most
+   /// 1000 characters (4000 for debug detail) with the name counted in. Debug detail is still dropped while it is off
+   /// and goes to the file only while it is on, and a failure and the session client's progress carry the name too.
+   /// </summary>
+   [Theory]
+   [InlineData(false)]
+   [InlineData(true)]
+   public void ForServer_KeepsRedactionCapsAndDebugRouting(bool debug)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug);
+      ServiceLog server = log.ForServer("Production");
+
+      server.Write("ERROR", "Authorization: Bearer synthetic-server-bearer enrollmentCode=synthetic-server-code");
+      server.Write("INFO", new string('p', 1500));
+      server.Write("DEBUG", new string('q', 4500));
+      server.Failure("Sign-in failed", new IOException("password=synthetic-server-password"));
+      server.SessionDiagnostics().Info("Discovery started.");
+
+      Assert.Equal(debug, server.IsDebugEnabled);
+      Assert.Equal(
+      [
+         "[Production] Authorization: Bearer [REDACTED] enrollmentCode=[REDACTED]",
+         "[Production] " + new string('p', 1000 - "[Production] ".Length),
+         "[Production] Sign-in failed: IOException: password=[REDACTED]",
+         "[Production] [Session] Discovery started.",
+      ], _sink);
+      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      List<string> lines = Lines(file);
+      Assert.Equal(debug ? 6 : 4, lines.Count(line => line.StartsWith(" [", StringComparison.Ordinal)));
+      Assert.Equal(debug, lines.Contains(" [INFO] [DEBUG] [Service] [Production] " + new string('q', 4000 - "[Production] ".Length), StringComparer.Ordinal));
+      Assert.DoesNotContain(lines, line => line.Contains("synthetic-server", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// A server's name is an operator's text, so it is made safe to stand at the front of a line: a line break or other
+   /// control character becomes a space (it cannot start a forged log entry), surrounding spaces go, and a long name is
+   /// cut at 64 characters. A name with nothing in it is refused.
+   /// </summary>
+   [Fact]
+   public void ForServer_MakesTheNameSafeToPrefix()
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.ForServer("  Warehouse\r\n2026-11-10 12:00:00 [ERROR] forged\t ").Write("INFO", "one");
+      log.ForServer(new string('n', 80)).Write("INFO", "two");
+
+      Assert.Equal(["[Warehouse  2026-11-10 12:00:00 [ERROR] forged] one", "[" + new string('n', 64) + "] two"], _sink);
+      Assert.Equal(2, File.ReadAllLines(file.CurrentLogFilePath).Length);
+      Assert.Equal(64, ServiceLog.ServerNameLimit);
+      Assert.Throws<ArgumentException>(() => log.ForServer("   "));
+      Assert.Throws<ArgumentNullException>(() => log.ForServer(null!));
+   }
+
+
+
+   /// <summary>
+   /// A server's name cannot switch off the redaction of the line it stands in front of. The redaction reads a quoted
+   /// value up to the next quote, so a name ending in an open quote, redacted as one string with the line, pairs with
+   /// the quote in front of the password and leaves the password itself in the log. The name and the line are redacted
+   /// apart: the password is gone from the ring, the host's sink and the file, for an operational line, for debug detail
+   /// and for a failure, and a secret written into the name itself is gone as well.
+   /// </summary>
+   [Theory]
+   [InlineData("A token=\"", "[A token=[REDACTED]] ")]
+   [InlineData("B secret='", "[B secret=[REDACTED]] ")]
+   [InlineData("C password=\"synthetic-name-secret", "[C password=[REDACTED]] ")]
+   public void ForServer_ANameCannotDefeatTheRedactionOfItsLine(string name, string prefix)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug: true);
+      ServiceLog server = log.ForServer(name);
+
+      server.Write("ERROR", "Sign-in failed: password=\"hunter2\" rejected");
+      server.Write("DEBUG", "POST /session password=\"hunter2\" rejected");
+      server.Failure("Sign-in failed", new IOException("token=\"hunter2\" refused"));
+
+      Assert.Equal([prefix + "Sign-in failed: password=[REDACTED] rejected", prefix + "Sign-in failed: IOException: token=[REDACTED] refused"], _sink);
+      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      string written = File.ReadAllText(file.CurrentLogFilePath);
+      Assert.DoesNotContain("hunter2", written, StringComparison.Ordinal);
+      Assert.DoesNotContain("synthetic-name-secret", written, StringComparison.Ordinal);
+      Assert.Contains("POST /session password=[REDACTED] rejected", written, StringComparison.Ordinal);
+      Assert.Equal(4, File.ReadAllLines(file.CurrentLogFilePath).Count(line => line.Contains(" [Service] ", StringComparison.Ordinal)));
+   }
+
+
+
+   /// <summary>
+   /// A character in a server's name that would end the line or change the order it is shown in becomes a space, as a
+   /// control character does: the line and paragraph separators (U+2028, U+2029), the next-line control (U+0085), the
+   /// bidirectional embeddings, overrides and isolates with the characters that end them (U+202A to U+202E, U+2066 to
+   /// U+2069), the directional marks and the zero-width characters. None of them is a control character, so each used
+   /// to pass through, and a name could show a forged line or text in reverse.
+   /// </summary>
+   [Theory]
+   [InlineData(0x0085)]
+   [InlineData(0x2028)]
+   [InlineData(0x2029)]
+   [InlineData(0x202A)]
+   [InlineData(0x202B)]
+   [InlineData(0x202C)]
+   [InlineData(0x202D)]
+   [InlineData(0x202E)]
+   [InlineData(0x2066)]
+   [InlineData(0x2067)]
+   [InlineData(0x2068)]
+   [InlineData(0x2069)]
+   [InlineData(0x200E)]
+   [InlineData(0x200F)]
+   [InlineData(0x061C)]
+   [InlineData(0x200B)]
+   [InlineData(0xFEFF)]
+   public void ForServer_ACharacterThatEndsOrReordersALine_BecomesASpace(int codePoint)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+      char character = (char)codePoint;
+
+      log.ForServer("Ware" + character + "house" + character).Write("INFO", "one");
+      log.ForServer(character + "2026-11-10 12:00:00 [ERROR] forged" + character + character + "entry").Write("INFO", "two");
+
+      Assert.Equal(["[Ware house] one", "[2026-11-10 12:00:00 [ERROR] forged  entry] two"], _sink);
+      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal([" [INFO] [Service] [Ware house] one", " [INFO] [Service] [2026-11-10 12:00:00 [ERROR] forged  entry] two"], Lines(file));
+      Assert.DoesNotContain(character.ToString(), File.ReadAllText(file.CurrentLogFilePath), StringComparison.Ordinal);
+      Assert.Throws<ArgumentException>(() => log.ForServer(new string(character, 3)));
+   }
+
+
+
+   /// <summary>
+   /// The ring's order is the order of its timestamps. The first writer's reading of the clock is held open while a
+   /// second writer, on a thread of its own, writes a whole line. An entry is stamped inside the lock that orders the
+   /// ring, so the second writer cannot enter the ring until the first has, and the earlier stamp is the earlier entry.
+   /// Stamped before that lock, the second writer would finish during the reading and stand in the ring in front of an
+   /// earlier stamp. The wait for the second writer is bounded, and with the stamp inside the lock it always runs out:
+   /// that the second writer could not finish is the thing being shown.
+   /// </summary>
+   [Fact]
+   public void RingOrder_IsTimestampOrder_WhenASecondWriterArrivesDuringTheFirstStamp()
+   {
+      SteppingClock clock = new();
+      ServiceLog log = new(AgentActivityLog.Create(_directory), _ => { }, clock);
+      Thread second = new(() => log.Write("WARN", "second"));
+      bool secondFinishedDuringTheFirstStamp = true;
+      clock.OnReading = reading =>
+      {
+         if(reading == 1)
+         {
+            second.Start();
+            secondFinishedDuringTheFirstStamp = second.Join(TimeSpan.FromMilliseconds(200));
+         }
+      };
+
+      log.Write("INFO", "first");
+      bool secondFinished = second.Join(TimeSpan.FromSeconds(30));
+
+      AgentLogEntry[] entries = log.Entries();
+      Assert.True(secondFinished);
+      Assert.False(secondFinishedDuringTheFirstStamp);
+      Assert.Equal(["first", "second"], entries.Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal([SteppingClock.Reading(1), SteppingClock.Reading(2)], entries.Select(entry => entry.Timestamp), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// Several threads writing at once, half of them through a server's view, lose no line and never corrupt the ring:
+   /// the host's sink and the file receive all 200 lines, each once, and the ring ends with 100 of them, each once,
+   /// the same 100 whether it is read through the log or through a view. On a clock that gives every reading a later
+   /// time than the last, the ring's timestamps are the last 100 readings in order. That holds here on every run, but
+   /// this test seldom catches a stamp taken outside the ring's lock, because the writers rarely overlap at that point;
+   /// the test above is the one that proves it.
+   /// </summary>
+   [Fact]
+   public async Task ConcurrentWriters_LoseNothing()
+   {
+      (_, AgentActivityLog file) = Create();
+      List<string> received = [];
+      var shared = new ServiceLog(file, line =>
+      {
+         lock(received)
+         { received.Add(line); }
+      }, new SteppingClock());
+
+      await Task.WhenAll(Enumerable.Range(0, 8).Select(writer => Task.Run(() =>
+      {
+         for(int index = 0; index < 25; index++)
+         {
+            (writer % 2 == 0 ? shared : shared.ForServer("Production")).Write("INFO", $"writer {writer} line {index}");
+         }
+      })));
+
+      string[] ring = shared.Entries().Select(entry => entry.Message).ToArray();
+      Assert.Equal(200, received.Count);
+      Assert.Equal(200, received.Distinct(StringComparer.Ordinal).Count());
+      Assert.Equal(100, ring.Length);
+      Assert.Equal(100, ring.Distinct(StringComparer.Ordinal).Count());
+      Assert.All(ring, line => Assert.Contains(line, received, StringComparer.Ordinal));
+      Assert.Equal(ring, shared.ForServer("Production").Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal(Enumerable.Range(101, 100).Select(reading => SteppingClock.Reading(reading)), shared.Entries().Select(entry => entry.Timestamp), StringComparer.Ordinal);
+      Assert.Equal(200, Lines(file).Count);
+   }
+
+
+
+   /// <summary>The log cannot be built without its file or its sink, so a wiring mistake fails at start.</summary>
+   [Fact]
+   public void MissingFileOrSink_IsRefused()
+   {
+      var file = AgentActivityLog.Create(_directory);
+
+      Assert.Throws<ArgumentNullException>(() => new ServiceLog(null!, _sink.Add));
+      Assert.Throws<ArgumentNullException>(() => new ServiceLog(file, null!));
+   }
+
+
+
+   /// <summary>
+   /// A clock that counts instead of keeping time: every reading is one second later than the one before, so each stamp
+   /// names the reading that made it and no two are equal, whatever the computer's clock does. A test can run code of
+   /// its own while one reading is being made, which is how it puts a second writer in the middle of a first one.
+   /// </summary>
+   private sealed class SteppingClock : TimeProvider
+   {
+      private static readonly DateTimeOffset s_start = new(2026, 11, 10, 12, 0, 0, TimeSpan.Zero);
+      private long _readings;
+
+
+
+      /// <summary>Called during each reading with its number, the first being 1, before the reading returns.</summary>
+      internal Action<long>? OnReading { get; set; }
+
+
+
+      /// <summary>The timestamp the log writes for a given reading, in the round-trip form the ring holds.</summary>
+      internal static string Reading(long number) => s_start.AddSeconds(number).ToString("O", CultureInfo.InvariantCulture);
+
+
+
+      /// <summary>Counts the reading, lets the test act during it, and returns its time.</summary>
+      public override DateTimeOffset GetUtcNow()
+      {
+         long number = Interlocked.Increment(ref _readings);
+         OnReading?.Invoke(number);
+         return s_start.AddSeconds(number);
+      }
+   }
+}

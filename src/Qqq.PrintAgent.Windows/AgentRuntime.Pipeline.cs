@@ -20,7 +20,7 @@ public sealed partial class AgentRuntime
    /// </summary>
    private const int DrainLanes = 16;
 
-   private TaskCompletionSource _pipelineChanged = NewSignal();
+   private readonly ChangeSignal _pipelineChanged = new();
    private readonly Dictionary<string, CancellationTokenSource> _activeTransfers = new(StringComparer.Ordinal);
    private readonly HashSet<string> _printingQueues = new(StringComparer.Ordinal);
    private readonly HashSet<string> _submittingJobs = new(StringComparer.Ordinal);
@@ -30,32 +30,11 @@ public sealed partial class AgentRuntime
    private long _stagedBytes;
    private int _activePrints;
    private int _activeDownloads;
+   private readonly long _bandwidthOrigin = (timeProvider ?? TimeProvider.System).GetTimestamp();
    private double _bandwidthDue;
    private bool _transitioning;
    private CancellationTokenSource? _pipelineLifetime;
    private Task _pipelineTask = Task.CompletedTask;
-
-
-
-   /// <summary>Creates a one-shot signal whose continuations run asynchronously, so completing it under a lock never runs waiter code inside that lock.</summary>
-   private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-
-
-   /// <summary>
-   /// Wakes everything waiting for a change, such as freed capacity or changed readiness. A fresh signal is swapped in
-   /// under the state lock and the old one completed, so a waiter holding the old signal is released and a later arrival
-   /// waits for the next change instead of missing it.
-   /// </summary>
-   private void SignalPipeline()
-   {
-      lock(_stateLock)
-      {
-         TaskCompletionSource previous = _pipelineChanged;
-         _pipelineChanged = NewSignal();
-         previous.TrySetResult();
-      }
-   }
 
 
 
@@ -97,7 +76,7 @@ public sealed partial class AgentRuntime
          {
             lock(_stateLock)
             { _pipelineLifetime = null; }
-            SignalPipeline();
+            _pipelineChanged.Raise();
          }
       }
    }
@@ -145,10 +124,10 @@ public sealed partial class AgentRuntime
             wave.Failed = true;
             wave.Drained = true;
          }
-         SignalPipeline();
+         _pipelineChanged.Raise();
       }
       if(report)
-      { WriteLog("ERROR", "Print lane stopped: " + exception.Message); }
+      { _log.Write("ERROR", "Print lane stopped: " + exception.Message); }
    }
 
 
@@ -164,7 +143,7 @@ public sealed partial class AgentRuntime
       await using IAsyncDisposable? lane = await AcquireDownloadLaneAsync(wave, token).ConfigureAwait(false);
       if(lane is null)
       { return false; }
-      using var store = new AgentStore(directory);
+      using AgentStore store = OpenStore(recover: false);
       if(store.LoadConfiguration() is null)
       { return false; }
       using PrintApiClient api = CreateApi();
@@ -195,13 +174,13 @@ public sealed partial class AgentRuntime
          },
       };
       ExposedPrinterBackend printers = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
-      bool processed = await new PrintWorker(api, printers, store, message => WriteLog("INFO", message),
+      bool processed = await new PrintWorker(api, printers, store, message => _log.Write("INFO", message),
          () => DispatchAllowed && !UpdatePaused && !_transitioning, () => _realtimeReady, options).RunOnceAsync(jobCancellation.Token).ConfigureAwait(false);
       if(!processed)
       {
          lock(_stateLock)
          { wave.Drained = true; }
-         SignalPipeline();
+         _pipelineChanged.Raise();
       }
       return processed;
    }
@@ -219,14 +198,14 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(wave.Drained || _transitioning)
             { return null; }
             if(_realtimeReady && _activeDownloads < _realtimeSettings.MaxConcurrentDownloads)
             {
                _activeDownloads++;
-               return new PipelineLease(() => { lock(_stateLock) { _activeDownloads--; } SignalPipeline(); });
+               return new ReleaseOnce(() => { lock(_stateLock) { _activeDownloads--; } _pipelineChanged.Raise(); });
             }
-            changed = _pipelineChanged.Task;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -254,20 +233,23 @@ public sealed partial class AgentRuntime
    /// <summary>
    /// Shares one bandwidth limit across every download. Each chunk reserves the time it should take at the configured
    /// rate on a single schedule, so the aggregate rate holds however many lanes download at once. A rate of zero means unlimited.
+   /// Both the schedule and the wait are measured on the runtime's clock, in seconds since the runtime was created, and
+   /// the wait is rounded to the clock's own unit instead of being cut short of it, so the pacing is exact on any clock
+   /// and a test can let it pass without waiting.
    /// </summary>
-   private Task ThrottleDownloadAsync(int bytes, CancellationToken token)
+   internal Task ThrottleDownloadAsync(int bytes, CancellationToken token)
    {
       double delay;
       lock(_stateLock)
       {
          long rate = _realtimeSettings.MaxDownloadBytesPerSecond;
-         double now = (double)System.Diagnostics.Stopwatch.GetTimestamp() / System.Diagnostics.Stopwatch.Frequency;
+         double now = Clock.GetElapsedTime(_bandwidthOrigin).TotalSeconds;
          if(rate == 0)
          { _bandwidthDue = now; return Task.CompletedTask; }
          _bandwidthDue = Math.Max(now, _bandwidthDue) + (double)bytes / rate;
          delay = _bandwidthDue - now;
       }
-      return Task.Delay(TimeSpan.FromSeconds(delay), token);
+      return Task.Delay(TimeSpan.FromTicks((long)Math.Round(delay * TimeSpan.TicksPerSecond)), Clock, token);
    }
 
 
@@ -288,6 +270,7 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(job.ContentLength < 1 || job.ContentLength > _realtimeSettings.MaximumDocumentBytes(job.Format) || job.ContentLength > _realtimeSettings.MaxStagedBytes)
             {
                throw new InvalidDataException("Document exceeds the effective format or staging limit.");
@@ -296,9 +279,8 @@ public sealed partial class AgentRuntime
             {
                _stagedBytes += job.ContentLength;
                ticket.Reserved.TrySetResult();
-               return new PipelineLease(() => { lock(_stateLock) { _stagedBytes -= job.ContentLength; } SignalPipeline(); });
+               return new ReleaseOnce(() => { lock(_stateLock) { _stagedBytes -= job.ContentLength; } _pipelineChanged.Raise(); });
             }
-            changed = _pipelineChanged.Task;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -323,18 +305,18 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(NormalTrafficAllowed && !_transitioning && _activePrints < _realtimeSettings.MaxConcurrentPrints && _printingQueues.Add(job.PrinterId))
             {
                _activePrints++;
                _submittingJobs.Add(job.JobId);
-               return new PipelineLease(() =>
+               return new ReleaseOnce(() =>
                {
                   lock(_stateLock)
                   { _activePrints--; _printingQueues.Remove(job.PrinterId); _submittingJobs.Remove(job.JobId); }
-                  SignalPipeline();
+                  _pipelineChanged.Raise();
                });
             }
-            changed = _pipelineChanged.Task;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -370,24 +352,7 @@ public sealed partial class AgentRuntime
    /// <summary>A job's place in its printer's order: the previous job's reservation and completion to wait for, and this job's own signals for its successor.</summary>
    private sealed record JobTicket(Task PreviousReservation, Task PreviousCompletion)
    {
-      public TaskCompletionSource Reserved { get; } = NewSignal();
-      public TaskCompletionSource Completed { get; } = NewSignal();
-   }
-
-
-
-   /// <summary>Runs its release action exactly once however many times it is disposed, so a normal path and an error path cannot double-count a freed resource.</summary>
-   private sealed class PipelineLease(Action release) : IAsyncDisposable
-   {
-      private Action? _release = release;
-
-
-
-      /// <summary>Atomically takes the release action and runs it; later calls do nothing.</summary>
-      public ValueTask DisposeAsync()
-      {
-         Interlocked.Exchange(ref _release, null)?.Invoke();
-         return ValueTask.CompletedTask;
-      }
+      public TaskCompletionSource Reserved { get; } = ChangeSignal.OneShot();
+      public TaskCompletionSource Completed { get; } = ChangeSignal.OneShot();
    }
 }

@@ -24,10 +24,9 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 {
    private readonly Lock _stateLock = new();
    private readonly IPrinterBackend _printers = printerBackend ?? new WindowsPrinters();
-   private readonly Queue<AgentLogEntry> _logs = new();
+   private readonly ServiceLog _log = new(AgentActivityLog.Create(directory), log);
    private readonly SemaphoreSlim _claimsRequested = new(0, 1);
    private readonly SemaphoreSlim _connectionGate = new(1, 1);
-   private readonly AgentActivityLog _activityLog = AgentActivityLog.Create(directory);
    private DateTimeOffset? _lastServerContact;
    private IReadOnlyList<JobSnapshot> _queuedJobs = [];
    private long _queueGeneration;
@@ -58,9 +57,19 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    {
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-      WriteLog("INFO", "Print service started.");
+      _log.Write("INFO", "Print service started.");
       await RunRealtimeAsync(token).ConfigureAwait(false);
    }
+
+
+
+   /// <summary>
+   /// Opens the journal and the protected files of the state directory for one unit of work. Every part of the runtime
+   /// opens its store here, so what a store is opened for is decided in one place. With <paramref name="recover"/> a saved
+   /// connection that can no longer be read is set aside instead of failing the open, which the paths that must keep
+   /// working without a readable pairing (status, sign-in, enrollment, settings) ask for.
+   /// </summary>
+   private AgentStore OpenStore(bool recover) => new(directory, recoverUnreadableConfiguration: recover);
 
 
 
@@ -111,7 +120,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// <summary>Current local observations, with no token or document content.</summary>
    public AgentSnapshot GetSnapshot()
    {
-      using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+      using AgentStore store = OpenStore(recover: true);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
       var printers = new ProfiledPrinterBackend(_printers, store).Discover().Select(printer => new PrinterSnapshot(printer.PrinterId, printer.Name, printer.DriverName, printer.PortName, printer.Status, printer.Formats, exposed.Contains(printer.PrinterId), printer.DisplayName, printer.Description, printer.Location, printer.MediaProfiles, ServerStateFor(printer.PrinterId, exposed.Contains(printer.PrinterId)))).ToList();
@@ -150,68 +159,9 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             health = "RED";
             status = _authenticationMessage;
          }
-         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastServerContact?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _logs.ToArray(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot(), PrinterSync: printerSync);
+         return new AgentSnapshot(configuration is not null, connected, health, status, configuration?.ServerUrl, configuration?.DeviceId, _lastServerContact?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), printers, jobs, _log.Entries(), store.GetDeviceProfile(), _controlState, AuthenticationStatus(), GetTransportSnapshot(), PrinterSync: printerSync);
       }
    }
-
-
-
-   /// <summary>
-   /// Records a service message in the in-memory ring shown to the companion (newest 100) and in the shared activity log.
-   /// The text is redacted first and capped at 1000 characters (4000 for debug detail), so credentials and document content
-   /// cannot reach either sink. DEBUG entries go only to the file, only while debug logging is on, and never displace the
-   /// ring's operational entries.
-   /// </summary>
-   private void WriteLog(string level, string message)
-   {
-      bool debug = string.Equals(level, "DEBUG", StringComparison.Ordinal);
-      if(debug && !_activityLog.IsDebugEnabled)
-      { return; }
-      string sanitized = AgentActivityLog.Redact(message);
-      int cap = debug ? 4000 : 1000;
-      string bounded = sanitized.Length <= cap ? sanitized : sanitized[..cap];
-      if(debug)
-      {
-         _activityLog.Debug("[Service] " + bounded);
-         return;
-      }
-      lock(_stateLock)
-      {
-         _logs.Enqueue(new AgentLogEntry(DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), level, bounded));
-         while(_logs.Count > 100)
-         {
-            _logs.Dequeue();
-         }
-      }
-      switch(level)
-      {
-         case "ERROR":
-            _activityLog.Error("[Service] " + bounded);
-            break;
-         case "WARN":
-            _activityLog.Warning("[Service] " + bounded);
-            break;
-         default:
-            _activityLog.Info("[Service] " + bounded);
-            break;
-      }
-      log(bounded);
-   }
-
-
-
-   /// <summary>Records a failure with its type and message at ERROR, and the full exception (stack and inner causes) as debug detail.</summary>
-   private void WriteFailure(string context, Exception exception)
-   {
-      WriteLog("ERROR", context + ": " + QqqSessionDiagnostics.Describe(exception));
-      WriteLog("DEBUG", context + " detail: " + exception);
-   }
-
-
-
-   /// <summary>The session client's progress sink: step entries at INFO, request detail at DEBUG, both through the redacting service log.</summary>
-   private QqqSessionDiagnostics SessionDiagnostics() => new(message => WriteLog("INFO", "[Session] " + message),
-      message => WriteLog("DEBUG", "[Session] " + message), () => _activityLog.IsDebugEnabled);
 
 
 
@@ -239,7 +189,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          }
          catch(Exception exception) when(exception is not OperationCanceledException || !token.IsCancellationRequested)
          {
-            WriteLog("ERROR", "Local command failed: " + QqqSessionDiagnostics.Describe(exception));
+            _log.Write("ERROR", "Local command failed: " + QqqSessionDiagnostics.Describe(exception));
             string message = exception is System.Security.Cryptography.CryptographicException
                ? "The saved connection cannot be opened. Open Settings, choose Connect this device or Sign in again, and use a fresh server enrollment code. Existing job history will be preserved."
                : AgentActivityLog.Redact(QqqSessionDiagnostics.Explain(exception));
@@ -310,12 +260,12 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             {
                throw new InvalidOperationException("PrinterId and Exposed are required.");
             }
-            using(AgentStore store = new(directory))
+            using(AgentStore store = OpenStore(recover: false))
             {
                store.SetExposure(request.PrinterId, request.Exposed.Value, _printers.Discover());
             }
             WakeClaims();
-            WriteLog("INFO", request.Exposed.Value ? "A printer was shared with the server." : "A printer was hidden from the server.");
+            _log.Write("INFO", request.Exposed.Value ? "A printer was shared with the server." : "A printer was hidden from the server.");
             return JsonSerializer.Serialize(GetSnapshot(), PrintApiClient.JsonOptions);
          case "enroll":
             return await EnrollWithGatesAsync(request, token).ConfigureAwait(false);

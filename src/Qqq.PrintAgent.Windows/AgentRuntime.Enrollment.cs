@@ -45,21 +45,21 @@ public sealed partial class AgentRuntime
       EnrollmentProgress progress = EnrollmentProgress.NothingChanged;
       try
       {
-         WriteLog("INFO", $"Enrollment requested on {request.ServerUrl ?? "(no server)"} with a {(request.EnrollmentCode ?? "").Length}-character enrollment code (never logged), computer name {Environment.MachineName}, agent {PrintApiClient.AgentVersion}.");
+         _log.Write("INFO", $"Enrollment requested on {request.ServerUrl ?? "(no server)"} with a {(request.EnrollmentCode ?? "").Length}-character enrollment code (never logged), computer name {Environment.MachineName}, agent {PrintApiClient.AgentVersion}.");
          IQqqSessionClient session = _sessionClient ?? throw Refused($"no {AppIdentity.ServerName} session is held; sign in first.", new InvalidOperationException($"Sign in to {AppIdentity.ServerName} before enrolling this computer."));
          if(!session.IsAuthenticated || request.ServerUrl is null || !SameOrigin(session.Origin, request.ServerUrl))
          {
             throw Refused(!session.IsAuthenticated ? "the held session is not authenticated." : request.ServerUrl is null ? "no server address was given."
                : $"the session is for {session.Origin.Authority} but enrollment was requested on {request.ServerUrl}.", new InvalidOperationException($"Sign in to the selected {AppIdentity.ServerName} server before enrollment."));
          }
-         WriteLog("INFO", "Step 1 of 4: reading the signed-in identity.");
+         _log.Write("INFO", "Step 1 of 4: reading the signed-in identity.");
          QqqSessionBinding identity = await session.GetSessionIdentityAsync(token).ConfigureAwait(false);
          using var api = PrintApiClient.ForSession(session);
-         WriteLog("INFO", "Step 2 of 4: exchanging the enrollment code for a device credential.");
+         _log.Write("INFO", "Step 2 of 4: exchanging the enrollment code for a device credential.");
          EnrollmentResponse response = await api.EnrollAsync(new EnrollmentRequest(request.EnrollmentCode ?? "", Environment.MachineName, PrintApiClient.AgentVersion), token).ConfigureAwait(false);
-         WriteLog("INFO", $"Enrollment accepted: device {response.DeviceId}.");
+         _log.Write("INFO", $"Enrollment accepted: device {response.DeviceId}.");
          QqqSessionBinding expected = identity with { DeviceId = response.DeviceId };
-         WriteLog("INFO", "Step 3 of 4: binding the new device to the session and confirming the identity.");
+         _log.Write("INFO", "Step 3 of 4: binding the new device to the session and confirming the identity.");
          QqqSessionBinding actual = await session.BindDeviceAsync(new QqqDeviceCredential(response.DeviceId, response.DeviceToken), cancellationToken: token).ConfigureAwait(false);
          progress = EnrollmentProgress.DeviceBound;
          RequireSameIdentity(expected, actual);
@@ -69,9 +69,9 @@ public sealed partial class AgentRuntime
          // staged step: a failure leaves either both files as they were,  //
          // or the new pairing with a session any later reader completes   //
          ////////////////////////////////////////////////////////////////////
-         WriteLog("INFO", "Step 4 of 4: saving the pairing to protected storage and activating the session for printing.");
+         _log.Write("INFO", "Step 4 of 4: saving the pairing to protected storage and activating the session for printing.");
          AgentAuthentication authentication = new(actual, session.ExportCredential());
-         using AgentStore store = new(directory, recoverUnreadableConfiguration: true);
+         using AgentStore store = OpenStore(recover: true);
          store.StagePairing(new AgentConfiguration(request.ServerUrl, response.DeviceId, response.DeviceToken, response.PollIntervalSeconds), authentication);
          progress = EnrollmentProgress.Saved;
          FinishStagedPairing(store);
@@ -82,7 +82,7 @@ public sealed partial class AgentRuntime
          {
             _queuedJobs = [];
          }
-         WriteLog("INFO", $"Device enrolled with the {AppIdentity.ServerName} user session.");
+         _log.Write("INFO", $"Device enrolled with the {AppIdentity.ServerName} user session.");
          WakeClaims();
          return $"Enrolled device {response.DeviceId}";
       }
@@ -108,7 +108,7 @@ public sealed partial class AgentRuntime
          case StagedPairingOutcome.Deferred:
             throw new IOException("The session saved with the new pairing could not be moved into place yet.", store.StagedPairingFailure);
          case StagedPairingOutcome.CompletedAfterQuarantine:
-            WriteLog("WARN", "The earlier session data could not be read and was moved aside for recovery.");
+            _log.Write("WARN", "The earlier session data could not be read and was moved aside for recovery.");
             break;
          default:
             break;
@@ -129,7 +129,7 @@ public sealed partial class AgentRuntime
    {
       if(progress is EnrollmentProgress.DeviceBound or EnrollmentProgress.Saved)
       { BlockAuthorization(); }
-      WriteFailure(progress switch
+      _log.Failure(progress switch
       {
          EnrollmentProgress.NothingChanged => "Enrollment failed; the stored pairing and session are unchanged",
          EnrollmentProgress.DeviceBound => "Enrollment failed after the server bound the new device; the stored pairing and session are unchanged, and printing is blocked until you sign in again",
@@ -143,7 +143,7 @@ public sealed partial class AgentRuntime
    /// <summary>Logs why an enrollment request was refused before it reached the server, and returns the exception to throw.</summary>
    private InvalidOperationException Refused(string reason, InvalidOperationException exception)
    {
-      WriteLog("WARN", "Enrollment refused: " + reason);
+      _log.Write("WARN", "Enrollment refused: " + reason);
       return exception;
    }
 }
