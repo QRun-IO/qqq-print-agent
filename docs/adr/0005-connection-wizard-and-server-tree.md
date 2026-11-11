@@ -311,3 +311,52 @@ Decided while building the wizard's frame and its Server step in the presentatio
 - **Modes.** The frame knows the three modes. So far a run can only be started for adding a server; the entry points for a repair and for pairing come with the steps that build them, so no mode exists that shows a step with nothing in it by another route than going on from step 1.
 - **The contract's printable form.** `ManagementText.Bounded` is public, so the companion gives the members that are plain text on the wire (a stage's reasons, a refused certificate's subject, issuer and fingerprint) the form the contract defines, where it shows them. A refusal's message already has that form and is not changed again.
 - **What is said once carries its sentence.** `Announcement.Raised` hands the sentence to its listeners, so a listener that announces something more from inside the event does not change what the listeners after it hear. `OperationGate.Changed` is raised on the thread that entered or released the key and can be out of date when it is heard; a listener takes it as "this key changed" and asks the gate.
+
+## Resolved while building the shell and tree, 2026-11-11
+
+Taken under the standing instruction while the models of the tree, the footer and the tray were built in the presentation assembly (`Shell/`). Where this record or the plan left a choice open, the option that is safest for the operator was taken. Nothing here is on screen yet: the window is rewritten on these models in a later step.
+
+**Health**
+
+- The worst health across servers is red, then unknown, then orange, then green. Unknown outranks orange and green because it is not known to be fine, and it is below red because red is known to need the operator.
+- A server's health is unknown when the service reports a word this build does not know, and for every server while the service is not answering: what the last snapshot said may no longer be true, so the node says "Not known while the local print service is not answering" and does not go on showing green. Before the first read has ended the footer and the tray are unknown too, where 1.x started red.
+- With no server the footer and the tray are red and say "Add a server to start printing".
+- The tray needs a fourth icon for unknown (`tray-unknown.png` beside the three there are); the model names it "unknown". It is added with the window.
+
+**What a server says**
+
+- The sentence beside a server's name follows the footer rule of 1.x for a paired server: the health's own sentence, replaced by "Dispatch disconnected by administrator" or "Dispatch paused by administrator", and by the missing authorization before either. Three states 1.x did not have come first: "Being removed", "Stored data for this server cannot be read", "Not paired".
+- No sentence says more than the snapshot. The contract's orange is wider than 1.x's ("working toward a connection, or held by the administrator"), so the 1.x sentence "Connected · printers need attention" is used only when the snapshot shows both: the transport is connected, and nothing is shared or a shared printer is not ready or is gone from Windows. Otherwise an orange server says "Waiting for the server connection" or "Not ready · see Connection".
+- With one server the footer is that server's sentence, which for an upgraded 1.x connection is what the 1.x footer said; a test gives the same inputs to both. The one difference: "authorization required" is led by the server's name where 1.x had the edition's. The node, which stands beside the name, says "Authorization required" (the plan's example wording was "Sign in required"; the snapshot does not say that a sign-in is what is missing).
+- A server that is being removed counts in the footer with the health the service reports for it, as it counts toward the eight.
+- The footer's link opens the first server in the worst state; while every server is green it opens nothing; with no server it opens the wizard; while the service is not available it opens the Computer page.
+
+**The tree**
+
+- A new server's node is expanded. Selecting one of a server's pages expands the server. Expansion otherwise stays as the operator left it.
+- When the server whose page is on screen goes, the neighbour's overview is shown (the server after it, or the one before it when it was last), not the neighbour's page of the same kind, and a message says which server went: an operator must not find themselves on another server's Jobs or Connection page without being told. When no server is left the wizard is shown if the stored data is ready, and the Computer page if not.
+- A snapshot entry whose identifier is not a server identifier, or repeats another's, is left out and logged once; the contract promises neither can happen.
+- The identifiers are the plan's, and they agree with the ones the window has today: `NavigatePrinters`, `NavigateJobs`, `NavigateLogs`, `NavigateSettings` exist; `NavigateComputer`, `NavigateConnection`, `AddServer` and `Server.<n>` are new.
+- A command of a server's menu is not disabled while another command runs on that server. Choosing it is refused out loud with the sentence of the command that is running.
+
+**Which page is shown**
+
+- Before the service has answered, the Computer page. When it first answers with its stored data ready, the window lands once: on the first server's Printers page (where 1.x opened), or on the wizard when there is no server. It does not land after the operator has chosen a page.
+- The Add server node stays enabled while a wizard is open, whatever else is true, and says "in progress": the wizard can itself bring the computer to eight servers, and the operator must be able to get back to it.
+- The shell asks for the wizard through an interface of three calls (add, repair, pair) and is told when the wizard has ended. If the wizard ends naming a server no snapshot lists yet, the Computer page stands in and the server is shown when a snapshot lists it.
+
+**Polling and local changes**
+
+- Each of the two reads never overlaps itself: a tick while its read is in flight starts nothing. The two are independent of each other, as in 1.x, so a slow snapshot does not stop the meter.
+- "A local change" is a command starting and a command ending under the server's key in the gate, whoever entered it, and anything a caller notes. A snapshot asked for before either is not shown for that server. A snapshot asked for while a command runs is shown, so a server that is busy for minutes (a browser sign-in) keeps refreshing.
+- A change under the computer's key (its details, a reorder) holds back the snapshot's computer part and the order of the list in the same way. A changed server that an older snapshot no longer lists stays until a newer one arrives.
+- The mark is taken when the shell asks the client for the snapshot. The client shares one request among callers and does not say when the request a caller was handed had been sent, so this is exact only while the shell is the one that asks for snapshots; pages and the wizard ask the shell.
+
+**Messages**
+
+- A message caused by a page that is no longer on screen (its command ended after the operator left) is kept under that page and shown when the operator opens it again, then dropped when they leave it. It is never shown on another page.
+- The wizard's page shows no message from elsewhere, including the one that says a server went.
+
+**The tray's tooltip**
+
+- With several servers it is the count in each state, worst first, then as many servers as fit whole, each with its health in words, then "+N more". With eight names of 64 characters one server fits. With one server or none it is the footer's sentence and the product's name, as in 1.x; when both do not fit the product's name is left out before anything is cut.
