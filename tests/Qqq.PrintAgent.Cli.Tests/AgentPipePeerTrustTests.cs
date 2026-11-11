@@ -238,11 +238,40 @@ public sealed class AgentPipePeerTrustTests
 
 
 
-   /// <summary>The installed product trusts only the service program at its fixed place under this computer's Program Files. Only the name is read here.</summary>
+   /// <summary>
+   /// The installed product's check is bound to the real Windows facts and trusts only the service program at its fixed
+   /// place under this computer's Program Files. Only the binding is read here; Windows is asked nothing.
+   /// </summary>
    [Fact]
-   public void InstalledProductTrustsTheServiceProgramUnderProgramFiles()
+   public void InstalledProductsCheckIsBoundToWindowsAndTheServiceProgramUnderProgramFiles()
    {
-      Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent", "Service", "Qqq.PrintAgent.Service.exe"), AgentPipePeer.InstalledService);
+      _ = Assert.IsType<WindowsPipePeerFacts>(AgentPipePeer.Installed.Facts);
+      Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent", "Service", "Qqq.PrintAgent.Service.exe"), AgentPipePeer.Installed.ServiceProgram);
+   }
+
+
+
+   /// <summary>
+   /// A bound check asks its own facts and trusts its own program and no other. Over the same facts, the check bound
+   /// to the program the process runs trusts the other end, and the check bound to another program refuses it. A
+   /// refusal is judged by the same facts: for an id no process can have, which Windows itself would leave in doubt,
+   /// facts that say the process is gone give "try again".
+   /// </summary>
+   [Fact]
+   public void BoundCheckAsksItsOwnFactsAndTrustsItsOwnProgram()
+   {
+      using SafePipeHandle pipe = new(IntPtr.Zero, ownsHandle: false);
+      FakePipePeerFacts facts = new();
+      using(new AgentPipePeer.Check(facts, FakePipePeerFacts.ServiceProgram).Authenticate(pipe))
+      {
+         Assert.Equal(2, facts.OpenHandles);
+      }
+      UnauthorizedAccessException refusal = Assert.Throws<UnauthorizedAccessException>(() => new AgentPipePeer.Check(facts, @"C:\Program Files\QQQ Print Agent\Cli\qqq-print-agent.exe").Authenticate(pipe));
+      Assert.Equal(NotTheService, refusal.Message);
+      Assert.Equal(0, facts.OpenHandles);
+      facts.ProcessRuns = false;
+      Assert.Equal(ServiceStopped, new AgentPipePeer.Check(facts, FakePipePeerFacts.ServiceProgram).Refusal(uint.MaxValue, new InvalidOperationException("Synthetic: a check that threw.")).Message);
+      Assert.Equal("OpenProcess 4294967295", facts.Calls[^1]);
    }
 
 

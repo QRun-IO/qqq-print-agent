@@ -25,8 +25,12 @@ internal sealed class AgentPipePeer : IDisposable
 
 
 
-   /// <summary>The real Windows facts, for the installed product.</summary>
-   private static readonly WindowsPipePeerFacts Windows = new();
+   /// <summary>
+   /// The check of the installed product: the real Windows facts and the service program at its fixed machine-wide
+   /// install path. The two entry points for the installed product go through it and pass nothing of their own, so what
+   /// the installed product trusts is this one value, which a test reads.
+   /// </summary>
+   internal static Check Installed { get; } = new(new WindowsPipePeerFacts(), InstalledService);
 
 
 
@@ -55,7 +59,7 @@ internal sealed class AgentPipePeer : IDisposable
 
 
    /// <summary>Proves that the far end of the pipe is the print service installed on this computer; see the overload for what is checked.</summary>
-   internal static AgentPipePeer Authenticate(SafePipeHandle pipe) => Authenticate(pipe, Windows, InstalledService);
+   internal static AgentPipePeer Authenticate(SafePipeHandle pipe) => Installed.Authenticate(pipe);
 
 
 
@@ -100,7 +104,7 @@ internal sealed class AgentPipePeer : IDisposable
 
 
    /// <summary>What a failed check tells the operator, judged by the real processes of this computer; see the overload.</summary>
-   internal static UnauthorizedAccessException Refusal(uint? server, Exception found) => Refusal(Windows, server, found);
+   internal static UnauthorizedAccessException Refusal(uint? server, Exception found) => Installed.Refusal(server, found);
 
 
 
@@ -161,5 +165,32 @@ internal sealed class AgentPipePeer : IDisposable
    {
       _process.Dispose();
       _service.Dispose();
+   }
+
+
+
+   /// <summary>
+   /// A check bound to where its facts come from and to the one program it trusts as the service. The installed product
+   /// has one, <see cref="Installed"/>; a test makes its own over a fake.
+   /// </summary>
+   internal sealed class Check(IPipePeerFacts facts, string serviceProgram)
+   {
+      /// <summary>Where this check's facts come from.</summary>
+      internal IPipePeerFacts Facts => facts;
+
+
+
+      /// <summary>The one program this check trusts as the service.</summary>
+      internal string ServiceProgram => serviceProgram;
+
+
+
+      /// <summary>Proves that the far end of the pipe is the service this check is bound to; <see cref="AgentPipePeer.Authenticate(SafePipeHandle, IPipePeerFacts, string)"/> says what is checked.</summary>
+      internal AgentPipePeer Authenticate(SafePipeHandle pipe) => AgentPipePeer.Authenticate(pipe, facts, serviceProgram);
+
+
+
+      /// <summary>What a failed check tells the operator, judged by this check's facts; <see cref="AgentPipePeer.Refusal(IPipePeerFacts, uint?, Exception)"/> says how.</summary>
+      internal UnauthorizedAccessException Refusal(uint? server, Exception found) => AgentPipePeer.Refusal(facts, server, found);
    }
 }

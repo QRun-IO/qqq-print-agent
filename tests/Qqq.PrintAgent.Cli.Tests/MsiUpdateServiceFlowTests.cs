@@ -423,16 +423,19 @@ public sealed class MsiUpdateServiceFlowTests
 
 
    /// <summary>
-   /// The companion's own constructor binds the installed product, which a test run is not: the update is not offered,
-   /// a check says to install the MSI and an install says to check first, all without the release feed, the service or
-   /// this computer's machine state being reached. The asset prefix it is given is the release client's, which refuses
-   /// one that is not letters and digits.
+   /// The companion's own constructor binds the installed product: the pipe is the installed service's and the update
+   /// steps are the installed product's own. Only the binding shows that, because neither is called here. A test run
+   /// is not the installed product, so the update is not offered, a check says to install the MSI and an install says
+   /// to check first, all without the release feed, the service or this computer's machine state being reached. The
+   /// asset prefix it is given is the release client's, which refuses one that is not letters and digits.
    /// </summary>
    [Fact]
    public async Task CompanionsConstructorBindsTheInstalledProduct()
    {
       FakeActivityLog log = new();
       using MsiUpdateService service = new(() => { }, log);
+      Assert.Equal<Func<PipeRequest, Task<string>>>(AgentPipeClient.SendAsync, service.Send);
+      Assert.Same(MsiUpdateInstaller.Installed, service.Steps);
       Assert.False(service.IsSupported);
       UpdateCheckResult check = await service.CheckAsync();
       Assert.Equal((null, "Install the machine MSI to check for updates from this app."), (check.AvailableVersion, check.Error));

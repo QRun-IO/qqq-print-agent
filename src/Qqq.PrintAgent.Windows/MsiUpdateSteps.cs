@@ -26,6 +26,11 @@ internal sealed partial class MsiUpdateSteps(IPathSecurity security, IProcessHos
 
 
 
+   /// <summary>The places these steps work in and what they reach outside themselves, so that a test can see which places an entry point bound them to.</summary>
+   internal MsiUpdatePlaces Places => places;
+
+
+
    /// <summary>The protected machine folder where downloaded installers, helper copies and update requests are staged; only administrators can write there.</summary>
    internal string UpdatesDirectory => places.UpdatesDirectory;
 

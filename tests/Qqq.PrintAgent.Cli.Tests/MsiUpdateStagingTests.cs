@@ -170,15 +170,18 @@ public sealed class MsiUpdateStagingTests
 
 
    /// <summary>
-   /// The installed product's steps are bound to this computer: they stage under its machine state folder, run as the
-   /// process that calls them, never take a development or test copy for the installed companion, and ask the real
-   /// process token who is asking. The last is shown with a folder outside the machine state, which nothing is ever
-   /// read from or created in: without administrator rights the request is refused for that reason, and with them
-   /// for being outside the updates folder.
+   /// The installed product's steps are bound to this computer. They work in exactly the places of the installed
+   /// product, with the machine state guard, the machine log and the installed service's pipe among them; the binding
+   /// is only compared, and none of those is called. They stage under the machine state folder, run as the process
+   /// that calls them, never take a development or test copy for the installed companion, and ask the real process
+   /// token who is asking. The last is shown with a folder outside the machine state, which nothing is ever read from
+   /// or created in: without administrator rights the request is refused for that reason, and with them for being
+   /// outside the updates folder.
    /// </summary>
    [Fact]
    public void InstalledProductsStepsAreBoundToThisComputer()
    {
+      Assert.Equal(MsiUpdatePlaces.Installed(), MsiUpdateInstaller.Installed.Places);
       Assert.Equal(Path.Combine(Qqq.PrintAgent.Core.MachineStateDirectory.Root, "updates"), MsiUpdateInstaller.Installed.UpdatesDirectory);
       Assert.Equal(Environment.ProcessId, MsiUpdateInstaller.Installed.CurrentProcessId);
       Assert.False(MsiUpdateInstaller.Installed.RunsAsInstalledCompanion);

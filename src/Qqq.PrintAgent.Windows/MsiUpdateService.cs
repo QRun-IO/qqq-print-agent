@@ -67,6 +67,16 @@ public sealed class MsiUpdateService : IUpdateService, IDisposable
 
 
 
+   /// <summary>How this update service reaches the print service, so that a test can see which pipe the companion's constructor bound.</summary>
+   internal Func<PipeRequest, Task<string>> Send => _send;
+
+
+
+   /// <summary>The update steps this update service uses, so that a test can see which steps the companion's constructor bound.</summary>
+   internal MsiUpdateSteps Steps => _installer;
+
+
+
    /// <summary>Raised with each step of an update as it begins and with the download's progress, for the companion to show.</summary>
    public event EventHandler<UpdateStatusEventArgs>? StatusChanged;
 

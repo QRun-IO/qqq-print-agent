@@ -21,13 +21,13 @@ public static partial class MsiUpdateInstaller
 
 
    /// <summary>Runs only inside the protected copied helper; never kills an installer or an application.</summary>
-   [ExcludeFromCodeCoverage(Justification = "Runs the apply step against this computer: its machine state folder, the installed service's pipe, Windows Installer and the installed companion, none of which a test may touch. It only passes the call on; the step is tested in MsiUpdateSteps with fakes of IPathSecurity and IProcessHost in temporary folders, and the places it is bound to in MsiUpdatePlaces.Installed.")]
+   [ExcludeFromCodeCoverage(Justification = "Runs the apply step against this computer: its machine state folder, the installed service's pipe, Windows Installer and the installed companion, none of which a test may touch. It only passes the call on to Installed. The step is tested in MsiUpdateSteps with fakes of IPathSecurity and IProcessHost in temporary folders; that Installed works in the places of MsiUpdatePlaces.Installed, as the process that calls it and for whoever the real process token says is asking, is asserted in MsiUpdateStagingTests, and what those places are in MsiUpdatePlacesTests.")]
    public static Task<int> ApplyAsync(string requestPath) => Installed.ApplyAsync(requestPath);
 
 
 
    /// <summary>Read-only, bounded last outcome; retained for Settings/log diagnostics rather than consumed.</summary>
-   [ExcludeFromCodeCoverage(Justification = "Reads the recorded outcome in this computer's machine state folder, which exists on some computers and not on others and which a test must not depend on. It only passes the call on; reading an outcome is tested in MsiUpdateSteps in a temporary folder, and the places it is bound to in MsiUpdatePlaces.Installed.")]
+   [ExcludeFromCodeCoverage(Justification = "Reads the recorded outcome in this computer's machine state folder, which exists on some computers and not on others and which a test must not depend on. It only passes the call on to Installed. Reading an outcome is tested in MsiUpdateSteps in a temporary folder; that Installed works in the places of MsiUpdatePlaces.Installed is asserted in MsiUpdateStagingTests, and what those places are in MsiUpdatePlacesTests.")]
    public static string? ReadLastOutcomeMessage() => Installed.ReadLastOutcomeMessage();
 
 
