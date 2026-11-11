@@ -24,15 +24,16 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// out, and showing it would put back what the operator has just changed.
 /// </para>
 /// <para>
-/// A stamp is always taken after the change it marks was answered, never before it was sent: a count read before
-/// would let through a snapshot that was sent before the change was carried out. A command changes its key when it
-/// ends, whoever entered the gate: its hold is given back after its answer has arrived, and the stamp is the
-/// client's count read then. It also changes its key when it starts, with the count read then, which holds back
-/// what was sent before the command began and nothing that was sent while it runs, so a server that is busy for
-/// minutes keeps refreshing. <see cref="NoteChange"/> records a change with the count its own result carries,
-/// which was read when its reply was read: that is how a change made without the gate is recorded, and how a
-/// command that goes on waiting before it gives its hold back marks its key at the moment of its answer. The
-/// counts are one client's and start again with the companion, and so do the stamps.
+/// The stamp that marks a change is always taken after the change was answered, never before it was sent: a count
+/// read before would let through a snapshot that was sent before the change was carried out. A command changes its
+/// key when it ends, whoever entered the gate: its hold is given back after its answer has arrived, and the stamp
+/// is the client's count read then. <see cref="NoteChange"/> records a change with the count its own result
+/// carries, which was read when its reply was read: that is how a change made without the gate is recorded, and
+/// how a command that goes on waiting before it gives its hold back marks its key at the moment of its answer.
+/// A command also stamps its key when it starts, with the count read then. That stamp marks no change: it holds
+/// back what was sent before the command began and nothing that was sent while it runs, so a server that is busy
+/// for minutes keeps refreshing, and the stamp of the command's end always follows it. The counts are one
+/// client's and start again with the companion, and so do the stamps.
 /// </para>
 /// </summary>
 public sealed class ServerBusy : IDisposable
