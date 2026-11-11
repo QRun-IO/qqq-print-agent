@@ -148,7 +148,7 @@ public sealed partial class SignInFlow
       _log.Info("Browser callback inbox open; starting the sign-in attempt.");
       Uri authorization = await session.BeginBrowserSignInAsync(redirect, cancellationToken);
       cancellationToken.ThrowIfCancellationRequested();
-      _log.Info("Opening the identity provider's sign-in page in the default browser (" + authorization.Authority + ").");
+      _log.Info("Opening the identity provider's sign-in page in the default browser (" + QqqOrigin.ShownAuthority(authorization) + ").");
       _browser.Open(authorization);
       Uri callback = await inbox.ReceiveAsync(cancellationToken);
       cancellationToken.ThrowIfCancellationRequested();

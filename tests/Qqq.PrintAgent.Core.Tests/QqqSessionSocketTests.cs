@@ -184,7 +184,7 @@ public sealed class QqqSessionSocketTests
    {
       ScriptedServer server = ScriptedServer.SignedIn().Add(ScriptedServer.Discovery);
       var transport = new FakeTransport(server);
-      using var client = new QqqSessionClient(ScriptedServer.Origin, null, null, false, null, null, false, transport);
+      using var client = new QqqSessionClient(ScriptedServer.Origin, null, null, false, null, null, QqqCertificateExceptionOrigins.None, transport);
       if(signedIn)
       { await client.SignInWithPasswordAsync("synthetic-user", "synthetic-password"); }
       QqqSessionException failure = await Assert.ThrowsAsync<QqqSessionException>(() => client.ConnectPrintingAsync(Heartbeat, HeartbeatLimit));
@@ -245,13 +245,65 @@ public sealed class QqqSessionSocketTests
 
 
 
+   /// <summary>
+   /// The rule the HTTP requests follow, at the socket upgrade. The upgrade only ever goes to the server's own origin,
+   /// so a certificate Windows does not trust is accepted there when the exception names the server, alone or beside
+   /// the sign-in provider, and refused when the exception names only another origin or there is none. An exception
+   /// for the provider therefore never lets a socket through. Both certificate types the platform hands over are
+   /// judged alike, an acceptance is logged as an exception for that origin, and a refusal is logged with the
+   /// certificate and the origins the exception in force covers.
+   /// </summary>
+   [Theory]
+   [InlineData("server", true)]
+   [InlineData("server+provider", true)]
+   [InlineData("provider", false)]
+   [InlineData("none", false)]
+   public async Task UntrustedCertificateAtTheUpgradeIsAcceptedOnlyWhenTheExceptionNamesTheServer(string named, bool accepted)
+   {
+      var provider = new Uri("https://id.example.invalid");
+      QqqCertificateExceptionOrigins exception = named switch
+      {
+         "server" => QqqCertificateExceptionOrigins.For(ScriptedServer.Origin),
+         "server+provider" => QqqCertificateExceptionOrigins.For(ScriptedServer.Origin, provider),
+         "provider" => QqqCertificateExceptionOrigins.For(provider),
+         _ => QqqCertificateExceptionOrigins.None,
+      };
+      (QqqSessionClient client, FakeTransport transport, _, List<string> info) = await BoundClientAsync(certificateException: exception);
+      using(client)
+      {
+         using WebSocket socket = await client.ConnectPrintingAsync(Heartbeat, HeartbeatLimit);
+         Assert.Equal("wss://printing.example.invalid/qqq/v1/qbit/printing/device/realtime", transport.Connectors[0].Request!.Uri.AbsoluteUri);
+         using X509Certificate2 certificate = SelfSigned("CN=Synthetic Authority");
+         using var legacy = new X509Certificate(certificate.Handle);
+         info.Clear();
+
+         Assert.Equal(accepted, transport.SocketCertificate!(this, certificate, null, SslPolicyErrors.RemoteCertificateChainErrors));
+         Assert.Equal(accepted, transport.SocketCertificate(this, legacy, null, SslPolicyErrors.RemoteCertificateChainErrors));
+         if(accepted)
+         {
+            Assert.Equal(2, info.Count(line => line.StartsWith("TLS certificate for printing.example.invalid is NOT trusted by Windows (RemoteCertificateChainErrors) but was accepted because the certificate exception covers this origin:", StringComparison.Ordinal)));
+            Assert.DoesNotContain(info, line => line.Contains("rejected", StringComparison.Ordinal));
+         }
+         else
+         {
+            Assert.Equal(2, info.Count(line => line.StartsWith("TLS certificate for printing.example.invalid rejected: RemoteCertificateChainErrors.", StringComparison.Ordinal)
+               && line.EndsWith($" The certificate exception in force covers {exception} and not this host.", StringComparison.Ordinal) == !exception.IsEmpty));
+            Assert.DoesNotContain(info, line => line.Contains("but was accepted", StringComparison.Ordinal));
+         }
+         Assert.True(transport.SocketCertificate(this, certificate, null, SslPolicyErrors.None));
+      }
+   }
+
+
+
    /// <summary>A client over the fake transport that has signed in with a password and bound an approved device, with the discovery its next socket attempt will read already queued.</summary>
-   private static async Task<(QqqSessionClient Client, FakeTransport Transport, ScriptedServer Server, List<string> Info)> BoundClientAsync(Uri? origin = null, string discovery = ScriptedServer.Discovery)
+   private static async Task<(QqqSessionClient Client, FakeTransport Transport, ScriptedServer Server, List<string> Info)> BoundClientAsync(Uri? origin = null, string discovery = ScriptedServer.Discovery,
+      QqqCertificateExceptionOrigins? certificateException = null)
    {
       var info = new List<string>();
       ScriptedServer server = ScriptedServer.SignedIn().Add(ScriptedServer.Identity).Add(discovery);
       var transport = new FakeTransport(server);
-      var client = new QqqSessionClient(origin ?? ScriptedServer.Origin, null, null, allowLoopbackHttp: true, null, new QqqSessionDiagnostics(info.Add), false, transport);
+      var client = new QqqSessionClient(origin ?? ScriptedServer.Origin, null, null, allowLoopbackHttp: true, null, new QqqSessionDiagnostics(info.Add), certificateException ?? QqqCertificateExceptionOrigins.None, transport);
       await client.SignInWithPasswordAsync("synthetic-user", "synthetic-password");
       await client.BindDeviceAsync(new QqqDeviceCredential("device-1", "synthetic-proof"));
       return (client, transport, server, info);

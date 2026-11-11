@@ -37,8 +37,13 @@ public sealed class QqqSessionDiagnostics(Action<string>? info = null, Action<st
 
 
 
-   /// <summary>Describes an address without its query, fragment or user information, so a logged route can never carry a code, state or credential.</summary>
-   public static string Describe(Uri uri) => uri.IsAbsoluteUri ? uri.Scheme + "://" + uri.Authority + uri.AbsolutePath : uri.ToString();
+   /// <summary>
+   /// Describes an address without its query, fragment or user information, so a logged route can never carry a code,
+   /// state or credential. The host is in the form every host is shown in (see <see cref="QqqOrigin.ShownAuthority"/>):
+   /// the ASCII name the connection is made to, because the address may be one a server wrote (its sign-in provider's
+   /// discovery document or endpoints), and a look-alike letter must read as the "xn--" name it is.
+   /// </summary>
+   public static string Describe(Uri uri) => uri.IsAbsoluteUri ? uri.Scheme + "://" + QqqOrigin.ShownAuthority(uri) + uri.AbsolutePath : uri.ToString();
 
 
 

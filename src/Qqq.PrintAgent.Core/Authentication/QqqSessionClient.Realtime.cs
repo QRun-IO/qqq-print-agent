@@ -109,21 +109,23 @@ public sealed partial class QqqSessionClient
 
 
    /// <summary>
-   /// The certificate decision for the HTTP client: the same logged policy as everywhere else, named after the host the
-   /// request is going to, or after the origin when a request carries no address.
+   /// The certificate decision for the HTTP client: the same logged policy as everywhere else, judged for the address the
+   /// request is going to, which is what decides whether the certificate exception applies, or for the origin when a
+   /// request carries no address.
    /// </summary>
    private bool ValidateHttpCertificate(HttpRequestMessage request, X509Certificate2? certificate, X509Chain? chain, SslPolicyErrors errors)
-      => EvaluateCertificate(request.RequestUri?.Authority ?? Origin.Authority, certificate, errors);
+      => EvaluateCertificate(request.RequestUri ?? Origin, certificate, errors);
 
 
 
    /// <summary>
    /// The certificate decision for the WebSocket upgrade: the same logged policy, so a rejected or explicitly allowed
-   /// certificate is reported the same way for the socket as for HTTP. The platform may hand over the older certificate
-   /// type, which is converted so its details can be logged.
+   /// certificate is reported the same way for the socket as for HTTP. The upgrade only ever goes to this client's own
+   /// origin and follows no redirect, so that origin is the address the certificate exception is asked about. The
+   /// platform may hand over the older certificate type, which is converted so its details can be logged.
    /// </summary>
    private bool ValidateSocketCertificate(object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors errors)
-      => EvaluateCertificate(Origin.Authority, certificate is null ? null : certificate as X509Certificate2 ?? new X509Certificate2(certificate), errors);
+      => EvaluateCertificate(Origin, certificate is null ? null : certificate as X509Certificate2 ?? new X509Certificate2(certificate), errors);
 
 
 

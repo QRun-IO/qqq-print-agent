@@ -110,7 +110,7 @@ public sealed partial class SignInFlow
          using IBrowserCallbackInbox inbox = _callbacks.Open();
          using CancellationTokenSource limit = new(ProviderSignOutLimit, _time);
          using var wait = CancellationTokenSource.CreateLinkedTokenSource(limit.Token, cancellationToken);
-         _log.Info("Opening the identity provider's sign-out page in the default browser (" + logout.EndSessionUri.Authority + ").");
+         _log.Info("Opening the identity provider's sign-out page in the default browser (" + QqqOrigin.ShownAuthority(logout.EndSessionUri) + ").");
          _browser.Open(logout.EndSessionUri);
          Uri callback = await inbox.ReceiveAsync(wait.Token);
          ThrowIfDisposed();

@@ -259,13 +259,13 @@ internal sealed class SignInFixture : ISignInSessionFactory, IBrowserLauncher, I
 
 
    /// <summary>Creates a scripted session or fails.</summary>
-   public ISignInSession Create(Uri origin, bool allowUntrustedCertificate)
+   public ISignInSession Create(Uri origin, QqqCertificateExceptionOrigins certificateException)
    {
       if(CreateFailure is not null)
       {
          throw CreateFailure;
       }
-      FakeSession session = new(origin, allowUntrustedCertificate);
+      FakeSession session = new(origin, certificateException);
       ConfigureSession?.Invoke(session);
       Sessions.Add(session);
       return session;

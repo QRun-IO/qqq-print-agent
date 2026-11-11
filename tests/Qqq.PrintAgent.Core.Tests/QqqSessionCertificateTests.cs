@@ -12,7 +12,7 @@ namespace Qqq.PrintAgent.Core.Tests;
 
 /// <summary>
 /// Certificate policy of the session client: a certificate Windows does not trust is refused by default with a logged reason and
-/// remedy, accepted only when untrusted certificates were explicitly allowed (still logged, as a warning naming the certificate), and a
+/// remedy, accepted only from an origin the certificate exception names (still logged, as a warning naming the certificate), and a
 /// trusted one is accepted with its identity at debug level only. Failures are never silent.
 /// </summary>
 public sealed class QqqSessionCertificateTests
@@ -28,8 +28,8 @@ public sealed class QqqSessionCertificateTests
       var info = new List<string>();
       using X509Certificate2 certificate = SelfSigned("CN=Caddy Local Authority - Test");
       using var client = new QqqSessionClient(Origin, diagnostics: new QqqSessionDiagnostics(info.Add));
-      Assert.False(client.AllowsUntrustedCertificate);
-      Assert.False(client.EvaluateCertificate("127.0.0.1:18581", certificate, SslPolicyErrors.RemoteCertificateChainErrors));
+      Assert.True(client.CertificateException.IsEmpty);
+      Assert.False(client.EvaluateCertificate(new Uri("https://127.0.0.1:18581"), certificate, SslPolicyErrors.RemoteCertificateChainErrors));
       string rejection = Assert.Single(info, line => line.StartsWith("TLS certificate for 127.0.0.1:18581 rejected: RemoteCertificateChainErrors", StringComparison.Ordinal));
       Assert.Contains("Caddy Local Authority - Test", rejection, StringComparison.Ordinal);
       Assert.Contains("LocalSystem", rejection, StringComparison.Ordinal);
@@ -39,16 +39,16 @@ public sealed class QqqSessionCertificateTests
 
 
 
-   /// <summary>With untrusted certificates allowed, the same certificate is accepted and the acceptance is logged as an exception, never silently.</summary>
+   /// <summary>With a certificate exception for the server's origin, the same certificate from that origin is accepted and the acceptance is logged as an exception, never silently.</summary>
    [Fact]
    public void UntrustedCertificateIsAcceptedOnlyWhenAllowedAndLoudly()
    {
       var info = new List<string>();
       using X509Certificate2 certificate = SelfSigned("CN=dev-server");
-      using var client = new QqqSessionClient(Origin, diagnostics: new QqqSessionDiagnostics(info.Add), allowUntrustedCertificate: true);
-      Assert.True(client.AllowsUntrustedCertificate);
+      using var client = new QqqSessionClient(Origin, diagnostics: new QqqSessionDiagnostics(info.Add), certificateException: QqqCertificateExceptionOrigins.For(Origin));
+      Assert.Equal(["https://127.0.0.1:18581/"], client.CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
       Assert.Contains(info, line => line.StartsWith("WARNING: certificate validation is relaxed", StringComparison.Ordinal));
-      Assert.True(client.EvaluateCertificate("127.0.0.1:18581", certificate, SslPolicyErrors.RemoteCertificateChainErrors));
+      Assert.True(client.EvaluateCertificate(new Uri("https://127.0.0.1:18581"), certificate, SslPolicyErrors.RemoteCertificateChainErrors));
       Assert.Contains(info, line => line.Contains("NOT trusted by Windows (RemoteCertificateChainErrors) but was accepted", StringComparison.Ordinal) && line.Contains("dev-server", StringComparison.Ordinal));
    }
 
@@ -62,7 +62,7 @@ public sealed class QqqSessionCertificateTests
       var debug = new List<string>();
       using X509Certificate2 certificate = SelfSigned("CN=print.example.invalid");
       using var client = new QqqSessionClient(new Uri("https://print.example.invalid"), diagnostics: new QqqSessionDiagnostics(info.Add, debug.Add));
-      Assert.True(client.EvaluateCertificate("print.example.invalid", certificate, SslPolicyErrors.None));
+      Assert.True(client.EvaluateCertificate(new Uri("https://print.example.invalid"), certificate, SslPolicyErrors.None));
       Assert.DoesNotContain(info, line => line.Contains("TLS certificate", StringComparison.Ordinal));
       Assert.Contains(debug, line => line.StartsWith("TLS certificate for print.example.invalid accepted by Windows", StringComparison.Ordinal));
    }

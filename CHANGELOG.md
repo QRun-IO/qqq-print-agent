@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+The development-only certificate exception now covers two origins at most (2.0, narrows behavior).
+
+- "Allow untrusted server certificate" used to make a session accept an untrusted certificate from every host it
+  contacted. It now accepts one only from the server's own origin and, during sign-in in the companion, from the
+  origin of the sign-in provider that server names. A certificate Windows does not trust from any other host is
+  refused, and the log names the certificate and the origins the exception covers.
+- A development setup whose sign-in provider has an untrusted certificate on a different origin from the server still
+  signs in: the companion reads the server's sign-in description under the exception for the server, then continues
+  with an exception that also names the provider, and logs both origins. In the service the exception names the
+  server only, so signing out of such a setup ends the QQQ session and signs out locally, but the provider's
+  sign-out page cannot be prepared and the sign-out reports that failure. Installing the provider's root certificate
+  in the Local Machine trusted root store avoids this. A later change records the provider's origin with the server.
+- A server check now reports the origin of the sign-in provider the server names whenever its sign-in description
+  could be read, so both addresses can be shown before an exception is saved.
+- The provider's address is written by the server, so its origin is kept, compared and shown by the host's ASCII
+  name, the name the connection is really made to. A name with a look-alike letter appears as its `xn--` form, a
+  zero-width character is not in it, and a host that has no ASCII name (one holding a line separator, for example)
+  is not an origin: nothing is added to the exception for it and nothing of it is shown. A name written in Unicode
+  and the same name in `xn--` form are one origin. The log line for a refused or excepted certificate names the
+  host the same way, and so does every other line that names the provider's address during sign-in and sign-out,
+  in the service's log and the companion's. Such a line leaves out a query, a fragment and user information and
+  says by kind that it did, and a provider's authorization endpoint that is refused is refused by naming the rule
+  it broke.
+- A refused certificate is reported with the origin that presented it and the time, so a caller can tell a refusal
+  from the server from one from its sign-in provider. The management contract's certificate description takes both
+  from that record and no longer accepts them from its caller.
+- A server that puts a host the platform cannot name (one holding a line separator) into its sign-in provider's
+  issuer, discovery address or endpoints is refused as a configuration problem, and a server check offers no
+  browser sign-in for such an issuer or discovery address. Before, sign-in or sign-out stopped with an internal
+  address-format error.
+- The service's log no longer says "The server session could not be ended" when a sign-out with a sign-in provider
+  failed after the server session was ended; it says that one of the two steps failed and points to the session
+  entries that say which.
+- Servers with trusted certificates, and setups without the exception, are not affected.
+
 Two cases the print worker now settles with a known outcome (2.0).
 
 - A printer that stops being shared while jobs wait behind a print no longer leaves those jobs with an unknown

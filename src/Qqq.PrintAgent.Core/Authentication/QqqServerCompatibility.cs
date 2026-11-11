@@ -9,12 +9,15 @@ namespace Qqq.PrintAgent.Core.Authentication;
 
 /// <summary>
 /// What a compatibility check found out about a server, for the connection wizard: every problem with its kind, the
-/// discovery document when one was read, the sign-in methods on offer, and the certificate that was refused when that is
-/// why the connection failed. It is a finding, not a failure: an unusable server produces a result, never an exception,
-/// so the wizard can show the operator what to fix. No field carries a credential.
+/// discovery document when one was read, the sign-in methods on offer, the certificate that was refused when that is
+/// why the connection failed, and the origin of the sign-in provider the server names. The provider's origin is there
+/// whenever the sign-in description could be read and names one, whether or not sign-in is usable, so a caller can
+/// show the operator both addresses a certificate exception would cover before the exception is saved. It is a
+/// finding, not a failure: an unusable server produces a result, never an exception, so the wizard can show the
+/// operator what to fix. No field carries a credential.
 /// </summary>
 public sealed record QqqServerCompatibility(IReadOnlyList<QqqCompatibilityProblem> Problems, QqqApiDiscovery? Discovery, QqqSignInMethods SignInMethods,
-   QqqCertificateRejection? Certificate = null)
+   QqqCertificateRejection? Certificate = null, Uri? ProviderOrigin = null)
 {
    /// <summary>True when nothing stands between the operator and signing in: the server answered, is a QQQ server with a usable printing extension, and offers a sign-in method.</summary>
    public bool IsCompatible => Problems.Count == 0;

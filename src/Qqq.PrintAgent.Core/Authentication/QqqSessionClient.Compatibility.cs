@@ -18,6 +18,15 @@ public sealed partial class QqqSessionClient
 
 
    /// <summary>
+   /// The certificate this client refused most recently, with the origin that presented it and the time on the
+   /// client's clock, or null when it has refused none since its last compatibility check began. The client talks to
+   /// its server and to the sign-in provider that server names, and the rejection's origin says which of them it was.
+   /// </summary>
+   public QqqCertificateRejection? LastCertificateRejection => Volatile.Read(ref _certificateRejection);
+
+
+
+   /// <summary>
    /// Checks whether this origin is a server the agent can use and says how a user may sign in. The server is asked
    /// afresh each time, so a retry after the operator fixed something sees the fix. An unreachable address, a refused
    /// certificate, an answer that is not QQQ discovery, a missing or unusable printing extension and an unsupported
@@ -46,8 +55,8 @@ public sealed partial class QqqSessionClient
          if(problems.Count != 0)
          { return Report(new QqqServerCompatibility(problems, discovery, QqqSignInMethods.None)); }
          _discovery = discovery;
-         (QqqSignInMethods methods, QqqCompatibilityProblem? signIn) = await SignInMethodsAsync(discovery, browserRedirect, cancellationToken).ConfigureAwait(false);
-         return Report(new QqqServerCompatibility(signIn is null ? [] : [signIn], discovery, methods, RefusedCertificate(signIn)));
+         (QqqSignInMethods methods, QqqCompatibilityProblem? signIn, Uri? provider) = await SignInMethodsAsync(discovery, browserRedirect, cancellationToken).ConfigureAwait(false);
+         return Report(new QqqServerCompatibility(signIn is null ? [] : [signIn], discovery, methods, RefusedCertificate(signIn), provider));
       }
       finally { _gate.Release(); }
    }
@@ -78,9 +87,10 @@ public sealed partial class QqqSessionClient
    /// Reads the authentication metadata of a server that passed discovery and names the sign-in methods it offers, or the
    /// problem that leaves none. Table-based servers offer a password; OAuth2 servers offer the browser when their native
    /// grant passes the same checks sign-in applies and lists the host's callback. Metadata that passed is cached, as
-   /// sign-in would.
+   /// sign-in would. The origin of the provider the description names is returned whenever the description was read,
+   /// usable or not.
    /// </summary>
-   private async Task<(QqqSignInMethods Methods, QqqCompatibilityProblem? Problem)> SignInMethodsAsync(QqqApiDiscovery discovery, Uri? browserRedirect, CancellationToken cancellationToken)
+   private async Task<(QqqSignInMethods Methods, QqqCompatibilityProblem? Problem, Uri? ProviderOrigin)> SignInMethodsAsync(QqqApiDiscovery discovery, Uri? browserRedirect, CancellationToken cancellationToken)
    {
       QqqAuthenticationMetadata metadata;
       try
@@ -89,18 +99,18 @@ public sealed partial class QqqSessionClient
       {
          if(Unreadable(exception, QqqCompatibilityIssue.SignInUnavailable, "sign-in description", cancellationToken) is not { } unreadable)
          { throw; }
-         return (QqqSignInMethods.None, unreadable);
+         return (QqqSignInMethods.None, unreadable, null);
       }
       if(string.Equals(metadata.Type, "TABLE_BASED", StringComparison.Ordinal))
       {
          _authentication = metadata;
-         return (QqqSignInMethods.Password, null);
+         return (QqqSignInMethods.Password, null, null);
       }
       List<string> problems = BrowserSignInProblems(discovery, metadata, browserRedirect);
       if(problems.Count != 0)
-      { return (QqqSignInMethods.None, new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, string.Join("; ", problems))); }
+      { return (QqqSignInMethods.None, new QqqCompatibilityProblem(QqqCompatibilityIssue.SignInUnavailable, string.Join("; ", problems)), metadata.ProviderOrigin); }
       _authentication = metadata;
-      return (QqqSignInMethods.Browser, null);
+      return (QqqSignInMethods.Browser, null, metadata.ProviderOrigin);
    }
 
 

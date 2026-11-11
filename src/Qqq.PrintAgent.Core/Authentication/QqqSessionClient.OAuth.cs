@@ -108,15 +108,17 @@ public sealed partial class QqqSessionClient
       string? providerAuthorization = provider.TryGetProperty("authorization_endpoint", out JsonElement authorization) && authorization.ValueKind == JsonValueKind.String ? authorization.GetString() : null;
       bool s256 = provider.TryGetProperty("code_challenge_methods_supported", out JsonElement methods) && methods.ValueKind == JsonValueKind.Array
          && methods.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && string.Equals(value.GetString(), "S256", StringComparison.Ordinal));
-      _diagnostics.Info($"Provider discovery: issuer {ShownText(providerIssuer)}, authorization endpoint {ShownText(providerAuthorization)}, S256 {(s256 ? "supported" : "not listed")}.");
+      _diagnostics.Info($"Provider discovery: issuer {ShownAddress(providerIssuer)}, authorization endpoint {ShownAddress(providerAuthorization)}, S256 {(s256 ? "supported" : "not listed")}.");
       if(!string.Equals(providerIssuer, grant.Issuer, StringComparison.Ordinal))
       {
          _diagnostics.Info($"Browser sign-in refused: the provider's issuer '{ShownText(providerIssuer)}' does not exactly match the issuer QQQ advertises '{ShownText(grant.Issuer)}'.");
          throw QqqApiDiscovery.Configuration();
       }
-      if(!TryHttps(providerAuthorization, out Uri? authorizationUri) || !SameOrigin(authorizationUri!, new Uri(grant.Issuer)))
+      string? problem = HttpsProblem(providerAuthorization, out Uri? authorizationUri) ?? (SameOrigin(authorizationUri!, new Uri(grant.Issuer)) ? null : "is on another origin");
+      if(problem is not null)
       {
-         _diagnostics.Info("Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin.");
+         // The line above shows the endpoint without what it left out, so this one names the rule that refused it.
+         _diagnostics.Info($"Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin: the endpoint {problem}.");
          throw QqqApiDiscovery.Configuration();
       }
       if(!s256)
@@ -258,7 +260,7 @@ public sealed partial class QqqSessionClient
          throw QqqApiDiscovery.Configuration();
       }
       QqqAuthenticationMetadata.NativeGrant grant = metadata.Values!.NativeSessionLogin!;
-      _diagnostics.Info($"Native browser sign-in grant accepted: issuer {ShownText(grant.Issuer)}, {grant.RedirectUris.Count} redirect address(es).");
+      _diagnostics.Info($"Native browser sign-in grant accepted: issuer {ShownAddress(grant.Issuer)}, {grant.RedirectUris.Count} redirect address(es).");
       return grant;
    }
 
@@ -320,9 +322,41 @@ public sealed partial class QqqSessionClient
 
 
 
-   /// <summary>Parses an address and accepts it only when it is an absolute HTTPS address with a host that also passes the configuration-address safety checks.</summary>
-   private static bool TryHttps(string? value, out Uri? uri) => Uri.TryCreate(value, UriKind.Absolute, out uri)
-      && string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && uri.Host.Length != 0 && SafeConfigurationUri(uri);
+   /// <summary>
+   /// Parses an address and accepts it only when it is an absolute HTTPS address that has an origin (see
+   /// <see cref="QqqOrigin.Of"/>) and also passes the configuration-address safety checks. Every address that comes
+   /// through here is text a server supplied, and each is later compared with another, shown, or connected to. A
+   /// host the platform cannot name in ASCII (one that holds a line separator) has no origin, and the platform
+   /// throws when asked to connect to it, so such an address is refused here, where the caller reports a refusal,
+   /// and never reaches a request. The rules are those of <see cref="HttpsProblem"/>, which also says which one failed.
+   /// </summary>
+   private static bool TryHttps(string? value, out Uri? uri) => HttpsProblem(value, out uri) is null;
+
+
+
+   /// <summary>
+   /// Says which rule a server-supplied HTTPS address breaks, as the end of a sentence about it for a log line, or
+   /// null when it breaks none and may be used. The rules are tried in a fixed order and the first one broken is
+   /// named. Nothing of the address is in the answer: a line that describes the address leaves out its query, its
+   /// fragment and its user information, which may carry a secret, so the reason is given by naming the rule and
+   /// never by showing what broke it.
+   /// </summary>
+   private static string? HttpsProblem(string? value, out Uri? uri)
+   {
+      if(!Uri.TryCreate(value, UriKind.Absolute, out uri))
+      { return "is missing or is not an absolute address"; }
+      Uri address = uri;
+      (bool Broken, string Rule)[] rules =
+      [
+         (!string.Equals(address.Scheme, "https", StringComparison.Ordinal), "is not an HTTPS address"),
+         (QqqOrigin.Of(address) is null, "has a host with no ASCII name"),
+         (address.UserInfo.Length != 0, "carries user information"),
+         (address.Query.Length != 0, "carries a query"),
+         (address.Fragment.Length != 0, "carries a fragment"),
+         (!SafeConfigurationUri(address), "names port 0, is longer than 2,048 characters, or contains a wildcard or a backslash"),
+      ];
+      return rules.Where(rule => rule.Broken).Select(rule => rule.Rule).FirstOrDefault();
+   }
 
 
 

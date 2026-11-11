@@ -35,12 +35,14 @@ public sealed record PresentedCertificate(IReadOnlyList<string> Refusals, string
 
    /// <summary>
    /// Describes the certificate Core recorded as refused, with the address that presented it and the time the service
-   /// saw the refusal. The caller passes the address the rejection itself carries: a session client talks to both the
-   /// server and its sign-in provider, so the address is the one that presented this certificate, never one the caller
-   /// assumes from which server it was working on. The subject and issuer are taken as Core holds them, which is
-   /// already printable and bounded, because they are text the server chose. The reasons are listed in a fixed order.
+   /// saw the refusal. Both come from the rejection itself and cannot be passed in: a session client talks to both the
+   /// server and its sign-in provider, so the address is the one Core recorded as presenting this certificate, never
+   /// one a caller assumes from which server it was working on. Core records it as an origin whose host is its ASCII
+   /// name, and it is carried as scheme, host and port without a trailing slash; a host with no such name leaves it
+   /// absent. The subject and issuer are taken as Core holds them, which is already printable and bounded, because
+   /// they are text the server chose. The reasons are listed in a fixed order.
    /// </summary>
-   public static PresentedCertificate From(QqqCertificateRejection rejection, string? origin = null, DateTimeOffset? observedAt = null)
+   public static PresentedCertificate From(QqqCertificateRejection rejection)
    {
       ArgumentNullException.ThrowIfNull(rejection);
       List<string> refusals = [];
@@ -56,7 +58,7 @@ public sealed record PresentedCertificate(IReadOnlyList<string> Refusals, string
       {
          refusals.Add(NotPresented);
       }
-      return new PresentedCertificate(refusals, origin, observedAt, rejection.Subject, rejection.Issuer, AsUtc(rejection.NotBeforeUtc), AsUtc(rejection.NotAfterUtc), rejection.Thumbprint);
+      return new PresentedCertificate(refusals, rejection.Origin?.GetLeftPart(UriPartial.Authority), rejection.ObservedAt, rejection.Subject, rejection.Issuer, AsUtc(rejection.NotBeforeUtc), AsUtc(rejection.NotAfterUtc), rejection.Thumbprint);
    }
 
 

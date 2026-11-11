@@ -46,11 +46,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// Creates a client bound to one server origin. The origin must be an absolute https URL with no credentials, path,
    /// query or fragment (plain http only when explicitly allowed and loopback). The handler never follows redirects or
    /// manages cookies, because redirects are refused and the session cookie is attached by hand to each request, and the
-   /// HTTP client has no overall timeout because every request sets its own bound.
+   /// HTTP client has no overall timeout because every request sets its own bound. A certificate Windows does not trust
+   /// is accepted only from the origins the certificate exception names; without one, from nowhere.
    /// </summary>
    public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null,
-      QqqSessionDiagnostics? diagnostics = null, bool allowUntrustedCertificate = false)
-      : this(origin, handler, timeProvider, allowLoopbackHttp, traffic, diagnostics, allowUntrustedCertificate, QqqPlatformTransport.Instance)
+      QqqSessionDiagnostics? diagnostics = null, QqqCertificateExceptionOrigins? certificateException = null)
+      : this(origin, handler, timeProvider, allowLoopbackHttp, traffic, diagnostics, certificateException ?? QqqCertificateExceptionOrigins.None, QqqPlatformTransport.Instance)
    {
    }
 
@@ -62,12 +63,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// of an upgrade back to it.
    /// </summary>
    internal QqqSessionClient(Uri origin, HttpMessageHandler? handler, TimeProvider? timeProvider, bool allowLoopbackHttp, ApplicationTrafficMeter? traffic,
-      QqqSessionDiagnostics? diagnostics, bool allowUntrustedCertificate, IQqqTransport transport)
+      QqqSessionDiagnostics? diagnostics, QqqCertificateExceptionOrigins certificateException, IQqqTransport transport)
    {
       ArgumentNullException.ThrowIfNull(origin);
       _transport = transport;
       _diagnostics = diagnostics ?? QqqSessionDiagnostics.None;
-      AllowsUntrustedCertificate = allowUntrustedCertificate;
+      CertificateException = certificateException;
       if(!origin.IsAbsoluteUri || origin.UserInfo.Length != 0 || origin.Query.Length != 0 || origin.Fragment.Length != 0
          || !string.Equals(origin.AbsolutePath, "/", StringComparison.Ordinal)
          || (!string.Equals(origin.Scheme, "https", StringComparison.Ordinal)
@@ -82,9 +83,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       {
          Timeout = Timeout.InfiniteTimeSpan,
       };
-      _diagnostics.Info($"Session client created for {Origin.Scheme}://{Origin.Authority} (plain HTTP {(string.Equals(Origin.Scheme, "http", StringComparison.Ordinal) ? "allowed for loopback" : "not allowed")}; untrusted server certificates {(allowUntrustedCertificate ? "ALLOWED" : "refused")}).");
-      if(allowUntrustedCertificate)
-      { _diagnostics.Info($"WARNING: certificate validation is relaxed for {Origin.Authority}. Any certificate, including a forged one, will be accepted. Use this only for development servers."); }
+      _diagnostics.Info($"Session client created for {Origin.Scheme}://{Origin.Authority} (plain HTTP {(string.Equals(Origin.Scheme, "http", StringComparison.Ordinal) ? "allowed for loopback" : "not allowed")}; untrusted server certificates {(certificateException.IsEmpty ? "refused" : "ALLOWED from " + certificateException)}).");
+      if(!certificateException.IsEmpty)
+      { _diagnostics.Info($"WARNING: certificate validation is relaxed for {certificateException} and for no other host. Any certificate presented from there, including a forged one, will be accepted. Use this only for development servers."); }
    }
 
 
@@ -92,19 +93,25 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    public Uri Origin { get; }
    public bool IsAuthenticated => _sessionToken is not null;
 
-   /// <summary>True when this client was told to accept a server certificate that Windows does not trust (self-signed or private authority), for development servers only.</summary>
-   public bool AllowsUntrustedCertificate { get; }
+   /// <summary>The origins from which this client accepts a certificate that Windows does not trust (self-signed or private authority), for development servers only; empty for none. It is fixed when the client is built.</summary>
+   public QqqCertificateExceptionOrigins CertificateException { get; }
 
 
 
    /// <summary>
    /// Decides whether a TLS server certificate is accepted and, either way, says why in the log. A certificate Windows trusts
-   /// is accepted silently (details at debug level). One it does not trust is rejected with the exact policy errors, the
-   /// subject, issuer and validity, and the remedy, unless untrusted certificates were explicitly allowed for this client,
-   /// in which case it is accepted with a warning naming the certificate so the exception is never silent.
+   /// is accepted silently (details at debug level). One it does not trust is accepted only when the address the request
+   /// or the socket upgrade is going to is on an origin the certificate exception names, and then with a warning naming
+   /// the certificate so the exception is never silent. From any other host it is rejected, whatever exception the
+   /// client holds, with the exact policy errors, the subject, issuer and validity, and the remedy; the rejection is
+   /// kept, with the origin that presented the certificate and the time, for the compatibility check to report. The
+   /// address may be one a server supplied (its sign-in provider's discovery document), so the log names its host
+   /// by the ASCII name the connection is made to, never as the server wrote it.
    /// </summary>
-   internal bool EvaluateCertificate(string host, X509Certificate2? certificate, SslPolicyErrors errors)
+   internal bool EvaluateCertificate(Uri address, X509Certificate2? certificate, SslPolicyErrors errors)
    {
+      Uri? origin = QqqOrigin.Of(address);
+      string host = QqqOrigin.ShownAuthority(address);
       string summary = certificate is null ? "no certificate presented"
          : $"subject '{ShownText(certificate.Subject)}', issuer '{ShownText(certificate.Issuer)}', valid {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd} to {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}, thumbprint {certificate.Thumbprint}";
       if(errors == SslPolicyErrors.None)
@@ -112,19 +119,20 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _diagnostics.Debug(() => $"TLS certificate for {host} accepted by Windows: {summary}.");
          return true;
       }
-      if(AllowsUntrustedCertificate)
+      if(CertificateException.Covers(address))
       {
-         _diagnostics.Info($"TLS certificate for {host} is NOT trusted by Windows ({errors}) but was accepted because untrusted certificates are allowed for this server: {summary}.");
+         _diagnostics.Info($"TLS certificate for {host} is NOT trusted by Windows ({errors}) but was accepted because the certificate exception covers this origin: {summary}.");
          return true;
       }
       Volatile.Write(ref _certificateRejection, new QqqCertificateRejection(errors, certificate is null ? null : ShownText(certificate.Subject), certificate is null ? null : ShownText(certificate.Issuer),
-         certificate?.NotBefore.ToUniversalTime(), certificate?.NotAfter.ToUniversalTime(), certificate?.Thumbprint));
+         certificate?.NotBefore.ToUniversalTime(), certificate?.NotAfter.ToUniversalTime(), certificate?.Thumbprint, origin, _timeProvider.GetUtcNow()));
       _diagnostics.Info($"TLS certificate for {host} rejected: {errors}. Certificate: {summary}. "
          + (errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors)
             ? "Windows does not trust the issuing authority for the account this process runs as (the service runs as LocalSystem and reads the machine store, not your user store). Install the issuer's root certificate in the Local Machine Trusted Root store, or enable 'Allow untrusted server certificate' in Connection settings for a development server."
             : errors.HasFlag(SslPolicyErrors.RemoteCertificateNameMismatch)
                ? "The certificate is not issued for this host name or address; use the address the certificate names, or reissue it."
-               : "The server presented no usable certificate."));
+               : "The server presented no usable certificate.")
+         + (CertificateException.IsEmpty ? "" : $" The certificate exception in force covers {CertificateException} and not this host."));
       return false;
    }
 
@@ -208,7 +216,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       ArgumentNullException.ThrowIfNull(credential);
       if(credential.Origin != Origin)
       {
-         _diagnostics.Info($"Saved session refused: it belongs to {QqqSessionDiagnostics.Describe(credential.Origin)}, not {QqqSessionDiagnostics.Describe(Origin)}.");
+         _diagnostics.Info($"Saved session refused: it belongs to {Written(credential.Origin)}, not {Written(Origin)}.");
          throw new ArgumentException("The session belongs to another server.", nameof(credential));
       }
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -466,7 +474,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       _diagnostics.Info($"Authentication metadata: type {Shown(metadata.Type)}, provider '{Shown(metadata.Name)}', native browser sign-in {(grant is null ? "not offered" : "offered")}.");
       _diagnostics.Debug(() => grant is null
          ? $"Provider values present: {metadata.Values is not null}; client id {(string.IsNullOrEmpty(metadata.Values?.ClientId) ? "(none)" : "present")}; scopes '{Shown(metadata.Values?.Scopes)}'."
-         : $"Native grant: flow {Shown(grant.Flow)}, challenge {Shown(grant.CodeChallengeMethod)}, prompt {Shown(grant.Prompt)}, issuer {ShownText(grant.Issuer)}, discovery {ShownText(grant.DiscoveryUrl)}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{ShownAddresses(grant.RedirectUris)}], scopes '{Shown(metadata.Values?.Scopes)}'.");
+         : $"Native grant: flow {Shown(grant.Flow)}, challenge {Shown(grant.CodeChallengeMethod)}, prompt {Shown(grant.Prompt)}, issuer {ShownAddress(grant.Issuer)}, discovery {ShownAddress(grant.DiscoveryUrl)}, {grant.RedirectUris?.Count ?? 0} redirect address(es) [{ShownAddresses(grant.RedirectUris)}], scopes '{Shown(metadata.Values?.Scopes)}'.");
       return metadata;
    }
 
@@ -538,7 +546,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    {
       if(!providerDiscovery && !SameOrigin(uri, Origin))
       {
-         _diagnostics.Info($"Refused a request to {QqqSessionDiagnostics.Describe(uri)}: it is not on the session origin {Origin.Authority}.");
+         // The comparison is made on the ASCII names, so both sides are shown that way.
+         _diagnostics.Info($"Refused a request to {QqqSessionDiagnostics.Describe(uri)}: it is not on the session origin {QqqOrigin.ShownAuthority(Origin)}.");
          throw new ArgumentException("Cross-origin QQQ requests are forbidden.", nameof(uri));
       }
       string route = QqqSessionDiagnostics.Describe(uri);
@@ -846,10 +855,17 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>Compares scheme, host and port only, ignoring case; used to refuse cross-origin requests.</summary>
-   private static bool SameOrigin(Uri left, Uri right) => left.IsAbsoluteUri && right.IsAbsoluteUri
-      && string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase)
-      && string.Equals(left.IdnHost, right.IdnHost, StringComparison.OrdinalIgnoreCase) && left.Port == right.Port;
+   /// <summary>
+   /// Compares scheme, host and port only, ignoring case; used to refuse cross-origin requests and to hold a sign-in
+   /// provider's endpoints to its issuer's origin. Both addresses are reduced to their origin by
+   /// <see cref="QqqOrigin.Of"/> first, so the host is compared by its ASCII name and an address that has no nameable
+   /// origin is not the same origin as anything, itself included. The addresses compared here can be text a server
+   /// supplied, and the platform throws when asked to name some hosts (one that holds a line separator), so the
+   /// comparison must not be made on the raw address: such an address is a refusal, never an exception.
+   /// </summary>
+   private static bool SameOrigin(Uri left, Uri right) => QqqOrigin.Of(left) is { } first && QqqOrigin.Of(right) is { } second
+      && string.Equals(first.Scheme, second.Scheme, StringComparison.OrdinalIgnoreCase)
+      && string.Equals(first.IdnHost, second.IdnHost, StringComparison.OrdinalIgnoreCase) && first.Port == second.Port;
 
 
 
@@ -971,6 +987,40 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
    /// <summary>The same for longer text the server can influence: an address, a certificate name, an error description, a failure's message, or an identity value, which the contract lets run to 200 characters and which an operator compares with another.</summary>
    private static string ShownText(string? value) => QqqCompatibilityProblem.Printable(value, QqqCompatibilityProblem.TextLimit);
+
+
+
+   /// <summary>
+   /// The same for an address a server supplied as text, where the line says what this client accepted or will use:
+   /// the issuer and discovery address of a sign-in provider, and the provider's own issuer and authorization
+   /// endpoint. An HTTP or WebSocket address is shown as <see cref="QqqSessionDiagnostics.Describe(Uri)"/> shows any
+   /// address: its host as the ASCII name the connection is made to (a host that has none, as written and made
+   /// printable), and no user information, query or fragment. A look-alike letter in the host therefore reads as
+   /// the "xn--" name it is in every line. What was left out is said, by kind and never by content ("(query
+   /// omitted)"): a query or user information can carry a secret, and its presence can be the very reason the
+   /// address is refused in the next line, so without the note the log would show a usable address and then refuse
+   /// it. Text that is not such an address (a relative one, another scheme, or none at all) is shown as it was
+   /// written. The lines that reject a value quote it through <see cref="ShownText"/> instead: an issuer that does
+   /// not match another exactly, and an issuer or discovery address the grant's checks refuse.
+   /// </summary>
+   private static string ShownAddress(string? value)
+   {
+      if(!Uri.TryCreate(value, UriKind.Absolute, out Uri? address) || address.Scheme is not ("https" or "http" or "wss" or "ws"))
+      { return ShownText(value); }
+      (bool Present, string Part)[] parts = [(address.UserInfo.Length != 0, "user information"), (address.Query.Length != 0, "query"), (address.Fragment.Length != 0, "fragment")];
+      string[] omitted = [.. parts.Where(part => part.Present).Select(part => part.Part)];
+      return ShownText(QqqSessionDiagnostics.Describe(address)) + (omitted.Length == 0 ? "" : " (" + string.Join(", ", omitted) + " omitted)");
+   }
+
+
+
+   /// <summary>
+   /// An address as it was written, without its query, fragment or user information and made printable, for a line
+   /// that says two addresses differ when they were compared as written. The form every other line uses names a
+   /// host by its ASCII name, and two addresses that differ only in how that name was written would then read as
+   /// the same text on both sides of "not".
+   /// </summary>
+   private static string Written(Uri address) => ShownText(address.IsAbsoluteUri ? address.Scheme + "://" + address.Authority + address.AbsolutePath : address.ToString());
 
 
 
