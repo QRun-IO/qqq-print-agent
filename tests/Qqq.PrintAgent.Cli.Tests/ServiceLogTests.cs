@@ -175,6 +175,12 @@ public sealed class ServiceLogTests : IDisposable
    /// <c>X-QQQ-Device-Token</c> header, and <c>idTokenHint</c> in the sign-out response with the provider's
    /// <c>id_token_hint</c>. The verifier and the hint are covered in every spelling and letter case.
    /// </para>
+   /// <para>
+   /// The last rows are the edges of the header and callback patterns: a header whose value stands on the next
+   /// line, an authorization header written with an equals sign, the two headers under the names a web server's
+   /// environment gives them, a no-break space or a zero-width space between a name and its separator, and a
+   /// callback whose ampersands are written the way HTML writes them.
+   /// </para>
    /// </summary>
    [Theory]
    [InlineData("Authorization: Bearer synthetic-value-1", "synthetic-value-1")]
@@ -251,6 +257,23 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("access_token%3Dsynthetic-value-72%26token_type%3Dbearer", "synthetic-value-72")]
    [InlineData("{\"grant_type\":\"authorization_code\",\"code_verifier\":\"synthetic-value-90\"}", "synthetic-value-90")]
    [InlineData("{\"id_token_hint\":\"synthetic-value-91\",\"post_logout_redirect_uri\":\"x\"}", "synthetic-value-91")]
+   [InlineData("Authorization:\r\n Basic synthetic-value-73", "synthetic-value-73")]
+   [InlineData("Authorization: \r\nBasic synthetic-value-74", "synthetic-value-74")]
+   [InlineData("Cookie:\r\n other=synthetic-value-75", "synthetic-value-75")]
+   [InlineData("Authorization=Basic synthetic-value-76", "synthetic-value-76")]
+   [InlineData("headers: Accept=*/*, Authorization=Basic synthetic-value-77", "synthetic-value-77")]
+   [InlineData("HTTP_AUTHORIZATION: Basic synthetic-value-78", "synthetic-value-78")]
+   [InlineData("HTTP_COOKIE: other=synthetic-value-79", "synthetic-value-79")]
+   [InlineData("Authorization\u00A0: Basic synthetic-value-80", "synthetic-value-80")]
+   [InlineData("Authorization\u200B: Basic synthetic-value-81", "synthetic-value-81")]
+   [InlineData("Cookie\u00A0: other=synthetic-value-82", "synthetic-value-82")]
+   [InlineData("Cookie\u200B: other=synthetic-value-83", "synthetic-value-83")]
+   [InlineData("sessionUUID\u200B=synthetic-value-84", "synthetic-value-84")]
+   [InlineData("code\u200B=synthetic-value-88&code_verifier\u00A0=synthetic-value-89", "synthetic-value-88")]
+   [InlineData("code\u200B=synthetic-value-88&code_verifier\u00A0=synthetic-value-89", "synthetic-value-89")]
+   [InlineData("\"Authorization\" => \"Basic synthetic-value-85\"", "synthetic-value-85")]
+   [InlineData("callback ?x=1&amp;code=synthetic-value-86&amp;state=synthetic-value-87", "synthetic-value-86")]
+   [InlineData("callback ?x=1&amp;code=synthetic-value-86&amp;state=synthetic-value-87", "synthetic-value-87")]
    public void Secrets_NeverReachTheRingTheSinkOrTheFile(string message, string secret)
    {
       (ServiceLog log, AgentActivityLog file) = Create();
@@ -303,7 +326,11 @@ public sealed class ServiceLogTests : IDisposable
    /// and in either letter case, and keeps its name; so does the same header as a member of a JSON object. The ID-token
    /// hint, the code verifier and the session cookie's two names lose their value and keep their name and everything
    /// around it. A callback's code and state lose a quoted value with its quotes, and a percent-encoded callback loses
-   /// both values up to the encoded separator. Each text is the same in the ring, the host's sink and the file.
+   /// both values up to the encoded separator. A header whose own line holds nothing after its name loses the next
+   /// line, which is where its value then stands, and the lines after that are kept; an authorization header written
+   /// with an equals sign, or under the name a web server's environment gives it, is a header too; and a callback
+   /// whose ampersands are written as in HTML loses both values. Each text is the same in the ring, the host's sink
+   /// and the file.
    /// </summary>
    [Theory]
    [InlineData("Authorization: Basic c3ludGhldGlj", "Authorization: [REDACTED]")]
@@ -321,6 +348,13 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("callback ?code=\"synthetic-quoted\"&state='synthetic-quoted-2' received", "callback ?code=[REDACTED]&state=[REDACTED] received")]
    [InlineData("callback ?code%3Dsynthetic-encoded%26state%3Dsynthetic-encoded-2 received", "callback ?code%3D[REDACTED]%26state%3D[REDACTED] received")]
    [InlineData("redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb%3FCODE%3dsynthetic-encoded%23top", "redirect_uri=https%3A%2F%2Fapp.example.com%2Fcb%3FCODE%3d[REDACTED]%23top")]
+   [InlineData("Authorization:\r\n Basic synthetic-ticket\r\nAccept: */*", "Authorization:\n   [REDACTED]\n  Accept: */*")]
+   [InlineData("Authorization: \r\nBasic synthetic-ticket", "Authorization: \n  [REDACTED]")]
+   [InlineData("Cookie:\n\tother=synthetic-cookie; theme=dark\nAccept: */*", "Cookie:\n  \t[REDACTED]\n  Accept: */*")]
+   [InlineData("headers: Accept=*/*, Authorization=Basic synthetic-ticket", "headers: Accept=*/*, Authorization=[REDACTED]")]
+   [InlineData("HTTP_AUTHORIZATION: Basic synthetic-ticket", "HTTP_AUTHORIZATION: [REDACTED]")]
+   [InlineData("HTTP_COOKIE: other=synthetic-cookie", "HTTP_COOKIE: [REDACTED]")]
+   [InlineData("<a href=\"https://print.example.com/cb?session_state=kept&amp;code=synthetic-code&amp;state=synthetic-state\">", "<a href=\"https://print.example.com/cb?session_state=kept&amp;code=[REDACTED]&amp;state=[REDACTED]\">")]
    public void AuthorizationHeadersAndTheValuesAddedLater_AreRedacted(string message, string expected)
    {
       (ServiceLog log, AgentActivityLog file) = Create();
@@ -451,7 +485,8 @@ public sealed class ServiceLogTests : IDisposable
    /// state that is not a parameter of an address (on its own, or as members of a JSON object) where the message names
    /// no code verifier, a cookie whose name is not one of the product's two when it stands under a header name that
    /// only ends in "Cookie", with an equals sign in place of the colon, or as a JSON member, a client assertion, and
-   /// a secret whose name is percent-encoded itself or whose colon is, all pass through unchanged. The redaction
+   /// a secret whose name is percent-encoded itself or whose colon is, and a callback value that opens a quote and
+   /// never closes it, all pass through unchanged. The redaction
    /// cannot help with these. They stay out of the log only for as long as nothing writes them: the service is handed
    /// a session credential and not the callback, the session client logs an address without its query (asserted
    /// below) and says only whether a cookie was attached. This test does not show that nothing writes them; it shows
@@ -476,6 +511,8 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("expectedNonce=synthetic-nonce")]
    [InlineData("code%5Fverifier=synthetic-verifier")]
    [InlineData("%7B%22idTokenHint%22%3A%22synthetic-hint%22%7D")]
+   [InlineData("callback ?code=\"synthetic-code and no closing quote")]
+   [InlineData("callback ?code='synthetic-code and no closing quote")]
    public void WhatTheRedactionStillDoesNotRecognise_IsRecorded(string message)
    {
       (ServiceLog log, _) = Create();
@@ -490,11 +527,47 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
+   /// Where the redaction takes part of a secret and leaves the rest, recorded like the shapes above so that each is a
+   /// known fact. A named value ends at the first space, comma, semicolon or ampersand, so what follows one of those
+   /// survives; a quoted value ends at the first quote, so an escaped quote inside it ends it early; an arrow
+   /// (<c>=&gt;</c>) is read as an equals sign with the value "&gt;", and the real value stands after it; and a
+   /// header whose value begins on its own line and is continued on the next loses the first line only. Each
+   /// expected text holds the part that survives. Closing these would need a parser for each notation, and a longer
+   /// reach (a named value to the end of its line, a header over every indented line after it) would take lines an
+   /// operator needs, the header lines of a logged request among them.
+   /// </summary>
+   [Theory]
+   [InlineData("id_token_hint=synthetic-head,surviving-tail", "id_token_hint=[REDACTED],surviving-tail")]
+   [InlineData("sessionUUID=synthetic-head surviving-tail", "sessionUUID=[REDACTED] surviving-tail")]
+   [InlineData("deviceToken=synthetic-head;surviving-tail", "deviceToken=[REDACTED];surviving-tail")]
+   [InlineData("{\"sessionUUID\":\"synthetic-head\\\"surviving-tail\"}", "{\"sessionUUID\":[REDACTED]surviving-tail\"}")]
+   [InlineData("password='it\\'s surviving-tail'", "password=[REDACTED]s surviving-tail'")]
+   [InlineData("sessionUUID => surviving-value", "sessionUUID =[REDACTED] surviving-value")]
+   [InlineData("Authorization: Digest username=\"operator\",\r\n response=\"surviving-tail\"", "Authorization: [REDACTED]\n   response=\"surviving-tail\"")]
+   [InlineData("Cookie: a=synthetic-head;\r\n\tother=surviving-tail", "Cookie: [REDACTED]\n  \tother=surviving-tail")]
+   public void WhatSurvivesBesideARedactedValue_IsRecorded(string message, string expected)
+   {
+      (ServiceLog log, _) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(expected, AgentActivityLog.Redact(message));
+      Assert.Equal(expected, Assert.Single(_sink));
+      Assert.Contains("surviving-", expected, StringComparison.Ordinal);
+      Assert.DoesNotContain("synthetic-head", expected, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
    /// What the redaction hides although it is not a secret, recorded for the same reason. A header pattern takes the
    /// rest of its line, so a sentence that happens to put a colon after the word "cookie" or "authorization" loses
    /// what follows; a header whose name only ends in "-Cookie" is hidden like a cookie header; a parameter named
    /// "state" or "code" in an ordinary address loses its value; the word "uuid" with a value after it is taken for
-   /// a session response's; and in a message that names a code verifier every "code" with a value loses it. No line
+   /// a session response's; in a message that names a code verifier every "code" with a value loses it; a line that
+   /// ends in "authorization:" or "cookie:" takes the next line with it, as a header whose value stands there
+   /// does; "authorization" before an equals sign is a header; and the session cookie's name before a colon loses
+   /// what follows even when that is a number. No line
    /// the product writes has these shapes: the session client writes "session cookie yes" without a colon, and its
    /// one address with a query is the printer list's. If such a line is ever written it must be worded differently,
    /// or the pattern anchored; hiding too much is the side these patterns err on.
@@ -508,6 +581,11 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("GET /report?code=E1234&lang=en answered 500", "GET /report?code=[REDACTED]&lang=en answered 500")]
    [InlineData("The job's uuid: 204 was not found", "The job's uuid: [REDACTED] was not found")]
    [InlineData("Exchange failed with exit code=1 (codeVerifier present yes)", "Exchange failed with exit code=[REDACTED] (codeVerifier present yes)")]
+   [InlineData("sessionId: 12 established", "sessionId: [REDACTED] established")]
+   [InlineData("The server asks for authorization:\nsign in again\nand try once more", "The server asks for authorization:\n  [REDACTED]\n  and try once more")]
+   [InlineData("The proxy removed the cookie:\r\nthe request was refused", "The proxy removed the cookie:\n  [REDACTED]")]
+   [InlineData("authorization=required for this device", "authorization=[REDACTED]")]
+   [InlineData("session_cookie: yes", "session_cookie: [REDACTED]")]
    public void WhatTheRedactionHidesAlthoughItIsNotASecret_IsRecorded(string message, string expected)
    {
       (ServiceLog log, _) = Create();

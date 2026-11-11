@@ -44,8 +44,12 @@ what the service and its clients will be able to build on. The last two are abou
   semicolon or a space, and a nonce are not covered. An `Authorization:` or `Proxy-Authorization:` header line
   loses its whole value to the end of the line,
   whatever its scheme; a line that began with `Authorization: Bearer` and went on with other text used to keep
-  that text. A callback's `code` and `state` are also redacted when the value is quoted or the callback is
-  percent-encoded inside another address.
+  that text. A callback's `code` and `state` are also redacted when the value is quoted, when the callback is
+  percent-encoded inside another address, and when its ampersands are written `&amp;`. A cookie or authorization
+  header is also recognised when its value stands on the next line, under the names `HTTP_COOKIE` and
+  `HTTP_AUTHORIZATION`, with a no-break or zero-width space before the colon, and, for the authorization header,
+  with an equals sign in place of the colon. What is still not recognised, and what is hidden although it is no
+  secret, is listed in audit W41 and held by tests.
 - **Service log.** The entries the service keeps in memory are stamped by the service's own clock, and a
   per-server view of the log, which nothing uses yet, would prefix a server's lines with the first eight characters
   of its identifier, never with its name.
