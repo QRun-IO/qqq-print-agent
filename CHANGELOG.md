@@ -34,12 +34,16 @@ models, and on the connection wizard, in a later change.
   its stored data is ready.
 - **One command at a time per server.** A second command on a server that is busy is refused with a message that
   says what is still running; a command on another server is not affected, and refreshing never stops. A
-  snapshot that is older than a change made from the window is not shown for the server that changed.
+  snapshot that is older than a change made from the window is not shown for the server that changed. Whether
+  it is older is decided by when its request was sent, which the client's result now says, and not by when the
+  window asked: the wizard has snapshots of its own in flight, and the window can be handed one of them.
 - **Messages.** A message is shown on the page that caused it. One that has not been on screen is never replaced:
   the results of commands that ended while the operator was elsewhere wait under their page, in order, and are
-  shown one after the other when the page is opened. Leaving a page drops only the message that was on screen. A
-  failure about a server that has since been removed is shown on the page that took its place, and says which
-  server it was about.
+  shown one after the other when the page is opened. When the operator leaves a page, only the message that was
+  on screen is dropped. When the window itself changes the page (it opens where 1.x opened, a wizard ends, the
+  server on screen is removed), an error that was on screen is kept and shown when the operator next opens that
+  page. A failure about a server that has since been removed is shown on the page that took its place, and says
+  which server it was about.
 
 Every control an operator acts on in the companion's own views now has an automation identifier, and the
 identifiers are recorded with the control each is on (2.0). Nothing an operator sees or hears changes. Fourteen
@@ -170,7 +174,9 @@ sees changes. The connection wizard and the server tree will be built on it.
 - **A snapshot that is newer than a change.** A caller that reads the state to learn the outcome of a change can
   ask for a snapshot that is sent after its call. It is never answered from a snapshot sent earlier: it waits
   out one that is in flight and then sends another, and over the limit it waits its turn instead of being
-  skipped.
+  skipped. A snapshot's result says which of the client's snapshots it is, by number, and the result of a change
+  says how many snapshots had been sent when its reply was read, so a caller can tell a snapshot that was sent
+  after a change was answered from one that may have been sent before it.
 - **Logging.** A log entry names the operation, the server's identifier and the kind of failure. It holds
   nothing from a request's arguments and, of a reply, at most the code of a refusal this version does not know,
   so a session credential, an enrollment code and the identity provider's sign-out request reach no log line.
