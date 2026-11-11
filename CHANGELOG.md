@@ -25,8 +25,8 @@ lives, so that tests can run it:
   a harmless child program, a pipe the test serves itself, the test process and a built-in Windows service that
   is only read. No test starts Windows Installer, asks the release feed, connects to the installed service's
   pipe or starts or stops a service. The minimum line coverage of the Windows library in
-  `build/minimum-coverage.json` rises from 87 to 94. With this change the library measured between 95.69%
-  and 95.82% of its lines over three runs (4,358 to 4,364 of 4,554), which puts it above its release bar of 90.
+  `build/minimum-coverage.json` rises from 87 to 95. With this change the library measured between 96.06%
+  and 96.14% of its lines over four runs (4,539 to 4,543 of 4,725), which puts it above its release bar of 90.
 
 Version 2 of the management pipe: the contract's gaps are closed (2.0). The contract is a set of types that
 nothing serves or sends yet, so none of the first seven items changes what the installed product does; they change
