@@ -35,7 +35,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Stores a new server together with its certificate exception and its session, or nothing. The request carries the sign-in provider's origin the check reported, for comparison with the service's own read; when they differ nothing is stored and the answer is <see cref="ManagementErrorCode.ProviderChanged"/>.</summary>
+   /// <summary>Stores a new server together with its certificate exception and its session, or nothing. The request states which sign-in provider the check showed the operator: the origin the check reported, or none when the member is left out. Nothing is stored and the answer is <see cref="ManagementErrorCode.ProviderChanged"/> when the provider the service reads is not that one, which includes reading one where the check named none and none where it named one.</summary>
    public const string ServersAdd = "servers.add";
 
 
@@ -128,7 +128,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Switches a server's certificate exception on or off. A request that switches it on after a check carries the sign-in provider's origin the check reported, for comparison with the service's own read; when they differ nothing is changed and the answer is <see cref="ManagementErrorCode.ProviderChanged"/>.</summary>
+   /// <summary>Switches a server's certificate exception on or off. A request that switches it on states which sign-in provider the check showed the operator: the origin the check reported, or none when the member is left out. Nothing is changed and the answer is <see cref="ManagementErrorCode.ProviderChanged"/> when the provider the service reads is not that one, which includes reading one where the check named none and none where it named one. A request that switches it off accepts nothing, so nothing is compared.</summary>
    public const string TrustSet = "trust.set";
 
 
