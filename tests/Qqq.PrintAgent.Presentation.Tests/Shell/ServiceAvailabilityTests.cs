@@ -135,7 +135,12 @@ public sealed class ServiceAvailabilityTests
 
 
 
-   /// <summary>When the server whose page is on screen is gone because the service now says that its stored data is not ready, the Computer page is shown, which says why, and no wizard is asked for.</summary>
+   /// <summary>
+   /// When the server whose page is on screen is not listed because the service now says that its stored data is
+   /// not ready, the Computer page is shown, which says why, and no wizard is asked for. Nothing was removed: the
+   /// service lists no server in that state and does not touch what is stored. So nothing says that a server was
+   /// removed. The message says that the server is not listed, with the reason, and so does the log.
+   /// </summary>
    [Fact]
    public async Task SelectedServerGone_StoredDataNotReady_ShowsComputer_NotTheWizard()
    {
@@ -149,7 +154,59 @@ public sealed class ServiceAvailabilityTests
       Assert.True(fixture.Shell.Tree.Computer.IsSelected);
       Assert.Empty(fixture.Wizard.Requests);
       Assert.False(fixture.Shell.WizardOpen);
-      Assert.Equal("Server 1 is no longer on this computer.", fixture.Shell.Messages.Current!.Message);
+      Assert.Equal(new FeedbackMessage("Server not listed",
+         "Server 1 is not listed now. A newer build of the print agent wrote the stored data (version 4; this build reads up to version 3), so the service is not printing.", FeedbackSeverity.Warning),
+         fixture.Shell.Messages.Current);
+      Assert.Contains($"INFO Server {Snapshots.Id(1)} is not listed while the stored data is not ready (NewerBuild); its page was on screen, and Computer is shown instead.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, SaysThatAServerWent);
+   }
+
+
+
+   /// <summary>
+   /// A computer with two servers whose service then answers that its stored data is not ready, in each way it can
+   /// say so. The snapshot lists no server, as the contract has it, and none was removed. The Computer page is
+   /// shown; neither the message nor the log says that a server was removed or is no longer on this computer; no
+   /// wizard is asked for. That stays so when the service stops answering after that. What waited under a server's
+   /// page is not treated as a gone server's: when the data is ready again and the servers are listed again, it is
+   /// shown on its own page, in its own words.
+   /// </summary>
+   [Theory]
+   [InlineData(StoredState.NewerBuild)]
+   [InlineData(StoredState.UpgradeIncomplete)]
+   [InlineData("repairing")]
+   public async Task ServersNotListed_WhileTheStoredDataIsNotReady_NoServerIsSaidToHaveGone_AndTheirMessagesWait(string status)
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1, "One"), Snapshots.Server(2, "Two"));
+      fixture.Shell.Select(PageKey.ForServer(PageKind.Jobs, Snapshots.Id(2)));
+      FeedbackMessage waiting = new("Reconnect failed", "One could not be reconnected.", FeedbackSeverity.Error);
+      fixture.Shell.Messages.Show(PageKey.Server(Snapshots.Id(1)), waiting);
+
+      await fixture.Tick(NotReady(new StoredState(status)));
+
+      Assert.False(fixture.Shell.Availability.StoredDataReady);
+      Assert.Equal(PageKey.Computer, fixture.Shell.Selected);
+      Assert.Empty(fixture.Shell.Tree.Servers);
+      Assert.Equal(new FeedbackMessage("Server not listed", "Two is not listed now. " + fixture.Shell.Availability.Summary, FeedbackSeverity.Warning), fixture.Shell.Messages.Current);
+      Assert.Equal(0, fixture.Shell.Messages.Waiting);
+      Assert.False(SaysThatAServerWent(fixture.Shell.Messages.Current!.Title + " " + fixture.Shell.Messages.Current.Message));
+      Assert.Empty(fixture.Wizard.Requests);
+
+      await fixture.TickFailing(new IOException("The pipe is broken."));
+
+      Assert.Equal(PageKey.Computer, fixture.Shell.Selected);
+      Assert.Equal("Server not listed", fixture.Shell.Messages.Current!.Title);
+      Assert.Equal(0, fixture.Shell.Messages.Waiting);
+
+      await fixture.Tick(Snapshots.Server(1, "One"), Snapshots.Server(2, "Two"));
+
+      Assert.Equal(PageKey.Computer, fixture.Shell.Selected);
+      Assert.Equal("One,Two", fixture.ServerNames);
+      Assert.True(fixture.Shell.Select(PageKey.Server(Snapshots.Id(1))));
+      Assert.Equal(waiting, fixture.Shell.Messages.Current);
+      Assert.DoesNotContain(fixture.Log.Entries, SaysThatAServerWent);
+      Assert.Empty(fixture.Wizard.Requests);
    }
 
 
@@ -304,4 +361,10 @@ public sealed class ServiceAvailabilityTests
       Assert.Throws<ArgumentNullException>(() => ServiceAvailability.From(skipped, null!, null));
       Assert.All(inFlight, request => Assert.False(request.IsCompleted));
    }
+
+
+
+   /// <summary>True for text that says a server was removed or is no longer on this computer.</summary>
+   private static bool SaysThatAServerWent(string text)
+      => text.Contains("no longer on this computer", StringComparison.OrdinalIgnoreCase) || text.Contains("removed", StringComparison.OrdinalIgnoreCase);
 }

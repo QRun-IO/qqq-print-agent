@@ -21,7 +21,9 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// data is not ready, or the service does not answer, the Computer page stays and says why; the wizard is shown
 /// only when the snapshot answered and the stored data is ready. Once the operator has chosen a page themselves the
 /// window does not land anywhere by itself. When the server whose page is on screen goes, its neighbour is shown
-/// and a message says that the server went.
+/// and a message says that the server went. That is said only when a snapshot whose stored data is ready no longer
+/// lists the server: when the servers are not listed because the stored data is not ready, the Computer page is
+/// shown with the reason, and nothing says that a server was removed, because none was.
 /// </para>
 /// <para>
 /// It does not know the wizard. It asks for one through <see cref="IWizardLauncher"/>, after it has decided that
@@ -85,6 +87,9 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
    /// <summary>True once the shell was disposed; nothing is read or shown after that.</summary>
    private bool _disposed;
+
+   /// <summary>The servers the tree had when a snapshot whose stored data is ready was last shown: a server of these that such a snapshot no longer lists has gone.</summary>
+   private IReadOnlyList<ServerNode> _listedWhenReady = [];
 
 
 
@@ -358,7 +363,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>Shows a page: selects its node, drops the message of the page that was left and words the heading. False when the page is not in the tree.</summary>
+   /// <summary>Shows a page: selects its node, moves the message bar to it (which drops the message that was on screen and keeps those of the page left that were not) and words the heading. False when the page is not in the tree.</summary>
    private bool Show(PageKey page)
    {
       if(!Tree.Select(page))

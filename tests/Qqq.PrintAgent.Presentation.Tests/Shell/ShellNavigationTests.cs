@@ -206,7 +206,7 @@ public sealed class ShellNavigationTests
 
       fixture.Shell.Select(PageKey.Logs);
       Assert.False(fixture.Shell.StartRepair(Snapshots.Id(9)));
-      Assert.Equal(new FeedbackMessage("Cannot start now", "That server is no longer on this computer.", FeedbackSeverity.Warning), fixture.Shell.Messages.Current);
+      Assert.Equal(new FeedbackMessage("Cannot start now", "That server is not in this window's list. It may have been removed from this computer.", FeedbackSeverity.Warning), fixture.Shell.Messages.Current);
       Assert.False(fixture.Shell.StartPairing(null!));
       Assert.Equal(PageKey.Logs, fixture.Shell.Selected);
 

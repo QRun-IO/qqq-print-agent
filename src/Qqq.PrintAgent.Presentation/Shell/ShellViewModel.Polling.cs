@@ -215,32 +215,67 @@ public sealed partial class ShellViewModel
 
 
    /// <summary>
-   /// Decides which page is on screen after a reconcile. When the selected server went, the tree has already moved
-   /// to its neighbour, and a message there says that the server went (not on the wizard's page, which shows no
-   /// message from elsewhere). A page the wizard asked for is shown once its server is listed. Otherwise, the first
-   /// time the service answers with its stored data ready and the operator has not chosen a page, the window lands.
+   /// Decides which page is on screen after a reconcile, and what becomes of the messages of servers that went.
+   /// When the server whose page was on screen is not listed any more, the tree has already moved to its neighbour;
+   /// what is said about that is kept under the page shown instead before the bar moves there, so it waits behind
+   /// anything that was already waiting on that page and covers none of it. A page the wizard asked for is shown
+   /// once its server is listed. The wizard's page with no wizard open (one ended with nothing to show) goes where
+   /// the window would land, which with no server is a new wizard. Otherwise, the first time the service answers
+   /// with its stored data ready and the operator has not chosen a page, the window lands.
    /// </summary>
    private void Place(ServerNode? went)
    {
       if(went is not null)
       {
-         Messages.Forget(went.ServerId);
-         _log.Info("Server {ServerId} is no longer on this computer; its page was on screen, and {Page} is shown instead.", went.ServerId, Selected);
+         SayThatItsPageIsNotShown(went);
+      }
+      if(Availability.StoredDataReady)
+      {
+         Messages.ServersWent(serverId => Tree.Server(serverId) is not null,
+            [.. _listedWhenReady.Where(node => Tree.Server(node.ServerId) is null).Select(node => KeyValuePair.Create(node.ServerId, node.Name))], Selected);
+         _listedWhenReady = Tree.Servers;
+      }
+      if(went is not null)
+      {
          GoTo(Selected);
-         if(Selected != PageKey.Wizard)
-         {
-            Messages.Show(Selected, ShellMessages.ServerRemoved(went.Name));
-         }
       }
       else if(_awaited is { } awaited && Show(awaited))
       {
          _awaited = null;
          _operatorChose = true;
       }
+      else if(Selected == PageKey.Wizard && !WizardOpen)
+      {
+         GoTo(Landing());
+      }
       else if(!_landed && !_operatorChose && Availability.StoredDataReady)
       {
          _landed = true;
          GoTo(Landing());
+      }
+   }
+
+
+
+   /// <summary>
+   /// Says, in the log and as a message under the page shown instead, why the page of a server is no longer on
+   /// screen. A snapshot whose stored data is ready lists every server, so a server it does not list has been
+   /// removed, and that is said (not on the wizard's page, which shows no notice from elsewhere). While the stored
+   /// data is not ready the service lists no server and has removed none: the message and the log then say that the
+   /// server is not listed, with the reason, and nothing about a removal.
+   /// </summary>
+   private void SayThatItsPageIsNotShown(ServerNode went)
+   {
+      if(!Availability.StoredDataReady)
+      {
+         _log.Info("Server {ServerId} is not listed while the stored data is not ready ({Availability}); its page was on screen, and {Page} is shown instead.", went.ServerId, Availability.Kind, Selected);
+         Messages.Show(Selected, ShellMessages.ServerNotListed(went.Name, Availability.Summary));
+         return;
+      }
+      _log.Info("Server {ServerId} is no longer on this computer; its page was on screen, and {Page} is shown instead.", went.ServerId, Selected);
+      if(Selected != PageKey.Wizard)
+      {
+         Messages.Show(Selected, ShellMessages.ServerRemoved(went.Name));
       }
    }
 

@@ -128,8 +128,8 @@ public static class ShellMessages
    /// <summary>Why the last server cannot be moved down.</summary>
    public const string MoveAlreadyLast = "This server is already last.";
 
-   /// <summary>What is said about a server that was asked for and is not on this computer.</summary>
-   public const string ServerGone = "That server is no longer on this computer.";
+   /// <summary>What is said about a server that was asked for and is not in the tree. Whether it was ever listed is not known where this is said, so it does not say that the server went.</summary>
+   public const string ServerGone = "That server is not in this window's list. It may have been removed from this computer.";
 
    /// <summary>What is said about a server that is being removed when something is asked of it.</summary>
    public const string ServerBeingRemoved = "This server is being removed from this computer, so nothing about it can be changed.";
@@ -257,6 +257,31 @@ public static class ShellMessages
 
 
 
-   /// <summary>The message shown when the server whose page was on screen is no longer on this computer and another page took its place.</summary>
+   /// <summary>The message shown when the server whose page was on screen is no longer on this computer and another page took its place. It is said only when a snapshot whose stored data is ready no longer lists a server that an earlier one listed.</summary>
    public static FeedbackMessage ServerRemoved(string name) => new("Server removed", name + " is no longer on this computer.", FeedbackSeverity.Informational);
+
+
+
+   /// <summary>
+   /// The message shown when the server whose page was on screen is not listed because the service's stored data is
+   /// not ready, and another page took its place. The service lists no server in that state and has not removed
+   /// any, so this says that the server is not listed, with the reason, and nothing about a removal.
+   /// </summary>
+   public static FeedbackMessage ServerNotListed(string name, string reason) => new("Server not listed", name + " is not listed now. " + reason, FeedbackSeverity.Warning);
+
+
+
+   /// <summary>A failure that was reported for a page of a server that has gone, as it is shown on another page: the same message, saying which server it was about.</summary>
+   public static FeedbackMessage AboutAServerThatWent(FeedbackMessage message, string name)
+   {
+      ArgumentNullException.ThrowIfNull(message);
+      return message with { Message = "About " + name + ", which is no longer on this computer: " + message.Message };
+   }
+
+
+
+   /// <summary>A page's own note that it did not keep every result that arrived for it while it was not on screen: how many, and how many of those were failures. It is a warning when any was.</summary>
+   public static FeedbackMessage ResultsNotKept(int count, int failures)
+      => new("Results not kept", string.Create(CultureInfo.InvariantCulture, $"This page already held as many results as it keeps. Not kept: {count}. Failures among them: {failures}."),
+         failures > 0 ? FeedbackSeverity.Warning : FeedbackSeverity.Informational);
 }
