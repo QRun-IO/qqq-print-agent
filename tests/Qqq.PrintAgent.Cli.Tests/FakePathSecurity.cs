@@ -41,6 +41,11 @@ internal sealed class FakePathSecurity : IPathSecurity
 
 
 
+   /// <summary>Asked for the descriptor of a folder or file the test did not list, for a path whose name a test cannot know in advance; no function, or null from it, means a trusted one.</summary>
+   internal Func<string, FileSystemSecurity?>? Unlisted { get; set; }
+
+
+
    /// <summary>Every folder or file whose descriptor was read, in order.</summary>
    internal List<string> Reads { get; } = [];
 
@@ -74,7 +79,7 @@ internal sealed class FakePathSecurity : IPathSecurity
    public FileSystemSecurity ReadDirectorySecurity(string directory)
    {
       Reads.Add(directory);
-      return Descriptors.TryGetValue(directory, out FileSystemSecurity? descriptor) ? descriptor : Descriptor();
+      return Descriptors.TryGetValue(directory, out FileSystemSecurity? descriptor) ? descriptor : Unlisted?.Invoke(directory) ?? Descriptor();
    }
 
 
@@ -85,7 +90,7 @@ internal sealed class FakePathSecurity : IPathSecurity
       Reads.Add(file);
       if(!File.Exists(file))
       { throw new FileNotFoundException("Synthetic: no such file to read a security descriptor from.", file); }
-      return Descriptors.TryGetValue(file, out FileSystemSecurity? descriptor) ? descriptor : Descriptor();
+      return Descriptors.TryGetValue(file, out FileSystemSecurity? descriptor) ? descriptor : Unlisted?.Invoke(file) ?? Descriptor();
    }
 
 

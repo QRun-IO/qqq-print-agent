@@ -9,14 +9,70 @@ using KofTwentyTwo.AppKit.Updates;
 
 namespace Qqq.PrintAgent.Windows;
 
-/// <summary>AppKit update flow backed by a coherent machine MSI rather than a per-user executable update.</summary>
-public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, string assetPrefix = Qqq.PrintAgent.Core.Edition.DefaultAssetPrefix) : IUpdateService, IDisposable
+/// <summary>
+/// AppKit update flow backed by a coherent machine MSI rather than a per-user executable update. The release feed, the
+/// service's pipe and the update steps are given to it, so the whole flow (check, download, pause, hand-off, and what
+/// is undone when a step fails) can be run against fakes; the companion uses the public constructor, which binds the
+/// GitHub release feed, the installed service's pipe and the installed product's update steps.
+/// </summary>
+public sealed class MsiUpdateService : IUpdateService, IDisposable
 {
-   private readonly GitHubMsiReleaseClient _releases = new(assetPrefix: assetPrefix);
+   /// <summary>Closes the companion once the update has been handed to the helper, so the installer can replace its files.</summary>
+   private readonly Action _exitApplication;
+
+
+
+   /// <summary>The companion's activity log.</summary>
+   private readonly IActivityLog _log;
+
+
+
+   /// <summary>Where releases are found and their installers downloaded from.</summary>
+   private readonly IMsiReleaseSource _releases;
+
+
+
+   /// <summary>Sends one request to the service and returns its reply.</summary>
+   private readonly Func<PipeRequest, Task<string>> _send;
+
+
+
+   /// <summary>The update steps: the staging checks, the preparation and the hand-off to the helper.</summary>
+   private readonly MsiUpdateSteps _installer;
+
+
+
+   /// <summary>The release the last successful check found, which is the only one an install will take.</summary>
    private MsiRelease? _pending;
 
+
+
+   /// <summary>The update service of the installed companion: the GitHub release feed for the given asset prefix, the installed service's pipe and the update steps of the installed product.</summary>
+   public MsiUpdateService(Action exitApplication, IActivityLog log, string assetPrefix = Qqq.PrintAgent.Core.Edition.DefaultAssetPrefix)
+      : this(exitApplication, log, new GitHubMsiReleaseClient(assetPrefix: assetPrefix), AgentPipeClient.SendAsync, MsiUpdateInstaller.Installed)
+   {
+   }
+
+
+
+   /// <summary>The update service over a given release source, pipe and update steps.</summary>
+   internal MsiUpdateService(Action exitApplication, IActivityLog log, IMsiReleaseSource releases, Func<PipeRequest, Task<string>> send, MsiUpdateSteps installer)
+   {
+      _exitApplication = exitApplication;
+      _log = log;
+      _releases = releases;
+      _send = send;
+      _installer = installer;
+   }
+
+
+
+   /// <summary>Raised with each step of an update as it begins and with the download's progress, for the companion to show.</summary>
    public event EventHandler<UpdateStatusEventArgs>? StatusChanged;
 
+
+
+   /// <summary>The version of this build, as stamped into the assembly; it is what the release feed's versions are compared with.</summary>
    public string? CurrentVersion { get; } = typeof(MsiUpdateService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
 
@@ -25,14 +81,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
    /// True only for the MSI-installed companion (running from its Program Files path with the machine state folder present).
    /// A development or portable copy cannot replace the service and CLI together, so it is never offered an in-app update.
    /// </summary>
-   public bool IsSupported
-   {
-      get
-      {
-         string installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "QQQ Print Agent", "App", "Qqq.PrintAgent.exe");
-         return string.Equals(Environment.ProcessPath, installed, StringComparison.OrdinalIgnoreCase) && Directory.Exists(AgentStore.DefaultDirectory);
-      }
-   }
+   public bool IsSupported => _installer.RunsAsInstalledCompanion;
 
 
 
@@ -83,16 +132,16 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
          // The service finishes the jobs it has already claimed before it answers, or answers that it is not ready.
          paused = true;
          StatusChanged?.Invoke(this, new UpdateStatusEventArgs("Waiting for active printing to finish…"));
-         string response = await AgentPipeClient.SendAsync(new PipeRequest("prepare-update")).ConfigureAwait(false);
+         string response = await _send(new PipeRequest("prepare-update")).ConfigureAwait(false);
          if(!string.Equals(response, "Ready for update.", StringComparison.Ordinal))
          {
             throw new InvalidOperationException(PreparationNotCompleted(response));
          }
          cancellationToken.ThrowIfCancellationRequested();
-         MsiUpdateInstaller.Installed.StartHelper(request);
+         _installer.StartHelper(request);
          handedOff = true;
-         log.Info("[Companion] Verified update handed to Windows Installer; closing the companion.");
-         exitApplication();
+         _log.Info("[Companion] Verified update handed to Windows Installer; closing the companion.");
+         _exitApplication();
          return null;
       }
       catch(Exception exception)
@@ -122,10 +171,10 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
    /// </summary>
    private async Task<string> StageAsync(MsiRelease release, IProgress<int>? progress, CancellationToken token)
    {
-      string staging = Path.Combine(MsiUpdateInstaller.Installed.UpdatesDirectory, Guid.NewGuid().ToString("N"));
-      MsiUpdateInstaller.Installed.ValidateStagingDirectory(staging);
+      string staging = Path.Combine(_installer.UpdatesDirectory, Guid.NewGuid().ToString("N"));
+      _installer.ValidateStagingDirectory(staging);
       Directory.CreateDirectory(staging);
-      MsiUpdateInstaller.Installed.ValidateStagingDirectory(staging);
+      _installer.ValidateStagingDirectory(staging);
       StatusChanged?.Invoke(this, new UpdateStatusEventArgs("Downloading the update…"));
       IProgress<double> downloadProgress = new Progress<double>(value =>
       {
@@ -137,7 +186,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
       {
          string package = await _releases.DownloadVerifiedAsync(release, CurrentVersion ?? "", staging, downloadProgress, token).ConfigureAwait(false);
          StatusChanged?.Invoke(this, new UpdateStatusEventArgs("Update verified. Preparing Windows Installer…"));
-         return await Task.Run(() => MsiUpdateInstaller.Installed.PrepareHelper(package, release.Version, Environment.ProcessId), token).ConfigureAwait(false);
+         return await Task.Run(() => _installer.PrepareHelper(package, release.Version, _installer.CurrentProcessId), token).ConfigureAwait(false);
       }
       catch
       {
@@ -157,7 +206,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
    {
       try
       {
-         MsiUpdateInstaller.Installed.ValidateStagingDirectory(directory);
+         _installer.ValidateStagingDirectory(directory);
          Stack<string> pending = new();
          pending.Push(directory);
          while(pending.TryPop(out string? current))
@@ -179,18 +228,18 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
       }
       catch(Exception exception)
       {
-         log.Warning("[Companion] Unapplied update staging could not be removed: " + Describe(exception));
+         _log.Warning("[Companion] Unapplied update staging could not be removed: " + Describe(exception));
       }
    }
 
 
 
    /// <summary>Tells the service to lift the maintenance pause after an update was abandoned; best effort, since the service also expires an abandoned pause on its own.</summary>
-   private static async Task ResumePrintingAsync()
+   private async Task ResumePrintingAsync()
    {
       try
       {
-         await AgentPipeClient.SendAsync(new PipeRequest("resume-after-update")).ConfigureAwait(false);
+         await _send(new PipeRequest("resume-after-update")).ConfigureAwait(false);
       }
       catch(Exception)
       {
@@ -222,6 +271,6 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
 
 
 
-   /// <summary>Releases the release-feed client.</summary>
+   /// <summary>Releases the release source.</summary>
    public void Dispose() => _releases.Dispose();
 }

@@ -61,6 +61,7 @@ internal sealed class MsiUpdateSetup : IDisposable
       File.WriteAllBytes(Package, PackageBytes);
       Companion = Processes.Run(CompanionId, Places.InstalledCompanion, CompanionStarted);
       Processes.CurrentPath = Places.InstalledCompanion;
+      Processes.CurrentId = CompanionId;
       Processes.OnStart = start =>
       {
          string program = Path.GetFileName(start.FileName);
@@ -160,6 +161,11 @@ internal sealed class MsiUpdateSetup : IDisposable
 
    /// <summary>What the service answers to each operation; "Printing resumed." unless a test says otherwise.</summary>
    internal Dictionary<string, string> Replies { get; } = new(StringComparer.Ordinal);
+
+
+
+   /// <summary>Called while a request is being sent, with its operation, so a test can act at the moment the service is asked.</summary>
+   internal Action<string>? WhileSending { get; set; }
 
 
 
@@ -321,10 +327,11 @@ internal sealed class MsiUpdateSetup : IDisposable
 
 
    /// <summary>The pipe of this setup: it notes the operation and answers, or fails when the test said so.</summary>
-   private Task<string> SendAsync(PipeRequest request)
+   internal Task<string> SendAsync(PipeRequest request)
    {
       Sent.Add(request.Operation);
       Journal.Add("send " + request.Operation);
+      WhileSending?.Invoke(request.Operation);
       return PipeFailure is not null ? Task.FromException<string>(PipeFailure) : Task.FromResult(Replies.GetValueOrDefault(request.Operation, "Printing resumed."));
    }
 }

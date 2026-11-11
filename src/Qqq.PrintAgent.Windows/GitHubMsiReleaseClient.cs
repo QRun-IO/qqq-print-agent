@@ -13,7 +13,7 @@ using System.Text.Json;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Discovers only this application's releases and stages an integrity-checked machine MSI.</summary>
-public sealed class GitHubMsiReleaseClient : IDisposable
+public sealed class GitHubMsiReleaseClient : IMsiReleaseSource
 {
    private const long MaximumMsiBytes = 256L * 1024 * 1024;
    private const int MaximumMetadataBytes = 2 * 1024 * 1024;

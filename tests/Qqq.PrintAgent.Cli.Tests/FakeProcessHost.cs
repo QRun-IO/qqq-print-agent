@@ -37,6 +37,11 @@ internal sealed class FakeProcessHost : IProcessHost
 
 
 
+   /// <summary>Called while a process is being opened, with its id, so a test can act at the moment the rules look at a process.</summary>
+   internal Action<int>? WhileOpening { get; set; }
+
+
+
    /// <summary>Every start the rules asked for, in order, exactly as they described it.</summary>
    internal List<ProcessStartInfo> Started { get; } = [];
 
@@ -94,6 +99,7 @@ internal sealed class FakeProcessHost : IProcessHost
    public IRunningProcess Open(int processId)
    {
       Opened.Add(processId);
+      WhileOpening?.Invoke(processId);
       return Running.TryGetValue(processId, out FakeProcess? process) ? process.Open() : throw new ArgumentException($"Synthetic: process with an Id of {processId} is not running.", nameof(processId));
    }
 
