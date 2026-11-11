@@ -525,6 +525,92 @@ public sealed class CompanionSignInTests
 
 
    /// <summary>
+   /// An operation that is being released says how it ended before it lets go of the sign-in, so for the length of
+   /// that announcement the sign-in is still busy while no call uses the session any more. A subscriber that
+   /// discards from that announcement gets the session discarded at once: left to the operation, as a discard
+   /// during a running call is, it would have been left to nobody, and every later read would have lost its
+   /// session as it ended. Here a password sign-in whose caller stopped waiting ends ready, a subscriber discards
+   /// at that moment, and afterwards the next read keeps its session and a sign-in on it works.
+   /// </summary>
+   [Fact]
+   public async Task Discard_FromASubscriberWhileAnOperationIsBeingReleased_DiscardsAtOnce()
+   {
+      using CancellationTokenSource caller = new();
+      SignInWorld world = new();
+      using CompanionSignIn signIn = await world.PasswordReadyAsync();
+      world.Sessions[0].PendingPassword = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      bool? busyWhenDiscarded = null;
+      signIn.PropertyChanged += (_, change) =>
+      {
+         if(busyWhenDiscarded is null && string.Equals(change.PropertyName, nameof(CompanionSignIn.State), StringComparison.Ordinal) && signIn.State == CompanionSignInState.Ready)
+         {
+            busyWhenDiscarded = signIn.IsBusy;
+            signIn.Discard();
+         }
+      };
+      Task<QqqSessionCredential?> running = signIn.SignInWithPasswordAsync("synthetic-operator", "synthetic-password", caller.Token);
+      await caller.CancelAsync();
+
+      Assert.Null(await SignInWorld.EndsAsync(running));
+      Assert.True(busyWhenDiscarded);
+      Assert.True(world.Sessions[0].Disposed);
+      Assert.False(signIn.HasSession);
+      Assert.Null(signIn.Offer);
+      Assert.Equal(CompanionSignInState.NotPrepared, signIn.State);
+      Assert.False(signIn.IsBusy);
+
+      SignInOffer? offer = await signIn.PrepareAsync(new Uri(SignInWorld.Server), SignInWorld.PasswordCheck, QqqCertificateExceptionOrigins.None);
+
+      Assert.Equal(new SignInOffer(true, false), offer);
+      Assert.Same(offer, signIn.Offer);
+      Assert.Equal(CompanionSignInState.Ready, signIn.State);
+      Assert.True(signIn.HasSession);
+      Assert.False(world.Sessions[1].Disposed);
+      Assert.NotNull(await signIn.SignInWithPasswordAsync("synthetic-operator", "synthetic-password"));
+      Assert.Equal(CompanionSignInState.SignedIn, signIn.State);
+   }
+
+
+
+   /// <summary>
+   /// A read never returns an offer whose session is gone. A subscriber that discards while the read announces that
+   /// it is ready ends the read's session with it: the read returns nothing, exactly as the sign-in then offers
+   /// nothing and holds no session, and a debug entry says why. The sign-in is free and can read again.
+   /// </summary>
+   [Fact]
+   public async Task Prepare_SessionDiscardedWhileItsResultIsAnnounced_ReturnsNoOffer()
+   {
+      SignInWorld world = new();
+      using CompanionSignIn signIn = world.NewSignIn();
+      bool discard = true;
+      signIn.PropertyChanged += (_, change) =>
+      {
+         if(discard && string.Equals(change.PropertyName, nameof(CompanionSignIn.State), StringComparison.Ordinal) && signIn.State == CompanionSignInState.Ready)
+         {
+            signIn.Discard();
+         }
+      };
+
+      SignInOffer? offer = await signIn.PrepareAsync(new Uri(SignInWorld.Server), SignInWorld.PasswordCheck, QqqCertificateExceptionOrigins.None);
+
+      Assert.Null(offer);
+      Assert.Null(signIn.Offer);
+      Assert.False(signIn.HasSession);
+      Assert.True(Assert.Single(world.Sessions).Disposed);
+      Assert.Equal(CompanionSignInState.NotPrepared, signIn.State);
+      Assert.False(signIn.IsBusy);
+      Assert.Equal("DEBUG The sign-in description was read, and its session was discarded before the read returned, so the read offers nothing.", world.Log.Entries[^1]);
+      Assert.DoesNotContain(world.Log.Entries, entry => entry.StartsWith("ERROR", StringComparison.Ordinal));
+
+      discard = false;
+      Assert.NotNull(await signIn.PrepareAsync(new Uri(SignInWorld.Server), SignInWorld.PasswordCheck, QqqCertificateExceptionOrigins.None));
+      Assert.True(signIn.HasSession);
+      Assert.False(world.Sessions[1].Disposed);
+   }
+
+
+
+   /// <summary>
    /// Disposing while the server checks a password only cancels. The session is not discarded under the running
    /// call, which would make the call end with "disposed": it ends with the cancellation, quietly, the session is
    /// discarded then, and from the moment of disposal nothing more is announced: a view that has closed is not

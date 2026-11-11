@@ -108,7 +108,10 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
    /// offered are those the service's check and this read both found; a difference is logged. When the description
    /// names another sign-in provider than the check reported, or this account refuses the server's certificate, or the
    /// description cannot be read, the state says which and no session is kept. It returns the offer, or null when
-   /// nothing can be signed in with, when the caller stopped waiting, or when another operation is running.
+   /// nothing can be signed in with, when the caller stopped waiting, or when another operation is running. An offer
+   /// is returned only while the session it was made on is the one that is held: when a subscriber discarded the
+   /// session while the result was being announced, the read returns null, as <see cref="Offer"/> then is, so a
+   /// caller is never handed an offer it cannot sign in with.
    /// </summary>
    public async Task<SignInOffer?> PrepareAsync(Uri server, ServerCheckResult check, QqqCertificateExceptionOrigins certificateException, CancellationToken cancellationToken = default)
    {
@@ -119,7 +122,13 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
       {
          return null;
       }
-      return await RunAsync("Reading the sign-in description", CompanionSignInState.Preparing, token => ReadDescriptionAsync(server, check, certificateException, token), cancellationToken);
+      SignInOffer? offer = await RunAsync("Reading the sign-in description", CompanionSignInState.Preparing, token => ReadDescriptionAsync(server, check, certificateException, token), cancellationToken);
+      if(offer is not null && !ReferenceEquals(offer, _offer))
+      {
+         _log.Debug("The sign-in description was read, and its session was discarded before the read returned, so the read offers nothing.");
+         return null;
+      }
+      return offer;
    }
 
 
@@ -261,7 +270,12 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
    /// Discards the session, if any, so a later sign-in starts with a new preparation. While an operation is running
    /// the session is in use, so this cancels the operation instead, and the operation discards the session as it
    /// ends: discarding a session under a call that is still using it makes that call fail in ways that look like
-   /// errors. Either way no session is held once the running operation, if any, has ended.
+   /// errors. Either way no session is held once the running operation, if any, has ended. "Running" is decided by
+   /// the operation's own wait, which exists exactly while the operation can still discard the session for us, and
+   /// not by <see cref="IsBusy"/>, which stays true a little longer: an operation that is being released announces
+   /// how it ended before it lets go, and a subscriber that calls this from that announcement finds no call using
+   /// the session any more, so the session is discarded at once. Leaving it to the operation then would leave it
+   /// to nobody.
    /// </summary>
    public void Discard()
    {
@@ -269,10 +283,10 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
       {
          return;
       }
-      if(_operating)
+      if(_operation is { } running)
       {
          _discarding = true;
-         _operation?.Cancel();
+         running.Cancel();
          return;
       }
       DropSession();
