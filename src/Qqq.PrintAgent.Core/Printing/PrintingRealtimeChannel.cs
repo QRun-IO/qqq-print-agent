@@ -5,6 +5,7 @@
 
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Qqq.PrintAgent.Core.Transport;
@@ -56,6 +57,12 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    /// cancellation while the caller's token is not cancelled ends the method as that cancellation, because it was not
    /// the caller who asked to stop.
    /// </para>
+   /// <para>
+   /// The shutdown aborts the socket, and a loop that is about to use the socket at that moment fails on it instead of
+   /// seeing the cancellation. That failure is the shutdown itself and is not reported: a loop that had not failed when
+   /// the shutdown began, and then fails the way an aborted socket fails, did not end the channel. Any other failure is
+   /// reported whenever it arrives, even beside a cancellation.
+   /// </para>
    /// </summary>
    public async Task RunAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
@@ -69,6 +76,8 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       // was disposed a moment later still reports its failure              //
       ////////////////////////////////////////////////////////////////////////
       bool disposed = Volatile.Read(ref _disposed) != 0;
+      bool readerFailedFirst = reader.IsFaulted;
+      bool writerFailedFirst = writer.IsFaulted;
       Interlocked.Exchange(ref _closed, 1);
       _outgoing.Writer.TryComplete();
       await lifetime.CancelAsync().ConfigureAwait(false);
@@ -87,8 +96,26 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       // caller with neither loop having failed. anything else is rethrown:  //
       // a failure, the reader's first, or a cancellation nobody asked for   //
       /////////////////////////////////////////////////////////////////////////
-      if(!disposed && !(both.IsCanceled && token.IsCancellationRequested))
-      { await both.ConfigureAwait(false); }
+      if(disposed)
+      { return; }
+      Exception? failure = FailureOf(reader, readerFailedFirst) ?? FailureOf(writer, writerFailedFirst);
+      if(failure is not null)
+      { ExceptionDispatchInfo.Throw(failure); }
+      if(!token.IsCancellationRequested)
+      { await (reader.IsCanceled ? reader : writer.IsCanceled ? writer : both).ConfigureAwait(false); }
+   }
+
+
+
+   /// <summary>
+   /// What a loop failed with, or null when it did not fail or its failure is only the shutdown: a loop that had not
+   /// failed when the shutdown began and then failed the way an aborted socket fails (disposed, or a socket error) was
+   /// stopped by the abort, not by anything the server or the network did.
+   /// </summary>
+   private static Exception? FailureOf(Task loop, bool failedBeforeShutdown)
+   {
+      Exception? failure = loop.Exception?.InnerException;
+      return failure is null || (!failedBeforeShutdown && failure is ObjectDisposedException or WebSocketException) ? null : failure;
    }
 
 

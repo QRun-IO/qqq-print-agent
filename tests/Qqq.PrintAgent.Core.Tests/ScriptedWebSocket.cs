@@ -29,6 +29,11 @@ internal sealed class ScriptedWebSocket : WebSocket
 
 
 
+   /// <summary>Called each time the channel asks for a frame, before the socket looks at its own state; a test uses it to act at the moment the reader is about to receive.</summary>
+   internal Action? Receiving { get; set; }
+
+
+
    /// <summary>Called for every frame the channel sends, before it is recorded; a test uses it to stall or fail the send.</summary>
    internal Func<CancellationToken, Task>? Sending { get; set; }
 
@@ -166,6 +171,7 @@ internal sealed class ScriptedWebSocket : WebSocket
    /// </summary>
    public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
    {
+      Receiving?.Invoke();
       ThrowIfEnded();
       if(!await _incoming.Reader.WaitToReadAsync(cancellationToken))
       { throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely); }

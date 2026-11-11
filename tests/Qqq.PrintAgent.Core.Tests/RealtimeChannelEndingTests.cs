@@ -181,6 +181,37 @@ public sealed class RealtimeChannelEndingTests
 
 
 
+   /// <summary>
+   /// The caller's cancellation can overtake the reader: the reader has checked the token and is about to ask the socket
+   /// for a frame when the caller cancels and the shutdown aborts the socket, so the reader fails on the aborted socket
+   /// instead of seeing the cancellation. Nothing failed, so the run still returns. The hook holds the reader at exactly
+   /// that point until the socket has been aborted.
+   /// </summary>
+   [Fact]
+   public async Task CallerCancellationThatOvertakesTheReaderStillEndsTheRunNormally()
+   {
+      using var stop = new CancellationTokenSource();
+      using var socket = new ScriptedWebSocket();
+      int receives = 0;
+      socket.Receiving = () =>
+      {
+         if(Interlocked.Increment(ref receives) == 2)
+         {
+            stop.Cancel();
+            Assert.True(SpinWait.SpinUntil(() => socket.Aborts > 0, Patience));
+         }
+      };
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      Task run = channel.RunAsync(_ => { }, stop.Token);
+      socket.Deliver("PONG", "pong-1", new { serverTime = "2026-01-01T00:00:00Z" });
+      await run.WaitAsync(Patience);
+      Assert.True(run.IsCompletedSuccessfully);
+      Assert.Equal(2, Volatile.Read(ref receives));
+      Assert.Equal(1, socket.Aborts);
+   }
+
+
+
    /// <summary>A failure is not hidden by a cancellation that arrives with it: when the socket refuses a frame just as the caller cancels, the run still ends with the failure.</summary>
    [Fact]
    public async Task FailureIsReportedEvenWhenTheCallerCancelsAtTheSameMoment()
