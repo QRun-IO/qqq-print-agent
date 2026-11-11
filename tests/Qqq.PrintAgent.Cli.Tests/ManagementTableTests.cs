@@ -20,9 +20,9 @@ public sealed class ManagementTableTests
    private static readonly string[] s_codesInTheAdr =
    [
       "unsupported_version", "unknown_operation", "invalid_request", "server_not_found", "server_ambiguous", "server_limit", "server_exists", "server_removing", "busy",
-      "not_signed_in", "not_paired", "not_connected", "server_incompatible", "certificate_untrusted", "server_unreachable", "server_refused", "sign_in_refused", "bind_refused",
-      "identity_changed", "enrollment_refused", "enrollment_unconfirmed", "printer_not_found", "job_not_found", "job_not_current", "duplicate_risk_unconfirmed", "cancel_refused",
-      "state_unreadable", "state_newer", "migration_incomplete", "update_in_progress", "internal_error",
+      "not_signed_in", "not_paired", "not_connected", "server_incompatible", "certificate_untrusted", "provider_changed", "server_unreachable", "server_refused", "sign_in_refused",
+      "bind_refused", "identity_changed", "enrollment_refused", "enrollment_unconfirmed", "printer_not_found", "job_not_found", "job_not_current", "duplicate_risk_unconfirmed",
+      "cancel_refused", "state_unreadable", "state_newer", "migration_incomplete", "update_in_progress", "internal_error",
    ];
 
 
@@ -52,7 +52,7 @@ public sealed class ManagementTableTests
       string[] declared = Constants(typeof(ManagementErrorCode));
 
       Assert.Equal(s_codesInTheAdr, ManagementErrorCode.All);
-      Assert.Equal(31, ManagementErrorCode.All.Count);
+      Assert.Equal(32, ManagementErrorCode.All.Count);
       Assert.Equal(s_codesInTheAdr.Order(StringComparer.Ordinal), declared.Order(StringComparer.Ordinal));
       Assert.All(ManagementErrorCode.All, code => Assert.Matches("^[a-z]+(_[a-z]+)*$", code));
    }
@@ -69,6 +69,7 @@ public sealed class ManagementTableTests
       Assert.Equal(typeof(IdentityChangedDetails), ManagementErrorCode.DetailsType(ManagementErrorCode.IdentityChanged));
       Assert.Equal(typeof(CancelRefusedDetails), ManagementErrorCode.DetailsType(ManagementErrorCode.CancelRefused));
       Assert.Equal(5, ManagementErrorCode.All.Count(code => ManagementErrorCode.DetailsType(code) is not null));
+      Assert.Null(ManagementErrorCode.DetailsType(ManagementErrorCode.ProviderChanged));
       Assert.Null(ManagementErrorCode.DetailsType("code_added_later"));
    }
 

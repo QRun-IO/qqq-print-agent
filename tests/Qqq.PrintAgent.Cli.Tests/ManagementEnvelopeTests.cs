@@ -569,6 +569,47 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>
+   /// The arguments of servers.add carry the sign-in provider's origin that the check reported, after the credential,
+   /// for comparison only: the service still reads the provider itself. The comparison is exact and has one rule for a
+   /// provider that is absent: the request names the provider the service read when both are the same text, or when
+   /// the check reported none and the service reads none. Another origin, the same origin in another spelling, a
+   /// provider where the check reported none, and none where it reported one are all a change, which the service
+   /// answers with a code of its own that carries no details and stores nothing. A request that leaves the origin out
+   /// is read, and says that the check reported no provider.
+   /// </summary>
+   [Fact]
+   public void ServersAdd_CarriesTheProviderTheCheckReported_ForComparisonOnly()
+   {
+      ServersAddArgs named = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, ManagementSamples.ProviderOrigin);
+      ServersAddArgs unnamed = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: false, ManagementSamples.SessionCredential);
+      string written = ManagementJson.Write(ManagementRequest.For(ManagementOperations.ServersAdd, null, named));
+
+      Assert.EndsWith(",\"sessionCredential\":{\"origin\":\"https://qqq.example.test\",\"sessionToken\":\"" + ManagementSamples.SessionCookieCanary + "\"},\"providerOrigin\":\"https://sign-in.example.test\"}}", written, StringComparison.Ordinal);
+      Assert.DoesNotContain("providerOrigin", ManagementJson.Write(ManagementRequest.For(ManagementOperations.ServersAdd, null, unnamed)), StringComparison.Ordinal);
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(written).Request!, out ServersAddArgs? read));
+      Assert.Equal((ManagementSamples.ProviderOrigin, "Warehouse", true), (read.ProviderOrigin, read.Name, read.AcceptCertificateException));
+      Assert.True(ManagementJson.TryReadArguments(ManagementRequest.For(ManagementOperations.ServersAdd, null, unnamed), out ServersAddArgs? readUnnamed));
+      Assert.Null(readUnnamed.ProviderOrigin);
+      Assert.True(named.NamesTheProvider("https://sign-in.example.test"));
+      Assert.True(unnamed.NamesTheProvider(null));
+      Assert.False(named.NamesTheProvider("https://other.example.test"));
+      Assert.False(named.NamesTheProvider("https://SIGN-IN.example.test"));
+      Assert.False(named.NamesTheProvider("https://sign-in.example.test/"));
+      Assert.False(named.NamesTheProvider(null));
+      Assert.False(unnamed.NamesTheProvider("https://sign-in.example.test"));
+      Assert.False(unnamed.NamesTheProvider(""));
+      Assert.Equal("provider_changed", ManagementErrorCode.ProviderChanged);
+      Assert.Contains(ManagementErrorCode.ProviderChanged, ManagementErrorCode.All, StringComparer.Ordinal);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"provider_changed\",\"message\":\"The server now names another sign-in provider. Check the server again.\"}}",
+         ManagementJson.Write(ManagementReply.Failure(ManagementErrorCode.ProviderChanged, "The server now names another sign-in provider. Check the server again.")));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.ProviderChanged, "Synthetic message.", ServerCheckResult.From(new QqqServerCompatibility([], null, QqqSignInMethods.None))));
+      Assert.Equal("Arguments of servers.add (session credential not shown)", named.ToString());
+      Assert.DoesNotContain(ManagementSamples.ProviderOrigin, $"{named} {ManagementRequest.For(ManagementOperations.ServersAdd, null, named)}", StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
    /// A request without arguments is read as one with empty arguments, so it is valid exactly when every member of the
    /// operation's argument record is optional. Sign-out is the one such operation today, which is why the command line
    /// can send it bare; an operation with a required argument refuses the same request. The update operations take no

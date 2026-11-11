@@ -86,6 +86,17 @@ public static class ManagementErrorCode
 
 
 
+   /// <summary>
+   /// <see cref="ManagementOperations.ServersAdd"/> only: the sign-in provider the server names now is not the one
+   /// <see cref="ManagementOperations.ServersCheck"/> reported and the request carried for comparison
+   /// (<see cref="ServersAddArgs.NamesTheProvider"/>). Nothing was stored, so a certificate exception never covers a
+   /// provider the operator did not see. The client checks the server again and shows what the check now reports. There
+   /// are no details: the check's result names the provider.
+   /// </summary>
+   public const string ProviderChanged = "provider_changed";
+
+
+
    /// <summary>The QQQ server could not be reached or did not answer in time, so the action was not carried out there.</summary>
    public const string ServerUnreachable = "server_unreachable";
 
@@ -187,9 +198,9 @@ public static class ManagementErrorCode
    public static IReadOnlyList<string> All { get; } =
    [
       UnsupportedVersion, UnknownOperation, InvalidRequest, ServerNotFound, ServerAmbiguous, ServerLimit, ServerExists, ServerRemoving, Busy, NotSignedIn, NotPaired,
-      NotConnected, ServerIncompatible, CertificateUntrusted, ServerUnreachable, ServerRefused, SignInRefused, BindRefused, IdentityChanged, EnrollmentRefused,
-      EnrollmentUnconfirmed, PrinterNotFound, JobNotFound, JobNotCurrent, DuplicateRiskUnconfirmed, CancelRefused, StateUnreadable, StateNewer, MigrationIncomplete,
-      UpdateInProgress, InternalError,
+      NotConnected, ServerIncompatible, CertificateUntrusted, ProviderChanged, ServerUnreachable, ServerRefused, SignInRefused, BindRefused, IdentityChanged,
+      EnrollmentRefused, EnrollmentUnconfirmed, PrinterNotFound, JobNotFound, JobNotCurrent, DuplicateRiskUnconfirmed, CancelRefused, StateUnreadable, StateNewer,
+      MigrationIncomplete, UpdateInProgress, InternalError,
    ];
 
 

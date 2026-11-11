@@ -8,6 +8,7 @@
       "sessionCredential": {
          "origin": "https://qqq.example.test",
          "sessionToken": "CANARY-SESSION-COOKIE-7f3a"
-      }
+      },
+      "providerOrigin": "https://sign-in.example.test"
    }
 }

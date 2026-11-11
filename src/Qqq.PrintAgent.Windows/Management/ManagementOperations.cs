@@ -35,7 +35,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Stores a new server together with its certificate exception and its session, or nothing.</summary>
+   /// <summary>Stores a new server together with its certificate exception and its session, or nothing. The request carries the sign-in provider's origin the check reported, for comparison with the service's own read; when they differ nothing is stored and the answer is <see cref="ManagementErrorCode.ProviderChanged"/>.</summary>
    public const string ServersAdd = "servers.add";
 
 
