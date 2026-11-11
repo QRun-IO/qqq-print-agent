@@ -18,13 +18,13 @@ public sealed partial class WindowsPrinters
 {
    /// <summary>
    /// Prints a staged file. The path must be an absolute, regular file (no link), and its length and SHA-256 are checked against the job
-   /// again here, because it is the last step before the spooler. The job's own queue is then looked up, and no other queue on the
-   /// computer is opened or has its driver asked, so a queue that hangs cannot hold a document meant for another. The queue and
-   /// options are validated (copies, no per-job paper dimensions, a format the queue offers), and the document goes to the RAW ZPL
-   /// or PDF path. Nothing is guessed or defaulted,
-   /// because a wrong guess prints on the wrong stock. The submission limit is not applied here: a driver call cannot be interrupted
-   /// from inside its own process, so the limit belongs to the service, which runs this adapter in a helper process and ends that
-   /// process when the limit passes.
+   /// again here, because it is the last step before the spooler. The job's own queue is then looked up: this process opens no other
+   /// queue on the computer and asks no other queue's driver, so a queue whose driver hangs cannot hold a document meant for another.
+   /// The lookup begins with the spooler's enumeration, which a connection to a print server that does not answer can still hold.
+   /// The queue and options are validated (copies, no per-job paper dimensions, a format the queue offers), and the document goes to
+   /// the RAW ZPL or PDF path. Nothing is guessed or defaulted, because a wrong guess prints on the wrong stock. The submission limit
+   /// is not applied here: a driver call cannot be interrupted from inside its own process, so the limit belongs to the service,
+   /// which runs this adapter in a helper process and ends that process when the limit passes.
    /// </summary>
    public async Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
    {

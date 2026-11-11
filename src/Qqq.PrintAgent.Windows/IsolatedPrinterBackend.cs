@@ -41,7 +41,7 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IPrinterBa
 
 
 
-   /// <summary>Lists the queues without their media through a helper of its own, with the same 20 second limit and the same failures as discovery. That helper asks no driver anything.</summary>
+   /// <summary>Lists the queues without their media through a helper of its own, with the same 20 second limit and the same failures as discovery. That helper opens no queue and asks no driver; the spooler's own enumeration can still hold it until the limit, as a connection to a print server that does not answer does.</summary>
    public IReadOnlyList<PrinterInfo> ListWithoutMedia() => ReadPrinters(new PrinterWorkerHost.Request("list-without-media"));
 
 

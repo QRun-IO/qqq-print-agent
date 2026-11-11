@@ -2,30 +2,47 @@
 
 ## Unreleased
 
-One printer that does not answer no longer stops jobs for the other printers (2.0), with one limit that is
-stated below. Until now the service asked Windows about every printer installed on the computer three times for
-each job (before it took the job, after it downloaded the document, and once more in the print helper), and each
-time it read every printer's settings through that printer's driver. One printer whose driver hung or failed was
-enough to stop every job on the station, label printing included.
+One printer whose driver does not answer no longer stops jobs for the other printers (2.0). What such a printer
+still affects is listed at the end of this entry; one case is not covered at all, a printer reached through a
+print server that is switched off or unreachable. Until now the service asked Windows about every printer
+installed on the computer three times for each job (before it took the job, after it downloaded the document, and
+once more in the print helper), and each time it read every printer's settings through that printer's driver. One
+printer whose driver hung or failed was enough to stop every job on the station, label printing included.
 
-- **A job asks Windows about its own printer only.** Before a job is taken, the service lists the printers by
-  name, which asks no driver anything. After the download it reads the settings of the job's own printer, and the
-  print helper reads them again before it prints. No other printer is opened or asked anything for the job. A
-  job is still refused before anything is sent to Windows, with the same reasons as before, when its printer is
-  gone or no longer shared, no longer offers the document's format, or changed its selected media.
+- **A job reads the settings of its own printer only.** Before a job is taken, the service asks Windows for the
+  list of printers and reads no printer's settings. After the download it reads the settings of the job's own
+  printer, and the print helper reads them again before it prints. The service opens no other printer for the job
+  and asks no other printer's driver anything. A job is still refused before anything is sent to Windows, with the
+  same reasons as before, when its printer is gone or no longer shared, no longer offers the document's format, or
+  changed its selected media.
 - **For the printer that prints, the print is unchanged.** What the print helper asks Windows for that printer,
   and in what order, is what it was. Before the print, its settings are now read once by the service, after the
   download, where they were read twice (also before the job was taken). The other printers are left alone.
 - **The connection to the server survives a printer list that cannot be read.** The station's own list of
   printers still reads every printer's settings, and the service reports it to the server after every change.
   When that list could not be read, the connection to the server was ended and made again each time the list
-  was due, and jobs stopped. Now the service writes one error to the log ("The printers on this computer could
-  not be read, so no printer inventory was sent to the server"), sends the server nothing in place of the list,
-  keeps the connection, and goes on taking and printing jobs with the list the server already has. The log says
-  once when the printers can be read again.
+  was due, and jobs stopped. Now the service writes one error to the log ("The printer inventory could not be
+  read, so none was sent to the server"), sends the server nothing in place of the list, keeps the connection,
+  and goes on taking and printing jobs with the list the server already has. The log says once when the
+  inventory can be read again.
 - **Cancelling and test prints.** Cancelling a job Windows already holds, from the companion or from the server,
-  and sending a test print, no longer read any printer's settings, so they work while a printer does not answer.
+  and sending a test print, no longer read any printer's settings, so they work while a printer's driver does not
+  answer.
 - **What a broken printer still affects.**
+  - **Not covered: a printer on a print server that is switched off or cannot be reached.** Some printers are not
+    installed on the station itself; they are connections to a printer that another computer, a print server,
+    shares. Microsoft documents that the Windows call the service lists printers with opens every such
+    connection, and waits for a timeout when the connection's print server is switched off or cannot be reached,
+    or the printer on it no longer exists. The service asks for that list before it takes each job, with a limit
+    of 20 seconds, again when it looks the job's printer up, and again in the print helper. So one such
+    connection can still hold up the list, the lookup and the print for every printer on the station. If Windows
+    waits longer than the limit, no job is taken for as long as it lasts (the log has "Print lane stopped: The
+    printer operation timed out"); a job already taken is refused before anything is sent when its lookup runs
+    out of time, and is recorded with an unknown outcome when its print does. The fix in this entry therefore
+    covers a printer on the station whose driver is broken, and does not cover a print server that is dead. This
+    was so before this change, which does not alter it. It rests on Microsoft's documentation and on reading the
+    code: it has not been tried on a real station, and how long Windows waits is not known. Bringing the print
+    server back, or removing that printer connection from Windows, ends it.
   - The companion's picture of the service (its status line, the Printers view and the recent jobs come from one
     request that includes the whole printer list), the `printers`, `snapshot` and `service-status` commands, and
     sharing or unsharing a printer read the whole list. While one printer does not answer, each can take up to 20
@@ -35,11 +52,16 @@ enough to stop every job on the station, label printing included.
   - After the service is restarted, or after it reconnects to the server, no job is taken until the whole list
     has been read once and the server has accepted it. A printer whose driver fails every time therefore still
     stops printing from the next restart or reconnect on, until that printer is repaired or removed from
-    Windows. The log line says so ("No job is claimed on this connection until the printers can be read"). A
+    Windows. The log line says so ("No job is claimed on this connection until the inventory can be read"). A
     change that reports such a printer as unusable and lets the others print is decided
     ([ADR-0004](docs/adr/0004-multi-server-runtime.md)) and is not in this build.
+  - While the list cannot be read, nothing about any printer is reported to the server. A healthy printer that
+    goes offline or comes back, or whose paper size or resolution is changed in Windows, is not reported until
+    the list can be read again, and the server goes on showing what it was last told. Each job is still checked
+    against its own printer after the download, so a job for a printer that was removed, unshared or given other
+    media in the meantime is refused before anything is sent.
   - A Windows print spooler that cannot list its printers at all still stops every job, as before.
-  - A job for the printer that does not answer is refused before anything is sent, with the reason.
+  - A job for the printer whose driver does not answer is refused before anything is sent, with the reason.
 
 The journal has a schema version (2.0). Printing, pairing and history are unchanged.
 

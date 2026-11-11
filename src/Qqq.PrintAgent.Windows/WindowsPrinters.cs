@@ -64,8 +64,10 @@ public sealed partial class WindowsPrinters : IPrinterBackend
 
    /// <summary>
    /// Lists the same queues as <see cref="Discover"/>, identified and classified by the same rule, without their media.
-   /// Native calls: the two enumeration calls and nothing else. No queue is opened and no driver is asked, so a queue
-   /// whose driver hangs or fails neither slows this nor fails it.
+   /// Native calls: the two enumeration calls and nothing else. This process opens no queue and asks no driver, so a
+   /// queue whose driver hangs or fails neither slows this nor fails it. What the spooler does to answer the
+   /// enumeration is its own: a connection to a print server that does not answer can still hold it, as
+   /// <see cref="EnumerateQueues"/> says.
    /// </summary>
    public IReadOnlyList<PrinterInfo> ListWithoutMedia() => [.. EnumerateQueues().Select(Identify)];
 
@@ -75,8 +77,8 @@ public sealed partial class WindowsPrinters : IPrinterBackend
    /// The one queue with this identifier, exactly as <see cref="Discover"/> lists it, or null when no queue has it. The
    /// identifier of each listed queue is worked out from its name, which needs no native call, and only the queue that
    /// matches has its settings read. Native calls: the two enumeration calls, then the settings read of that one queue
-   /// when it can print unattended; no other queue is opened and no other driver is asked. Two queues with one identifier
-   /// are refused before either is read, because there is no telling which was meant.
+   /// when it can print unattended; this process opens no other queue and asks no other driver. Two queues with one
+   /// identifier are refused before either is read, because there is no telling which was meant.
    /// </summary>
    public PrinterInfo? FindWithMedia(string printerId)
    {
@@ -105,6 +107,17 @@ public sealed partial class WindowsPrinters : IPrinterBackend
    /// Asks the spooler for its list of queues with the two enumeration calls every read begins with: one for the size of
    /// the list and one for the list. A spooler with nothing installed answers the first with no size, and the second is
    /// not made. These are the only calls a read makes that concern every queue at once.
+   /// <para>
+   /// This process opens no queue for them, but the spooler may. Both calls ask for the queues installed here and for
+   /// the connections this identity has to printers on print servers, at the level that carries each queue's driver,
+   /// port and status (level 2). Microsoft documents that an enumeration at that level opens every such connection, and
+   /// waits for the remote call to time out when the connection is down, its server no longer exists or its printer no
+   /// longer exists (the remarks on PRINTER_INFO_4). So one connection to a print server that is switched off or
+   /// cannot be reached can hold every read that begins here, the list without media included, although no driver on
+   /// this computer is asked. That was so before the three reads existed and they do not change it. It has not been
+   /// measured on Windows. Listing at another level would change what reaches Windows, so it is not done here; it
+   /// belongs with the check on real printers. docs/REALTIME.md states the limit for operators.
+   /// </para>
    /// </summary>
    private IReadOnlyList<SpoolerQueue> EnumerateQueues()
    {

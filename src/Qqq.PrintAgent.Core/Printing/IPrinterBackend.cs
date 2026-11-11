@@ -16,6 +16,11 @@ namespace Qqq.PrintAgent.Core.Printing;
 /// printer whose settings cannot be read (a driver that hangs or fails) therefore gets in the way only of a read that asks for
 /// its settings. A print job uses the second before it is claimed and the third for its own printer, and never the first.
 /// </para>
+/// <para>
+/// That is a statement about settings and no more. All three reads begin with the platform's own list of printers, and what
+/// the platform does to produce that list is outside this contract. On Windows a connection to a printer on a print server
+/// that does not answer can hold the list, and so all three reads; see the Windows adapter.
+/// </para>
 /// </summary>
 public interface IPrinterBackend
 {
@@ -31,7 +36,8 @@ public interface IPrinterBackend
    /// <summary>
    /// Lists every printer this backend can print to by what identifies it: identifier, names, port, status and formats, exactly
    /// as <see cref="Discover"/> reports them, with no media profiles (<see cref="PrinterInfo.MediaProfiles"/> is null, meaning
-   /// "not read"). It reads the settings of no printer, so one printer that cannot be read does not slow it or fail it.
+   /// "not read"). It reads the settings of no printer, so a printer whose settings cannot be read does not slow it or fail
+   /// it on that account. It is still as slow as the platform's own list of printers, and fails when that list fails.
    /// </summary>
    IReadOnlyList<PrinterInfo> ListWithoutMedia();
 

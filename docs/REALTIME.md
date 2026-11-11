@@ -95,28 +95,50 @@ gates the lanes share and the leases a job holds. The runtime, not the worker,
 reports at start the jobs a previous run left unfinished, and sends inventory
 and heartbeats.
 
-A printer backend has three reads, and a job uses the two that do not depend on
-every printer. The full discovery reads the settings of every queue through its
-driver; it is for the inventory report, the companion's list and sharing
-changes. The list without media names every queue from the spooler's
-enumeration alone and asks no driver anything. The lookup reads the settings of
-one queue. A lane lists before it claims (the list names the job's printer in
-the journal), looks up the claimed job's own printer once after the download
-and before SUBMITTING is recorded, and the print helper looks the same printer
-up again before it prints. So for one job Windows is asked about that job's
-queue and no other; a queue whose driver hangs or fails stops only its own
-jobs, which are refused before submission. Each read through the service is a
-helper of its own with a 20 second limit.
+A printer backend has three reads, and a job uses the two that do not read
+every printer's settings. The full discovery reads the settings of every queue
+through its driver; it is for the inventory report, the companion's list and
+sharing changes. The list without media names every queue from the spooler's
+enumeration alone: the service opens no queue for it and asks no driver. The
+lookup is the same enumeration and then the settings of one queue. A lane lists
+before it claims (the list names the job's printer in the journal), looks up
+the claimed job's own printer once after the download and before SUBMITTING is
+recorded, and the print helper looks the same printer up again before it
+prints. So for one job the service reads the settings of that job's queue and
+of no other; a queue whose driver hangs or fails stops only its own jobs,
+which are refused before submission. Each read through the service is a helper
+of its own with a 20 second limit.
 
 What still asks every queue is the inventory report. A report that cannot be
 read (one queue's driver is enough) sends nothing and is logged once per
 reason; the connection stays up and jobs continue on the inventory it already
-delivered. A connection that has delivered no inventory yet claims nothing
-until one full discovery succeeds and the server accepted it, so after a
-restart or a reconnect a driver that fails every time still stops printing.
-The enumeration itself asks the spooler about every local queue and every
-connection, so a spooler that cannot enumerate stops every pass before it
-claims.
+delivered. While it lasts the server is told nothing new about any printer, so
+a change in the status or the media of a healthy printer is not reported
+either. A connection that has delivered no inventory yet claims nothing until
+one full discovery succeeds and the server accepted it, so after a restart or
+a reconnect a driver that fails every time still stops printing.
+
+Known limit: a print server that is switched off or cannot be reached. The
+enumeration is Windows' own work, and all three reads begin with it. It asks
+the spooler for the queues installed on the station and for the connections
+the service's identity has to printers that another computer, a print server,
+shares. Microsoft documents that this enumeration opens every such connection
+and waits for a timeout when the connection's server is down or gone, or the
+printer on it no longer exists. So one connection to a print server that does
+not answer can still stall the list, the lookup and the print, for every
+printer on the station. The list runs before every claim with its 20 second
+limit. If Windows waits longer than that, the pass ends before it claims (the
+log has "Print lane stopped: The printer operation timed out") and no job is
+taken for as long as it lasts; a lookup that runs out of time fails its job
+before SUBMITTING, and a print that runs out of time ends as OUTCOME_UNKNOWN.
+The three reads therefore cover a broken driver on the station and do not
+cover a dead print server, which stalls printing as it did before them. The
+remedy is to bring the server back or to remove that printer connection from
+Windows. This comes from Microsoft's documentation and from the code; it has
+not been measured on Windows. Listing in a way that opens no connection would
+change what reaches Windows, so it waits for the check on real printers (W70
+in [the audit](AUDIT-2026-11-10.md)). A spooler that cannot enumerate at all
+also stops every pass before it claims.
 
 Documents stream over separate authenticated HTTPS requests into owned files in
 the protected service staging directory. Length and SHA-256 are checked while
@@ -181,7 +203,7 @@ levels, so that a job nested too deep to read can still be identified.
   it, and the lane ends its pass as it does for a job that is submitting.
 - **Printer changed before the download finished.** The assigned printer is
   looked up once, after the download and before the job asks for the
-  printer's turn; no other queue is asked. A printer the operator stopped sharing, a queue that is
+  printer's turn; no other queue's settings are read. A printer the operator stopped sharing, a queue that is
   gone, or a selected media default that changed by then is FAILED with its
   reason before SUBMITTING is recorded, and Windows is never asked. The
   timing line reports this one check as `revalidate`.
