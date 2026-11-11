@@ -36,8 +36,9 @@ this build: the connection dialog still runs on the existing flow, whose only ch
   so an attempt that is cancelled, times out or is stopped after that discards the session.
 - `BrowserCallbackDispatcher` owns the one browser callback inbox. A sign-in or a provider sign-out registers the
   OAuth state it sent and waits for the callback that carries it, so two servers can be signing in at once. A
-  callback that carries no state, more than one, or a state nobody waits for is dropped, and the log says only that
-  one was dropped. An inbox is open exactly while something waits. When the inbox fails, everything that waits fails
+  callback that carries no state, more than one, or a state nobody waits for is dropped, and so is one the session
+  would refuse to read (an entry without a value, a repeated name, a control character, a fragment); the log says
+  only that one was dropped. An inbox is open exactly while something waits. When the inbox fails, everything that waits fails
   once and the next registration opens a new inbox. Whatever the inbox fails with, each sign-in or sign-out that
   waits ends as a failure it reports: a failure of a kind they do not expect (the inbox gives an argument error when
   the process that sent a callback has already exited) reaches them as one that names only its kind.

@@ -11,9 +11,10 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// ticket to await, and this hands each callback to the ticket whose state it carries. Two servers can then be signing
 /// in at once, and a late callback for an exchange that has ended is dropped instead of failing another. An inbox is
 /// open exactly while at least one ticket waits. Each inbox takes one callback, so after every callback it is closed and,
-/// when tickets still wait, a new one is opened. A callback that carries no state, more than one, or a state nobody
-/// waits for is dropped, and the log says only that one was dropped: nothing of a callback, its state or its code is
-/// ever logged, and a registered state is held only while its ticket waits. When the inbox itself fails, which
+/// when tickets still wait, a new one is opened. A callback that carries no state, more than one, a state nobody
+/// waits for, or a query the session would refuse to read is dropped, and the log says only that one was dropped:
+/// nothing of a callback, its state or its code is ever logged, and a registered state is held only while its
+/// ticket waits. When the inbox itself fails, which
 /// includes an inbox that refuses what it received as no callback at all, every waiting ticket fails and the next
 /// registration opens a new inbox. The tickets are given the inbox's failure when it is of a kind every exchange
 /// reports, and otherwise one that names only its kind (see <see cref="BrowserCallbackFailure"/>), so whatever an
@@ -23,6 +24,9 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// </summary>
 public sealed class BrowserCallbackDispatcher
 {
+   /// <summary>The longest query a callback may have, in characters; the session refuses a longer one.</summary>
+   internal const int LongestQuery = 16_384;
+
    private readonly IBrowserCallbackSource _callbacks;
    private readonly IPresentationLog _log;
    private readonly Lock _gate = new();
@@ -86,29 +90,37 @@ public sealed class BrowserCallbackDispatcher
 
    /// <summary>
    /// Reads the one <c>state</c> parameter of an address's query: the state a sign-in sent, from the authorization
-   /// address, or the state a callback returns. It is null when the address has none, an empty one or more than one,
-   /// because a repeated parameter could make two readers disagree about which exchange a callback belongs to.
+   /// address, or the state a callback returns. The query is read by the rules the session applies to a callback
+   /// before it accepts it (<c>QqqSessionClient</c>, in Core): the address is absolute and has no fragment and no
+   /// user information, the query is there and no longer than a callback's may be, every entry is a name and a
+   /// value, no name is repeated, and neither a name nor a value holds a control character. An address that breaks
+   /// one of them has no state here. A callback like that is therefore dropped as nobody's, where a more lenient
+   /// reading would hand it to the exchange whose state it seems to carry, only for the session to refuse it and
+   /// end that sign-in. There is no state either when the parameter is missing or empty. A repeated name is refused
+   /// because two readers could disagree about which exchange a callback belongs to.
    /// </summary>
    internal static string? ReadState(Uri address)
    {
-      string? state = null;
-      if(!address.IsAbsoluteUri)
+      if(!address.IsAbsoluteUri || address.Fragment.Length != 0 || address.UserInfo.Length != 0 || address.Query.Length is < 2 or > LongestQuery)
       {
          return null;
       }
-      foreach(string entry in address.Query.TrimStart('?').Split('&'))
+      Dictionary<string, string> values = new(StringComparer.Ordinal);
+      foreach(string entry in address.Query[1..].Split('&'))
       {
          string[] pair = entry.Split('=', 2);
-         if(pair.Length == 2 && string.Equals(Uri.UnescapeDataString(pair[0].Replace('+', ' ')), "state", StringComparison.Ordinal))
+         if(pair.Length != 2)
          {
-            if(state is not null)
-            {
-               return null;
-            }
-            state = Uri.UnescapeDataString(pair[1].Replace('+', ' '));
+            return null;
+         }
+         string name = Uri.UnescapeDataString(pair[0].Replace('+', ' '));
+         string value = Uri.UnescapeDataString(pair[1].Replace('+', ' '));
+         if(name.Any(char.IsControl) || value.Any(char.IsControl) || !values.TryAdd(name, value))
+         {
+            return null;
          }
       }
-      return string.IsNullOrEmpty(state) ? null : state;
+      return values.TryGetValue("state", out string? state) && state.Length != 0 ? state : null;
    }
 
 

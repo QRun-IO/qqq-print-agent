@@ -129,7 +129,10 @@ public sealed class BrowserCallbackDispatcherTests
    /// somebody's only when it is exactly the one that was registered: the same letters in another case, the
    /// beginning of it, more than it, or it with a space after it are all nobody's. The ticket that waits is
    /// untouched, a new inbox is opened for it, and the log holds the fixed sentence and nothing of the callback.
-   /// The ticket's own callback, sent to the new inbox, still reaches it.
+   /// The ticket's own callback, sent to the new inbox, still reaches it. A callback the session would refuse to
+   /// read is nobody's too, even with the right state in it: a query that starts with a second question mark, an
+   /// entry without a value, a repeated name, a control character, or a fragment. Handed to the exchange, each of
+   /// these would have ended its sign-in; dropped, it leaves the exchange waiting for the real one.
    /// </summary>
    [Theory]
    [InlineData("?code=synthetic-code")]
@@ -142,6 +145,11 @@ public sealed class BrowserCallbackDispatcherTests
    [InlineData("?code=synthetic-code&state=synthetic-state-")]
    [InlineData("?code=synthetic-code&state=synthetic-state-xy")]
    [InlineData("?code=synthetic-code&state=synthetic-state-x%20")]
+   [InlineData("??state=synthetic-state-x")]
+   [InlineData("?state=synthetic-state-x&synthetic-entry-without-a-value")]
+   [InlineData("?code=synthetic-code&code=synthetic-code&state=synthetic-state-x")]
+   [InlineData("?state=synthetic-state-x&code=synthetic%00code")]
+   [InlineData("?state=synthetic-state-x#synthetic-fragment")]
    public async Task Dispatcher_CallbackWithNoStateOrTwo_IsDropped_AndNotLogged(string query)
    {
       SignInWorld world = new();
@@ -488,10 +496,23 @@ public sealed class BrowserCallbackDispatcherTests
 
    /// <summary>
    /// The state of an address is its one "state" parameter, decoded: found wherever it stands in the query, with a
-   /// plus sign and a percent escape read as the provider wrote them. There is none when the parameter is missing,
-   /// empty, repeated or named differently, when the address has no query, and when it is not an absolute address.
+   /// plus sign and a percent escape read as the provider wrote them, in the name as well as in the value. There is
+   /// none when the parameter is missing, empty, repeated or named differently, when the address has no query, and
+   /// when it is not an absolute address. There is none either when the session would refuse the query: it starts
+   /// with a second question mark, an entry has no value, any name is repeated, a name or a value holds a control
+   /// character, or the address has a fragment or user information.
    /// </summary>
    [Theory]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?%73tate=synthetic-state-a", "synthetic-state-a")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?state=synthetic-state-a&State=synthetic-state-b", "synthetic-state-a")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback??state=synthetic-state-a", null)]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?state=synthetic-state-a&synthetic", null)]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code=a&code=b&state=synthetic-state-a", null)]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?state=synthetic-state-a%00", null)]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?synthetic%0Aname=a&state=synthetic-state-a", null)]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?state=synthetic-state-a#state=synthetic-state-b", null)]
+   [InlineData("https://synthetic-user@id.example.com/authorize?state=synthetic-state-a", null)]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?", null)]
    [InlineData("https://id.example.com/authorize?client_id=synthetic&state=synthetic-state-a&nonce=synthetic", "synthetic-state-a")]
    [InlineData("io.qrun.qqq-print-agent:/oauth/callback?state=synthetic%2Dstate+a", "synthetic-state a")]
    [InlineData("io.qrun.qqq-print-agent:/oauth/callback?state=synthetic=state", "synthetic=state")]
@@ -593,6 +614,20 @@ public sealed class BrowserCallbackDispatcherTests
       Assert.Empty(typeof(BrowserCallbackDispatcher).GetMethods(declaredPublic));
       Assert.Empty(typeof(BrowserCallbackDispatcher).GetProperties(declaredPublic));
       Assert.Single(typeof(BrowserCallbackDispatcher).GetConstructors(declaredPublic));
+   }
+
+
+
+   /// <summary>A query is read up to the length the session accepts for a callback and not beyond: one character more, and the address has no state.</summary>
+   [Fact]
+   public void ReadState_QueryLongerThanACallbacksMayBe_HasNoState()
+   {
+      const string prefix = "?state=synthetic-state-a&synthetic=";
+      string longest = prefix + new string('a', BrowserCallbackDispatcher.LongestQuery - prefix.Length);
+
+      Assert.Equal(16_384, BrowserCallbackDispatcher.LongestQuery);
+      Assert.Equal("synthetic-state-a", BrowserCallbackDispatcher.ReadState(new Uri(SignInWorld.Callback + longest)));
+      Assert.Null(BrowserCallbackDispatcher.ReadState(new Uri(SignInWorld.Callback + longest + "a")));
    }
 
 
