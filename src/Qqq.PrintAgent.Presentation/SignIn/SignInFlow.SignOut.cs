@@ -99,11 +99,15 @@ public sealed partial class SignInFlow
    /// <summary>
    /// Opens the identity provider's end-session page in the default browser and waits up to two minutes for the browser to return
    /// to this application's registered callback with this sign-out's own state. The inbox is opened first so a fast redirect is not lost.
-   /// The request carries a sensitive token hint, so only its host is logged. Returns whether the provider confirmed; the wait
+   /// The request carries a sensitive token hint, so only its host is logged, and a browser that cannot be started is logged by
+   /// the kind of failure only, because Windows' own text for it names the whole request (see <see cref="BrowserLaunch"/>).
+   /// Returns whether the provider confirmed, did not confirm, or was never asked because the browser could not be
+   /// started, which the operator is told as what it is (an inbox that could not be opened is still returned as not
+   /// confirmed, as it was before); the wait
    /// also ends when the caller's token does. When the flow is disposed the wait ends without a result, and that is left
    /// to the runner as a quiet end instead of being reported as an unconfirmed sign-out.
    /// </summary>
-   private async Task<bool> CompleteProviderSignOutAsync(QqqProviderLogout logout, CancellationToken cancellationToken)
+   private async Task<ProviderSignOutResult> CompleteProviderSignOutAsync(QqqProviderLogout logout, CancellationToken cancellationToken)
    {
       try
       {
@@ -111,17 +115,25 @@ public sealed partial class SignInFlow
          using CancellationTokenSource limit = new(ProviderSignOutLimit, _time);
          using var wait = CancellationTokenSource.CreateLinkedTokenSource(limit.Token, cancellationToken);
          _log.Info("Opening the identity provider's sign-out page in the default browser (" + QqqOrigin.ShownAuthority(logout.EndSessionUri) + ").");
-         _browser.Open(logout.EndSessionUri);
+         try
+         {
+            BrowserLaunch.Open(_browser, logout.EndSessionUri);
+         }
+         catch(IOException exception) when(!_disposed)
+         {
+            _log.Warning("Identity provider sign-out was not confirmed: " + QqqSessionDiagnostics.Describe(exception));
+            return ProviderSignOutResult.NotOpened;
+         }
          Uri callback = await inbox.ReceiveAsync(wait.Token);
          ThrowIfDisposed();
          bool matched = logout.Matches(callback);
          _log.Info("Identity provider sign-out callback " + (matched ? "matched." : "did not match this sign-out."));
-         return matched;
+         return matched ? ProviderSignOutResult.Confirmed : ProviderSignOutResult.NotConfirmed;
       }
       catch(Exception exception) when(!_disposed && exception is OperationCanceledException or IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception)
       {
          _log.Warning("Identity provider sign-out was not confirmed: " + QqqSessionDiagnostics.Describe(exception));
-         return false;
+         return ProviderSignOutResult.NotConfirmed;
       }
    }
 }

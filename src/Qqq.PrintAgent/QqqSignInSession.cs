@@ -58,6 +58,11 @@ internal sealed class QqqSignInSession(QqqSessionClient client) : ISignInSession
 
 
 
+   /// <summary>The certificate the session client refused most recently, with the origin that presented it; null when it refused none.</summary>
+   public QqqCertificateRejection? LastCertificateRejection => client.LastCertificateRejection;
+
+
+
    /// <summary>Releases the session client.</summary>
    public void Dispose() => client.Dispose();
 }

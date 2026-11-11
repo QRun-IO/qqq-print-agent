@@ -148,10 +148,18 @@ public static class SignInMessages
 
 
 
-   /// <summary>Whether the identity provider confirmed its sign-out, and what to do when it did not.</summary>
-   public static FeedbackMessage ProviderSignedOut(string message, bool confirmed) => confirmed
-      ? new("Account sign-out", message + " The identity provider session ended too, so the next sign-in asks for credentials.", FeedbackSeverity.Success)
-      : new("Account sign-out", message + " The identity provider sign-out was opened in your browser but did not confirm; close that page and sign out there if it is still open.", FeedbackSeverity.Warning);
+   /// <summary>
+   /// How the identity provider's sign-out ended, and what to do when it was not confirmed. A page that was never
+   /// opened, because the default browser could not be started, is said to be exactly that, with what to check: the
+   /// operator has no page to close, and the provider's session, if there is one, is still there. Every other
+   /// unconfirmed ending is told as before.
+   /// </summary>
+   public static FeedbackMessage ProviderSignedOut(string message, ProviderSignOutResult result) => result switch
+   {
+      ProviderSignOutResult.Confirmed => new("Account sign-out", message + " The identity provider session ended too, so the next sign-in asks for credentials.", FeedbackSeverity.Success),
+      ProviderSignOutResult.NotOpened => new("Account sign-out", message + " The identity provider's sign-out page could not be opened in your browser, so you may still be signed in to the identity provider and the next sign-in may not ask for credentials. " + BrowserLaunch.Remedy, FeedbackSeverity.Warning),
+      _ => new("Account sign-out", message + " The identity provider sign-out was opened in your browser but did not confirm; close that page and sign out there if it is still open.", FeedbackSeverity.Warning),
+   };
 
 
 

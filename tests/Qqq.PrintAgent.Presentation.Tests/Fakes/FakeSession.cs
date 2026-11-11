@@ -14,7 +14,8 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// step succeeds unless a failure is set for it, can be held open until the test releases it, and records what the flow
 /// passed in. Disposing it behaves like the real client too: a call that is still in flight fails with "disposed" when
 /// it finishes, whatever else happened to it, and every later call is refused. A held call resumes on another thread, as
-/// the real client's network calls do. It never touches a network.
+/// the real client's network calls do. A test can also name the certificate the session refuses when a step fails,
+/// which is how the real client reports that a certificate was why. It never touches a network.
 /// </summary>
 internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins certificateException) : ISignInSession
 {
@@ -65,6 +66,11 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
 
 
 
+   /// <summary>When set, it runs at the moment a step is about to answer with success. A test uses it to end the caller's wait at the last moment, which is how a real answer can arrive for a wait that has just ended.</summary>
+   internal Action? BeforeAnswer { get; set; }
+
+
+
    /// <summary>When set, discovery fails with this.</summary>
    internal Exception? DiscoverFailure { get; set; }
 
@@ -105,8 +111,28 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
 
 
 
+   /// <summary>The token the flow gave the completion of a browser sign-in, which is how a test sees that ending the flow's wait ends the completion too.</summary>
+   internal CancellationToken? CompleteToken { get; private set; }
+
+
+
    /// <summary>True once the flow discarded this session.</summary>
    internal bool Disposed { get; private set; }
+
+
+
+   /// <summary>When set, a step that fails records this as the certificate the session refused, as the real client does when a certificate is why a request failed. A step that fails while this is null leaves the last refusal as it was.</summary>
+   internal QqqCertificateRejection? RefusedCertificate { get; set; }
+
+
+
+   /// <summary>The certificate this session refused most recently; null until a step failed while <see cref="RefusedCertificate"/> was set.</summary>
+   public QqqCertificateRejection? LastCertificateRejection { get; private set; }
+
+
+
+   /// <summary>What every browser attempt's state begins with, followed by the attempt's number. Two sessions that sign in at the same time are given different stems, as two real sessions have different random states.</summary>
+   internal string StateStem { get; set; } = "secret-state-";
 
 
 
@@ -115,13 +141,18 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
 
 
 
+   /// <summary>When set, beginning a browser sign-in returns this address in place of the provider page with the attempt's state, as a session that prepared an unusable address would.</summary>
+   internal Uri? AuthorizationOverride { get; set; }
+
+
+
    /// <summary>The provider page of the latest browser attempt; its query stands for that attempt's secret state.</summary>
-   internal Uri Authorization => new("https://" + ProviderAuthority + "/authorize?state=secret-state-" + _attempts);
+   internal Uri Authorization => AuthorizationOverride ?? new("https://" + ProviderAuthority + "/authorize?state=" + StateStem + _attempts);
 
 
 
    /// <summary>The callback the provider would send the browser to for the latest attempt, carrying that attempt's state and a one-time code.</summary>
-   internal Uri CallbackForLatestAttempt => new(SignInFixture.Callback + "?code=one-time-code&state=secret-state-" + _attempts);
+   internal Uri CallbackForLatestAttempt => new(SignInFixture.Callback + "?code=one-time-code&state=" + StateStem + _attempts);
 
 
 
@@ -133,9 +164,11 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
       {
          if(DiscoverFailure is not null)
          {
-            throw DiscoverFailure;
+            throw Refusing(DiscoverFailure);
          }
-         return PendingDiscovery is null ? Metadata : await PendingDiscovery.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+         QqqAuthenticationMetadata metadata = PendingDiscovery is null ? Metadata : await PendingDiscovery.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+         BeforeAnswer?.Invoke();
+         return metadata;
       }
       finally
       {
@@ -154,13 +187,14 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
       {
          if(PasswordFailure is not null)
          {
-            throw PasswordFailure;
+            throw Refusing(PasswordFailure);
          }
          if(PendingPassword is not null)
          {
             await PendingPassword.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
          }
          _signedIn = true;
+         BeforeAnswer?.Invoke();
       }
       finally
       {
@@ -179,7 +213,7 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
       {
          if(BeginFailure is not null)
          {
-            throw BeginFailure;
+            throw Refusing(BeginFailure);
          }
          if(PendingBegin is not null)
          {
@@ -187,6 +221,7 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
          }
          _attempts++;
          _attemptOpen = true;
+         BeforeAnswer?.Invoke();
          return Authorization;
       }
       finally
@@ -202,6 +237,7 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
    {
       ObjectDisposedException.ThrowIf(Disposed, this);
       Callback = callback;
+      CompleteToken = cancellationToken;
       _completeEntered.TrySetResult();
       try
       {
@@ -212,9 +248,9 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
          _attemptOpen = false;
          if(CompleteFailure is not null)
          {
-            throw CompleteFailure;
+            throw Refusing(CompleteFailure);
          }
-         if(!callback.Query.EndsWith("state=secret-state-" + _attempts, StringComparison.Ordinal))
+         if(!callback.Query.EndsWith("state=" + StateStem + _attempts, StringComparison.Ordinal))
          {
             throw new QqqSessionException(QqqSessionException.FailureKind.InvalidResponse, "The callback does not belong to this sign-in attempt.");
          }
@@ -223,6 +259,7 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
             await PendingComplete.Task.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
          }
          _signedIn = true;
+         BeforeAnswer?.Invoke();
       }
       finally
       {
@@ -241,6 +278,15 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
       }
       return _signedIn ? new QqqSessionCredential(Origin, "synthetic-session-token")
          : throw new QqqSessionException(QqqSessionException.FailureKind.AuthenticationRequired, "Sign in before exporting the session.");
+   }
+
+
+
+   /// <summary>Records the certificate a failing step refused, when the test named one, and returns the failure to throw.</summary>
+   private Exception Refusing(Exception failure)
+   {
+      LastCertificateRejection = RefusedCertificate ?? LastCertificateRejection;
+      return failure;
    }
 
 

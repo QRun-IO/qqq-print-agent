@@ -11,11 +11,19 @@ namespace Qqq.PrintAgent.Presentation.Tests.Fakes;
 /// A callback inbox a test delivers to by hand. Waiting ends when a callback is delivered, when a failure is injected, or
 /// when the flow's token is cancelled, exactly like the real pipe inbox. Like the real one it finishes on whatever thread
 /// delivered the callback, not on the caller's, so a flow that forgot to return to its own thread is caught by a test.
+/// An inbox that answers inline is the exception a test asks for when it has to know that a delivery was dealt with
+/// before it does the next thing: whoever waits on it, with no synchronization context on the delivering thread,
+/// continues inside the call that delivers.
 /// </summary>
-internal sealed class FakeInbox : IBrowserCallbackInbox
+internal sealed class FakeInbox(bool answersInline = false) : IBrowserCallbackInbox
 {
-   private readonly TaskCompletionSource<Uri> _callback = new(TaskCreationOptions.RunContinuationsAsynchronously);
+   /// <summary>What the wait ends with: the callback a test delivers, or the failure it injects.</summary>
+   private readonly TaskCompletionSource<Uri> _callback = new(answersInline ? TaskCreationOptions.None : TaskCreationOptions.RunContinuationsAsynchronously);
+
+   /// <summary>Completed when the flow starts waiting.</summary>
    private readonly TaskCompletionSource _listening = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+   /// <summary>The flow's wait, once it has started.</summary>
    private Task<Uri>? _wait;
 
 
