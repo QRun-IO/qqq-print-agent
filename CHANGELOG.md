@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+In-app update, service controls and the pipe's identity check (2.0). The installed product behaves as before. This
+change does not alter the Windows Installer command line, the files, owners and access lists that are checked or
+the order they are checked in, what an installer exit code means, the calls made to the service control manager,
+or the decision whether the other end of the management pipe is the installed service. It changes where that code
+lives, so that tests can run it:
+
+- The update steps (the staging checks, preparing the helper, the hand-off, applying and recording the outcome)
+  moved from `MsiUpdateInstaller` into `MsiUpdateSteps`, which reaches Windows only through `IPathSecurity` (owners
+  and access lists) and the new `IProcessHost` (the current process, a process by its id, a program started, a
+  file's version). `MsiUpdateInstaller` keeps the two entry points the command line tool and the companion call,
+  and the rules that need nothing from Windows.
+- `MsiUpdateService` is given its release source (`IMsiReleaseSource`, which `GitHubMsiReleaseClient` implements),
+  the pipe and the update steps. The companion's constructor binds the real ones, as before.
+- `AgentServiceControl` passes its four actions to `AgentServiceActions`, which reaches the service control
+  manager through `IServiceManager` and measures its 30 second wait on a clock it is given.
+- `AgentPipePeer` makes its decision from facts it is given through `IPipePeerFacts`: which process serves the
+  pipe, the service's state and process, and that process's account and program.
+- `MsiUpdateInstaller.PrepareHelper`, `StartHelper`, `ValidateStagingDirectory` and `UpdatesDirectory` are no
+  longer public members. Nothing outside the Windows library called them.
+- Tests run each of these against hand-written fakes in temporary folders, and the real Windows adapters against
+  a harmless child program, a pipe the test serves itself, the test process and a built-in Windows service that
+  is only read. No test starts Windows Installer, asks the release feed, connects to the installed service's
+  pipe or starts or stops a service. The minimum line coverage of the Windows library in
+  `build/minimum-coverage.json` rises from 80 to 88; its release bar is 90.
+
 Version 2 of the management pipe: the contract's gaps are closed (2.0). The contract is a set of types that
 nothing serves or sends yet, so none of the first seven items changes what the installed product does; they change
 what the service and its clients will be able to build on. The last two are about logging.
