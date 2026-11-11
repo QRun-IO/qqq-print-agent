@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+Servers that run as several nodes (2.0; the 1.2.x fix carried over). A load balancer in front of such a server
+names the node it chose in a cookie; the client attached only the session cookie, so its realtime socket could open
+on one node while its claims and downloads went to another, and a server whose claim gate needs the socket on the
+same node (QQQ Printing 1.1.x) answered 409. The client now keeps the Application Load Balancer's cookies (names
+beginning `AWSALB`) from any answer of the server, the WebSocket upgrade answer included, and sends them on every
+later request and on the upgrade, so everything reaches the node that holds the socket. When that node stops, the
+load balancer rewrites the cookie on the next answer, an error answer or a refused upgrade included, and the client
+follows it. The cookies are held in memory only, never saved with the session and never shown in a log, limited to
+eight bounded values scoped to the server's host and root path, and sent nowhere but the server: never to the
+sign-in provider. Cookies under other names no longer decide whether a session answer is valid, because a load
+balancer adds its own to every answer. Nothing changes against a single-node server. No change to pairing, history
+or the printing protocol.
+
 The development-only certificate exception now covers two origins at most (2.0, narrows behavior).
 
 - "Allow untrusted server certificate" used to make a session accept an untrusted certificate from every host it
