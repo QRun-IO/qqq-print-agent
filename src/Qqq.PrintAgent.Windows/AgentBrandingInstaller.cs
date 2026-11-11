@@ -19,8 +19,8 @@ public static class AgentBrandingInstaller
 
 
 
-   /// <summary>The rules bound to the real shell, folder security, the product's registry key and the installed places; the record's warnings go where the notes go.</summary>
-   private static readonly AgentBrandingShortcuts Installed = new(new WindowsShortcutShell(), new WindowsPathSecurity(), RegistryShortcutRecord.Machine(Places.TryNote), Places);
+   /// <summary>The rules bound to the real shell, folder security, the product's registry key and the installed places; the record's warnings go where the notes go, and the pause between two tries at a file in use is a real one.</summary>
+   private static readonly AgentBrandingShortcuts Installed = new(new WindowsShortcutShell(), new WindowsPathSecurity(), RegistryShortcutRecord.Machine(Places.TryNote), Places, Thread.Sleep);
 
 
 

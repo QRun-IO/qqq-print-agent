@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+A Start menu shortcut that another program holds no longer fails an uninstall, an install or an upgrade (2.0). The
+installer creates, renames and removes the shortcut under **Start → Print Connectors** in a required step, and
+Windows Installer undoes the whole install, upgrade or uninstall when that step fails. Until now it failed whenever
+the shortcut could not be opened or deleted because a virus scanner, a backup or the Start menu had the file open
+for a moment. 1.2.1 failed in the same places, more bluntly: it took a shortcut it could not open for someone
+else's. **No real install, upgrade or uninstall has exercised this change**: it is shown by tests that hold real
+files in temporary folders, and the cases are on the list for the upgrade qualification
+([TODO](docs/TODO.md), [audit](docs/AUDIT-2026-11-10.md) W50, W120 to W122).
+
+- **A file in use is tried again.** A shortcut file that Windows reports as in use (a sharing violation or a lock
+  violation) is tried nine times over two seconds before anything below applies. A file that is refused for
+  another reason is not tried again.
+- **Uninstall.** No shortcut file fails an uninstall any more.
+  - A recorded shortcut that is still held after the two seconds, or that cannot be opened or deleted for another
+    reason, is left where it is. A file that cannot be opened is not judged, so it is never deleted.
+  - A temporary file a failed earlier run left behind (`.qqq-` and 32 hexadecimal digits, `.lnk`) is removed also
+    when it is marked read-only; one that is held is left where it is.
+  - A **Print Connectors** folder that can no longer be trusted (an ordinary user may write to it, or a link
+    leads to it) is not worked in at all: nothing in it is opened or deleted, and the uninstall goes on. It used
+    to fail the uninstall, which protected nothing more and kept the product installed.
+  - What is left behind is a shortcut to a program that is no longer installed. The registry no longer names it:
+    delete it by hand, or install again under the same display name, which takes it over. An install under
+    another display name does not find it.
+  - An uninstall still fails, before it has deleted anything, for three reasons that are not about one shortcut
+    file: the step does not run as an elevated administrator, the registry record cannot be changed, or the
+    folder cannot be listed.
+- **Install, upgrade and repair.**
+  - When the product's own shortcut under the display name being applied is still held after the two seconds, the
+    install goes on and leaves that shortcut exactly as it is. It starts the same companion at the same path, so
+    it keeps working; a changed icon appears with the next install, upgrade or repair, which replaces it. A
+    previous display name's shortcut is not removed in that run either.
+  - A previous display name's shortcut that cannot be opened no longer stops a rename: the new shortcut is created,
+    the old one stays for the moment, and the next install, upgrade, repair or uninstall removes it.
+  - An install still fails, before it has changed anything, when a file that is not this product's shortcut has
+    the name the shortcut needs. That now includes a file under that name that the registry does not record and
+    that cannot be opened: it cannot be judged, so it is not overwritten. The failure says so; close the program
+    that holds the file and run the installer again.
+- **Where the reason is.** Windows Installer shows only its general message when the step fails. The reason is in
+  the service's activity log, `%ProgramData%\QqqPrintAgent\logs\qqq-print-agent-<date>.log`, in a line that starts
+  with `[Installer]`: an error when the step failed, a warning for each file that was left where it is. The
+  warnings, and the failure over a file that cannot be judged, name the shortcut's file name and the kind of the
+  failure (in use, access denied, or Windows' result code). They no longer repeat Windows' own message, which
+  carries a full path.
+- This replaces what the entry "Branded Start menu shortcut" below says about a shortcut that cannot be opened or
+  deleted; that entry is corrected where it said otherwise.
+
 The server tree, the footer and the tray for several servers exist as models (2.0). The window does not use them
 yet, so nothing an operator sees changes: it still shows the one connection of 1.x. The window is rebuilt on these
 models, and on the connection wizard, in a later change.
@@ -480,8 +526,9 @@ Two cases the print worker now settles with a known outcome (2.0).
   the job stayed marked as held until the service restarted, and every later offer of it was turned away.
 
 Branded Start menu shortcut (2.0). The installer step that creates, renames and removes the shortcut under
-**Start → Print Connectors** now records, by name, every shortcut it has put there and may still own, and a file
-that is not ours no longer fails an install or an uninstall. Nothing changes for an installation whose shortcut
+**Start → Print Connectors** now records, by name, every shortcut it has put there and may still own, and a
+recorded file that is no longer ours no longer fails an install or an uninstall. A file that is not ours under the
+name a new shortcut needs still refuses an install, as below. Nothing changes for an installation whose shortcut
 was never touched by anything else.
 
 What counts as ours, here and below: a shortcut that starts the installed companion with no arguments and carries
@@ -511,9 +558,9 @@ not judged, since it may well be ours.
     `.lnk`) is removed. Only a file with exactly such a name is removed for this reason, and such a name is never
     recorded. One that cannot be removed is noted as a warning and tried again by the next run.
   - An install fails before it has changed anything when a file that is not ours has the name the shortcut
-    needs, when the record in the registry cannot be opened for writing, or when a recorded shortcut, the
-    current one included, cannot be opened. The last one now says that the shortcut could not be read; a
-    same-brand upgrade used to say that a different shortcut already used the name.
+    needs, or when the record in the registry cannot be opened for writing. A recorded shortcut that cannot be
+    opened no longer fails an install; see the first entry of this list of changes. In 1.2.1 a same-brand upgrade
+    over a held shortcut failed saying that a different shortcut already used the name.
   - An install can still fail after that. If the new shortcut cannot be written, the record is put back as it
     was found, except that the new name stays on record when a shortcut of ours already has that name or when
     the temporary file could not be removed. If the shortcut is written and the record then cannot be, the
@@ -522,10 +569,9 @@ not judged, since it may well be ours.
   in the activity log says so, and the record is removed. The same holds for a recorded name that is not a
   shortcut file name in the folder. Both used to stop the uninstall. Shortcuts an earlier install could not
   remove, and temporary files left behind, are removed with the current shortcut. An uninstall still fails,
-  before it has deleted anything, when a recorded shortcut cannot be opened, when the record cannot be changed,
-  or when the shortcut folder can no longer be trusted. It fails with the record kept, so that it can be run
-  again, when a shortcut of ours cannot be opened for the look taken just before its delete or cannot be deleted,
-  or when a temporary file cannot be deleted; shortcuts it had already deleted by then stay deleted.
+  before it has deleted anything, when the record cannot be changed. A shortcut that cannot be opened or deleted,
+  a temporary file that cannot be deleted and a shortcut folder that can no longer be trusted no longer fail it;
+  see the first entry of this list of changes.
 - **Registry.** `HKLM\SOFTWARE\QRunIO\PrintAgent` keeps `LastShortcutName` as before and may now also hold
   `PendingShortcutNames` (multi-string): the names of a shortcut that is being written and of shortcuts that are
   still to be removed. It is normally absent and is removed at uninstall. A value of either name that is of

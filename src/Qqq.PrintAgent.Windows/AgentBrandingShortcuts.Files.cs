@@ -47,14 +47,14 @@ internal sealed partial class AgentBrandingShortcuts
    /// half-written shortcut under the real name. It points only at the installed companion and carries the ownership
    /// description. Whatever the shell left under the temporary name is removed, also when the shell failed part way.
    /// <para>
-   /// The destination is looked at again immediately before the move, because a file could have appeared or been
-   /// replaced there since the first look. When nothing was there at the first look, the move never overwrites: a file
-   /// that has appeared since is someone else's and the run is refused. When a shortcut of ours was there, it is
-   /// replaced only if the second look still finds a shortcut of ours; a read-only mark on it is cleared first, since
-   /// it would otherwise fail this and every later run. A file that is not ours is never overwritten or changed.
+   /// It returns nothing when the new shortcut is in place. When a shortcut of ours was under the name at the first
+   /// look and cannot be opened for the second look or replaced now, after the tries a file in use is given, the new
+   /// shortcut is given up: the file that is there is left exactly as it is, and the kind of the failure is returned
+   /// for the caller to note. Every other failure is thrown, as it is when nothing was there at the first look,
+   /// because then there would be no shortcut under the name at all.
    /// </para>
    /// </summary>
-   private void WriteShortcut(string path, string? icon, bool replacingOurs)
+   private string? WriteShortcut(string path, string? icon, bool replacingOurs)
    {
       string temporary = Path.Combine(ShortcutDirectory, ".qqq-" + Guid.NewGuid().ToString("N") + ".lnk");
       // The name must match TemporaryName, which is how a later run recognises a temporary file that was left behind.
@@ -62,17 +62,15 @@ internal sealed partial class AgentBrandingShortcuts
       {
          shell.Write(temporary, new ShortcutLink(places.InstalledExecutable, "", OwnershipDescription, Path.GetDirectoryName(places.InstalledExecutable)!, (icon ?? places.InstalledExecutable) + ",0"));
          MsiUpdateInstaller.ValidateNoReparseComponents(ShortcutDirectory);
-         if(!File.Exists(path))
+         try
          {
-            File.Move(temporary, path, overwrite: false);
-            return;
+            WhileHeld(() => PutInPlace(temporary, path, replacingOurs));
+            return null;
          }
-         if(!replacingOurs || !IsOwnedShortcut(path))
+         catch(Exception exception) when(replacingOurs && exception is IOException or UnauthorizedAccessException && File.Exists(path))
          {
-            throw new InvalidOperationException(NameTaken);
+            return Kind(exception);
          }
-         ClearReadOnly(path);
-         File.Move(temporary, path, overwrite: true);
       }
       finally
       {
@@ -81,6 +79,36 @@ internal sealed partial class AgentBrandingShortcuts
             File.Delete(temporary);
          }
       }
+   }
+
+
+
+   /// <summary>
+   /// One try at moving the finished shortcut to the destination. The destination is looked at again immediately
+   /// before the move, because a file could have appeared or been replaced there since the first look, or since the
+   /// try before this one. When nothing is there, the move never overwrites. When a file is there, it is replaced
+   /// only if a shortcut of ours was there at the first look and this look still finds a shortcut of ours; a file that
+   /// has appeared since, or that is not ours, is never overwritten or changed, and the run is refused. A read-only
+   /// mark on a shortcut of ours is cleared first, since it would otherwise defeat this and every later run. A file
+   /// that cannot be opened or replaced throws as the file system does.
+   /// </summary>
+   private void PutInPlace(string temporary, string path, bool replacingOurs)
+   {
+      if(!File.Exists(path))
+      {
+         File.Move(temporary, path, overwrite: false);
+         return;
+      }
+      if(!replacingOurs || !SaysOurs(path))
+      {
+         throw new InvalidOperationException(NameTaken);
+      }
+      ClearReadOnly(path);
+      // Windows reports the replacement of a file another program has open as access denied, whatever that program
+      // shares, which says nothing about why. Opening the file with nothing shared first reports it as what it is,
+      // a sharing violation, so that it is tried again like any other file in use and noted as one.
+      File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None).Dispose();
+      File.Move(temporary, path, overwrite: true);
    }
 
 
@@ -102,38 +130,99 @@ internal sealed partial class AgentBrandingShortcuts
 
 
 
-   /// <summary>
-   /// Looks at an existing file under a shortcut name and reports whether it is a shortcut of ours. A link is not ours and
-   /// is not opened, because this product never writes one. A file that opens and holds no shortcut at all is not ours.
-   /// A shortcut that says anything but what ours says is not ours. A file that cannot be opened is not judged: nothing
-   /// is known about it, so the failure is passed on, naming the shortcut, and the caller decides what that means. At a
-   /// first look it stops the run before anything has changed; at the look before a delete or a replacement the file is
-   /// left alone and its name stays on record.
-   /// </summary>
-   private bool IsOwnedShortcut(string path)
+   /// <summary>What a first look at an existing file under a shortcut name found.</summary>
+   private enum Whose
    {
-      MsiUpdateInstaller.ValidateNoReparseComponents(Path.GetDirectoryName(path)!);
-      if(security.IsLink(path))
-      {
-         return false;
-      }
-      ShortcutLink? link;
-      try
-      {
-         link = shell.Read(path);
-      }
-      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
-      {
-         throw new IOException($"The shortcut \"{Path.GetFileName(path)}\" could not be read, so it cannot be known whether it belongs to this application: {exception.Message}", exception);
-      }
-      return link is not null && MatchesOwnedShortcut(link.Target, link.Arguments, link.Description);
+      /// <summary>A shortcut of ours.</summary>
+      Ours,
+
+      /// <summary>Someone else's shortcut, a file that holds no shortcut at all, or a link.</summary>
+      NotOurs,
+
+      /// <summary>The file could not be opened, so nothing is known about it: it may be ours.</summary>
+      NotOpened,
    }
 
 
 
    /// <summary>
+   /// The first look of a branding run at an existing file under a shortcut name, before anything is changed. A file
+   /// that cannot be opened is not judged: nothing is known about it, the kind of the failure is given, and the caller
+   /// decides what that means. Asked to be patient, the look gives a file in use the tries of
+   /// <see cref="WhileHeld"/> first. A folder that has a link on the way to it, and a shell that cannot do its work,
+   /// are not about this file and fail as they always did.
+   /// </summary>
+   private Whose Judge(string path, bool patiently, out string kind)
+   {
+      kind = "";
+      MsiUpdateInstaller.ValidateNoReparseComponents(Path.GetDirectoryName(path)!);
+      bool ours = false;
+      try
+      {
+         if(patiently)
+         {
+            WhileHeld(() => ours = SaysOurs(path));
+         }
+         else
+         {
+            ours = SaysOurs(path);
+         }
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         kind = Kind(exception);
+         return Whose.NotOpened;
+      }
+      return ours ? Whose.Ours : Whose.NotOurs;
+   }
+
+
+
+   /// <summary>
+   /// The first look at a file that already has the name the new shortcut needs, and what it means for the run. A
+   /// shortcut of ours is to be replaced, also one that nothing records: that is how an install takes over a shortcut
+   /// an uninstall had to leave behind. A file that is not ours refuses the run. A file that cannot be opened, after
+   /// the tries a file in use is given, is not judged and therefore never overwritten. When the record names it, it
+   /// is the shortcut an earlier run of ours made, which starts the same companion whatever version wrote it: the run
+   /// goes on without replacing it, with a note, and answers false. When nothing records it, nothing says it is
+   /// ours, and the run is refused with what the operator can do.
+   /// </summary>
+   private bool OursToReplace(string destination, bool recorded, List<string> notes)
+   {
+      string filename = Path.GetFileName(destination);
+      switch(Judge(destination, patiently: true, out string kind))
+      {
+         case Whose.Ours:
+            return true;
+         case Whose.NotOurs:
+            throw new InvalidOperationException(NameTaken);
+         default:
+            if(!recorded)
+            {
+               throw new IOException(NotJudged(filename, kind));
+            }
+            notes.Add(KeptAsItIs(filename, "opened", kind));
+            return false;
+      }
+   }
+
+
+
+   /// <summary>
+   /// One look at an existing file under a shortcut name: whether it is a shortcut of ours. A link is not ours and is
+   /// not opened, because this product never writes one. A file that opens and holds no shortcut at all is not ours,
+   /// and neither is a shortcut that says anything but what ours says. A file that cannot be opened fails as the file
+   /// system fails, with Windows' own result code, which is how a file in use is told from one that is denied.
+   /// </summary>
+   private bool SaysOurs(string path)
+      => !security.IsLink(path) && shell.Read(path) is { } link && MatchesOwnedShortcut(link.Target, link.Arguments, link.Description);
+
+
+
+   /// <summary>
    /// Clears the read-only mark of a file that has just been found to be a shortcut of ours, so that it can be replaced
-   /// or deleted. It is never called for a file that is not ours.
+   /// or deleted, or of a temporary file an earlier run left behind, which is ours by its name. It is never called for
+   /// a file that is not ours.
    /// </summary>
    private static void ClearReadOnly(string path)
    {
@@ -184,6 +273,29 @@ internal sealed partial class AgentBrandingShortcuts
    {
       MsiUpdateInstaller.ValidateNoReparseComponents(directory);
       ValidateShortcutSecurity(security.ReadDirectorySecurity(directory));
+   }
+
+
+
+   /// <summary>
+   /// Whether an uninstall may work in the shortcut folder. A folder that can no longer be trusted (a link on the way
+   /// to it, an untrusted owner, or write access for an untrusted account), or whose security cannot be read, is not
+   /// worked in: nothing in it is opened, changed or deleted, because an elevated process must not act on files an
+   /// ordinary user could have put there. That does not fail the uninstall, which would only keep the product
+   /// installed and protect nothing more; one note says that shortcuts of ours may remain there.
+   /// </summary>
+   private bool TrustedForRemoval(List<string> notes)
+   {
+      try
+      {
+         ValidateShortcutDirectory(ShortcutDirectory);
+         return true;
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         notes.Add($"The shortcut folder can no longer be trusted, or its security could not be read ({exception.GetType().Name}), so nothing in it was opened or removed. Shortcuts of this application may remain in it; they are no longer recorded.");
+         return false;
+      }
    }
 
 

@@ -14,8 +14,9 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// The decisions about the branded all-users shortcut, run in temporary folders against a shell, folder security and a
 /// shortcut record that exist only in the test: who may brand, which folders must be trusted first, what the shortcut
 /// says, when one is written, replaced or left alone, what the record names at every step, and what happens when Windows
-/// refuses. Removal at uninstall is in <see cref="AgentBrandingRemovalTests"/>. No test here touches this computer's
-/// Start menu, registry or install folder.
+/// refuses. Removal at uninstall is in <see cref="AgentBrandingRemovalTests"/>, and a shortcut under the wanted name
+/// that another program holds is in <see cref="AgentBrandingHeldShortcutTests"/>. No test here touches this
+/// computer's Start menu, registry or install folder.
 /// </summary>
 public sealed class AgentBrandingShortcutsTests
 {
@@ -266,55 +267,32 @@ public sealed class AgentBrandingShortcutsTests
 
 
    /// <summary>
-   /// A recorded shortcut that cannot be opened, because another program holds it and shares nothing, is never judged:
-   /// it may well be ours. At the first look that stops the run before anything is changed, with a failure that names
-   /// the shortcut, and nothing is forgotten. Once the file is free, the next run removes it.
+   /// A recorded shortcut of an earlier brand that cannot be opened, because another program holds it and shares
+   /// nothing, is never judged: it may well be ours. It does not stop the run. The new shortcut is written and made
+   /// current, the held one is left exactly as it is and stays on record with a note, and the next run, finding it
+   /// free, removes it. The run waits for the held file once, at the look before the delete, not also at the first look.
    /// </summary>
    [Fact]
-   public void RecordedShortcutThatCannotBeOpenedStopsTheRunAndIsNotForgotten()
+   public void RecordedShortcutThatCannotBeOpenedStaysOnRecordAndTheRunGoesOn()
    {
       using var setup = new BrandingSetup();
       string previous = setup.PlantShortcut(Old, setup.OurLink);
       setup.Record.Name = Old;
       using(new FileStream(previous, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
       {
-         IOException refused = Assert.Throws<IOException>(setup.Rules.ApplyInstalledBranding);
-         Assert.StartsWith("The shortcut \"Old Brand.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
+         setup.Rules.ApplyInstalledBranding();
       }
-      Assert.Equal(new[] { previous }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
-      Assert.Empty(setup.Shell.Written);
-      Assert.Equal(ReadsOnly, setup.Record.Operations, StringComparer.Ordinal);
-      Assert.Equal(Old, setup.Record.Name);
-      Assert.Empty(setup.Notes);
+      Assert.Equal(setup.OurLink, new FakeShortcutShell().Read(previous));
+      Assert.True(File.Exists(setup.Shortcut(Acme)));
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
+      Assert.Equal(8, setup.Waits.Count);
+      Assert.Equal(new[] { "The previous shortcut \"Old Brand.lnk\" could not be removed (in use by another program: sharing violation). It stays recorded, and the next branding run or the uninstall will try again." }, setup.Notes, StringComparer.Ordinal);
       setup.Rules.ApplyInstalledBranding();
       Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Empty(setup.Record.Pending);
-      Assert.Empty(setup.Notes);
-   }
-
-
-
-   /// <summary>
-   /// A same-brand install, upgrade or repair while another program holds the current shortcut says that the shortcut
-   /// could not be read. It does not say that a different shortcut uses the name, which would be untrue: the shortcut
-   /// is ours. Nothing is changed.
-   /// </summary>
-   [Fact]
-   public void CurrentShortcutThatCannotBeOpenedIsReportedAsUnreadableNotAsSomeoneElses()
-   {
-      using var setup = new BrandingSetup();
-      string current = setup.PlantShortcut(Acme, setup.OurLink);
-      setup.Record.Name = Acme;
-      using(new FileStream(current, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-      {
-         IOException refused = Assert.Throws<IOException>(setup.Rules.ApplyInstalledBranding);
-         Assert.StartsWith("The shortcut \"Acme Print Connector.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
-      }
-      Assert.Equal(setup.OurLink, new FakeShortcutShell().Read(current));
-      Assert.Empty(setup.Shell.Written);
-      Assert.Equal(ReadsOnly, setup.Record.Operations, StringComparer.Ordinal);
-      Assert.Equal(Acme, setup.Record.Name);
+      _ = Assert.Single(setup.Notes);
    }
 
 
@@ -344,8 +322,7 @@ public sealed class AgentBrandingShortcutsTests
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
       string note = Assert.Single(setup.Notes);
-      Assert.StartsWith("The previous shortcut \"Old Brand.lnk\" could not be removed (IOException: The shortcut \"Old Brand.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", note, StringComparison.Ordinal);
-      Assert.EndsWith("). It stays recorded, and the next branding run or the uninstall will try again.", note, StringComparison.Ordinal);
+      Assert.Equal("The previous shortcut \"Old Brand.lnk\" could not be removed (in use by another program: sharing violation). It stays recorded, and the next branding run or the uninstall will try again.", note);
       setup.Shell.BeforeWrite = null;
       setup.Rules.ApplyInstalledBranding();
       Assert.False(File.Exists(previous));
@@ -565,7 +542,7 @@ public sealed class AgentBrandingShortcutsTests
       Assert.True(File.Exists(previous));
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
-      Assert.Equal(new[] { "The previous shortcut \"Old Brand.lnk\" could not be removed (InvalidOperationException: Windows could not open the shortcut.). It stays recorded, and the next branding run or the uninstall will try again." }, setup.Notes, StringComparer.Ordinal);
+      Assert.Equal(new[] { "The previous shortcut \"Old Brand.lnk\" could not be removed (Windows shortcut automation failed). It stays recorded, and the next branding run or the uninstall will try again." }, setup.Notes, StringComparer.Ordinal);
       setup.Shell.BeforeWrite = null;
       setup.Shell.ReadFailure = null;
       setup.Rules.ApplyInstalledBranding();
@@ -817,11 +794,12 @@ public sealed class AgentBrandingShortcutsTests
 
    /// <summary>
    /// When another program takes hold of our current shortcut while its replacement is being written, the second look
-   /// cannot open it, so it is not replaced: the run fails saying the shortcut could not be read, the shortcut is as it
-   /// was, no temporary file stays behind, and its name is still on record.
+   /// cannot open it, so it is not replaced. That does not fail the run: the shortcut is exactly as it was, no
+   /// temporary file stays behind, its name is still the current one on record, and one note says that it was left
+   /// as it is.
    /// </summary>
    [Fact]
-   public void CurrentShortcutHeldAtTheSecondLookIsNotReplaced()
+   public void CurrentShortcutHeldAtTheSecondLookIsNotReplacedAndTheRunGoesOn()
    {
       using var setup = new BrandingSetup();
       string destination = setup.PlantShortcut(Acme, setup.OurLink);
@@ -830,8 +808,7 @@ public sealed class AgentBrandingShortcutsTests
       setup.Shell.BeforeWrite = () => held = new FileStream(destination, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
       try
       {
-         IOException refused = Assert.Throws<IOException>(setup.Rules.ApplyInstalledBranding);
-         Assert.StartsWith("The shortcut \"Acme Print Connector.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
+         setup.Rules.ApplyInstalledBranding();
       }
       finally
       {
@@ -840,6 +817,9 @@ public sealed class AgentBrandingShortcutsTests
       Assert.Equal(setup.OurLink, new FakeShortcutShell().Read(destination));
       Assert.Equal(new[] { destination }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
       Assert.Equal(Acme, setup.Record.Name);
+      Assert.DoesNotContain(setup.Record.Operations, operation => operation.StartsWith("last=", StringComparison.Ordinal));
+      Assert.Equal(8, setup.Waits.Count);
+      Assert.Equal(new[] { "The shortcut \"Acme Print Connector.lnk\" could not be replaced (in use by another program: sharing violation). It was left as it is and stays recorded: it still starts the companion, and the next install, upgrade or repair replaces it." }, setup.Notes, StringComparer.Ordinal);
    }
 
 
@@ -890,6 +870,37 @@ public sealed class AgentBrandingShortcutsTests
       { setup.Rules.ApplyInstalledBranding(); }
       Assert.True(File.GetAttributes(theirs).HasFlag(FileAttributes.ReadOnly));
       Assert.Equal(before, File.ReadAllText(theirs));
+   }
+
+
+
+   /// <summary>
+   /// At the look taken just before a replacement or a delete, the file is judged first and its read-only mark is
+   /// touched only if it is ours. Here another program replaces our shortcut with a read-only file of its own while
+   /// the new shortcut is being written, under the wanted name, where it refuses the run, or under the earlier
+   /// brand's name, where it is left alone and forgotten: the file keeps its mark and its content.
+   /// </summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public void ReadOnlyFileThatReplacedOursBeforeTheSecondLookKeepsItsMark(bool underTheWantedName)
+   {
+      using var setup = new BrandingSetup();
+      string path = setup.PlantShortcut(underTheWantedName ? Acme : Old, setup.OurLink);
+      setup.Record.Name = underTheWantedName ? Acme : Old;
+      var theirs = new ShortcutLink(Path.Combine(setup.Root, "other.exe"), "", "Somebody's shortcut");
+      setup.Shell.BeforeWrite = () =>
+      {
+         FakeShortcutShell.Plant(path, theirs);
+         File.SetAttributes(path, FileAttributes.ReadOnly);
+      };
+      if(underTheWantedName)
+      { Assert.Equal("A different shortcut already uses the requested brand name.", Assert.Throws<InvalidOperationException>(setup.Rules.ApplyInstalledBranding).Message); }
+      else
+      { setup.Rules.ApplyInstalledBranding(); }
+      Assert.True(File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly));
+      Assert.Equal(theirs, new FakeShortcutShell().Read(path));
+      Assert.Equal(new[] { path, path }, setup.Shell.Reads, StringComparer.Ordinal);
    }
 
 

@@ -75,6 +75,16 @@ internal sealed class BrandingSetup : IDisposable
 
 
 
+   /// <summary>Every pause the rules took between two tries at a file in use, in order. A test waits for none of them.</summary>
+   internal List<TimeSpan> Waits { get; } = [];
+
+
+
+   /// <summary>Something that happens when the rules pause, given how many pauses there have been by then: a test uses it to let go of a file, as another program would in the meantime.</summary>
+   internal Action<int>? OnWait { get; set; }
+
+
+
    /// <summary>For each time the branding was loaded, whether the installer's labels were asked for.</summary>
    internal List<bool> LoadedWithInstallerLabels { get; } = [];
 
@@ -113,7 +123,7 @@ internal sealed class BrandingSetup : IDisposable
       Directory.CreateDirectory(Path.GetDirectoryName(Installed)!);
       File.WriteAllText(Installed, "synthetic companion");
       Directory.CreateDirectory(Programs);
-      Rules = new AgentBrandingShortcuts(realShell ?? Shell, Security, Record, new BrandingPlaces(Installed, Programs, State, EnsureState, LoadBranding, WriteNote));
+      Rules = new AgentBrandingShortcuts(realShell ?? Shell, Security, Record, new BrandingPlaces(Installed, Programs, State, EnsureState, LoadBranding, WriteNote), Wait);
    }
 
 
@@ -159,6 +169,15 @@ internal sealed class BrandingSetup : IDisposable
    {
       LoadedWithInstallerLabels.Add(includeInstallerLabels);
       return Branding;
+   }
+
+
+
+   /// <summary>Stands in for the pause between two tries at a file in use: writes it down, waits for nothing, and lets the test act as another program would in the meantime.</summary>
+   private void Wait(TimeSpan pause)
+   {
+      Waits.Add(pause);
+      OnWait?.Invoke(Waits.Count);
    }
 
 
