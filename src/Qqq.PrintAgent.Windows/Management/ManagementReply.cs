@@ -14,14 +14,57 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// answered in this version whatever version was asked for. The result stays untyped here because its type depends on the operation;
 /// <see cref="ManagementJson"/> reads it into the operation's own record. One result, that of a sign-out, carries the
 /// identity provider's sign-out request, so neither the text form of a reply nor that of its result shows it.
+/// <para>
+/// A reply is built only by the <see cref="Success{TResult}"/> and <see cref="Failure(ManagementError)"/> functions,
+/// which the parser uses too, and no member can be set afterwards. So every reply that exists is of this contract's
+/// version and holds exactly one of the two: a success its result and no error, a failure its error and no result.
+/// </para>
 /// </summary>
 [JsonConverter(typeof(ManagementJson.NotBySerializer<ManagementReply>))]
-public sealed record ManagementReply(int V, bool Ok, ManagementPayload? Result = null, ManagementError? Error = null)
+public sealed record ManagementReply
 {
+   /// <summary>Stores a reply. Only the functions below call this, each with exactly one of the two.</summary>
+   private ManagementReply(ManagementPayload? result, ManagementError? error)
+   {
+      Result = result;
+      Error = error;
+   }
+
+
+
+   /// <summary>The contract version the reply is in. It is always this contract's: a reply of another version is not read, and none can be built.</summary>
+   public int V { get; } = ManagementProtocol.Version;
+
+
+
+   /// <summary>True when the operation succeeded, which is when the reply holds a result and no error.</summary>
+   public bool Ok => Error is null;
+
+
+
+   /// <summary>The operation's result as the JSON object the wire carries; null exactly when the operation failed.</summary>
+   public ManagementPayload? Result { get; }
+
+
+
+   /// <summary>Why the operation failed; null exactly when it succeeded.</summary>
+   public ManagementError? Error { get; }
+
+
+
    /// <summary>Builds the reply to an operation that succeeded, writing its result record the way the wire carries it. An operation with nothing to report answers <see cref="NoResult"/>, so a success always has a result object.</summary>
    public static ManagementReply Success<TResult>(TResult result)
       where TResult : class
-      => new(ManagementProtocol.Version, true, ManagementPayload.From(result));
+      => Success(ManagementPayload.From(result));
+
+
+
+   /// <summary>Builds the reply to an operation that succeeded around a result that is already the JSON object the wire carries: what the parser does with a success it read.</summary>
+   public static ManagementReply Success(ManagementPayload result)
+   {
+      ArgumentNullException.ThrowIfNull(result);
+      return new ManagementReply(result, null);
+   }
 
 
 
@@ -46,11 +89,11 @@ public sealed record ManagementReply(int V, bool Ok, ManagementPayload? Result =
    public static ManagementReply Failure(ManagementError error)
    {
       ArgumentNullException.ThrowIfNull(error);
-      return new ManagementReply(ManagementProtocol.Version, false, Error: error);
+      return new ManagementReply(null, error);
    }
 
 
 
    /// <summary>Says whether the operation succeeded and, if not, with which code. The result is never shown, so logging a reply cannot reveal the provider's sign-out request.</summary>
-   public override string ToString() => Ok ? $"Management reply v{V} ok (result not shown)" : $"Management reply v{V} failed: {Error?.Code ?? "no error given"}";
+   public override string ToString() => Error is null ? $"Management reply v{V} ok (result not shown)" : $"Management reply v{V} failed: {Error.Code}";
 }

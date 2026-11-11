@@ -65,7 +65,7 @@ public sealed class ManagementGoldenTests
       Assert.Equal(operation.Scope == ManagementScope.Server, parse.Request.Server is not null);
       Assert.Equal(operation.ArgumentsType is not null, parse.Request.Args is not null);
       object? arguments = operation.ArgumentsType is null ? null : ReadTyped(nameof(ManagementJson.TryReadArguments), operation.ArgumentsType, parse.Request);
-      Assert.Equal(golden, ManagementJson.Write(parse.Request with { Args = arguments is null ? null : Payload(arguments, operation.ArgumentsType!) }));
+      Assert.Equal(golden, ManagementJson.Write(ManagementRequest.For(parse.Request.Op, parse.Request.Server, arguments is null ? null : Payload(arguments, operation.ArgumentsType!))));
    }
 
 
@@ -77,8 +77,7 @@ public sealed class ManagementGoldenTests
    {
       Assert.True(ManagementOperations.TryFind(name, out ManagementOperationInfo? operation));
       object? arguments = ManagementSamples.Arguments(name);
-      ManagementRequest example = new(ManagementProtocol.Version, name, ManagementSamples.ServerFor(operation),
-         arguments is null ? null : Payload(arguments, operation.ArgumentsType!));
+      var example = ManagementRequest.For(name, ManagementSamples.ServerFor(operation), arguments is null ? null : Payload(arguments, operation.ArgumentsType!));
 
       Assert.Equal(arguments?.GetType(), operation.ArgumentsType);
       Assert.Equal(Normalized(name + ".request.json"), ManagementJson.Write(example));
@@ -101,7 +100,7 @@ public sealed class ManagementGoldenTests
       Assert.True(parse.Reply.Ok);
       Assert.Null(parse.Reply.Error);
       object result = ReadTyped(nameof(ManagementJson.TryReadResult), operation.ResultType, parse.Reply);
-      Assert.Equal(golden, ManagementJson.Write(parse.Reply with { Result = Payload(result, operation.ResultType) }));
+      Assert.Equal(golden, ManagementJson.Write(ManagementReply.Success(Payload(result, operation.ResultType))));
    }
 
 
@@ -188,7 +187,7 @@ public sealed class ManagementGoldenTests
 
 
 
-   /// <summary>Builds a successful reply with <see cref="ManagementReply.Success"/> for a result whose type is known only at run time.</summary>
+   /// <summary>Builds a successful reply with <see cref="ManagementReply.Success{TResult}(TResult)"/> for a result whose type is known only at run time.</summary>
    private static ManagementReply SuccessOf(object result)
-      => (ManagementReply)typeof(ManagementReply).GetMethod(nameof(ManagementReply.Success))!.MakeGenericMethod(result.GetType()).Invoke(null, [result])!;
+      => (ManagementReply)typeof(ManagementReply).GetMethods().Single(method => method.IsGenericMethodDefinition && string.Equals(method.Name, nameof(ManagementReply.Success), StringComparison.Ordinal)).MakeGenericMethod(result.GetType()).Invoke(null, [result])!;
 }

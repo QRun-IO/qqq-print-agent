@@ -130,7 +130,7 @@ public sealed class ManagementSecrecyTests
       foreach(ManagementOperationInfo operation in ManagementOperations.All)
       {
          object result = ManagementSamples.Result(operation.Name);
-         written.Add(ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, true, Payload(result, operation.ResultType))));
+         written.Add(ManagementJson.Write(ManagementReply.Success(Payload(result, operation.ResultType))));
          written.Add(result.ToString()!);
       }
       foreach(string code in ManagementErrorCode.All)
@@ -169,7 +169,7 @@ public sealed class ManagementSecrecyTests
    [Fact]
    public void ProviderSignOutRequest_IsInTheSignOutReplyAndNowhereElse()
    {
-      string[] carrying = [.. ManagementOperations.All.Where(operation => ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, true,
+      string[] carrying = [.. ManagementOperations.All.Where(operation => ManagementJson.Write(ManagementReply.Success(
          Payload(ManagementSamples.Result(operation.Name), operation.ResultType))).Contains(ManagementSamples.IdTokenHintCanary, StringComparison.Ordinal))
          .Select(operation => operation.Name)];
 
@@ -184,7 +184,7 @@ public sealed class ManagementSecrecyTests
    private static string RequestText(string operation)
    {
       object arguments = ManagementSamples.Arguments(operation)!;
-      return ManagementJson.Write(new ManagementRequest(ManagementProtocol.Version, operation, null, Payload(arguments, arguments.GetType())));
+      return ManagementJson.Write(ManagementRequest.For(operation, null, Payload(arguments, arguments.GetType())));
    }
 
 

@@ -350,6 +350,7 @@ The rows for `server_refused` and `identity_changed`, and "Text a server supplie
 - A details record was not tied to its code, and any text was accepted as a code. The service can now build an error only with a code from the table, and with exactly the details record the table names for it; a client still reads a code it does not know (audit W32).
 - The envelope types refused the serializer only when it was given the contract's own options. The refusal is now declared on the types and holds for the default options and for every options object that brings no converter of its own for an envelope type, for reading and for writing (audit W33).
 - A cut value carried a three-character mark after the cut, and a missing value was sent as the text `(missing)`. "Text on the wire" above settles both (audit W34).
+- Found by the review of those fixes and closed in the round after it: a request and a reply could still be built member by member, with another version, with an error beside a result, or with any text as an operation or a server. Both are now built only by functions that check them, which the parser uses as well, so every request that exists is one the parser would read back and every reply holds exactly one of a result and an error (audit W75). The parsing functions also no longer throw for the escape of a surrogate without its partner (audit W74; "Text on the wire").
 
 Three decisions of this section were also missing from the contract and are in it now. What each still needs is built with the pipe server and the registry, not with the contract:
 

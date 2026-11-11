@@ -344,13 +344,13 @@ public static class ManagementJson
          problem = ManagementEnvelopeProblem.OperationMalformed;
       }
       return problem == ManagementEnvelopeProblem.None
-         ? new ManagementRequestParse(new ManagementRequest(ManagementProtocol.Version, operation!, server, arguments), ManagementEnvelopeProblem.None)
+         ? new ManagementRequestParse(ManagementRequest.For(operation!, server, arguments), ManagementEnvelopeProblem.None)
          : new ManagementRequestParse(null, problem);
    }
 
 
 
-   /// <summary>Reads the members of a reply object whose root is known to be an object.</summary>
+   /// <summary>Reads the members of a reply object whose root is known to be an object. The error is read by <see cref="ManagementError.FromWire"/>, and a reply is made by the same functions the service makes one with.</summary>
    private static ManagementReplyParse ReadReply(JsonElement root)
    {
       ManagementEnvelopeProblem problem = CheckVersion(root);
@@ -359,33 +359,14 @@ public static class ManagementJson
          return new ManagementReplyParse(null, problem);
       }
       bool hasResult = root.TryGetProperty("result", out JsonElement result) && result.ValueKind == JsonValueKind.Object;
-      ManagementError? error = root.TryGetProperty("error", out JsonElement failure) ? ReadError(failure) : null;
+      ManagementError? error = root.TryGetProperty("error", out JsonElement failure) ? ManagementError.FromWire(failure) : null;
       ManagementReply? reply = root.TryGetProperty("ok", out JsonElement ok) switch
       {
-         true when ok.ValueKind == JsonValueKind.True && hasResult => new ManagementReply(ManagementProtocol.Version, true, ManagementPayload.FromElement(result)),
-         true when ok.ValueKind == JsonValueKind.False && error is not null => new ManagementReply(ManagementProtocol.Version, false, Error: error),
+         true when ok.ValueKind == JsonValueKind.True && hasResult => ManagementReply.Success(ManagementPayload.FromElement(result)),
+         true when ok.ValueKind == JsonValueKind.False && error is not null => ManagementReply.Failure(error),
          _ => null,
       };
       return new ManagementReplyParse(reply, reply is null ? ManagementEnvelopeProblem.ReplyIncomplete : ManagementEnvelopeProblem.None);
-   }
-
-
-
-   /// <summary>
-   /// Reads an error object, or returns null when it lacks a code or a message as text; a code or a message that
-   /// holds a surrogate without its partner is not text (<see cref="TextOf"/>). Details of any kind but an object are
-   /// dropped, because every details type is an object.
-   /// </summary>
-   private static ManagementError? ReadError(JsonElement error)
-   {
-      if(error.ValueKind != JsonValueKind.Object
-         || !error.TryGetProperty("code", out JsonElement code) || code.ValueKind != JsonValueKind.String || TextOf(code) is not { } codeText
-         || !error.TryGetProperty("message", out JsonElement message) || message.ValueKind != JsonValueKind.String || TextOf(message) is not { } messageText)
-      {
-         return null;
-      }
-      ManagementPayload? details = error.TryGetProperty("details", out JsonElement found) && found.ValueKind == JsonValueKind.Object ? ManagementPayload.FromElement(found) : null;
-      return ManagementError.FromWire(codeText, messageText, details);
    }
 
 
@@ -396,7 +377,7 @@ public static class ManagementJson
    /// and the platform throws when asked to. The envelope's own strings are read through here, so such a value is
    /// answered like any other value that is not what its member needs, and never thrown.
    /// </summary>
-   private static string? TextOf(JsonElement value)
+   internal static string? TextOf(JsonElement value)
    {
       try
       {

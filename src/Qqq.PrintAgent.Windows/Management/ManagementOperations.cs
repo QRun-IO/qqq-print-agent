@@ -234,20 +234,18 @@ public static class ManagementOperations
 
    /// <summary>
    /// Decides whether a request whose envelope was read can be routed, and to which operation. It returns null when it
-   /// can, and otherwise the error to answer: the version is not this contract's; the operation does not exist; an
-   /// operation on the computer names a server; an operation on one server names none, or names it by anything but a
-   /// full identifier; or an operation that takes no arguments is given some (an empty object is accepted, because it
-   /// says the same as leaving the arguments out). It is pure, so the dispatcher and the tests share one rule. The
-   /// messages are fixed and never repeat what the request said.
+   /// can, and otherwise the error to answer: the operation does not exist; an operation on the computer names a
+   /// server; an operation on one server names none; or an operation that takes no arguments is given some (an empty
+   /// object is accepted, because it says the same as leaving the arguments out). It is pure, so the dispatcher and
+   /// the tests share one rule. The messages are fixed and never repeat what the request said. Three things are not
+   /// asked here because no request can be otherwise (<see cref="ManagementRequest"/>): its version is this
+   /// contract's, its operation is shaped like a name, and a server it names is named by a full identifier. Text
+   /// that breaks one of them is refused by the parser, which is where <see cref="ManagementErrorCode.UnsupportedVersion"/>
+   /// is answered.
    /// </summary>
    public static ManagementError? Check(ManagementRequest request, out ManagementOperationInfo? operation)
    {
       ArgumentNullException.ThrowIfNull(request);
-      operation = null;
-      if(request.V != ManagementProtocol.Version)
-      {
-         return new ManagementError(ManagementErrorCode.UnsupportedVersion, "This service speaks version 2 of the management protocol.");
-      }
       if(!TryFind(request.Op, out operation))
       {
          return new ManagementError(ManagementErrorCode.UnknownOperation, "There is no operation with this name.");
@@ -256,7 +254,7 @@ public static class ManagementOperations
       {
          return new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on the computer and must not name a server.");
       }
-      if(operation.Scope == ManagementScope.Server && !ManagementProtocol.IsServerId(request.Server))
+      if(operation.Scope == ManagementScope.Server && request.Server is null)
       {
          return new ManagementError(ManagementErrorCode.InvalidRequest, "This operation acts on one server and must name it by its full identifier.");
       }

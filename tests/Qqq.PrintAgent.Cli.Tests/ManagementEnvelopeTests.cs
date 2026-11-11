@@ -334,28 +334,125 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>The routing check is the one rule for whether a request names a server correctly: an operation on the computer must not name one, and an operation on one server must name it by a full identifier. Each refusal has its code, finds no more than the operation, and never repeats the request.</summary>
+   /// <summary>
+   /// A request is built only by the functions that check it, which the parser uses too, so no request exists that
+   /// the parser would not read back. Text that is not shaped like an operation's name, and a server named by
+   /// anything but a full identifier in its one spelling (a prefix, a name, another letter case, braces, nothing at
+   /// all between the quotes), are refused by each of the three functions, and the refusal does not repeat what was
+   /// given. A request has no public constructor and no member that can be set, so there is no other way to make
+   /// one: not with another version, and not by changing one that was checked.
+   /// </summary>
    [Theory]
-   [InlineData(2, "snapshot", null, null)]
-   [InlineData(2, "servers.list", null, null)]
-   [InlineData(2, "trust.get", Server, null)]
-   [InlineData(2, "jobs.query", Server, null)]
-   [InlineData(2, "snapshot", Server, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.add", Server, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "update.prepare", Server, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "trust.get", null, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "session.signIn", null, ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.remove", "3f2b8c1e", ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.remove", "Warehouse", ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.remove", "3F2B8C1E-5D4A-4F6B-9A7C-0E1D2C3B4A5F", ManagementErrorCode.InvalidRequest)]
-   [InlineData(2, "servers.explode", null, ManagementErrorCode.UnknownOperation)]
-   [InlineData(2, "Snapshot", null, ManagementErrorCode.UnknownOperation)]
-   [InlineData(2, "printers", null, ManagementErrorCode.UnknownOperation)]
-   [InlineData(1, "snapshot", null, ManagementErrorCode.UnsupportedVersion)]
-   [InlineData(3, "snapshot", null, ManagementErrorCode.UnsupportedVersion)]
-   public void RoutingCheck_AcceptsOrRefusesWithTheRightCode(int version, string operation, string? server, string? code)
+   [InlineData("Snapshot", null)]
+   [InlineData("servers.List", null)]
+   [InlineData("servers list", null)]
+   [InlineData("Not An Operation\n", null)]
+   [InlineData("", null)]
+   [InlineData("servers.remove", "3f2b8c1e")]
+   [InlineData("servers.remove", "Warehouse")]
+   [InlineData("servers.remove", "3F2B8C1E-5D4A-4F6B-9A7C-0E1D2C3B4A5F")]
+   [InlineData("servers.remove", "{3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f}")]
+   [InlineData("servers.remove", "")]
+   public void Request_IsBuiltOnlyByFunctionsThatCheckTheOperationAndTheServer(string operation, string? server)
    {
-      ManagementRequest request = new(version, operation, server);
+      ManagementPayload arguments = Payload("{\"printerId\":\"printer-a1\",\"shared\":true}");
+      Func<ManagementRequest>[] ways =
+      [
+         () => ManagementRequest.For(operation, server),
+         () => ManagementRequest.For(operation, server, new PrintersShareArgs("printer-a1", Shared: true)),
+         () => ManagementRequest.For(operation, server, arguments),
+      ];
+
+      Assert.All(ways, way =>
+      {
+         ArgumentException refusal = Assert.Throws<ArgumentException>(way);
+         Assert.True(operation.Length == 0 || !refusal.Message.Contains(operation, StringComparison.Ordinal));
+         Assert.True(string.IsNullOrEmpty(server) || !refusal.Message.Contains(server, StringComparison.Ordinal));
+      });
+      Assert.Throws<ArgumentNullException>(() => ManagementRequest.For(null!));
+      Assert.Empty(typeof(ManagementRequest).GetConstructors());
+      Assert.All(typeof(ManagementRequest).GetProperties(), member => Assert.Null(member.SetMethod));
+      var built = ManagementRequest.For(ManagementOperations.PrintersShare, Server, arguments);
+      Assert.Equal((ManagementProtocol.Version, ManagementOperations.PrintersShare, Server), (built.V, built.Op, built.Server));
+      Assert.Same(arguments, built.Args);
+      Assert.Equal(ManagementJson.Write(built), ManagementJson.Write(ManagementJson.ParseRequest(ManagementJson.Write(built)).Request!));
+   }
+
+
+
+   /// <summary>
+   /// A reply is built only by the functions for a success and for a failure, which the parser uses too. So a reply
+   /// is always of this contract's version and holds exactly one of a result and an error: there is no public
+   /// constructor to give it another version, an error beside a result, or neither, and no member can be set
+   /// afterwards. A success needs its result and a failure its error.
+   /// </summary>
+   [Fact]
+   public void Reply_IsBuiltOnlyByFunctionsThatGiveItExactlyOneOfAResultAndAnError()
+   {
+      ManagementPayload result = Payload("{\"ready\":true}");
+      var success = ManagementReply.Success(result);
+      var typed = ManagementReply.Success(new NoResult());
+      var failure = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
+
+      Assert.Equal((ManagementProtocol.Version, true), (success.V, success.Ok));
+      Assert.Same(result, success.Result);
+      Assert.Null(success.Error);
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{\"ready\":true}}", ManagementJson.Write(success));
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{}}", ManagementJson.Write(typed));
+      Assert.Equal((ManagementProtocol.Version, false), (failure.V, failure.Ok));
+      Assert.Null(failure.Result);
+      Assert.NotNull(failure.Error);
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Success(null!));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(null!));
+      Assert.Empty(typeof(ManagementReply).GetConstructors());
+      Assert.All(typeof(ManagementReply).GetProperties(), member => Assert.Null(member.SetMethod));
+   }
+
+
+
+   /// <summary>
+   /// An error comes to exist in three ways and no others: the constructor and <c>WithDetails</c>, which check the
+   /// code against the table, and the parser's way in, which takes the error object as the JSON a reply carried and
+   /// nothing else. No function of the type, public or internal, turns a code and a message given as text into an
+   /// error without those checks, so code in the service's own assembly cannot send "Not A Code" or details for a
+   /// code that carries none by reaching past the two that check.
+   /// </summary>
+   [Fact]
+   public void Error_HasNoWayInFromLooseText_BesideTheTwoThatCheckTheCode()
+   {
+      System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly;
+      string[] makers = [.. typeof(ManagementError).GetMethods(all)
+         .Where(method => !method.IsPrivate && (Nullable.GetUnderlyingType(method.ReturnType) ?? method.ReturnType) == typeof(ManagementError))
+         .Select(method => method.Name + "(" + string.Join(", ", method.GetParameters().Select(parameter => parameter.ParameterType.Name)) + ")")
+         .Order(StringComparer.Ordinal)];
+
+      Assert.Equal(["FromWire(JsonElement)", "WithDetails(String, String, TDetails)"], makers);
+      Assert.Equal("(String, String)", "(" + string.Join(", ", Assert.Single(typeof(ManagementError).GetConstructors()).GetParameters().Select(parameter => parameter.ParameterType.Name)) + ")");
+      Assert.Null(ManagementError.FromWire(JsonDocument.Parse("\"busy\"").RootElement));
+      Assert.Null(ManagementError.FromWire(JsonDocument.Parse("{\"code\":\"busy\"}").RootElement));
+      Assert.Equal("code_added_later", ManagementError.FromWire(JsonDocument.Parse("{\"code\":\"code_added_later\",\"message\":\"Something newer.\"}").RootElement)!.Code);
+   }
+
+
+
+   /// <summary>The routing check is the one rule for whether a request names a server correctly: an operation on the computer must not name one, and an operation on one server must name one. Each refusal has its code, finds no more than the operation, and never repeats the request. A request of another version, with a name that is not shaped like an operation's, or with a server named by anything but a full identifier, cannot be built, so the check is never asked about one.</summary>
+   [Theory]
+   [InlineData("snapshot", null, null)]
+   [InlineData("servers.list", null, null)]
+   [InlineData("trust.get", Server, null)]
+   [InlineData("jobs.query", Server, null)]
+   [InlineData("snapshot", Server, ManagementErrorCode.InvalidRequest)]
+   [InlineData("servers.add", Server, ManagementErrorCode.InvalidRequest)]
+   [InlineData("update.prepare", Server, ManagementErrorCode.InvalidRequest)]
+   [InlineData("trust.get", null, ManagementErrorCode.InvalidRequest)]
+   [InlineData("session.signIn", null, ManagementErrorCode.InvalidRequest)]
+   [InlineData("servers.remove", null, ManagementErrorCode.InvalidRequest)]
+   [InlineData("servers.explode", null, ManagementErrorCode.UnknownOperation)]
+   [InlineData("servers.explode", Server, ManagementErrorCode.UnknownOperation)]
+   [InlineData("printers", null, ManagementErrorCode.UnknownOperation)]
+   public void RoutingCheck_AcceptsOrRefusesWithTheRightCode(string operation, string? server, string? code)
+   {
+      var request = ManagementRequest.For(operation, server);
 
       ManagementError? refusal = ManagementOperations.Check(request, out ManagementOperationInfo? found);
 
@@ -439,7 +536,6 @@ public sealed class ManagementEnvelopeTests
       Assert.Equal("Management reply v2 failed: busy", failure.ToString());
       Assert.Equal("busy: Another sign-in is running.", failure.Error!.ToString());
       Assert.Equal("enrollment_unconfirmed: The outcome is not known.", detailed.Error!.ToString());
-      Assert.Equal("Management reply v2 failed: no error given", new ManagementReply(2, false).ToString());
       Assert.Equal("(management payload not shown)", success.Result!.ToString());
       Assert.Equal("result (management payload not shown) details (management payload not shown)", $"result {success.Result} details {detailed.Error.Details}");
       Assert.Contains(ManagementSamples.IdTokenHintCanary, success.Result.ToElement().ToString(), StringComparison.Ordinal);
@@ -586,7 +682,7 @@ public sealed class ManagementEnvelopeTests
    [InlineData(null, false)]
    public void Arguments_AreReadStrictly(string? arguments, bool accepted)
    {
-      ManagementRequest request = new(2, ManagementOperations.PrintersShare, Server, arguments is null ? null : Payload(arguments));
+      var request = ManagementRequest.For(ManagementOperations.PrintersShare, Server, arguments is null ? null : Payload(arguments));
 
       bool read = ManagementJson.TryReadArguments(request, out PrintersShareArgs? shared);
 
@@ -622,7 +718,7 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void ResultAndDetails_ThatDoNotFit_AreNotRead()
    {
-      ManagementReply wrongShape = new(2, true, Payload("{\"ready\":\"soon\"}"));
+      var wrongShape = ManagementReply.Success(Payload("{\"ready\":\"soon\"}"));
       var failure = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
       ManagementError wrongDetails = ErrorRead(ManagementErrorCode.EnrollmentUnconfirmed, "{\"stage\":5}");
 
@@ -1131,7 +1227,7 @@ public sealed class ManagementEnvelopeTests
    {
       ManagementPayload payload = Payload("{\"printerId\":\"printer-a1\",\"shared\":true}");
 
-      Assert.Equal("{\"v\":2,\"op\":\"printers.share\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Write(new ManagementRequest(2, ManagementOperations.PrintersShare, null, payload)));
+      Assert.Equal("{\"v\":2,\"op\":\"printers.share\",\"args\":{\"printerId\":\"printer-a1\",\"shared\":true}}", ManagementJson.Write(ManagementRequest.For(ManagementOperations.PrintersShare, null, payload)));
       Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"code_added_later\",\"message\":\"Synthetic message.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}}",
          ManagementJson.Write(ManagementReply.Failure(ErrorRead("code_added_later", "{\"printerId\":\"printer-a1\",\"shared\":true}"))));
       Assert.False(payload.IsEmpty());
@@ -1266,8 +1362,8 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>
    /// The form and the bound of an error's message hold however the error is made, not only through the reply
-   /// factories: built by its constructor, put into a reply by the reply's constructor or by a <c>with</c> expression,
-   /// handed to the factory that takes an error, and read from the text of a service that did not bound it. Each
+   /// factories: built by its constructor, handed to the factory that takes an error, built by the factory that
+   /// takes a code and a message, and read from the text of a service that did not bound it. Each
    /// carries the same printable, cut message, and none of them writes the raw text. An error has one constructor and
    /// no member that can be set afterwards, so there is no second way to give it a message.
    /// </summary>
@@ -1276,17 +1372,16 @@ public sealed class ManagementEnvelopeTests
    {
       string hostile = "refused\u202Egnp.exe\nnext\u2028line " + new string('x', 2000);
       ManagementError built = new(ManagementErrorCode.ServerRefused, hostile);
-      ManagementReply byConstructor = new(ManagementProtocol.Version, false, Error: new ManagementError(ManagementErrorCode.ServerRefused, hostile));
-      ManagementReply byWith = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.") with { Error = new ManagementError(ManagementErrorCode.ServerRefused, hostile) };
       var byFactory = ManagementReply.Failure(built);
+      var byCode = ManagementReply.Failure(ManagementErrorCode.ServerRefused, hostile);
       ManagementError read = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"server_refused\",\"message\":" + JsonSerializer.Serialize(hostile) + "}}").Reply!.Error!;
 
       string expected = ManagementReply.Failure(ManagementErrorCode.ServerRefused, hostile).Error!.Message;
 
       Assert.StartsWith("refused gnp.exe next line xxx", expected, StringComparison.Ordinal);
       Assert.Equal(ManagementProtocol.MaximumMessageCharacters, expected.Length);
-      Assert.All(new[] { built, byConstructor.Error!, byWith.Error!, byFactory.Error!, read }, error => Assert.Equal(expected, error.Message));
-      Assert.All(new[] { byConstructor, byWith, byFactory }, reply =>
+      Assert.All(new[] { built, byFactory.Error!, byCode.Error!, read }, error => Assert.Equal(expected, error.Message));
+      Assert.All(new[] { byFactory, byCode }, reply =>
       {
          string written = ManagementJson.Write(reply);
          Assert.DoesNotContain("\\u202E", written, StringComparison.OrdinalIgnoreCase);
@@ -1304,7 +1399,7 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void RoutingRefusal_IsSentByTheFactoryThatTakesAnError()
    {
-      ManagementError refusal = ManagementOperations.Check(new ManagementRequest(2, "servers.explode"), out _)!;
+      ManagementError refusal = ManagementOperations.Check(ManagementRequest.For("servers.explode"), out _)!;
 
       var reply = ManagementReply.Failure(refusal);
 
@@ -1371,12 +1466,12 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>A request for some operation with the given arguments object; which operation does not matter to reading arguments.</summary>
-   private static ManagementRequest Request(string arguments) => new(2, ManagementOperations.Snapshot, null, Payload(arguments));
+   private static ManagementRequest Request(string arguments) => ManagementRequest.For(ManagementOperations.Snapshot, null, Payload(arguments));
 
 
 
    /// <summary>A successful reply with the given result object.</summary>
-   private static ManagementReply Result(string result) => new(2, true, Payload(result));
+   private static ManagementReply Result(string result) => ManagementReply.Success(Payload(result));
 
 
 

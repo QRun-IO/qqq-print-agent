@@ -324,7 +324,7 @@ public sealed class ManagementResultTests
       Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(before).Reply!, out ComputerSnapshot? read));
       Assert.Null(read.PrintersDiscoveredAt);
       Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{\"printers\":[],\"discoveredAt\":\"2026-11-10T15:04:05.0000000Z\"}}", ManagementJson.Write(ManagementReply.Success(new PrintersDiscoverResult([], found))));
-      Assert.False(ManagementJson.TryReadResult(new ManagementReply(2, true, ManagementPayload.From(new ServerListResult([]))), out PrintersDiscoverResult? _));
+      Assert.False(ManagementJson.TryReadResult(ManagementReply.Success(new ServerListResult([])), out PrintersDiscoverResult? _));
    }
 
 

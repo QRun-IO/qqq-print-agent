@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Qqq.PrintAgent.Windows.Management;
@@ -18,7 +19,9 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// record the table names for that code and nothing else. So a failure cannot be sent under text that is not a code,
 /// a code without details cannot be given any, and details cannot be written from an object that only looks like the
 /// right record and skips what that record's own construction enforces. Only the parser builds an error otherwise, from
-/// what the wire carried, because a client must be able to read a code a newer service added.
+/// what the wire carried, because a client must be able to read a code a newer service added; that way in
+/// (<see cref="FromWire"/>) takes the error object as JSON and nothing else, so no code can use it to turn loose text
+/// into an error.
 /// </para>
 /// <para>
 /// The message may repeat what a server said, so it is never held as given: every way of building an error ends in one
@@ -84,11 +87,25 @@ public sealed record ManagementError
 
 
    /// <summary>
-   /// Holds an error as a client read it from the wire: the code as it came, known or not, with whatever details came
-   /// with it. Only the parser calls this. The message is still made printable and cut, so a service that did not bound
-   /// it cannot put raw text on a client's screen; an empty one is held as it came.
+   /// Reads an error object as a reply carried it, or returns null when it is not an object or lacks a code or a
+   /// message as text (a code or a message that holds a surrogate without its partner is not text). The code is held
+   /// as it came, known or not, with whatever details came with it; details of any kind but an object are dropped,
+   /// because every details type is an object. The message is still made printable and cut, so a service that did not
+   /// bound it cannot put raw text on a client's screen; an empty one is held as it came. This is the parser's way
+   /// in, and it is the only one that does not check the code against the table: it takes the JSON the wire carried
+   /// and not a code and a message as text, so a handler cannot reach for it to send a code of its own making.
    /// </summary>
-   internal static ManagementError FromWire(string code, string message, ManagementPayload? details) => new(code, message, details);
+   internal static ManagementError? FromWire(JsonElement error)
+   {
+      if(error.ValueKind != JsonValueKind.Object
+         || !error.TryGetProperty("code", out JsonElement code) || code.ValueKind != JsonValueKind.String || ManagementJson.TextOf(code) is not { } codeText
+         || !error.TryGetProperty("message", out JsonElement message) || message.ValueKind != JsonValueKind.String || ManagementJson.TextOf(message) is not { } messageText)
+      {
+         return null;
+      }
+      ManagementPayload? details = error.TryGetProperty("details", out JsonElement found) && found.ValueKind == JsonValueKind.Object ? ManagementPayload.FromElement(found) : null;
+      return new ManagementError(codeText, messageText, details);
+   }
 
 
 

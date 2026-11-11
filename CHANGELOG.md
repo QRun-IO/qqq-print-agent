@@ -15,7 +15,9 @@ what the service and its clients will be able to build on. The last two are abou
 - **The envelope.** A request or a reply is read only by the contract's two parsing functions and written only by
   its writing function. The JSON serializer refuses both under the default options and under any options that do
   not bring a converter of their own for the envelope; it used to refuse reading for the contract's own options
-  only. The text on the wire is unchanged. The parsing functions no longer throw
+  only. A request and a reply are built only by functions that check them: a request names its operation by a
+  well-formed name and a server by its full identifier, and a reply holds exactly one of a result and an error.
+  The text on the wire is unchanged. The parsing functions no longer throw
   for a text that holds a surrogate without its partner, as itself or as an escape (`\ud800` on its own): it is
   refused like anything else that is wrong in the same place.
 - **Accounts.** The principal and the tenant are carried one way wherever a reply names an account (a snapshot,
