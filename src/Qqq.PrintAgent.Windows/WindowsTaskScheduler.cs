@@ -10,14 +10,15 @@ using System.Security.Principal;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// The real Windows behind <see cref="ITaskScheduler"/>: it starts schtasks.exe, reads the identity of the current process,
-/// asks the local security authority what account a name stands for and reads a path's attributes. It reports what Windows
-/// said and decides nothing about tasks.
+/// The real Windows behind <see cref="ITaskScheduler"/>: it starts the scheduler's program, reads the identity of the
+/// current process, asks the local security authority what account a name stands for and reads a path's attributes. It
+/// reports what Windows said and decides nothing about tasks. The two members a test cannot usefully run are excluded
+/// from coverage one by one, each with its reason; the other two are tested against a temporary folder and well-known accounts.
 /// </summary>
-[ExcludeFromCodeCoverage(Justification = "Starts schtasks.exe, reads the identity and elevation of the current process and asks the local security authority to resolve account names. A test cannot run these without depending on, or changing, this computer's scheduled tasks and accounts. No rule lives here: which arguments are passed, how long to wait, what counts as this application's task and when one is created, replaced or removed are decided in AgentStartupTasks, which is tested with a fake of ITaskScheduler.")]
 internal sealed class WindowsTaskScheduler : ITaskScheduler
 {
    /// <summary>Reads the current Windows identity, its administrator role and the path of the running program.</summary>
+   [ExcludeFromCodeCoverage(Justification = "Reads the Windows identity, the administrator role and the program path of the running process. A test can call it, but the answer is whatever account and elevation the tests happen to run under, so a test could only repeat the same three reads. It decides nothing: what a missing identifier, a caller without administrator rights or a program path means is decided in AgentStartupTasks, which is tested with a caller the test supplies.")]
    public StartupCaller CurrentCaller()
    {
       using var identity = WindowsIdentity.GetCurrent();
@@ -27,12 +28,13 @@ internal sealed class WindowsTaskScheduler : ITaskScheduler
 
 
    /// <summary>
-   /// Runs schtasks.exe from the system folder with an argument list (never a shell string), without a window, and collects
-   /// what it prints. A scheduler that does not finish within the limit is killed with its process tree.
+   /// Runs the given program with an argument list (never a shell string), without a window, and collects what it
+   /// prints. A program that does not finish within the limit is killed with its process tree.
    /// </summary>
-   public async Task<TaskSchedulerRun?> RunAsync(IReadOnlyList<string> arguments, TimeSpan limit)
+   [ExcludeFromCodeCoverage(Justification = "Starts a process, waits for it up to the limit and kills it past the limit. The only program it is ever given is schtasks.exe in the Windows system folder: AgentStartupTasks passes that path and a test pins it. A test must not run that program, because it reads and changes this computer's scheduled tasks. It decides nothing about tasks: the program, the arguments, the limit, and what an exit code, a program that did not start or one that had to be stopped means are decided in AgentStartupTasks, which is tested with a fake of ITaskScheduler.")]
+   public async Task<TaskSchedulerRun?> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan limit)
    {
-      ProcessStartInfo start = new(Path.Combine(Environment.SystemDirectory, "schtasks.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+      ProcessStartInfo start = new(program) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
       foreach(string argument in arguments)
       {
          start.ArgumentList.Add(argument);

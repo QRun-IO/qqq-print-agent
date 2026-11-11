@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -21,6 +22,15 @@ internal sealed partial class AgentStartupTasks(ITaskScheduler scheduler, string
    internal static readonly TimeSpan SchedulerLimit = TimeSpan.FromSeconds(15);
 
    private static readonly XNamespace TaskNamespace = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+
+
+
+   /// <summary>
+   /// The only program these rules ever run: the task scheduler's command-line program by its full path in the Windows
+   /// system folder. It is never looked up by name, so a program of the same name elsewhere on the search path cannot
+   /// be started in its place with administrator rights.
+   /// </summary>
+   internal static string SchedulerProgram => Path.Combine(Environment.SystemDirectory, "schtasks.exe");
 
 
 
@@ -109,7 +119,7 @@ internal sealed partial class AgentStartupTasks(ITaskScheduler scheduler, string
       string definition = Path.Combine(staging.Directory, "startup-" + Guid.NewGuid().ToString("N") + ".xml");
       try
       {
-         using FileStream heldDefinition = AgentStartup.CreateHeldDefinition(definition, CreateTaskXml(caller.UserSid ?? throw new InvalidOperationException("Current user has no SID.")));
+         using FileStream heldDefinition = CreateHeldDefinition(definition, CreateTaskXml(caller.UserSid ?? throw new InvalidOperationException("Current user has no SID.")));
          staging.ValidateFile(definition);
          (int createCode, _) = await RunSchedulerAsync("/Create", "/TN", TaskName(caller), "/XML", definition, "/F").ConfigureAwait(false);
          if(createCode != 0)
@@ -126,6 +136,27 @@ internal sealed partial class AgentStartupTasks(ITaskScheduler scheduler, string
       {
          File.Delete(definition);
       }
+   }
+
+
+
+   /// <summary>
+   /// Writes the task definition and returns it open for reading, with sharing set so Task Scheduler's own reader can open
+   /// it while this handle stays held. Holding the handle in the validated protected folder prevents the file being replaced
+   /// between validation and registration.
+   /// </summary>
+   internal static FileStream CreateHeldDefinition(string path, string xml)
+   {
+      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(path);
+      // The validated protected parent prevents replacement while switching from the
+      // exclusive writer to a read handle compatible with Task Scheduler's own reader.
+      using(FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+      {
+         byte[] bytes = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(xml)).ToArray();
+         stream.Write(bytes);
+         stream.Flush(flushToDisk: true);
+      }
+      return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
    }
 
 
@@ -287,12 +318,12 @@ internal sealed partial class AgentStartupTasks(ITaskScheduler scheduler, string
 
 
    /// <summary>
-   /// Runs the task scheduler with an argument list and the 15 second limit, and returns its exit code and output. A scheduler
+   /// Runs the task scheduler's program with an argument list and the 15 second limit, and returns its exit code and output. A scheduler
    /// that could not be started, or that hung and was stopped, is reported as such with advice to refresh.
    /// </summary>
    private async Task<(int Code, string Output)> RunSchedulerAsync(params string[] arguments)
    {
-      TaskSchedulerRun run = await scheduler.RunAsync(arguments, SchedulerLimit).ConfigureAwait(false) ?? throw new InvalidOperationException("Could not start Windows Task Scheduler administration.");
+      TaskSchedulerRun run = await scheduler.RunAsync(SchedulerProgram, arguments, SchedulerLimit).ConfigureAwait(false) ?? throw new InvalidOperationException("Could not start Windows Task Scheduler administration.");
       if(run.TimedOut is not null)
       {
          throw new TimeoutException("Windows Task Scheduler did not respond within 15 seconds. Refresh the preference to check its current state.", run.TimedOut);

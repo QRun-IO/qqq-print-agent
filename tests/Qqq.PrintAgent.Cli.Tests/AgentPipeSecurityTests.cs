@@ -144,7 +144,7 @@ public sealed class AgentPipeSecurityTests
       string definition = Path.Combine(directory, "startup.xml");
       try
       {
-         using(FileStream held = AgentStartup.CreateHeldDefinition(definition, "<Task>synthetic</Task>"))
+         using(FileStream held = AgentStartupTasks.CreateHeldDefinition(definition, "<Task>synthetic</Task>"))
          {
             Assert.Contains("synthetic", File.ReadAllText(definition), StringComparison.Ordinal);
             Assert.Throws<IOException>(() => File.WriteAllText(definition, "replacement"));

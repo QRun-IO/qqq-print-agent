@@ -382,6 +382,33 @@ public sealed class AgentStartupTasksTests
 
 
 
+   /// <summary>
+   /// Every command the rules send, whether it queries, creates, deletes or lists, is run with the task scheduler's
+   /// program by its full path in the Windows system folder and never by a bare name, so a program called schtasks
+   /// somewhere else on the search path can never be started with administrator rights in its place.
+   /// </summary>
+   [Fact]
+   public async Task EveryCommandRunsTheSchedulerFromTheSystemFolder()
+   {
+      using var setup = new Setup();
+      _ = await setup.Rules.SetEnabledAsync(true);
+      _ = await setup.Rules.SetEnabledAsync(false);
+      setup.Scheduler.Tasks[TaskName] = setup.Rules.CreateTaskXml(Sid);
+      await setup.Rules.RemoveInstalledTasksAsync();
+      Assert.Equal(new[] { "/Create", "/Delete", "/Query" }, setup.Scheduler.Runs.Select(run => run[0]).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Contains(setup.Scheduler.Runs, run => run.Contains("/FO", StringComparer.Ordinal));
+      Assert.Equal(setup.Scheduler.Runs.Count, setup.Scheduler.Programs.Count);
+      Assert.All(setup.Scheduler.Programs, program =>
+      {
+         Assert.True(Path.IsPathFullyQualified(program));
+         Assert.Equal(Environment.GetFolderPath(Environment.SpecialFolder.System), Path.GetDirectoryName(program), ignoreCase: true);
+         Assert.Equal("schtasks.exe", Path.GetFileName(program));
+      });
+      Assert.Equal(AgentStartupTasks.SchedulerProgram, Assert.Single(setup.Scheduler.Programs.Distinct(StringComparer.Ordinal)));
+   }
+
+
+
    /// <summary>The generated definition with the user in both places replaced by the given account text.</summary>
    private static string WithUser(Setup setup, string account)
    {

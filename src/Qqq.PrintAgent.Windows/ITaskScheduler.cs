@@ -19,10 +19,11 @@ internal interface ITaskScheduler
 
 
    /// <summary>
-   /// Runs the task scheduler's command-line program with the given arguments and waits for it for at most the given time.
+   /// Runs the task scheduler's command-line program, given by its full path so that which program runs is decided by
+   /// the rules and not by the search path, with the given arguments, and waits for it for at most the given time.
    /// It returns null when the program could not be started, and a run marked as timed out when it had to be stopped.
    /// </summary>
-   Task<TaskSchedulerRun?> RunAsync(IReadOnlyList<string> arguments, TimeSpan limit);
+   Task<TaskSchedulerRun?> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan limit);
 
 
 

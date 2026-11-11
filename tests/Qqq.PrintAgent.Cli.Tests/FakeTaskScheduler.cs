@@ -50,6 +50,11 @@ internal sealed class FakeTaskScheduler : ITaskScheduler
 
 
 
+   /// <summary>The program each command was to be run with, in order.</summary>
+   internal List<string> Programs { get; } = [];
+
+
+
    /// <summary>The time limit given with the last command.</summary>
    internal TimeSpan? LastLimit { get; private set; }
 
@@ -101,8 +106,9 @@ internal sealed class FakeTaskScheduler : ITaskScheduler
 
 
    /// <summary>Records the command and answers it from the registered tasks, or fails the way the test asked.</summary>
-   public Task<TaskSchedulerRun?> RunAsync(IReadOnlyList<string> arguments, TimeSpan limit)
+   public Task<TaskSchedulerRun?> RunAsync(string program, IReadOnlyList<string> arguments, TimeSpan limit)
    {
+      Programs.Add(program);
       Runs.Add([.. arguments]);
       LastLimit = limit;
       if(CannotStart)
