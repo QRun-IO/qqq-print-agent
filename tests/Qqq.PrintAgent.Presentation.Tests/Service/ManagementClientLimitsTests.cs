@@ -501,6 +501,45 @@ public sealed class ManagementClientLimitsTests
 
 
    /// <summary>
+   /// A snapshot asked for as "sent after the call" is answered by one that was sent after it asked, also when that
+   /// one has landed by the time the caller's turn comes: it shares that answer and sends nothing. Here two such
+   /// calls wait their turn with a change between them. The first gets a turn and sends the snapshot; when that
+   /// lands, the place it gives back goes to the change, so the second still waits, and its turn comes only when
+   /// another request is done. By then the snapshot it may share has landed. The pipe is given an answer for one
+   /// more request, so a second snapshot would be answered and seen, and none is sent.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotSentAfterTheCall_WhoseTurnComesAfterALaterOneHasLanded_SharesItsAnswer_AndSendsNothing()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      for(int index = 0; index < 12; index++)
+      {
+         _ = client.AcknowledgeJobAsync(Server, "job-" + index);
+      }
+
+      Task<ServiceResult<ServiceSnapshot>> first = client.SnapshotAsync(sentAfterTheCall: true);
+      Task<ServiceResult<ReconnectResult>> change = client.ReconnectAsync(Server);
+      Task<ServiceResult<ServiceSnapshot>> second = client.SnapshotAsync(sentAfterTheCall: true);
+      pipe.Held[0].SetResult(Replies.Success(new NoResult()));
+      await pipe.Arrived(13);
+      pipe.Held[12].SetResult(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> answer = await first.WaitAsync(s_guard);
+      await pipe.Arrived(14);
+      Assert.False(second.IsCompleted);
+      pipe.Answer(Replies.Golden("snapshot.healthy.reply.json"));
+      pipe.Held[1].SetResult(Replies.Success(new NoResult()));
+      ServiceResult<ServiceSnapshot> shared = await second.WaitAsync(s_guard);
+
+      Assert.True(answer.Succeeded);
+      Assert.Same(answer, shared);
+      Assert.Equal([ManagementOperations.Snapshot, ManagementOperations.ConnectionReconnect], pipe.Sent.Skip(12).Select(request => request.Op), StringComparer.Ordinal);
+      Assert.False(change.IsCompleted);
+   }
+
+
+
+   /// <summary>
    /// A change whose turn comes at the very moment its caller leaves is not sent either. The place is handed over
    /// first, so the wait ends with a place taken and a token that is cancelled; the client then gives the place back
    /// and reports that nothing was sent. Here the cancellation itself releases the request whose place is handed
@@ -577,6 +616,29 @@ public sealed class ManagementClientLimitsTests
       Assert.True(result.Succeeded);
       Assert.Equal(13, pipe.Sent.Count);
       Assert.Equal(0, Volatile.Read(ref sentWhileDelivering));
+   }
+
+
+
+   /// <summary>
+   /// A wait for a turn that begins with its token already cancelled is over at once, as a cancelled task, and holds
+   /// no place: the place that is given back afterwards is free, and it is the only one. That is why the client asks
+   /// whether such a wait completed successfully, and not whether it completed, before it goes on as the holder of a
+   /// place. No test brings the client itself there: it looks at the token just before it waits, so only a
+   /// cancellation between that look and the wait would, and a test cannot place one there.
+   /// </summary>
+   [Fact]
+   public void WaitForATurnThatBeginsCancelled_IsOverAtOnce_AndHoldsNoPlace()
+   {
+      RequestCeiling ceiling = new(1);
+      Assert.True(ceiling.TryEnter());
+
+      Task wait = ceiling.EnterAsync(new CancellationToken(canceled: true));
+      ceiling.Leave();
+
+      Assert.Equal((true, true, false), (wait.IsCompleted, wait.IsCanceled, wait.IsCompletedSuccessfully));
+      Assert.True(ceiling.TryEnter());
+      Assert.False(ceiling.TryEnter());
    }
 
 

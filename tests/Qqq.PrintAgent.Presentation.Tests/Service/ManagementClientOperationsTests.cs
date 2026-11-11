@@ -218,6 +218,64 @@ public sealed class ManagementClientOperationsTests
 
 
    /// <summary>
+   /// The address an add's reply names is compared with the one asked for as an origin, whichever of the two is
+   /// spelled another way. A service that writes the address it stored with a trailing slash, in upper case, with
+   /// the scheme's own port or with all three has added the server that was asked for, and its answer is read: an
+   /// add that was carried out must not come back as unreadable, which would send the operator to check for a
+   /// server that is there. The result carries the address as the reply spelled it.
+   /// </summary>
+   [Theory]
+   [InlineData("https://qqq.example.test/")]
+   [InlineData("HTTPS://QQQ.EXAMPLE.TEST")]
+   [InlineData("https://qqq.example.test:443")]
+   [InlineData("HTTPS://Qqq.Example.Test:443/")]
+   public async Task AddReplyThatSpellsTheAddressAnotherWay_IsTheAnswer(string spelling)
+   {
+      RecordingLog log = new();
+      Assert.True(ManagementJson.TryReadResult(Replies.Golden("servers.add.reply.json").Reply!, out ServerAddResult? golden));
+      FakePipe pipe = new FakePipe().Answer(Replies.Success(golden with { Server = golden.Server with { Address = spelling } }));
+      ManagementClient client = new(pipe.SendAsync, log);
+      SampleValues given = SampleValues.Golden;
+
+      ServiceResult<ServerAddResult> added = await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, given.Check, given.Credential);
+
+      Assert.Equal("https://qqq.example.test", golden.Server.Address);
+      Assert.True(added.Succeeded);
+      Assert.Equal(spelling, added.Payload.Server.Address);
+      Assert.Empty(log.Entries);
+   }
+
+
+
+   /// <summary>
+   /// A reorder's reply names the servers that were given, each as often as it was given. A reply that names one of
+   /// them twice is not the list that was ordered, and neither is a reply that names once a server that was given
+   /// twice: both are unreadable. Given twice and named twice, in whatever order, it is the answer.
+   /// </summary>
+   [Fact]
+   public async Task ReorderReply_NamesEachServerAsOftenAsItWasGiven_OrIsUnreadable()
+   {
+      SampleValues given = SampleValues.Golden;
+      ServerSummary first = new(given.ServerId, "Warehouse", "https://qqq.example.test", 0, "GREEN", "Connected.");
+      ServerSummary second = new(given.SecondServerId, "Bench", "https://bench.example.test", 1, "GREEN", "Connected.");
+      ManagementReplyParse namesTheFirstTwice = Replies.Success(new ServerListResult([first, first, second]));
+      FakePipe pipe = new FakePipe().Answer(namesTheFirstTwice).Answer(Replies.Success(new ServerListResult([first, second]))).Answer(namesTheFirstTwice);
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+
+      ServiceResult<ServerListResult> namedTwiceGivenOnce = await client.ReorderServersAsync([given.ServerId, given.SecondServerId]);
+      ServiceResult<ServerListResult> namedOnceGivenTwice = await client.ReorderServersAsync([given.ServerId, given.SecondServerId, given.ServerId]);
+      ServiceResult<ServerListResult> asOftenAsGiven = await client.ReorderServersAsync([given.ServerId, given.SecondServerId, given.ServerId]);
+
+      Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.UnreadableReply, true), (namedTwiceGivenOnce.Outcome, namedTwiceGivenOnce.Failure, namedTwiceGivenOnce.Unconfirmed));
+      Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.UnreadableReply, true), (namedOnceGivenTwice.Outcome, namedOnceGivenTwice.Failure, namedOnceGivenTwice.Unconfirmed));
+      Assert.True(asOftenAsGiven.Succeeded);
+      Assert.Equal(3, asOftenAsGiven.Payload.Servers.Count);
+      Assert.Equal(3, pipe.Sent.Count);
+   }
+
+
+
+   /// <summary>
    /// A reorder's reply is judged against the servers as they were given when the call was made, not as the
    /// caller's list is when the reply arrives. A caller that empties its list while the request is in flight still
    /// gets the answer to what it asked; and a caller whose list has come to name the servers of a reply for other
