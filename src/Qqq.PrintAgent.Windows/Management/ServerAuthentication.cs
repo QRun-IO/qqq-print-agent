@@ -18,18 +18,22 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <see cref="From"/> builds the record from the service's own status through that constructor, and the serializer
 /// reads the wire through it, so a client holds bounded values even when a service did not send them so; a result
 /// in which one of them is not text at all (the escape of a surrogate without its partner) is not read. A value that
-/// is missing is absent and left out of the text.
+/// is missing is absent and left out of the text. The message is the service's own wording today, and it is held to
+/// the form of text on the wire all the same, by the same constructor: printable, and cut at
+/// <see cref="ManagementProtocol.MaximumMessageCharacters"/> exactly, as an error's message is. So if a later handler
+/// puts something a server said into it, that text cannot reach the wire or a client's screen raw.
 /// </summary>
 public sealed record ServerAuthentication
 {
-   /// <summary>Takes the members as the service holds them or as the wire carried them, and gives the two identity values their wire form. <see cref="From"/> and the serializer are its only callers.</summary>
+   /// <summary>Takes the members as the service holds them or as the wire carried them, and gives the two identity values and the message their wire form. <see cref="From"/> and the serializer are its only callers.</summary>
    [JsonConstructor]
    private ServerAuthentication(bool signedIn, string? principalId, string? tenantId, string message, bool authorized = false)
    {
+      ArgumentNullException.ThrowIfNull(message);
       SignedIn = signedIn;
       PrincipalId = ManagementText.Identity(principalId);
       TenantId = ManagementText.Identity(tenantId);
-      Message = message;
+      Message = ManagementText.Bounded(message, ManagementProtocol.MaximumMessageCharacters);
       Authorized = authorized;
    }
 
@@ -50,7 +54,7 @@ public sealed record ServerAuthentication
 
 
 
-   /// <summary>The text that explains the state to the operator. It is the service's own wording.</summary>
+   /// <summary>The text that explains the state to the operator: printable, and at most <see cref="ManagementProtocol.MaximumMessageCharacters"/> UTF-16 units. Today it is the service's own wording.</summary>
    public string Message { get; }
 
 

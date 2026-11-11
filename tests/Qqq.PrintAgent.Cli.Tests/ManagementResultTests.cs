@@ -283,10 +283,41 @@ public sealed class ManagementResultTests
 
 
    /// <summary>
+   /// The message beside an account is held to the form of text on the wire, like the two identity values and like
+   /// an error's message: every character that is not shown becomes a space and the text is cut at 512 UTF-16 units
+   /// exactly, when the record is built from the service's status and when it is read from a reply of a service that
+   /// did not bound it. The result is the text an error would carry for the same message, and reading it again
+   /// changes nothing. A message that is already in that form is carried as it is, an empty one included.
+   /// </summary>
+   [Fact]
+   public void ServerAuthentication_GivesItsMessageTheFormOfTextOnTheWire_WhenBuiltAndWhenRead()
+   {
+      string hostile = "Signed in" + (char)0x202E + "as" + (char)0x000A + "another" + (char)0x2028 + "account " + new string('x', 2000);
+      string expected = new ManagementError(ManagementErrorCode.ServerRefused, hostile).Message;
+      string raw = "{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":true,\"principalId\":\"principal-4\",\"tenantId\":\"tenant-2\",\"message\":" + JsonSerializer.Serialize(hostile) + ",\"authorized\":true}}";
+
+      var built = ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", hostile, Authorized: true));
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(raw).Reply!, out ServerAuthentication? read));
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Success(built))).Reply!, out ServerAuthentication? readBack));
+
+      Assert.StartsWith("Signed in as another account xxx", expected, StringComparison.Ordinal);
+      Assert.Equal(ManagementProtocol.MaximumMessageCharacters, expected.Length);
+      Assert.Equal(expected, built.Message);
+      Assert.Equal(expected, read.Message);
+      Assert.Equal(built, read);
+      Assert.Equal(built, readBack);
+      Assert.Equal("Signed in.", ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", "Signed in.")).Message);
+      Assert.Equal("", ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: false, PrincipalId: null, TenantId: null, Message: "")).Message);
+      Assert.Throws<ArgumentNullException>(() => ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: false, PrincipalId: null, TenantId: null, Message: null!)));
+   }
+
+
+
+   /// <summary>
    /// A client holds bounded, printable identity values in a snapshot's authentication even when a service did not send
    /// them so, because the wire is read through the constructor that builds the record. A signed-out status has neither
-   /// value and leaves both out of the text; the message and the two flags are carried as given, and a status without
-   /// its message is unreadable.
+   /// value and leaves both out of the text; the two flags are carried as given and the message in the form of text
+   /// on the wire (the test below), and a status without its message is unreadable.
    /// </summary>
    [Fact]
    public void ServerAuthentication_ReadFromTheWire_IsBoundedToo()

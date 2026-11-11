@@ -22,7 +22,7 @@ what the service and its clients will be able to build on. The last two are abou
   refused like anything else that is wrong in the same place.
 - **Accounts.** The principal and the tenant are carried one way wherever a reply names an account (a snapshot,
   the result of adding a server or signing in, the details of a changed identity): printable, at most 200 units,
-  left out when missing.
+  left out when missing. The message beside an account is printable and at most 512 units, like an error's.
 - **Server names and addresses.** A name is 1 to 64 characters of visible text after trimming, of which at least
   one draws something (a name made only of spaces, combining marks and characters that draw nothing, such as
   U+3164, is refused), without square brackets (ASCII or fullwidth), and not shaped like a server identifier or the
