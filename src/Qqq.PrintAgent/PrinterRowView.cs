@@ -54,6 +54,7 @@ internal sealed class PrinterRowView : Grid
       AutomationProperties.SetAutomationId(_disclosure, "TogglePrinterDetails");
       FrameworkElement[] cells = [NameCell(), _status, _server, _location, _formats, Exposure];
       AutomationProperties.SetAutomationId(_server, "PrinterServerState");
+      AutomationProperties.SetAutomationId(Exposure, "SharePrinter");
       for(int index = 0; index < cells.Length; index++)
       {
          SetColumn(cells[index], index);

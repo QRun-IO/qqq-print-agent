@@ -20,7 +20,9 @@ internal static class AboutContent
    {
       if(supportUrl is not null)
       {
-         body.Children.Add(new HyperlinkButton { Content = "Contact support", NavigateUri = supportUrl });
+         HyperlinkButton support = new() { Content = "Contact support", NavigateUri = supportUrl };
+         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(support, "AboutSupportLink");
+         body.Children.Add(support);
       }
       if(logo is not null)
       {

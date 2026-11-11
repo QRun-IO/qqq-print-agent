@@ -22,7 +22,7 @@ internal sealed class PrinterDetailsView : StackPanel
 
 
 
-   /// <summary>Builds the read-only field list: name, Windows queue, status, location and a three-line description (full text is in Settings), plus a collapsed expander for driver, port and identifier.</summary>
+   /// <summary>Builds the read-only field list: name, Windows queue, status, location and a three-line description (full text is in Settings), plus a collapsed expander for driver, port and identifier, which carries an automation identifier like every control an operator can act on.</summary>
    internal PrinterDetailsView()
    {
       Spacing = 8;
@@ -35,7 +35,9 @@ internal sealed class PrinterDetailsView : StackPanel
       _description.TextTrimming = TextTrimming.WordEllipsis;
       AddField("Description", _description);
       Children.Add(new TextBlock { Text = "Open Settings to read or edit the full description.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
-      Children.Add(new Expander { Header = "Windows diagnostics", Content = _technical, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
+      Expander diagnostics = new() { Header = "Windows diagnostics", Content = _technical, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+      Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(diagnostics, "PrinterDiagnostics");
+      Children.Add(diagnostics);
    }
 
 

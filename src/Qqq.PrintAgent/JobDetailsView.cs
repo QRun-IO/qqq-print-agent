@@ -23,13 +23,15 @@ internal sealed class JobDetailsView : StackPanel
       Children.Add(Summary(content));
       if(compact)
       {
-         Children.Add(new Expander
+         Expander events = new()
          {
             Header = content.EventsHeading,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = History(content),
-         });
+         };
+         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(events, "JobEventHistory");
+         Children.Add(events);
          Children.Add(Text(content.EventsNote));
       }
       else
