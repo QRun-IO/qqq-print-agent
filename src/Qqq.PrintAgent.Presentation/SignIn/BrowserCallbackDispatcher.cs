@@ -47,9 +47,10 @@ public sealed class BrowserCallbackDispatcher
    /// waiting is refused, because two exchanges could not be told apart. When the inbox cannot be opened the failure is
    /// thrown to the caller and nothing is registered; a failure of a kind the exchanges do not report is thrown as
    /// one that names only its kind, as it is for a ticket. The caller disposes the ticket when its exchange ends,
-   /// however it ends.
+   /// however it ends. Only the presentation assembly's own exchanges register: a ticket's task carries a callback
+   /// with its one-time code and state, so neither this nor the ticket is offered to code outside the assembly.
    /// </summary>
-   public BrowserCallbackTicket Register(string state)
+   internal BrowserCallbackTicket Register(string state)
    {
       ArgumentException.ThrowIfNullOrEmpty(state);
       BrowserCallbackTicket ticket = new(this, state);

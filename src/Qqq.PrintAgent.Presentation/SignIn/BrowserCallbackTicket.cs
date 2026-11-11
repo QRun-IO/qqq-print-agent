@@ -9,9 +9,10 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// One browser exchange's claim on the callback inbox: the sign-in or provider sign-out that registered an OAuth state
 /// with the <see cref="BrowserCallbackDispatcher"/> waits on this for the callback carrying that state. Disposing it
 /// ends the claim, after which a callback with that state is dropped. The state is held only while the ticket waits
-/// and is never shown: the ticket has no public member that returns it.
+/// and is never shown. The ticket's task carries the callback, with its one-time code and state, so the ticket is
+/// internal to the presentation assembly, whose sign-in and sign-out are the only ones to wait on it.
 /// </summary>
-public sealed class BrowserCallbackTicket : IDisposable
+internal sealed class BrowserCallbackTicket : IDisposable
 {
    private readonly TaskCompletionSource<Uri> _callback = new(TaskCreationOptions.RunContinuationsAsynchronously);
    private readonly BrowserCallbackDispatcher _dispatcher;
@@ -37,7 +38,7 @@ public sealed class BrowserCallbackTicket : IDisposable
    /// it, fails with the inbox's failure when the inbox failed while this ticket waited, and is cancelled when the
    /// ticket is disposed first. Whoever awaits it continues on its own thread, never inside the dispatcher.
    /// </summary>
-   public Task<Uri> Callback => _callback.Task;
+   internal Task<Uri> Callback => _callback.Task;
 
 
 

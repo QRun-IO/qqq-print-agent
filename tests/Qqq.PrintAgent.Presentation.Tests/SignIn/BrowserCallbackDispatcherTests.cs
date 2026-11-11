@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Reflection;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Presentation.SignIn;
 using Qqq.PrintAgent.Presentation.Tests.Fakes;
@@ -502,6 +503,26 @@ public sealed class BrowserCallbackDispatcherTests
    public void ReadState_IsTheOneStateParameter(string address, string? state)
    {
       Assert.Equal(state, BrowserCallbackDispatcher.ReadState(new Uri(address, UriKind.RelativeOrAbsolute)));
+   }
+
+
+
+   /// <summary>
+   /// A ticket's task carries a callback with its one-time code and state, so code outside the presentation assembly
+   /// can neither see a ticket nor register for one: the ticket is not a public type and offers no public property,
+   /// and the dispatcher's public surface is its constructor alone.
+   /// </summary>
+   [Fact]
+   public void TicketAndRegistration_AreNotOfferedOutsideTheAssembly()
+   {
+      const BindingFlags declaredPublic = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.DeclaredOnly;
+
+      Assert.False(typeof(BrowserCallbackTicket).IsVisible);
+      Assert.Empty(typeof(BrowserCallbackTicket).GetProperties(declaredPublic));
+      Assert.True(typeof(BrowserCallbackDispatcher).IsVisible);
+      Assert.Empty(typeof(BrowserCallbackDispatcher).GetMethods(declaredPublic));
+      Assert.Empty(typeof(BrowserCallbackDispatcher).GetProperties(declaredPublic));
+      Assert.Single(typeof(BrowserCallbackDispatcher).GetConstructors(declaredPublic));
    }
 
 
