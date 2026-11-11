@@ -12,7 +12,31 @@
 - [ ] Hardware check, final (release condition): on the release candidate, through the installed service, same two printers, each print approved by the owner. "Ready to merge to `main`" is held until it is recorded in [ACCEPTANCE.md](ACCEPTANCE.md), with "the spooler accepted the job" and "paper came out" as separate statements. Not run.
 - [ ] Standards exception EX-0016 (the Windows coverage bar of 90%): in standards pull request 58, which is open; its status is "Proposed, awaiting approval".
 - [ ] Open findings from the two retrospective reviews of 2026-11-10 and from the review of the printing seams step: listed in [the audit](AUDIT-2026-11-10.md) under "Found by the retrospective reviews". The should-fix findings about the pipe contract close before anything serves the contract.
-- [ ] Qualify the upgrade from 1.2.x to 2.0. Not done: the 2026-11-10 snapshot (`snapshot-2.0.0-rc.1`) was not installed anywhere. The qualification also has to cover what pull request 41 left unverified: no elevated MSI run has exercised the new branding and startup code, so the real machine registry key, the installer's custom actions, and shell and folder creation as SYSTEM are unexercised, and its real-shell tests ran only on the development PC's Windows build.
+- [ ] Qualify the upgrade from 1.2.x to 2.0. Not done: the 2026-11-10 snapshot (`snapshot-2.0.0-rc.1`) was not installed anywhere. The qualification also has to cover what pull request 41 left unverified: no elevated MSI run has exercised the new branding and startup code, so the real machine registry key, the installer's custom actions, and shell and folder creation as SYSTEM are unexercised, and its real-shell tests ran only on the development PC's Windows build. It also has to cover what the review of the update, service-control and pipe-peer seams (plan step 8, 2026-11-10) listed as shown only by an elevated run on the installed product; none of it has been run:
+  - The upgrade is finished by 1.2.1's own updater, not by 2.0's ([ADR-0004](adr/0004-multi-server-runtime.md), "Recorded while reviewing the update and pipe-peer seams"). Run a real 1.2.1 installation's in-app update to a 2.0 build and check what that helper needs from 2.0 after the installer exits:
+    - the companion, the service and the command line tool at their three paths under `%ProgramFiles%\QQQ Print Agent`, each carrying the release as its product version, with identical build metadata, so that the old helper records success;
+    - the service named `QqqPrintAgent`, running as SYSTEM from its service path and serving the pipe `QqqPrintAgent`, so that the old helper's peer check passes;
+    - an answer of one line to the old helper's version 1 request `resume-after-update`, the only request it sends after the installer exits, and printing not left paused afterwards;
+    - `last-result.json` as the old helper wrote it, and its line in the machine activity log, shown by the 2.0 companion it reopens;
+    - the companion reopened by the old helper from `App\Qqq.PrintAgent.exe`.
+    - Not read in that review and to be checked before this run: what 1.2.1's release client needs from the published 2.0 release before the installer starts (the feed entry, the asset names and the checksum).
+  - The first real authentication through the new adapters, from an elevated command line tool or companion against the installed service. No unit test has any of these:
+    - `GetNamedPipeServerProcessId` asked by a client whose server is another process (a test now shows the reverse, the server's end with a child as client);
+    - `ServiceController.ServiceHandle` opening with full access, and `QueryServiceStatusEx` returning state 4 and the pipe server's id;
+    - `OpenProcessToken` on a process of another account reporting SYSTEM (audit W77);
+    - the main module equal to `%ProgramFiles%\QQQ Print Agent\Service\Qqq.PrintAgent.Service.exe`.
+  - The two refusals for real: the same command without elevation gives "not the installed Windows print service", and the service stopped during a command gives "stopped or restarted".
+  - The 2.0 updater itself, which needs a 2.0 build that updates to a later 2.0 build:
+    - the real access lists under `C:\ProgramData\QqqPrintAgent\updates\<session>` and on the installed `Cli` tree passing the trust check;
+    - the helper's own program path equal to the staged path;
+    - the companion's id and start time agreeing between the companion and the helper;
+    - Windows Installer able to open the MSI while the helper holds it with read sharing;
+    - exit codes 0, 1602 and 3010;
+    - the three version resources read;
+    - `last-result.json` read back by the reopened companion;
+    - `resume-after-update` accepted through the peer check.
+  - The service controls on the real service: a refresh that really reads again (audit W78), stop, wait and start through real pending states, "Unavailable" without elevation, and the Services console with its elevation prompt.
+  - The Windows-layer suite run once elevated and once as SYSTEM or on the hosted runner: the token assertions, the administrator branch of `InstalledProductsStepsAreBoundToThisComputer`, the shell start without a desktop, and `mklink /J`.
 
 ## Released: 1.2.1 — 2026-11-06
 

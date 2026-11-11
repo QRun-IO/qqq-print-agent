@@ -375,6 +375,35 @@ The journal's schema version and its one-time migration (plan step 5 of the buil
 - The consequence, stated plainly: after version 1 no journal has rows without a scope. The later step that introduces several servers will find none, and needs no rule for them. Rows adopted under a readable pairing become that pairing's rows, which are the first server's after the upgrade, and cannot be told apart afterwards from rows that pairing wrote itself. Rows adopted under the unpaired name or an "unreadable" name belong to no server, as the earlier sentence says of those names.
 - Considered and not taken: taking the adoption out of version 1, so that the rows stay under no scope until the step that introduces several servers assigns them to no server. It would hide jobs that every build since `v0.1.6-rc.1` shows on the same journal, and the only journals it would treat differently are ones no 1.x release leaves behind.
 
+## Recorded while reviewing the update and pipe-peer seams, 2026-11-10
+
+The update installer, the update service, the service controls and the pipe-peer check were put behind tested seams (plan step 8 of the build) and reviewed independently before they merged. The review changed no decision of this record. It found a constraint on a later step that this record did not state. It is recorded here on 2026-11-10, from that review and from reading the 1.2.1 source. It is a finding about released code and not a decision, and nothing in it was run.
+
+**An upgrade from 1.2.x is finished by the updater of 1.2.x.** When an installed 1.2.x updates itself to 2.0, the code that runs is its own: its companion downloads the 2.0 MSI, and a copy of its command line tool, the helper, starts Windows Installer and finishes the update after the 2.0 files are in place. 2.0 therefore has to satisfy what that helper does after the installer exits. An MSI installed by hand runs no helper. Read at tag `v1.2.1` with `git show`: `MsiUpdateInstaller.Apply.cs`, `MsiUpdateInstaller.Paths.cs`, `AgentPipeClient.cs`, `AgentPipePeer.cs`, `AgentPipeFraming.cs` and `PipeRequest.cs` under `src/Qqq.PrintAgent.Windows`, each identical at `v1.2.0`.
+
+After Windows Installer exits, the 1.2.1 helper does four things in this order. The last three are each attempted whatever came before, and a failure in any of them is swallowed.
+
+1. Only after exit code 0, it reads the product version of `App\Qqq.PrintAgent.exe`, `Service\Qqq.PrintAgent.Service.exe` and `Cli\qqq-print-agent.exe` under `%ProgramFiles%\QQQ Print Agent`. Each must be readable and carry the requested release in front of any `+`, and the three version strings must be identical, build metadata included. If not, the helper reports the update as failed, with exit code 1, although 2.0 is installed.
+2. It writes the outcome to `%ProgramData%\QqqPrintAgent\updates\last-result.json` (the time, the release, the exit code and a message), after its own check that the machine state folder is protected, and writes one line to the machine activity log. The 2.0 companion shows that outcome when it reopens.
+3. It sends one request to the service, `resume-after-update`, and waits for one line in answer. This is the only request it sends after the installer exits. It connects to the pipe named `QqqPrintAgent`, waiting three seconds at most. Before it sends anything it runs the 1.2.1 peer check: the service named `QqqPrintAgent` must be running and hosted by the process that serves the pipe, and that process must run as SYSTEM from `%ProgramFiles%\QQQ Print Agent\Service\Qqq.PrintAgent.Service.exe`. The request is one line in the version 1 form, UTF-8, ended by a line feed. As 1.2.1's `PipeRequest` and its JSON options write it, the line is `{"operation":"resume-after-update","confirmDuplicateRisk":false,"claimLegacyDevice":false,"startNewPairing":false}`. The answer is read up to its line feed, within 35 seconds for the whole exchange, and its content is ignored.
+4. It starts `%ProgramFiles%\QQQ Print Agent\App\Qqq.PrintAgent.exe` with no arguments, in that program's own folder, after checking that the path holds no link and that the file and every folder up to Program Files have a trusted owner and access list.
+
+What 2.0 must keep for that helper:
+
+- The three programs at those three paths, each carrying the release as its product version, with identical build metadata. Otherwise a completed upgrade is reported to the operator as failed.
+- A service named `QqqPrintAgent` that runs as SYSTEM from that service path and serves a pipe named `QqqPrintAgent`. Otherwise the helper's peer check refuses and the request is never sent.
+- An answer to the version 1 request `resume-after-update`: a pause that is in force is lifted, and one line comes back. The step that retires version 1 of the pipe must keep answering this one request in its version 1 form for as long as an upgrade from 1.2.x is supported. The helper sends nothing else after the installer exits.
+- The form of `last-result.json`, which the 2.0 companion reads.
+
+What an unanswered request costs, as read at `v1.2.1` and at the head of that step:
+
+- The review expected printing to stay paused after the upgrade until the pause expires, which is ten minutes. The code does not bear that out for a service the installer has replaced. The pause is a field of the running service process (`_updatePauseUntil`, in 1.2.1 and here) and is not stored, and the installer stops the old process and starts the new one (`ServiceControl` with `Stop="both"` in `installer/Package.wxs`). A 2.0 service that the installer started begins without a pause, whether or not it answers.
+- The expectation becomes true as soon as a later step stores the pause or keeps the service process across an update. The request is then the only thing that lifts the pause before it expires.
+- Where the paused 1.2.x process survives the installer, as after an install that failed or was cancelled before the service was stopped, it is the 1.2.x service that answers.
+- What is certain today is smaller. A 2.0 service that accepts the connection and neither answers with a line nor closes it holds the helper for up to 35 seconds before the companion is reopened.
+
+The qualification of the upgrade from 1.2.x, which is open in `docs/TODO.md`, has to run a real 1.2.1 installation's own update to a 2.0 build and look at each of the four steps.
+
 ## Decisions taken while working, per the owner's direction
 
 About the runtime:
