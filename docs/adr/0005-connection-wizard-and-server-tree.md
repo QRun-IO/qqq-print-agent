@@ -76,7 +76,7 @@ The pairing choice no longer exists as a control up front, so documentation and 
 
 A planning pass on 2026-11-10 read this record against the code of `release/2.0` (at `65a99d3`; nothing was built or run for it) and listed twenty-one places where the record was silent, disagreed with the code or left a choice open. They keep the plan's numbers, G1 to G21. Each was settled on 2026-11-10 as the plan recommended, under the owner's standing instruction for this work (when a decision comes up, take the recommended option, record it in the decision record, and keep going), with one exception: for G1 and G2 the rule that was taken that day, and then built, is tighter than the plan's wording, and what is recorded here is the rule as built. They were written into this record on 2026-11-11. None of this is the owner's own words, and the owner can reverse any of it. The plan listed seven of them (G1, G2, G4, G5, G7, G11 and G19) as needing a decision before a step could start, which its summary puts as needing the owner or the service steps; it asked that four (G1, G2, G4 and G11) be raised with the service steps, and it called one part of G19, adding the layout tests to the solution, the owner's call. All seven were taken under the standing instruction like the rest, that part of G19 included; it is recorded with G19 that the owner may reverse it before the step that builds it. Two of them keep a condition that is stated with them (G7 and G11).
 
-"Built" below means merged on `release/2.0` and read there at `02f34c3` on 2026-11-11. "Not built yet" means that no merged code does it. Neither the wizard nor the tree exists, the window calls none of the merged parts, and nothing serves version 2 of the pipe, so no decision here has reached an operator.
+"Built" below means merged on `release/2.0` and read there at `02f34c3` on 2026-11-11. "Not built yet" means that no merged code does it. Neither the wizard nor the tree exists, the window calls none of the merged parts, and nothing serves version 2 of the pipe, so no decision here has reached an operator. Since then the wizard's frame and its Server step were added to the presentation assembly; the entries that touches say so (G3, G5, G8, G12 and G20). The window does not use them, so the last part of that sentence still holds.
 
 Sentences of this record that a decision contradicted, or that said less than the rule as built, were corrected in place on 2026-11-11, each with a pointer to its decision, except the third case in step 2:
 
@@ -110,6 +110,7 @@ Sentences of this record that a decision contradicted, or that said less than th
 - Rules out: a copy of either rule in the presentation assembly, which is how the three address rules of audit finding U16 came about.
 - Built by pull request 51 (audit W39 says what the rules are and what is held by test).
 - Not built yet: their callers in the window. The dialog's flow and the session client still apply their own checks to an address, as W39 records, so U16 stays open. The companion's client for version 2 takes the origin `ServerAddress.TryRead` returned and sends nothing for an address that rule refuses ("Resolved while reviewing the management client, 2026-11-11").
+- Built in the presentation assembly by the wizard's Server step, which the window does not use yet: the address is read by `ServerAddress.TryRead`, the name is `ServerName.Propose` of the origin until one is typed, and a typed name is judged by `ServerName.Check`. The step has no rule of its own for either. The sign-in provider a check reports is read by the contract's rule as well (`SignInProviderOrigin.TryRead`; "Resolved while building the wizard, 2026-11-11").
 
 **G4. Who builds `transport.get` and `printers.discover` in the service.** The step of the multi-server build that builds the version 2 pipe server builds both, and makes `printers.discover` single-flight there. It is recorded in [ADR-0004](0004-multi-server-runtime.md), "Resolved while planning the wizard and tree build".
 
@@ -119,7 +120,8 @@ Sentences of this record that a decision contradicted, or that said less than th
 **G5. When the wizard is what the window shows.** Only when the snapshot was answered, it reports the stored data as ready, and there are no servers. With no servers in any other state the window shows the Computer page, which says why: the upgrade from 1.x stopped at a file it names, a newer build wrote the data, the service was not reached, or a service of another pipe version answered. Add server is disabled with that reason.
 
 - Rules out: a wizard on a service that would refuse every operation it sends (`state_newer`, `migration_incomplete`), and a wizard on a service that did not answer.
-- Not built yet.
+- Built in part, in the presentation assembly: a run that adds a server is not started without an answered snapshot, while the stored data is not ready, or at eight servers, and `ConnectionWizard.WhyAddServerCannotStart` is the sentence that says which, for the Add server item too.
+- Not built yet: the window, which decides what it shows when there are no servers, and the Computer page that says why.
 
 **G6. A computer whose 1.x files could not be read.** [ADR-0004](0004-multi-server-runtime.md), "The cases", says that with neither the pairing nor the session readable there are no servers, the files stay where they are and "the computer says why". The contract has no member that could say it: the stored state carries a status, the file an unfinished upgrade stopped at and two version numbers (`StoredState`). The decision is that the stored state gains a list of fixed values that name what was left in place unread; the plan's examples are `pairingUnreadable` and `sessionUnreadable`. It is a change to the contract for the service steps to make.
 
@@ -135,7 +137,8 @@ Sentences of this record that a decision contradicted, or that said less than th
 **G8. Where Back works.** From Sign in to Server, where the step before stored nothing, and from Done to Printers. Not from Pair this computer and not from Printers, because the step before each of them stored something.
 
 - Rules out: a Back that would have to undo a stored server or a stored pairing.
-- Not built yet.
+- Built in the presentation assembly by the wizard's frame, which the window does not use yet: Back is offered from Sign in and from Done and from no other step, and not while the wizard waits for the service. Back to the Server step says that step's result again ("Resolved while building the wizard, 2026-11-11").
+- Not built yet: the Sign in and Done steps themselves, and with them what going back from each discards.
 
 **G9. Leaving the wizard's page.** The wizard stays alive while the operator looks at another page. Add server shows that one is in progress, and starting another asks first whether to cancel it. There is one wizard at a time.
 
@@ -157,7 +160,8 @@ Sentences of this record that a decision contradicted, or that said less than th
 **G12. When the certificate exception is offered.** Only when the reasons Windows refused the certificate include that it does not trust the issuing authority (`untrustedAuthority` among the refusals of the certificate the check describes). A name mismatch alone, or no certificate at all, gets the certificate shown and no exception offered. If a check still fails after the exception was accepted, the step says that the exception does not cover it.
 
 - Rules out: offering a development exception for a certificate issued to another name.
-- Not built yet. The contract already carries the reasons (`PresentedCertificate.Refusals`). This decides what the wizard offers; it does not change Core, whose exception, once on, accepts a certificate from a covered origin whatever Windows held against it (`QqqSessionClient.EvaluateCertificate`).
+- Built in the presentation assembly by the wizard's Server step, which the window does not use yet: the exception is offered only when the refusals include `untrustedAuthority`; a certificate that came with no reason is offered none; and when the certificate is refused again under the exception the step says that the exception does not cover it and does not offer it again for that result. What the step says for each reason is under "Resolved while building the wizard, 2026-11-11".
+- The contract carries the reasons (`PresentedCertificate.Refusals`). This decides what the wizard offers; it does not change Core, whose exception, once on, accepts a certificate from a covered origin whatever Windows held against it (`QqqSessionClient.EvaluateCertificate`).
 
 **G13. This Windows account refuses a certificate that the service accepted.** Step 2 says that it is this account that refused it, shows the certificate, and offers no exception: an exception would be stored for a service that does not need one.
 
@@ -200,7 +204,8 @@ Sentences of this record that a decision contradicted, or that said less than th
 
 - Rules out: showing such text as it was received.
 - Built in part by pull request 51: wherever a reply names an account, the principal, the tenant and the message beside them are printable and bounded (`ServerAuthentication`; W35 has what is still open).
-- Not built yet: the rows and the nodes, and the same treatment for the other texts W35 lists. Found on 2026-11-11 while this was written: the contract's rule (`ManagementText`) is internal to the Windows assembly, which opens its internals to its tests and to the worker fixture only, so the presentation assembly cannot call it as it stands. The step that builds the rows has to make the rule reachable, or W35 is closed first.
+- Built with the wizard's Server step: the contract's rule can be called from the presentation assembly (`ManagementText.Bounded` is public; when this entry was first written, on 2026-11-11, `ManagementText` was internal to the Windows assembly and could not be). The Server step puts a check stage's reasons and a refused certificate's subject, issuer and fingerprint through it before they are shown.
+- Not built yet: the rows and the nodes (a status text, a job title, a job message), and the same treatment for the other texts W35 lists.
 
 **G21. Logging by template in the presentation assembly.** The presentation log takes a message template and its values, and new presentation code logs only that way (K22-CODE-CS-10). The older types, which join strings into a finished message, are not rewritten; they go when the window stops using them.
 
