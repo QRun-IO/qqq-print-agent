@@ -55,7 +55,7 @@ public sealed partial class WindowsPrinters
 
 
    /// <summary>Spools a staged file as one RAW document, rechecking the selected media just before it starts, and aborts the document if anything fails after it began so no partial label stays queued.</summary>
-   private static string PrintRawStream(PrinterInfo selectedPrinter, PrintJob job, Stream input, CancellationToken token)
+   private string PrintRawStream(PrinterInfo selectedPrinter, PrintJob job, Stream input, CancellationToken token)
    {
       Check(Native.OpenPrinter(selectedPrinter.Name, out IntPtr printer, IntPtr.Zero));
       try

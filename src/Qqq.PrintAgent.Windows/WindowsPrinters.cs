@@ -20,6 +20,32 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>Windows spooler discovery, RAW ZPL, and Windows PDF renderer to native GDI.</summary>
 public sealed partial class WindowsPrinters : IPrinterBackend
 {
+   private readonly ISpooler _spooler;
+   private readonly IPrinterSettings _settings;
+   private readonly IGdiPrinter _gdi;
+
+
+
+   /// <summary>Builds the adapter over the real Windows spooler, printer settings and GDI. Nothing is asked of Windows until a member is called.</summary>
+   public WindowsPrinters() : this(new WindowsSpooler(), new WindowsPrinterSettings(), new WindowsGdiPrinter())
+   {
+   }
+
+
+
+   /// <summary>
+   /// Builds the adapter over the given Windows calls. Every rule in this class reaches Windows only through these, so
+   /// tests run the rules against fakes that record what was asked and never open a printer.
+   /// </summary>
+   internal WindowsPrinters(ISpooler spooler, IPrinterSettings settings, IGdiPrinter gdi)
+   {
+      _spooler = spooler;
+      _settings = settings;
+      _gdi = gdi;
+   }
+
+
+
    /// <summary>
    /// Enumerates the queues visible to this Windows identity (for the service, the machine-wide ones). A queue whose port
    /// or driver needs a person at the keyboard (file output, print-to-PDF, XPS, fax, OneNote) is reported UNKNOWN with no
@@ -130,7 +156,7 @@ public sealed partial class WindowsPrinters : IPrinterBackend
    /// the selection. Pages are rendered and printed copy by copy; any failure after the document starts aborts it, and the
    /// context is always released.
    /// </summary>
-   private static async Task<string> PrintPdfDocumentAsync(PrinterInfo printer, PrintJob job, PdfDocument document, CancellationToken cancellationToken)
+   private async Task<string> PrintPdfDocumentAsync(PrinterInfo printer, PrintJob job, PdfDocument document, CancellationToken cancellationToken)
    {
       (int WidthMicrons, int HeightMicrons)? paper = job.Options.CustomPaperMicrons();
       QueueDefaultMedia? media = RequireCurrentMedia(printer, job);
@@ -331,10 +357,6 @@ public sealed partial class WindowsPrinters : IPrinterBackend
       /// <summary>Discards a spool document that failed part way, so a partial label is not printed.</summary>
       [DllImport("winspool.drv", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] internal static extern bool AbortPrinter(IntPtr printer);
 
-
-
-      /// <summary>Creates a printer device context from the supplied settings so the real page size and resolution can be read and drawn on.</summary>
-      [DllImport("gdi32.dll", EntryPoint = "CreateDCW", SetLastError = true, CharSet = CharSet.Unicode)] internal static extern IntPtr CreateDC(string driver, string device, string? output, IntPtr devMode);
 
 
 

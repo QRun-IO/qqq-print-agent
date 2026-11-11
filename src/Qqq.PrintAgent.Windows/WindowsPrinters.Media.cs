@@ -21,29 +21,23 @@ public sealed partial class WindowsPrinters
    /// <summary>
    /// Keeps the complete driver bytes beside their resolved profile so validation and submission use the same captured defaults.
    /// </summary>
-   private sealed record QueueDefaultMedia(byte[] DevMode, PrinterMediaProfile? Profile);
+   internal sealed record QueueDefaultMedia(byte[] DevMode, PrinterMediaProfile? Profile);
 
 
 
    /// <summary>
    /// Resolves bounded machine defaults into a selectable profile; unreadable queues remain discoverable without a media claim.
    /// </summary>
-   private static QueueDefaultMedia? ReadQueueMedia(string id, string name, string driver, string port)
+   internal QueueDefaultMedia? ReadQueueMedia(string id, string name, string driver, string port)
    {
       try
       {
          byte[]? mode = ReadMachineDevMode(name);
          if(mode is null)
          { return null; }
-         var pinned = GCHandle.Alloc(mode, GCHandleType.Pinned);
-         try
-         {
-            IntPtr pointer = pinned.AddrOfPinnedObject();
-            (int width, int height) = ResolvePaperDimensions(name, port, mode, pointer);
-            (int dpiX, int dpiY) = ResolveResolution(name, mode, pointer);
-            return new QueueDefaultMedia(mode, BuildMediaProfile(id, driver, mode, width, height, dpiX, dpiY));
-         }
-         finally { pinned.Free(); }
+         (int width, int height) = ResolvePaperDimensions(name, port, mode);
+         (int dpiX, int dpiY) = ResolveResolution(name, mode);
+         return new QueueDefaultMedia(mode, BuildMediaProfile(id, driver, mode, width, height, dpiX, dpiY));
       }
       catch(Win32Exception)
       {
@@ -56,34 +50,29 @@ public sealed partial class WindowsPrinters
 
    /// <summary>
    /// Copies level-eight machine defaults only after checking native pointer and length bounds, avoiding per-user preferences.
+   /// The answer's first field is the address of the settings inside the same answer, so it is turned into an offset and
+   /// checked against the answer's size before anything is read at it.
    /// </summary>
-   private static byte[]? ReadMachineDevMode(string name)
+   internal byte[]? ReadMachineDevMode(string name)
    {
-      Check(Native.OpenPrinter(name, out IntPtr printer, IntPtr.Zero));
+      Check(_spooler.OpenPrinter(name, out IntPtr printer));
       try
       {
-         _ = Native.GetPrinter(printer, 8, IntPtr.Zero, 0, out uint needed);
+         _ = _settings.GetPrinterSize(printer, 8, out uint needed);
          if(needed < IntPtr.Size + 102 || needed > 1_048_576)
          { return null; }
-         IntPtr buffer = Marshal.AllocHGlobal(checked((int)needed));
-         try
-         {
-            Check(Native.GetPrinter(printer, 8, buffer, needed, out _));
-            IntPtr mode = Marshal.ReadIntPtr(buffer);
-            long offset = mode.ToInt64() - buffer.ToInt64();
-            if(mode == IntPtr.Zero || offset < IntPtr.Size || offset > needed - 102)
-            { return null; }
-            int size = (ushort)Marshal.ReadInt16(mode, 68);
-            int extra = (ushort)Marshal.ReadInt16(mode, 70);
-            if(size < 102 || size + extra > needed - offset)
-            { return null; }
-            byte[] bytes = new byte[size + extra];
-            Marshal.Copy(mode, bytes, 0, bytes.Length);
-            return bytes;
-         }
-         finally { Marshal.FreeHGlobal(buffer); }
+         Check(_settings.GetPrinter(printer, 8, needed, out byte[] buffer, out long address));
+         long mode = BinaryPrimitives.ReadIntPtrLittleEndian(buffer);
+         long offset = mode - address;
+         if(mode == 0 || offset < IntPtr.Size || offset > needed - 102)
+         { return null; }
+         int size = BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan((int)offset + 68));
+         int extra = BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan((int)offset + 70));
+         if(size < 102 || size + extra > needed - offset)
+         { return null; }
+         return buffer.AsSpan((int)offset, size + extra).ToArray();
       }
-      finally { _ = Native.ClosePrinter(printer); }
+      finally { _ = _spooler.ClosePrinter(printer); }
    }
 
 
@@ -91,7 +80,7 @@ public sealed partial class WindowsPrinters
    /// <summary>
    /// Uses both explicit form dimensions or an unambiguous driver paper-ID mapping, because partial dimensions are not reliable stock data.
    /// </summary>
-   private static (int Width, int Height) ResolvePaperDimensions(string name, string port, byte[] mode, IntPtr pointer)
+   private (int Width, int Height) ResolvePaperDimensions(string name, string port, byte[] mode)
    {
       uint fields = BinaryPrimitives.ReadUInt32LittleEndian(mode.AsSpan(72));
       if((fields & 12) != 0)
@@ -101,40 +90,36 @@ public sealed partial class WindowsPrinters
       }
       if((fields & 2) == 0)
       { return (0, 0); }
-      return ReadDriverPaperSize(name, port, pointer, ReadModeShort(mode, 78));
+      return ReadDriverPaperSize(name, port, mode, ReadModeShort(mode, 78));
    }
 
 
 
    /// <summary>
    /// Pairs the driver's paper identifiers and size arrays and accepts exactly one bounded match, rather than guessing a standard form.
+   /// Capability 2 lists the identifiers as 16-bit values and capability 3 the sizes as pairs of 32-bit tenths of a millimeter.
    /// </summary>
-   private static (int Width, int Height) ReadDriverPaperSize(string name, string port, IntPtr mode, short paperId)
+   private (int Width, int Height) ReadDriverPaperSize(string name, string port, byte[] mode, short paperId)
    {
-      int count = Native.DeviceCapabilities(name, port, 2, IntPtr.Zero, mode);
-      if(count is < 1 or > ushort.MaxValue || Native.DeviceCapabilities(name, port, 3, IntPtr.Zero, mode) != count)
+      int count = _settings.DeviceCapabilities(name, port, 2, mode);
+      if(count is < 1 or > ushort.MaxValue || _settings.DeviceCapabilities(name, port, 3, mode) != count)
       { return (0, 0); }
-      IntPtr identifiers = Marshal.AllocHGlobal(count * sizeof(short));
-      IntPtr dimensions = Marshal.AllocHGlobal(count * 2 * sizeof(int));
-      try
+      if(_settings.DeviceCapabilities(name, port, 2, count * sizeof(short), mode, out byte[] identifiers) != count
+         || _settings.DeviceCapabilities(name, port, 3, count * 2 * sizeof(int), mode, out byte[] dimensions) != count)
+      { return (0, 0); }
+      List<(int Width, int Height)> matches = [];
+      for(int index = 0; index < count; index++)
       {
-         if(Native.DeviceCapabilities(name, port, 2, identifiers, mode) != count || Native.DeviceCapabilities(name, port, 3, dimensions, mode) != count)
-         { return (0, 0); }
-         List<(int Width, int Height)> matches = [];
-         for(int index = 0; index < count; index++)
+         if(BinaryPrimitives.ReadInt16LittleEndian(identifiers.AsSpan(index * 2)) == paperId)
          {
-            if(Marshal.ReadInt16(identifiers, index * 2) == paperId)
-            {
-               int width = Marshal.ReadInt32(dimensions, index * 8);
-               int height = Marshal.ReadInt32(dimensions, index * 8 + 4);
-               if(width is < 1 or > 20_000 || height is < 1 or > 20_000)
-               { return (0, 0); }
-               matches.Add((width * 100, height * 100));
-            }
+            int width = BinaryPrimitives.ReadInt32LittleEndian(dimensions.AsSpan(index * 8));
+            int height = BinaryPrimitives.ReadInt32LittleEndian(dimensions.AsSpan(index * 8 + 4));
+            if(width is < 1 or > 20_000 || height is < 1 or > 20_000)
+            { return (0, 0); }
+            matches.Add((width * 100, height * 100));
          }
-         return matches.Count == 1 ? matches[0] : (0, 0);
       }
-      finally { Marshal.FreeHGlobal(identifiers); Marshal.FreeHGlobal(dimensions); }
+      return matches.Count == 1 ? matches[0] : (0, 0);
    }
 
 
@@ -142,18 +127,18 @@ public sealed partial class WindowsPrinters
    /// <summary>
    /// Uses positive explicit DPI or a DC built from the captured defaults; symbolic quality values are not treated as resolution.
    /// </summary>
-   private static (int X, int Y) ResolveResolution(string name, byte[] mode, IntPtr pointer)
+   private (int X, int Y) ResolveResolution(string name, byte[] mode)
    {
       uint fields = BinaryPrimitives.ReadUInt32LittleEndian(mode.AsSpan(72));
       if((fields & 0x2400) == 0x2400 && ReadModeShort(mode, 90) > 0 && ReadModeShort(mode, 96) > 0)
       { return (ReadModeShort(mode, 90), ReadModeShort(mode, 96)); }
       // Symbolic quality values are not DPI. Ask this driver with this exact machine DEVMODE.
-      IntPtr dc = Native.CreateDC("WINSPOOL", name, null, pointer);
+      IntPtr dc = _gdi.CreateDC("WINSPOOL", name, mode);
       if(dc == IntPtr.Zero)
       { return (0, 0); }
       try
-      { return (Native.GetDeviceCaps(dc, 88), Native.GetDeviceCaps(dc, 90)); }
-      finally { _ = Native.DeleteDC(dc); }
+      { return (_gdi.GetDeviceCaps(dc, 88), _gdi.GetDeviceCaps(dc, 90)); }
+      finally { _ = _gdi.DeleteDC(dc); }
    }
 
 
@@ -203,7 +188,7 @@ public sealed partial class WindowsPrinters
    /// <summary>
    /// Re-reads and matches selected defaults at the native submission boundary, while leaving legacy unselected jobs on their existing path.
    /// </summary>
-   private static QueueDefaultMedia? RequireCurrentMedia(PrinterInfo printer, PrintJob job)
+   internal QueueDefaultMedia? RequireCurrentMedia(PrinterInfo printer, PrintJob job)
    {
       if(job.Options.MediaProfile is null)
       { return null; }
@@ -217,8 +202,8 @@ public sealed partial class WindowsPrinters
    /// <summary>
    /// Passes the pinned captured or normalized job settings to GDI so selected jobs do not silently request current-user defaults.
    /// </summary>
-   private static IntPtr CreateDocumentContext(string printerName, byte[]? mode)
-      => WithPinnedMode(mode, pointer => Native.CreateDC("WINSPOOL", printerName, null, pointer));
+   private IntPtr CreateDocumentContext(string printerName, byte[]? mode)
+      => _gdi.CreateDC("WINSPOOL", printerName, mode);
 
 
 
@@ -289,28 +274,5 @@ public sealed partial class WindowsPrinters
       try
       { return create(pinned.AddrOfPinnedObject()); }
       finally { pinned.Free(); }
-   }
-
-
-
-   /// <summary>
-   /// Contains read-only Winspool entry points used to obtain machine defaults and driver form capabilities.
-   /// </summary>
-   private static partial class Native
-   {
-      /// <summary>
-      /// Reads printer information into a caller-sized buffer; level eight supplies machine-wide DEVMODE defaults.
-      /// </summary>
-      [DllImport("winspool.drv", EntryPoint = "GetPrinterW", SetLastError = true)]
-      [return: MarshalAs(UnmanagedType.Bool)]
-      internal static extern bool GetPrinter(IntPtr printer, uint level, IntPtr buffer, uint size, out uint needed);
-
-
-
-      /// <summary>
-      /// Queries driver capabilities against the supplied DEVMODE so paper IDs and sizes refer to the same captured configuration.
-      /// </summary>
-      [DllImport("winspool.drv", EntryPoint = "DeviceCapabilitiesW", CharSet = CharSet.Unicode)]
-      internal static extern int DeviceCapabilities(string device, string port, ushort capability, IntPtr output, IntPtr devMode);
    }
 }
