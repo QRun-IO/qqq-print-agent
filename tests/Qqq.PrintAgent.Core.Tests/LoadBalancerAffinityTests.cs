@@ -97,9 +97,12 @@ public sealed class LoadBalancerAffinityTests
    /// plain value. Any other cookie the server or a proxy sets, and any malformed one, is not stored and is never sent back.
    /// Attribute names are read without regard to letter case, a leading dot on the domain is allowed, and an attribute this
    /// client cannot read (an expiry that is not a date, a lifetime that is not a number) is ignored, not treated as expiry.
-   /// A plain value is printable ASCII without a space, quote, comma or backslash: a tab or any other control character,
-   /// DEL, and a character outside ASCII each refuse the cookie, because the value is written into a Cookie header as it
-   /// is and none of them may reach one.
+   /// A plain value is printable ASCII without a space, quote, comma or backslash. A carriage return or a line feed, the
+   /// two characters that end a header line, a tab or any other control character, DEL, and a character outside ASCII
+   /// each refuse the cookie, because the value is written into a Cookie header as it is and none of them may reach one.
+   /// The fake server hands a value with a carriage return or a line feed to the client unchanged, so those rows test
+   /// the client's own rule and not the platform's handling of such a header; the third is what the rule is for, a
+   /// second header forged behind a line break.
    /// </summary>
    [Theory]
    [InlineData("AWSALB=value; Path=/", true)]
@@ -125,6 +128,9 @@ public sealed class LoadBalancerAffinityTests
    [InlineData("AWSALB=\"quoted\"; Path=/", false)]
    [InlineData("AWSALB=one,two; Path=/", false)]
    [InlineData("AWSALB=back\\slash; Path=/", false)]
+   [InlineData("AWSALB=one\rtwo; Path=/", false)]
+   [InlineData("AWSALB=one\ntwo; Path=/", false)]
+   [InlineData("AWSALB=one\r\nSet-Cookie:sessionUUID=forged; Path=/", false)]
    [InlineData("AWSALB=one\ttwo; Path=/", false)]
    [InlineData("AWSALB=one\u0001two; Path=/", false)]
    [InlineData("AWSALB=one\u001Ftwo; Path=/", false)]
