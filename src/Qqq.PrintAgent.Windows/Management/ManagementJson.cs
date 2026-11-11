@@ -26,11 +26,13 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// without breaking an older client; for the same reason a client treats a vocabulary value it does not know (a
 /// health, a stage, an outcome) as unknown, never as a failure to read the reply. An envelope is read only by
 /// <see cref="ParseRequest"/> and <see cref="ParseReply"/>: handed to the serializer directly, the envelope types
-/// refuse to be read, so the checks those two make cannot be walked around. The refusal is declared on the four
-/// envelope types themselves (<see cref="NotBySerializer{TEnvelope}"/>), so it holds whatever options the serializer
-/// is given, the default ones included. The same types refuse to be written by the serializer, and an envelope is
-/// written only by <see cref="Write(ManagementRequest)"/> and <see cref="Write(ManagementReply)"/>, so it cannot
-/// leave in another form than the one line this contract defines (other options could indent it across lines).
+/// refuse to be read, so the checks those two make cannot be walked around by accident. The refusal is declared on
+/// the four envelope types themselves (<see cref="NotBySerializer{TEnvelope}"/>), so it holds for the default
+/// options and for any options object that does not bring a converter of its own for one of these types. Such a
+/// converter, placed in the options, takes precedence over a declaration on the type; it has to be written for the
+/// purpose, and nothing in the product has one. The same types refuse to be written by the serializer, and an
+/// envelope is written only by <see cref="Write(ManagementRequest)"/> and <see cref="Write(ManagementReply)"/>, so it
+/// cannot leave in another form than the one line this contract defines (other options could indent it across lines).
 /// </summary>
 public static class ManagementJson
 {
@@ -576,7 +578,9 @@ public static class ManagementJson
    /// a member the envelope does not have), and with options of a caller's choosing it could write one indented across
    /// lines, which the pipe's framing cannot carry. So both are closed, and the refusal names the functions to use
    /// instead. Each envelope type names this converter in an attribute on the type itself, which is why the refusal
-   /// holds for every options object, the default ones included, and not only for the two this contract builds.
+   /// holds for the default options and for options built elsewhere, and not only for the two this contract builds.
+   /// It does not hold against options that carry a converter written for the envelope type: the serializer asks the
+   /// options before it asks the type.
    /// </summary>
    internal sealed class NotBySerializer<TEnvelope> : JsonConverter<TEnvelope>
    {
@@ -592,7 +596,7 @@ public static class ManagementJson
 
       /// <summary>The refusal, naming the functions that read an envelope with its checks and the one that writes it.</summary>
       private static NotSupportedException Refusal()
-         => new($"A {typeof(TEnvelope).Name} is neither read nor written by the serializer, whatever its options. Read a request with {nameof(ManagementJson)}.{nameof(ParseRequest)} and a reply with "
+         => new($"A {typeof(TEnvelope).Name} is neither read nor written by the serializer. Read a request with {nameof(ManagementJson)}.{nameof(ParseRequest)} and a reply with "
             + $"{nameof(ManagementJson)}.{nameof(ParseReply)}, which check the envelope, and write either with {nameof(ManagementJson)}.{nameof(ManagementJson.Write)}.");
    }
 }

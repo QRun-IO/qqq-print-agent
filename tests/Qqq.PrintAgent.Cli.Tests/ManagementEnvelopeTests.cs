@@ -1045,14 +1045,14 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>
    /// The refusal is declared on the four envelope types, not on the contract's two options objects, so it holds for
-   /// every options object a caller could hand the serializer: the default ones, the web ones, ones that indent, ones
-   /// that ignore letter case, and the contract's own two. None of them reads a request of another version with a
+   /// options that were not built for the contract: the default ones, the web ones, ones that indent, ones that
+   /// ignore letter case, and the contract's own two. None of them reads a request of another version with a
    /// malformed operation and a member the envelope does not have, a reply without a result, an error with a raw
    /// message or a payload. None of them writes an envelope either, because options of a caller's choosing could
    /// write it in another form than the contract's one line; the refusal names the function that does write it.
    /// </summary>
    [Fact]
-   public void Envelope_IsNeitherReadNorWrittenByTheSerializer_WhateverItsOptions()
+   public void Envelope_IsNeitherReadNorWrittenByTheSerializer_UnderOptionsThatBringNoConverterForIt()
    {
       JsonSerializerOptions[] all = [JsonSerializerOptions.Default, JsonSerializerOptions.Web, new JsonSerializerOptions { WriteIndented = true },
          new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ManagementJson.Options, ManagementJson.StrictOptions];
@@ -1077,6 +1077,26 @@ public sealed class ManagementEnvelopeTests
       Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\"}}", ManagementJson.Write(reply));
       Assert.Throws<ArgumentNullException>(() => ManagementJson.Write((ManagementRequest)null!));
       Assert.Throws<ArgumentNullException>(() => ManagementJson.Write((ManagementReply)null!));
+   }
+
+
+
+   /// <summary>
+   /// Where the refusal ends, held so that no document says more: options that carry a converter written for an
+   /// envelope type are asked before the type is, so with them the serializer writes and reads that type as the
+   /// converter says. Such a converter has to be written on purpose, as the one in this test is; the default options
+   /// and every options object the product builds have none, and under those the refusal holds (the test above).
+   /// </summary>
+   [Fact]
+   public void AConverterPlacedInTheOptionsForAnEnvelopeType_IsAskedBeforeTheRefusalOnTheType()
+   {
+      JsonSerializerOptions withConverter = new() { Converters = { new ReplyAsFixedText() } };
+      var reply = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
+
+      Assert.Equal("\"written by a converter in the options\"", JsonSerializer.Serialize(reply, withConverter));
+      Assert.Equal(ManagementErrorCode.InternalError, JsonSerializer.Deserialize<ManagementReply>("{\"v\":9}", withConverter)!.Error!.Code);
+      Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply.Error, withConverter));
+      Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(reply, JsonSerializerOptions.Default));
    }
 
 
@@ -1368,6 +1388,24 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>A JSON object as the payload an envelope carries. It is parsed the lenient way on purpose, so a test can hand the typed readers something the envelope parser would have refused.</summary>
    private static ManagementPayload Payload(string json) => ManagementPayload.FromElement(JsonDocument.Parse(json).RootElement);
+
+
+
+   /// <summary>A converter for the reply type of the kind only a deliberate caller writes: it writes every reply as one fixed text and reads any text as one fixed failure. It exists to show that options carrying it are asked before the refusal declared on the type.</summary>
+   private sealed class ReplyAsFixedText : JsonConverter<ManagementReply>
+   {
+      /// <summary>Skips whatever is there and returns a fixed failure.</summary>
+      public override ManagementReply Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+      {
+         reader.Skip();
+         return ManagementReply.Failure(ManagementErrorCode.InternalError, "Read by a converter in the options.");
+      }
+
+
+
+      /// <summary>Writes a fixed text, whatever the reply holds.</summary>
+      public override void Write(Utf8JsonWriter writer, ManagementReply value, JsonSerializerOptions options) => writer.WriteStringValue("written by a converter in the options");
+   }
 
 
 
