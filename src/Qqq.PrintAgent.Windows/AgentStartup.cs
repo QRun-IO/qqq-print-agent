@@ -5,7 +5,6 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>

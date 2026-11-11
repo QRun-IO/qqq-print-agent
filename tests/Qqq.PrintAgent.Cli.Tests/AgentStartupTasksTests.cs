@@ -133,7 +133,7 @@ public sealed class AgentStartupTasksTests
       Assert.Equal(setup.Rules.CreateTaskXml(Sid), text);
       Assert.Equal(new byte[] { 0xFF, 0xFE }, start);
       Assert.True(setup.Scheduler.DefinitionWasHeld);
-      Assert.Equal(new[] { setup.SetupDirectory }, setup.EnsuredFolders, StringComparer.Ordinal);
+      Assert.Equal(new[] { setup.SetupDirectory, path }, setup.EnsuredFolders, StringComparer.Ordinal);
       Assert.Equal(new[] { path }, setup.ValidatedFiles, StringComparer.Ordinal);
       Assert.Equal(setup.Rules.CreateTaskXml(Sid), setup.Scheduler.Tasks[TaskName]);
       Assert.Empty(Directory.GetFiles(setup.SetupDirectory));

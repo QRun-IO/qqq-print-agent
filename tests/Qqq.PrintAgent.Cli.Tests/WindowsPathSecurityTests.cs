@@ -55,6 +55,23 @@ public sealed class WindowsPathSecurityTests
 
 
 
+   /// <summary>
+   /// The identity it reports is the one of the test process: a well-formed security identifier that is the one of the
+   /// process token, and an administrator flag that agrees with the token read another way, by whether the
+   /// administrators group is among its enabled groups.
+   /// </summary>
+   [Fact]
+   public void IdentityIsTheOneOfTheRunningProcess()
+   {
+      var security = new WindowsPathSecurity();
+      using var identity = WindowsIdentity.GetCurrent();
+      Assert.Matches("^S-1-\\d+(-\\d+)+$", security.CurrentUserSid);
+      Assert.Equal(identity.User!.Value, security.CurrentUserSid);
+      Assert.Equal(identity.Groups!.Contains(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)), security.IsAdministrator);
+   }
+
+
+
    /// <summary>The access rules of a descriptor, explicit and inherited, by security identifier.</summary>
    private static FileSystemAccessRule[] Rules(FileSystemSecurity security)
       => [.. security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()];

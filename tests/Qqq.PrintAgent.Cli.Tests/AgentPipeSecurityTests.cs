@@ -144,7 +144,9 @@ public sealed class AgentPipeSecurityTests
       string definition = Path.Combine(directory, "startup.xml");
       try
       {
-         using(FileStream held = AgentStartupTasks.CreateHeldDefinition(definition, "<Task>synthetic</Task>"))
+         List<string> ensured = [];
+         var rules = new AgentStartupTasks(new FakeTaskScheduler(), Path.Combine(directory, "Qqq.PrintAgent.exe"), new ProtectedStaging(directory, ensured.Add, _ => { }));
+         using(FileStream held = rules.CreateHeldDefinition(definition, "<Task>synthetic</Task>"))
          {
             Assert.Contains("synthetic", File.ReadAllText(definition), StringComparison.Ordinal);
             Assert.Throws<IOException>(() => File.WriteAllText(definition, "replacement"));
@@ -152,6 +154,7 @@ public sealed class AgentPipeSecurityTests
             Assert.Throws<IOException>(() => File.Move(definition, Path.Combine(directory, "moved.xml")));
          }
          Assert.Contains("synthetic", File.ReadAllText(definition), StringComparison.Ordinal);
+         Assert.Equal(new[] { definition }, ensured, StringComparer.Ordinal);
       }
       finally
       {

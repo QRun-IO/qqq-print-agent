@@ -143,11 +143,12 @@ internal sealed partial class AgentStartupTasks(ITaskScheduler scheduler, string
    /// <summary>
    /// Writes the task definition and returns it open for reading, with sharing set so Task Scheduler's own reader can open
    /// it while this handle stays held. Holding the handle in the validated protected folder prevents the file being replaced
-   /// between validation and registration.
+   /// between validation and registration. The folder check is the one the staging was given, asked again for the file's
+   /// own path, so the installed product checks the real machine state and a test checks what it chose to.
    /// </summary>
-   internal static FileStream CreateHeldDefinition(string path, string xml)
+   internal FileStream CreateHeldDefinition(string path, string xml)
    {
-      Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(path);
+      staging.EnsureFolder(path);
       // The validated protected parent prevents replacement while switching from the
       // exclusive writer to a read handle compatible with Task Scheduler's own reader.
       using(FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))

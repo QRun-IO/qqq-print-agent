@@ -16,11 +16,16 @@ public static class Program
 {
    /// <summary>
    /// Selects the fixture behavior from the arguments. With --launch-parent it starts a hanging child worker whose parent id is this
-   /// process, reports the child's id, and exits, so a test can check the child dies with its parent. Otherwise it runs the real
+   /// process, reports the child's id, and exits, so a test can check the child dies with its parent. With --stand-in first it is
+   /// the plain child program of <see cref="StandIn"/> and never touches the worker. Otherwise it runs the real
    /// worker loop against a fake backend that can hang (--hang) or report a media change (--media-drift).
    /// </summary>
    public static async Task<int> Main(string[] args)
    {
+      if(args.Length > 1 && string.Equals(args[0], StandIn.Flag, StringComparison.Ordinal))
+      {
+         return StandIn.Run(args);
+      }
       if(args.Contains("--launch-parent", StringComparer.Ordinal))
       {
          ProcessStartInfo start = new(Environment.ProcessPath!) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true };
