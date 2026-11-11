@@ -21,14 +21,22 @@ internal sealed class ServiceLog
    /// <summary>How many operational entries the in-memory ring keeps; the oldest is dropped first.</summary>
    internal const int RingCapacity = 100;
 
+
+
    /// <summary>The longest operational line, in characters, after redaction.</summary>
    internal const int LineLimit = 1000;
+
+
 
    /// <summary>The longest line of debug detail, in characters, after redaction; it is longer because it carries exception text.</summary>
    internal const int DebugLimit = 4000;
 
+
+
    /// <summary>The longest server name a prefixed view shows, in characters, so an operator's long name cannot use up a line.</summary>
    internal const int ServerNameLimit = 64;
+
+
 
    private readonly Sinks _sinks;
    private readonly string _prefix;
