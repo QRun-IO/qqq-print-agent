@@ -19,7 +19,7 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// reports, and otherwise one that names only its kind (see <see cref="BrowserCallbackFailure"/>), so whatever an
 /// inbox fails with ends each exchange as a failure it reports and never as an exception nobody handles. Tickets
 /// are registered from the window's thread and callbacks arrive on others, so the waiting set is guarded, and this
-/// never continues on a caller's thread.
+/// never continues on a caller's thread. A log that fails does not stop any of it.
 /// </summary>
 public sealed class BrowserCallbackDispatcher
 {
@@ -133,8 +133,29 @@ public sealed class BrowserCallbackDispatcher
       CancellationTokenSource listening = new();
       _inbox = inbox;
       _listening = listening;
-      _log.Info("Browser callback inbox open.");
+      Record(static log => log.Info("Browser callback inbox open."));
       _ = ReceiveAsync(inbox, listening.Token);
+   }
+
+
+
+   /// <summary>
+   /// Writes a log entry in a way that cannot break the dispatcher. Its entries are written between steps that
+   /// belong together: after an inbox was opened and before anyone waits on it, after an inbox was closed and before
+   /// the next one is opened, before the tickets of a broken inbox are failed. A log that threw there would leave
+   /// an inbox nobody reads, or tickets waiting for nothing until their own time limits ran out. So a failure of
+   /// the log stays with the log: the entry is lost, and the dispatcher goes on.
+   /// </summary>
+   private void Record(Action<IPresentationLog> entry)
+   {
+      try
+      {
+         entry(_log);
+      }
+      catch(Exception)
+      {
+         // A log that cannot be written to must not cost an operator the sign-in that is waiting.
+      }
    }
 
 
@@ -205,7 +226,7 @@ public sealed class BrowserCallbackDispatcher
          }
          if(ticket is null)
          {
-            _log.Warning("A browser callback that belongs to no waiting sign-in or sign-out was dropped. Nothing of it is logged.");
+            Record(static log => log.Warning("A browser callback that belongs to no waiting sign-in or sign-out was dropped. Nothing of it is logged."));
          }
          failure = Reopen(out stranded);
       }
@@ -276,7 +297,7 @@ public sealed class BrowserCallbackDispatcher
    /// </summary>
    private void End(BrowserCallbackTicket[] stranded, Exception failure)
    {
-      _log.Error("The browser callback inbox failed ({Failure}); {Waiting} waiting browser exchange(s) were ended and have to be started again.", failure.GetType().Name, stranded.Length);
+      Record(log => log.Error("The browser callback inbox failed ({Failure}); {Waiting} waiting browser exchange(s) were ended and have to be started again.", failure.GetType().Name, stranded.Length));
       Exception reported = BrowserCallbackFailure.Reported(failure);
       foreach(BrowserCallbackTicket ticket in stranded)
       {

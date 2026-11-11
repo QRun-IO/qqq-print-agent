@@ -395,6 +395,44 @@ public sealed class BrowserCallbackDispatcherTests
 
 
    /// <summary>
+   /// A log that cannot be written to does not stop the dispatcher. Every entry it writes fails here, and all the
+   /// same: a registration returns its ticket with the inbox open and being read; a callback for nobody is dropped
+   /// and the next inbox is opened and read; the ticket's own callback reaches it; and when an inbox breaks, the
+   /// tickets that wait are failed and not left waiting. Each of the three entries was attempted, so the test is
+   /// about entries that failed and not about entries that were never written.
+   /// </summary>
+   [Fact]
+   public async Task LogThatThrows_DoesNotBreakTheDispatcher()
+   {
+      SignInWorld world = new();
+      ThrowingLog log = new();
+      BrowserCallbackDispatcher dispatcher = new(world, log);
+
+      using BrowserCallbackTicket ticket = dispatcher.Register("synthetic-state-a");
+      FakeInbox inbox = Assert.Single(world.Inboxes);
+      Assert.True(inbox.Waiting);
+      Task<FakeInbox> reopened = world.NextInboxAsync();
+      inbox.Deliver(CallbackFor("synthetic-state-of-nobody"));
+      FakeInbox next = await reopened;
+      Assert.True(inbox.Disposed);
+      Assert.False(ticket.Callback.IsCompleted);
+      next.Deliver(CallbackFor("synthetic-state-a"));
+      Assert.Equal(CallbackFor("synthetic-state-a"), await SignInWorld.EndsAsync(ticket.Callback));
+
+      using BrowserCallbackTicket first = dispatcher.Register("synthetic-state-b");
+      using BrowserCallbackTicket second = dispatcher.Register("synthetic-state-c");
+      IOException failure = new("synthetic pipe failure");
+      world.Inboxes[2].Fail(failure);
+
+      Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => SignInWorld.EndsAsync(first.Callback)));
+      Assert.Same(failure, await Assert.ThrowsAsync<IOException>(() => SignInWorld.EndsAsync(second.Callback)));
+      Assert.All(world.Inboxes, opened => Assert.True(opened.Disposed));
+      Assert.Equal(["INFO", "WARN", "INFO", "INFO", "ERROR"], log.Attempts);
+   }
+
+
+
+   /// <summary>
    /// Two exchanges cannot wait under one state, because a callback could not be told to belong to one of them. The
    /// second registration is refused without naming the state, and the first is left as it was. A state of nothing is
    /// refused before anything is opened.
@@ -446,6 +484,47 @@ public sealed class BrowserCallbackDispatcherTests
 
       Assert.Equal("callbacks", Assert.Throws<ArgumentNullException>(() => new BrowserCallbackDispatcher(null!, world.Log)).ParamName);
       Assert.Equal("log", Assert.Throws<ArgumentNullException>(() => new BrowserCallbackDispatcher(world, null!)).ParamName);
+   }
+
+
+
+   /// <summary>A log that fails on every entry, as a log whose file cannot be written would, and notes the level of each entry that was attempted.</summary>
+   private sealed class ThrowingLog : IPresentationLog
+   {
+      /// <summary>The level of every entry that was attempted, oldest first.</summary>
+      internal List<string> Attempts { get; } = [];
+
+
+
+      /// <summary>Fails.</summary>
+      public void Info(string message) => Fail("INFO");
+
+
+
+      /// <summary>Fails.</summary>
+      public void Warning(string message) => Fail("WARN");
+
+
+
+      /// <summary>Fails.</summary>
+      public void Error(string message) => Fail("ERROR");
+
+
+
+      /// <summary>Fails.</summary>
+      public void Debug(string message) => Fail("DEBUG");
+
+
+
+      /// <summary>Notes the attempt and fails.</summary>
+      private void Fail(string level)
+      {
+         lock(Attempts)
+         {
+            Attempts.Add(level);
+         }
+         throw new IOException("synthetic log failure");
+      }
    }
 
 
