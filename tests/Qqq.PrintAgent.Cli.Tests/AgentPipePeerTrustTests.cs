@@ -140,26 +140,33 @@ public sealed class AgentPipePeerTrustTests
    /// or cannot be looked at, the answer stays the one refusal, with what stopped the check kept inside for the log:
    /// a service whose status cannot be read (it is not installed, or the caller may not control it), a process that
    /// cannot be opened, an account or a program that cannot be read, and a pipe that cannot say who serves it when
-   /// asked again.
+   /// asked again. A process that cannot be opened is refused the same way whether Windows said so with an error of
+   /// its own or .NET with an invalid-operation failure: neither is the sign that the process has ended, so the
+   /// failure neither escapes as it is nor turns the answer into "try again".
    /// </summary>
    [Theory]
    [InlineData("service-unreadable")]
    [InlineData("process-unopenable")]
+   [InlineData("process-unopenable-as-an-invalid-operation")]
    [InlineData("account-unreadable")]
    [InlineData("program-unreadable")]
    [InlineData("pipe-silent-when-asked-again")]
    public void CheckThatCouldNotBeCarriedOutIsRefusedWithItsCauseInside(string how)
    {
       FakePipePeerFacts facts = new();
-      Exception cause = string.Equals(how, "service-unreadable", StringComparison.Ordinal)
-         ? new InvalidOperationException("Synthetic: service 'QqqPrintAgent' was not found on computer '.'.")
-         : new Win32Exception(5, "Synthetic: access is denied.");
+      Exception cause = how switch
+      {
+         "service-unreadable" => new InvalidOperationException("Synthetic: service 'QqqPrintAgent' was not found on computer '.'."),
+         "process-unopenable-as-an-invalid-operation" => new InvalidOperationException("Synthetic: the process cannot be looked at."),
+         _ => new Win32Exception(5, "Synthetic: access is denied."),
+      };
       switch(how)
       {
          case "service-unreadable":
             facts.ServiceFailure = cause;
             break;
          case "process-unopenable":
+         case "process-unopenable-as-an-invalid-operation":
             facts.OpenFailure = cause;
             break;
          case "account-unreadable":
@@ -234,6 +241,23 @@ public sealed class AgentPipePeerTrustTests
       FakePipePeerFacts facts = new() { IsSystem = false };
       _ = Assert.Throws<UnauthorizedAccessException>(() => Authenticate(facts));
       Assert.Equal(new[] { "OpenService QqqPrintAgent", "ServerProcessId", "ReadStatus", "OpenProcess 5120", "RunsAsSystem", "Dispose process", "Dispose service", "OpenProcess 5120", "HasExited", "Dispose process" }, facts.Calls, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The second look at the service asks only which process hosts it. A service that has begun to stop since the
+   /// first look and is still hosted by the verified process is trusted as before: that process is held by then, so
+   /// its id cannot have passed to another, and a service that has stopped names no process at all.
+   /// </summary>
+   [Fact]
+   public void SecondLookAtTheServiceComparesOnlyTheProcessThatHostsIt()
+   {
+      FakePipePeerFacts facts = new();
+      facts.Statuses.Add(new PeerServiceStatus(3, FakePipePeerFacts.ServicePid));
+      using AgentPipePeer peer = Authenticate(facts);
+      Assert.Equal(2, facts.Calls.Count(call => string.Equals(call, "ReadStatus", StringComparison.Ordinal)));
+      Assert.Equal(2, facts.OpenHandles);
    }
 
 

@@ -153,6 +153,24 @@ public sealed class AgentServiceActionsTests
 
 
 
+   /// <summary>
+   /// The state is looked at before the limit: a service that is found running at the look that falls on the 30th
+   /// second, the 121st, is in time, and the action succeeds.
+   /// </summary>
+   [Fact]
+   public async Task ServiceThatRunsAtTheLookOnTheThirtiethSecondIsInTime()
+   {
+      var setup = new Setup();
+      setup.Become([.. Enumerable.Repeat(ServiceControllerStatus.StartPending, 120), ServiceControllerStatus.Running]);
+      Task<AgentServiceStatus> start = setup.Actions.StartAsync();
+      await setup.PassPollsAsync(120);
+      Assert.Equal("Running", (await start.WaitAsync(MsiUpdateSetup.Patience)).State);
+      Assert.Equal(121, setup.Services.Calls.Count(call => string.Equals(call, "Refresh", StringComparison.Ordinal)));
+      Assert.Equal(0, setup.Clock.PendingTimers);
+   }
+
+
+
    /// <summary>A restart stops a service that is not stopped, running or paused alike, waits until it has stopped, and only then starts it and waits until it runs.</summary>
    [Theory]
    [InlineData(ServiceControllerStatus.Running)]

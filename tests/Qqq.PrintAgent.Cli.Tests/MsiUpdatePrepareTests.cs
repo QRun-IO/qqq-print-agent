@@ -283,6 +283,23 @@ public sealed class MsiUpdatePrepareTests
 
 
 
+   /// <summary>
+   /// The request is created new and never written over one that is already there: a request left in the session
+   /// fails the preparation with what Windows says about a file that exists, and stays exactly as it was.
+   /// </summary>
+   [Fact]
+   public void RequestThatAlreadyExistsIsNotOverwritten()
+   {
+      using var setup = new MsiUpdateSetup();
+      File.WriteAllText(setup.RequestPath, "left by someone else");
+      IOException refusal = Assert.Throws<IOException>(() => setup.Prepare());
+      Assert.Equal(unchecked((int)0x80070050), refusal.HResult);
+      Assert.Equal("left by someone else", File.ReadAllText(setup.RequestPath));
+      Assert.Empty(setup.Processes.Started);
+   }
+
+
+
    /// <summary>A junction inside the installed command line folder stops the copy, so nothing is copied from where it points, and no request is written.</summary>
    [Fact]
    public void JunctionInsideTheInstalledFolderStopsTheCopy()

@@ -288,6 +288,27 @@ public sealed class MsiUpdateApplyTests
 
 
    /// <summary>
+   /// The MSI is checked against the request and held only once the companion has closed, not while it is waited
+   /// for: during the wait the MSI is not yet held, and bytes that change in it then are found when it is checked
+   /// afterwards, so the installer is never started on them. This records the order the helper works in today.
+   /// </summary>
+   [Fact]
+   public async Task MsiIsCheckedAndHeldOnlyOnceTheCompanionHasClosed()
+   {
+      using var setup = new MsiUpdateSetup();
+      string request = setup.PrepareAndRunAsHelper(companionClosed: false);
+      Task<int> apply = setup.ApplyAsync(request);
+      await MsiUpdateSetup.UntilAsync(() => setup.Companion.Waits == 1);
+      Assert.False(Throws<IOException>(() => File.WriteAllBytes(setup.Package, [.. setup.PackageBytes.Reverse()])), "The MSI was already held while the companion was still waited for.");
+      setup.Companion.Exit(0);
+      Assert.Equal(1, await apply);
+      Assert.DoesNotContain(Installer, setup.StartedPrograms, StringComparer.Ordinal);
+      Assert.Equal(new[] { "ERROR [Update] " + Failed + "The staged update changed or failed its checksum. Download it again." }, setup.Log.Entries, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
    /// A companion that does not close is waited for for 30 seconds and no longer: just before that the helper is still
    /// waiting and has started nothing; at 30 seconds it gives up, says that no process was terminated, and the installer
    /// is never started. The companion is left running.
