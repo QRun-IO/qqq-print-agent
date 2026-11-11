@@ -25,6 +25,9 @@ public enum ServerNameProblem
    /// <summary>The name holds a character that is not shown as itself (a line break or another control character, a character that reorders or hides text, a private-use or unassigned one), or a surrogate without its partner.</summary>
    NotPrintable,
 
+   /// <summary>Every character of the name is shown, yet the name shows nothing: it is made only of spaces, of combining marks with no character to sit on, and of characters that are letters or symbols by category and draw nothing (the Hangul fillers, the blank Braille pattern).</summary>
+   ShowsNothing,
+
    /// <summary>The name holds a square bracket, ASCII or fullwidth (U+FF3B, U+FF3D).</summary>
    SquareBracket,
 

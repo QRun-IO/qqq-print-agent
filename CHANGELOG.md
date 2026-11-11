@@ -23,9 +23,10 @@ what the service and its clients will be able to build on. The last two are abou
 - **Accounts.** The principal and the tenant are carried one way wherever a reply names an account (a snapshot,
   the result of adding a server or signing in, the details of a changed identity): printable, at most 200 units,
   left out when missing.
-- **Server names and addresses.** A name is 1 to 64 characters of visible text after trimming, without square
-  brackets (ASCII or fullwidth), and not shaped like a server identifier or the first eight or more characters of
-  one. `servers.add` and
+- **Server names and addresses.** A name is 1 to 64 characters of visible text after trimming, of which at least
+  one draws something (a name made only of spaces, combining marks and characters that draw nothing, such as
+  U+3164, is refused), without square brackets (ASCII or fullwidth), and not shaped like a server identifier or the
+  first eight or more characters of one. `servers.add` and
   `servers.rename` refuse any other name as `invalid_request`. The rule is one function for the service and the
   companion, it says which part a name breaks, and it proposes a name from a server's address that always passes
   (the host; "Server" in front of a host that looks like an identifier). The rule for an address is beside it:

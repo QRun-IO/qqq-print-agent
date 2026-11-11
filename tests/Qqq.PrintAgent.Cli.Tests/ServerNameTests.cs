@@ -146,6 +146,47 @@ public sealed class ServerNameTests
 
 
 
+   /// <summary>
+   /// A name must show something. Core's definition of printable text goes by category, and by category the Hangul
+   /// fillers are letters, the blank Braille pattern is a symbol and a combining mark is shown, though none of them
+   /// draws anything on its own; so does a space that is not the plain one. A name made only of those is refused as
+   /// one that shows nothing, however many of them it has and in whatever mixture, and the two argument records
+   /// cannot be built with it. One character that draws makes the same text a name: these characters are allowed in
+   /// a name, they just cannot be all of it.
+   /// </summary>
+   [Theory]
+   [InlineData(0x3164)]
+   [InlineData(0x115F)]
+   [InlineData(0x1160)]
+   [InlineData(0xFFA0)]
+   [InlineData(0x2800)]
+   [InlineData(0x034F)]
+   [InlineData(0x0301)]
+   [InlineData(0xFE0F)]
+   [InlineData(0x20DD)]
+   [InlineData(0x0903)]
+   public void AName_MadeOnlyOfCharactersThatDrawNothing_IsRefused(int codePoint)
+   {
+      string character = char.ConvertFromUtf32(codePoint);
+      string noBreakSpace = char.ConvertFromUtf32(0x00A0);
+      string filler = char.ConvertFromUtf32(0x3164);
+
+      Assert.Equal(ServerNameProblem.ShowsNothing, ServerName.Check(character));
+      Assert.Equal(ServerNameProblem.ShowsNothing, ServerName.Check(character + character + character));
+      Assert.Equal(ServerNameProblem.ShowsNothing, ServerName.Check(character + noBreakSpace + character));
+      Assert.Equal(ServerNameProblem.ShowsNothing, ServerName.Check(character + " " + filler));
+      Assert.Equal(ServerNameProblem.ShowsNothing, ServerName.Check("  " + character + "  "));
+      Assert.False(ServerName.TryAccept(character, out string? accepted));
+      Assert.Null(accepted);
+      Assert.Throws<ArgumentException>(() => new ServersRenameArgs(character));
+      Assert.Throws<ArgumentException>(() => new ServersAddArgs(ManagementSamples.Address, character, acceptCertificateException: false, ManagementSamples.SessionCredential));
+      Assert.Equal(ServerNameProblem.None, ServerName.Check("W" + character));
+      Assert.Equal(ServerNameProblem.None, ServerName.Check(character + "2"));
+      Assert.Equal(ServerNameProblem.None, ServerName.Check(character + " - " + character));
+   }
+
+
+
    /// <summary>A surrogate without its partner is not a character, so a name that holds one is refused, at its start, inside it and at its end; a whole pair is a character and is accepted.</summary>
    [Fact]
    public void AName_WithASurrogateWithoutItsPartner_IsRefused()
@@ -223,8 +264,8 @@ public sealed class ServerNameTests
 
    /// <summary>
    /// A name that breaks the rule in several ways is reported under the first of them in the rule's order (empty, too
-   /// long, not printable, a square bracket, shaped like an identifier), so the same name always gets the same answer
-   /// and the companion has one thing to say.
+   /// long, not printable, showing nothing, a square bracket, shaped like an identifier), so the same name always
+   /// gets the same answer and the companion has one thing to say.
    /// </summary>
    [Fact]
    public void AName_ThatBreaksTheRuleInSeveralWays_IsReportedUnderTheFirst()
@@ -232,9 +273,11 @@ public sealed class ServerNameTests
       Assert.Equal(ServerNameProblem.TooLong, ServerName.Check(new string('[', 65)));
       Assert.Equal(ServerNameProblem.TooLong, ServerName.Check(new string('n', 60) + "\n[x]\n" + new string('n', 60)));
       Assert.Equal(ServerNameProblem.NotPrintable, ServerName.Check("Ware\nhouse [east]"));
+      Assert.Equal(ServerNameProblem.NotPrintable, ServerName.Check(char.ConvertFromUtf32(0x3164) + "\n" + char.ConvertFromUtf32(0x3164)));
+      Assert.Equal(ServerNameProblem.TooLong, ServerName.Check(string.Concat(Enumerable.Repeat(char.ConvertFromUtf32(0x3164), 65))));
       Assert.Equal(ServerNameProblem.SquareBracket, ServerName.Check("[deadbeef]"));
       Assert.Equal(ServerNameProblem.LikeAnIdentifier, ServerName.Check("  deadbeef  "));
-      Assert.Equal([ServerNameProblem.None, ServerNameProblem.Empty, ServerNameProblem.TooLong, ServerNameProblem.NotPrintable, ServerNameProblem.SquareBracket, ServerNameProblem.LikeAnIdentifier],
+      Assert.Equal([ServerNameProblem.None, ServerNameProblem.Empty, ServerNameProblem.TooLong, ServerNameProblem.NotPrintable, ServerNameProblem.ShowsNothing, ServerNameProblem.SquareBracket, ServerNameProblem.LikeAnIdentifier],
          Enum.GetValues<ServerNameProblem>());
    }
 

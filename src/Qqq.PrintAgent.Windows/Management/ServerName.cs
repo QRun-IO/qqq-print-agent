@@ -5,6 +5,7 @@
 
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 using Qqq.PrintAgent.Core;
 using Qqq.PrintAgent.Core.Authentication;
@@ -20,6 +21,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <list type="bullet">
 /// <item>it has 1 to <see cref="MaximumCharacters"/> UTF-16 units;</item>
 /// <item>every code point of it is one Core's definition of printable text shows (<see cref="ServerText.IsShown"/>), and no surrogate stands without its partner;</item>
+/// <item>at least one code point of it draws something: a letter, a digit, a punctuation mark or a symbol, other than the few of those that draw nothing (the Hangul fillers and the blank Braille pattern). Core's definition shows those, and it shows a combining mark with nothing to sit on; a name made only of them and of spaces would be a server the operator cannot see in a list or tell from another;</item>
 /// <item>it holds no square bracket, because square brackets are the delimiters of the service log's line prefixes (the marker of the service, a server's short identifier) and of other lines that put something in brackets, so a bracket in a name could forge that structure wherever a name is written into such a line. The fullwidth pair (U+FF3B, U+FF3D) is refused with the ASCII pair: it is not a delimiter to a program, but it reads as the same brackets to a person;</item>
 /// <item>it is not shaped like a server identifier or like the first eight or more characters of one, in either letter case, because that is what the command line's <c>--server</c> takes as an identifier or a prefix (<see cref="ServerSelector"/>).</item>
 /// </list>
@@ -64,6 +66,7 @@ public static class ServerName
       return trimmed.Length == 0 ? ServerNameProblem.Empty
          : trimmed.Length > MaximumCharacters ? ServerNameProblem.TooLong
          : !IsPrintable(trimmed) ? ServerNameProblem.NotPrintable
+         : !trimmed.EnumerateRunes().Any(Draws) ? ServerNameProblem.ShowsNothing
          : trimmed.AsSpan().ContainsAny(s_squareBrackets) ? ServerNameProblem.SquareBracket
          : IsIdentifierOrItsBeginning(trimmed) ? ServerNameProblem.LikeAnIdentifier
          : ServerNameProblem.None;
@@ -121,6 +124,21 @@ public static class ServerName
       }
       return true;
    }
+
+
+
+   /// <summary>
+   /// True for a code point that draws something on a screen, among the code points Core's definition shows. That
+   /// definition goes by category, and by category the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0) are letters
+   /// and the blank Braille pattern (U+2800) is a symbol, though each draws nothing; a combining mark draws only
+   /// together with the character before it; and a space draws nothing by design. So a code point draws when it is
+   /// none of those. This is the contract's own addition for a name, where showing nothing is a trap for the
+   /// operator; Core's definition is not changed by it, and other text (a message, an identity value) is not held to
+   /// it. It names the code points known to draw nothing, and a font can always draw another as nothing.
+   /// </summary>
+   private static bool Draws(Rune rune)
+      => rune.Value is not (0x115F or 0x1160 or 0x3164 or 0xFFA0 or 0x2800)
+         && Rune.GetUnicodeCategory(rune) is not (UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark or UnicodeCategory.SpaceSeparator);
 
 
 
