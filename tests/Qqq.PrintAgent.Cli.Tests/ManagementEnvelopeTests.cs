@@ -749,10 +749,9 @@ public sealed class ManagementEnvelopeTests
    /// one the operator has not seen; one shown and none read do not; one shown and another read (another host, port
    /// or scheme) do not; and the same one agrees. Origins are compared in the one form an origin is kept in, so one
    /// place written in another letter case, with its default port, with a trailing slash, with a path, or by its
-   /// Unicode name is the same place. Text that names no origin agrees with nothing, not even with itself. An IPv6
-   /// literal with a zone names none: the form origins are compared in has no place for the zone, so it would agree
-   /// with the same address in another zone or in none, which are other places. The same literal without a zone
-   /// agrees with itself.
+   /// Unicode name is the same place. What the service reads is its own, and may name nothing or be an IPv6 literal
+   /// with a zone: that agrees with no origin a request can carry. What a request carries always names an origin or
+   /// is absent; the test below holds what happens to one that does not.
    /// </summary>
    [Theory]
    [InlineData(null, null, true)]
@@ -767,17 +766,12 @@ public sealed class ManagementEnvelopeTests
    [InlineData("https://sign-in.example.test", "https://SIGN-IN.Example.Test:443/", true)]
    [InlineData("https://sign-in.example.test/realms/dev", "https://sign-in.example.test", true)]
    [InlineData("https://xn--bcher-kva.example", "https://b\u00FCcher.example/", true)]
-   [InlineData("", null, false)]
-   [InlineData("", "", false)]
-   [InlineData("sign-in.example.test", "https://sign-in.example.test", false)]
-   [InlineData("not an origin", "not an origin", false)]
-   [InlineData("io.qrun.qqq-print-agent:/oauth/callback", "io.qrun.qqq-print-agent:/oauth/callback", false)]
-   [InlineData("https://id\u2028.example.test", "https://id\u2028.example.test", false)]
+   [InlineData("https://sign-in.example.test", "", false)]
+   [InlineData("https://sign-in.example.test", "sign-in.example.test", false)]
+   [InlineData("https://sign-in.example.test", "not an origin", false)]
+   [InlineData(null, "not an origin", false)]
    [InlineData("https://[fe80::1]", "https://[fe80::1]:443/", true)]
-   [InlineData("https://[fe80::1%25eth0]", "https://[fe80::1%25eth1]", false)]
-   [InlineData("https://[fe80::1%25eth0]", "https://[fe80::1]", false)]
-   [InlineData("https://[fe80::1%25eth0]", "https://[fe80::1%25eth0]", false)]
-   [InlineData("https://[fe80::1%eth0]:8443", "https://[fe80::1%eth0]:8443", false)]
+   [InlineData("https://[fe80::1]", "https://[fe80::1%25eth0]", false)]
    public void TheProviderTheOperatorWasShown_IsComparedWithTheOneTheServiceRead(string? shown, string? read, bool agrees)
    {
       ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, shown);
@@ -787,6 +781,82 @@ public sealed class ManagementEnvelopeTests
       Assert.Equal(agrees, add.ProviderAgrees(read));
       Assert.Equal(agrees, on.ProviderAgrees(read));
       Assert.Equal(agrees, SignInProviderOrigin.Agrees(read, shown));
+   }
+
+
+
+   /// <summary>
+   /// A provider origin that names nothing is refused where the arguments are read, as a name that breaks the name
+   /// rule is, and is not read only to be answered "the provider changed" for ever after: empty or blank text, a word
+   /// such as "none", a host with no scheme, a scheme that is not a web one, a host that cannot be named, and an IPv6
+   /// literal with a zone, which the form origins are compared in has no place for (two zones of one address, or a
+   /// zone and none, would compare as one place). Neither argument record can be built with one, in code or from a
+   /// request, for trust.set whichever way the switch goes; the refusal does not repeat the text; and by the rule
+   /// itself such text agrees with nothing, not even with itself.
+   /// </summary>
+   [Theory]
+   [InlineData("")]
+   [InlineData("   ")]
+   [InlineData("none")]
+   [InlineData("null")]
+   [InlineData("not an origin")]
+   [InlineData("sign-in.example.test")]
+   [InlineData("//sign-in.example.test")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback")]
+   [InlineData("ftp://sign-in.example.test")]
+   [InlineData("https://id\u2028.example.test")]
+   [InlineData("https://[fe80::1%25eth0]")]
+   [InlineData("https://[fe80::1%eth0]:8443")]
+   public void AProviderOriginThatNamesNothing_IsRefusedWhenTheArgumentsAreRead(string text)
+   {
+      string member = ",\"providerOrigin\":" + JsonSerializer.Serialize(text);
+      string add = "{\"v\":2,\"op\":\"servers.add\",\"args\":{\"address\":\"https://qqq.example.test\",\"name\":\"Warehouse\",\"acceptCertificateException\":true,"
+         + "\"sessionCredential\":{\"origin\":\"https://qqq.example.test\",\"sessionToken\":\"synthetic-session\"}";
+      string trust = "{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":";
+
+      ArgumentException refusedAdd = Assert.Throws<ArgumentException>(() => new ServersAddArgs(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, text));
+      ArgumentException refusedOn = Assert.Throws<ArgumentException>(() => new TrustSetArgs(AcceptCertificateException: true, text));
+      ArgumentException refusedOff = Assert.Throws<ArgumentException>(() => new TrustSetArgs(AcceptCertificateException: false, text));
+
+      Assert.All(new[] { refusedAdd, refusedOn, refusedOff }, refusal => Assert.True(string.IsNullOrWhiteSpace(text) || !refusal.Message.Contains(text, StringComparison.Ordinal)));
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(add + "}}").Request!, out ServersAddArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(add + member + "}}").Request!, out ServersAddArgs? _));
+      Assert.True(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(trust + "true}}").Request!, out TrustSetArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(trust + "true" + member + "}}").Request!, out TrustSetArgs? _));
+      Assert.False(ManagementJson.TryReadArguments(ManagementJson.ParseRequest(trust + "false" + member + "}}").Request!, out TrustSetArgs? _));
+      Assert.False(SignInProviderOrigin.Agrees(text, text));
+      Assert.False(SignInProviderOrigin.Agrees(text, null));
+      Assert.False(SignInProviderOrigin.Agrees(null, text));
+      Assert.False(SignInProviderOrigin.Agrees(text, "https://sign-in.example.test"));
+   }
+
+
+
+   /// <summary>
+   /// "The check named no provider" is said in two ways on the wire, and both are read as the same statement: the
+   /// member left out, and the member given as null. Either agrees with a service that reads no provider and with no
+   /// other, for servers.add and for trust.set. Written back, the member is left out.
+   /// </summary>
+   [Theory]
+   [InlineData("")]
+   [InlineData(",\"providerOrigin\":null")]
+   public void AProviderOriginLeftOutOrNull_StatesThatTheCheckNamedNoProvider(string member)
+   {
+      ManagementRequest add = ManagementJson.ParseRequest("{\"v\":2,\"op\":\"servers.add\",\"args\":{\"address\":\"https://qqq.example.test\",\"name\":\"Warehouse\",\"acceptCertificateException\":true,"
+         + "\"sessionCredential\":{\"origin\":\"https://qqq.example.test\",\"sessionToken\":\"synthetic-session\"}" + member + "}}").Request!;
+      ManagementRequest trust = ManagementJson.ParseRequest("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":true" + member + "}}").Request!;
+
+      Assert.True(ManagementJson.TryReadArguments(add, out ServersAddArgs? readAdd));
+      Assert.True(ManagementJson.TryReadArguments(trust, out TrustSetArgs? readTrust));
+
+      Assert.Null(readAdd.ProviderOrigin);
+      Assert.Null(readTrust.ProviderOrigin);
+      Assert.True(readAdd.ProviderAgrees(null));
+      Assert.True(readTrust.ProviderAgrees(null));
+      Assert.False(readAdd.ProviderAgrees("https://sign-in.example.test"));
+      Assert.False(readTrust.ProviderAgrees("https://sign-in.example.test"));
+      Assert.DoesNotContain("providerOrigin", ManagementJson.Write(ManagementRequest.For(ManagementOperations.ServersAdd, null, readAdd)), StringComparison.Ordinal);
+      Assert.Equal("{\"v\":2,\"op\":\"trust.set\",\"server\":\"" + Server + "\",\"args\":{\"acceptCertificateException\":true}}", ManagementJson.Write(ManagementRequest.For(ManagementOperations.TrustSet, Server, readTrust)));
    }
 
 

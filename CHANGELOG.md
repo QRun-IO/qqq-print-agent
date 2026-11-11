@@ -29,8 +29,9 @@ what the service and its clients will be able to build on. The last two are abou
   an ASCII name and is not an IPv6 literal with a zone (the stored form of an address cannot hold the zone, so two
   zones would be one server). The existing checks of an address are unchanged.
 - **Adding a server, and switching the certificate exception on.** `servers.add` and `trust.set` carry the sign-in
-  provider's address that `servers.check` reported, for comparison only; leaving it out says that the check named
-  no provider. When the service reads another provider from the server, or one where the check named none, nothing
+  provider's address that `servers.check` reported, for comparison only; leaving it out, or giving null, says that
+  the check named no provider, and text that names no address is refused as `invalid_request`. When the service
+  reads another provider from the server, or one where the check named none, or none where it named one, nothing
   is stored or changed and the answer is the new error code `provider_changed`; the client checks the server
   again.
 - **Printer discovery.** The operation table marks `printers.discover` as single-flight: one discovery runs at a

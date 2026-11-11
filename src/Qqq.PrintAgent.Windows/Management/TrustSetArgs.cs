@@ -16,10 +16,19 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// and the exception must not come to cover an origin the operator did not see. An absent origin states that the
 /// check named no provider, and is compared like any other value. When the service reads something else, nothing is
 /// changed and the answer is <see cref="ManagementErrorCode.ProviderChanged"/>. A client therefore checks the server
-/// before it switches the exception on. Switching it off accepts nothing, so there is nothing to compare.
+/// before it switches the exception on. Switching it off accepts nothing, so there is nothing to compare. A member
+/// that is left out and one that is null both state that the check named no provider; text that names no origin
+/// states nothing, and the record cannot be built with it, in code or from a request, whichever way the switch goes,
+/// so such a request is refused as an invalid one when its arguments are read
+/// (<see cref="SignInProviderOrigin.Require"/>).
 /// </summary>
 public sealed record TrustSetArgs(bool AcceptCertificateException, string? ProviderOrigin = null)
 {
+   /// <summary>The sign-in provider's origin that the check reported and the operator was shown, or null to state that the check reported none. It names an origin whenever it is given, and cannot be set once the arguments exist. It is compared, never stored.</summary>
+   public string? ProviderOrigin { get; } = SignInProviderOrigin.Require(ProviderOrigin, nameof(ProviderOrigin));
+
+
+
    /// <summary>
    /// True when the request may be carried out as far as the sign-in provider goes: it switches the exception off,
    /// which accepts nothing, or what it says the operator was shown is what the service read from the server

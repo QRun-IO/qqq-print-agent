@@ -20,7 +20,9 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// compares it with its own read (<see cref="ProviderAgrees"/>), and when they differ it stores nothing and answers
 /// <see cref="ManagementErrorCode.ProviderChanged"/>. An absent origin states that the check named no provider, and
 /// is compared like any other value: when the service then reads a provider, the request is refused. A client
-/// therefore checks the server before it adds it.
+/// therefore checks the server before it adds it. A member that is left out and one that is null both state that;
+/// text that names no origin states nothing, and the record cannot be built with it, in code or from a request, so
+/// such a request is refused as an invalid one when its arguments are read (<see cref="SignInProviderOrigin.Require"/>).
 /// </para>
 /// <para>
 /// The name must be one a server may have (<see cref="ServerName"/>): the record cannot be built with another, in code
@@ -30,14 +32,14 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// </summary>
 public sealed record ServersAddArgs
 {
-   /// <summary>Takes the arguments. The name must pass <see cref="ServerName"/>'s rule and is held with surrounding white space removed. The provider's origin is the one the check reported, or null when it reported none.</summary>
+   /// <summary>Takes the arguments. The name must pass <see cref="ServerName"/>'s rule and is held with surrounding white space removed. The provider's origin is the one the check reported, or null when it reported none; text that names no origin is refused.</summary>
    public ServersAddArgs(string address, string name, bool acceptCertificateException, QqqSessionCredential sessionCredential, string? providerOrigin = null)
    {
       Address = address;
       Name = ServerName.Require(name);
       AcceptCertificateException = acceptCertificateException;
       SessionCredential = sessionCredential;
-      ProviderOrigin = providerOrigin;
+      ProviderOrigin = SignInProviderOrigin.Require(providerOrigin, nameof(providerOrigin));
    }
 
 

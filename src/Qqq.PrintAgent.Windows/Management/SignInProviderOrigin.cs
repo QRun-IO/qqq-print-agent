@@ -42,6 +42,20 @@ internal static class SignInProviderOrigin
 
 
 
+   /// <summary>
+   /// Returns the origin a request carries, as it was given, or refuses text that names none. Null stays null: it
+   /// states that the check named no provider, and is a value like any other. Text that names no origin (empty text,
+   /// a word such as "none", an address with no host or with a scheme that is not a web one, a host that cannot be
+   /// named) states nothing the check could have shown, so it could never agree with what the service reads, and a
+   /// request that carries it would be answered <see cref="ManagementErrorCode.ProviderChanged"/> however often the
+   /// client checked again. It is a malformed argument, and is refused where the arguments are read, as a name that
+   /// breaks the name rule is. The refusal is fixed text and never repeats what was given.
+   /// </summary>
+   internal static string? Require(string? shown, string parameter)
+      => shown is null || OriginOf(shown) is not null ? shown : throw new ArgumentException("The provider's origin is the origin the check reported, or is left out when the check named no provider.", parameter);
+
+
+
    /// <summary>The origin a text names, in the one form an origin is compared in, or null when it names none.</summary>
    private static Uri? OriginOf(string text)
       => Uri.TryCreate(text, UriKind.Absolute, out Uri? address) && QqqOrigin.Of(address) is { } origin && !ServerAddress.HasZone(origin) ? origin : null;
