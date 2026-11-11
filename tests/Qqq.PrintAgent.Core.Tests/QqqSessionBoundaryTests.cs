@@ -208,8 +208,8 @@ public sealed class QqqSessionBoundaryTests
    [InlineData("no-redirects", "0 redirect address(es) listed; expected 1 to 32")]
    [InlineData("plain-redirect", "redirect address(es) not an HTTPS app link or dotted private scheme: http://127.0.0.1/callback")]
    [InlineData("insecure-origin", "the server origin is not HTTPS")]
-   [InlineData("provider-endpoint", "Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin.")]
-   [InlineData("provider-plain-endpoint", "Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin.")]
+   [InlineData("provider-endpoint", "Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin: the endpoint is on another origin.")]
+   [InlineData("provider-plain-endpoint", "Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin: the endpoint is not an HTTPS address.")]
    [InlineData("provider-s256", "Browser sign-in refused: the provider does not list S256 among its supported code challenge methods.")]
    public async Task UnusableGrantOrProviderNeverOpensABrowser(string fault, string reason)
    {
@@ -238,6 +238,42 @@ public sealed class QqqSessionBoundaryTests
       Assert.Equal(QqqSessionException.FailureKind.ConfigurationRequired, refused.Failure);
       Assert.Contains(info, line => line.Contains(reason, StringComparison.Ordinal));
       Assert.All(server.Requests, request => Assert.True(request.IsPublic));
+   }
+
+
+
+   /// <summary>
+   /// An operator can tell from the log alone why a provider's authorization endpoint was refused. The line that
+   /// reports what the provider answered describes the endpoint in the one form an address is shown in, which leaves
+   /// out a query, a fragment and user information, and says by kind what it left out; the refusal that follows names
+   /// the rule that failed. The first row is the address Azure AD B2C publishes, whose query selects the policy:
+   /// without the note and the rule the log showed a plain HTTPS address on the issuer's origin and then refused it.
+   /// The content of what was left out is in no line, because a query or user information can carry a secret. The
+   /// rules are tried in a fixed order, so an address that breaks several is refused for the first.
+   /// </summary>
+   [Theory]
+   [InlineData("https://id.example.invalid/authorize?p=b2c_1_signin", "https://id.example.invalid/authorize (query omitted)", "carries a query")]
+   [InlineData("https://id.example.invalid/authorize?", "https://id.example.invalid/authorize (query omitted)", "carries a query")]
+   [InlineData("https://operator:hunter2@id.example.invalid/authorize", "https://id.example.invalid/authorize (user information omitted)", "carries user information")]
+   [InlineData("https://id.example.invalid/authorize#frag-secret", "https://id.example.invalid/authorize (fragment omitted)", "carries a fragment")]
+   [InlineData("https://operator:hunter2@id.example.invalid/authorize?p=b2c_1_signin#frag-secret", "https://id.example.invalid/authorize (user information, query, fragment omitted)", "carries user information")]
+   [InlineData("http://id.example.invalid/authorize?p=b2c_1_signin", "http://id.example.invalid/authorize (query omitted)", "is not an HTTPS address")]
+   [InlineData("https://id\u2028.example.invalid/authorize?p=b2c_1_signin", "https://id .example.invalid/authorize (query omitted)", "has a host with no ASCII name")]
+   [InlineData("https://id.example.invalid:0/authorize", "https://id.example.invalid:0/authorize", "names port 0, is longer than 2,048 characters, or contains a wildcard or a backslash")]
+   [InlineData("https://id.example.invalid/*/authorize", "https://id.example.invalid/*/authorize", "names port 0, is longer than 2,048 characters, or contains a wildcard or a backslash")]
+   [InlineData("https://elsewhere.invalid/authorize", "https://elsewhere.invalid/authorize", "is on another origin")]
+   [InlineData("/authorize", "/authorize", "is missing or is not an absolute address")]
+   public async Task RefusedProviderEndpointIsDescribedWithWhatWasLeftOutAndRefusedByNamingTheRule(string endpoint, string described, string rule)
+   {
+      var info = new List<string>();
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery).Add(ScriptedServer.OAuth).Add(ScriptedServer.Provider.Replace("https://id.example.invalid/authorize", endpoint, StringComparison.Ordinal));
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server, diagnostics: new QqqSessionDiagnostics(info.Add, info.Add, () => true));
+      QqqSessionException refused = await Assert.ThrowsAsync<QqqSessionException>(() => client.BeginBrowserLoginAsync(Redirect));
+      Assert.Equal(QqqSessionException.FailureKind.ConfigurationRequired, refused.Failure);
+      Assert.Contains("Provider discovery: issuer https://id.example.invalid/application/, authorization endpoint " + described + ", S256 supported.", info, StringComparer.Ordinal);
+      Assert.Contains("Browser sign-in refused: the provider's authorization endpoint is not an HTTPS address on the issuer's origin: the endpoint " + rule + ".", info, StringComparer.Ordinal);
+      Assert.DoesNotContain(info, line => line.Contains("hunter2", StringComparison.Ordinal) || line.Contains("frag-secret", StringComparison.Ordinal) || line.Contains("b2c_1_signin", StringComparison.Ordinal));
    }
 
 

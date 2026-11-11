@@ -992,13 +992,24 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// <summary>
    /// The same for an address a server supplied as text, where the line says what this client accepted or will use:
    /// the issuer and discovery address of a sign-in provider, and the provider's own issuer and authorization
-   /// endpoint. An address that has an origin is shown as <see cref="QqqSessionDiagnostics.Describe(Uri)"/> shows any
-   /// address, with its host as the ASCII name the connection is made to and without user information, query or
-   /// fragment, so a look-alike letter in the host reads as the "xn--" name it is in every line. Text that is not
-   /// such an address is shown as it was written. A line that refuses two texts for not matching exactly quotes both
-   /// through <see cref="ShownText"/> instead, because there the difference between them is the point.
+   /// endpoint. An HTTP or WebSocket address is shown as <see cref="QqqSessionDiagnostics.Describe(Uri)"/> shows any
+   /// address: its host as the ASCII name the connection is made to (a host that has none, as written and made
+   /// printable), and no user information, query or fragment. A look-alike letter in the host therefore reads as
+   /// the "xn--" name it is in every line. What was left out is said, by kind and never by content ("(query
+   /// omitted)"): a query or user information can carry a secret, and its presence can be the very reason the
+   /// address is refused in the next line, so without the note the log would show a usable address and then refuse
+   /// it. Text that is not such an address (a relative one, another scheme, or none at all) is shown as it was
+   /// written. The lines that reject a value quote it through <see cref="ShownText"/> instead: an issuer that does
+   /// not match another exactly, and an issuer or discovery address the grant's checks refuse.
    /// </summary>
-   private static string ShownAddress(string? value) => ShownText(Uri.TryCreate(value, UriKind.Absolute, out Uri? address) && QqqOrigin.Of(address) is not null ? QqqSessionDiagnostics.Describe(address) : value);
+   private static string ShownAddress(string? value)
+   {
+      if(!Uri.TryCreate(value, UriKind.Absolute, out Uri? address) || address.Scheme is not ("https" or "http" or "wss" or "ws"))
+      { return ShownText(value); }
+      (bool Present, string Part)[] parts = [(address.UserInfo.Length != 0, "user information"), (address.Query.Length != 0, "query"), (address.Fragment.Length != 0, "fragment")];
+      string[] omitted = [.. parts.Where(part => part.Present).Select(part => part.Part)];
+      return ShownText(QqqSessionDiagnostics.Describe(address)) + (omitted.Length == 0 ? "" : " (" + string.Join(", ", omitted) + " omitted)");
+   }
 
 
 
