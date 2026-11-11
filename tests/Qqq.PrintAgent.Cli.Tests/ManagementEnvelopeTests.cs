@@ -749,7 +749,10 @@ public sealed class ManagementEnvelopeTests
    /// one the operator has not seen; one shown and none read do not; one shown and another read (another host, port
    /// or scheme) do not; and the same one agrees. Origins are compared in the one form an origin is kept in, so one
    /// place written in another letter case, with its default port, with a trailing slash, with a path, or by its
-   /// Unicode name is the same place. Text that names no origin agrees with nothing, not even with itself.
+   /// Unicode name is the same place. Text that names no origin agrees with nothing, not even with itself. An IPv6
+   /// literal with a zone names none: the form origins are compared in has no place for the zone, so it would agree
+   /// with the same address in another zone or in none, which are other places. The same literal without a zone
+   /// agrees with itself.
    /// </summary>
    [Theory]
    [InlineData(null, null, true)]
@@ -770,6 +773,11 @@ public sealed class ManagementEnvelopeTests
    [InlineData("not an origin", "not an origin", false)]
    [InlineData("io.qrun.qqq-print-agent:/oauth/callback", "io.qrun.qqq-print-agent:/oauth/callback", false)]
    [InlineData("https://id\u2028.example.test", "https://id\u2028.example.test", false)]
+   [InlineData("https://[fe80::1]", "https://[fe80::1]:443/", true)]
+   [InlineData("https://[fe80::1%25eth0]", "https://[fe80::1%25eth1]", false)]
+   [InlineData("https://[fe80::1%25eth0]", "https://[fe80::1]", false)]
+   [InlineData("https://[fe80::1%25eth0]", "https://[fe80::1%25eth0]", false)]
+   [InlineData("https://[fe80::1%eth0]:8443", "https://[fe80::1%eth0]:8443", false)]
    public void TheProviderTheOperatorWasShown_IsComparedWithTheOneTheServiceRead(string? shown, string? read, bool agrees)
    {
       ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential, shown);

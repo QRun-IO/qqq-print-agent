@@ -26,7 +26,8 @@ what the service and its clients will be able to build on. The last two are abou
   companion, it says which part a name breaks, and it proposes a name from a server's address that always passes
   (the host; "Server" in front of a host that looks like an identifier). The rule for an address is beside it:
   HTTPS, or plain HTTP for this computer itself, with no user name, query, fragment or path, and a host that has
-  an ASCII name. The existing checks of an address are unchanged.
+  an ASCII name and is not an IPv6 literal with a zone (the stored form of an address cannot hold the zone, so two
+  zones would be one server). The existing checks of an address are unchanged.
 - **Adding a server, and switching the certificate exception on.** `servers.add` and `trust.set` carry the sign-in
   provider's address that `servers.check` reported, for comparison only; leaving it out says that the check named
   no provider. When the service reads another provider from the server, or one where the check named none, nothing

@@ -33,6 +33,6 @@ public enum ServerAddressProblem
    /// <summary>The address has a path. A server is named by its origin: scheme, host and port.</summary>
    HasPath,
 
-   /// <summary>The address's host has no plain ASCII name, so it cannot be compared or shown as the place a connection is really made to.</summary>
+   /// <summary>The address's host cannot be named in the text of an origin: it has no plain ASCII name, so it cannot be compared or shown as the place a connection is really made to, or it is an IPv6 literal with a zone, which that text has no place for.</summary>
    HostNotNameable,
 }

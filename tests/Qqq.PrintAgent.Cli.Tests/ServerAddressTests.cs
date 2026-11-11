@@ -129,9 +129,40 @@ public sealed class ServerAddressTests
 
 
    /// <summary>
+   /// An IPv6 literal with a zone is refused as a host that cannot be named, with the zone written either way the
+   /// platform reads it, for a server's address and for this computer's own. The origin form keeps the zone in the
+   /// host it connects to and drops it from its text, so two addresses that differ only in the zone, or one with a
+   /// zone and one without, would be stored and shown as the same place; that is shown here, and it is why the rule
+   /// refuses them. The same literal without a zone is read. The session client, which is handed an origin and
+   /// compares hosts with their zone, accepts each of these.
+   /// </summary>
+   [Theory]
+   [InlineData("https://[fe80::1%25eth0]/")]
+   [InlineData("https://[fe80::1%25eth1]/")]
+   [InlineData("https://[fe80::1%eth0]")]
+   [InlineData("https://[fe80::1%2511]:8443/")]
+   [InlineData("http://[::1%251]:18581/")]
+   public void TryRead_RefusesAnIPv6LiteralWithAZone(string text)
+   {
+      Assert.False(ServerAddress.TryRead(text, out Uri? origin, out ServerAddressProblem problem));
+
+      Assert.Equal(ServerAddressProblem.HostNotNameable, problem);
+      Assert.Null(origin);
+      Uri withZone = QqqOrigin.Of(new Uri(text))!;
+      Assert.True(ServerAddress.HasZone(withZone));
+      Assert.DoesNotContain('%', withZone.AbsoluteUri);
+      Assert.True(ServerAddress.TryRead(withZone.AbsoluteUri, out Uri? withoutZone, out _));
+      Assert.False(ServerAddress.HasZone(withoutZone));
+      Assert.Equal(withZone.AbsoluteUri, withoutZone.AbsoluteUri);
+      Assert.True(SessionClientAccepts(new Uri(text)));
+   }
+
+
+
+   /// <summary>
    /// The rule and the session client agree on every address in a table of the shapes an operator can type: the rule
-   /// reads an address exactly when a session client can be made for it, except for a host with no ASCII name, which
-   /// only the rule refuses. When both accept, the origin the rule returns is the origin the session client holds.
+   /// reads an address exactly when a session client can be made for it, except for a host that cannot be named (one
+   /// with no ASCII name, or an IPv6 literal with a zone), which only the rule refuses. When both accept, the origin the rule returns is the origin the session client holds.
    /// The values in the order they are checked are the rule's whole vocabulary.
    /// </summary>
    [Fact]
@@ -145,6 +176,7 @@ public sealed class ServerAddressTests
          "io.qrun.qqq-print-agent:/oauth/callback", "mailto:operator@example.test", "https://operator@qqq.example.test/", "https://operator:synthetic@qqq.example.test/",
          "http://operator@localhost/", "https://qqq.example.test/?", "https://qqq.example.test/?a=1", "https://qqq.example.test/#", "https://qqq.example.test/#top",
          "https://qqq.example.test/app", "https://qqq.example.test/app/", "https://qqq.example.test//", "http://localhost/app", "https://id\u2028.example.test/",
+         "https://[fe80::1]/", "https://[fe80::1%25eth0]/", "http://[::1%251]/",
       ];
 
       Assert.All(table, text =>
