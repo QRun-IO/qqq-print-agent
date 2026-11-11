@@ -22,7 +22,7 @@ public sealed class AgentBrandingInstallerTests
    {
       DirectorySecurity security = new();
       security.SetSecurityDescriptorSddlForm("O:SYG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;0x10040;;;S-1-5-21-100-200-300-1001)");
-      AgentBrandingInstaller.ValidateShortcutSecurity(security);
+      AgentBrandingShortcuts.ValidateShortcutSecurity(security);
       Assert.Throws<UnauthorizedAccessException>(() => MsiUpdateInstaller.ValidateTrustedAcl(security, "S-1-5-18"));
    }
 
@@ -40,7 +40,7 @@ public sealed class AgentBrandingInstallerTests
    {
       DirectorySecurity security = new();
       security.SetSecurityDescriptorSddlForm("O:SYG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;" + rights + ";;;S-1-5-21-100-200-300-1001)");
-      Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingInstaller.ValidateShortcutSecurity(security));
+      Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingShortcuts.ValidateShortcutSecurity(security));
    }
 
 
@@ -51,7 +51,7 @@ public sealed class AgentBrandingInstallerTests
    {
       DirectorySecurity security = new();
       security.SetSecurityDescriptorSddlForm("O:SYG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OIIO;GW;;;S-1-5-21-100-200-300-1001)");
-      Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingInstaller.ValidateShortcutSecurity(security));
+      Assert.Throws<UnauthorizedAccessException>(() => AgentBrandingShortcuts.ValidateShortcutSecurity(security));
    }
 
 
@@ -60,11 +60,11 @@ public sealed class AgentBrandingInstallerTests
    [Fact]
    public void FriendlyShortcutKeepsItsLabelAndLongNamesHaveStableDistinctSuffixes()
    {
-      Assert.Equal("Acme Print Connector.lnk", AgentBrandingInstaller.ShortcutFileName("Acme Print Connector"));
+      Assert.Equal("Acme Print Connector.lnk", AgentBrandingShortcuts.ShortcutFileName("Acme Print Connector"));
       string longName = new('x', 180);
-      string first = AgentBrandingInstaller.ShortcutFileName(longName);
-      Assert.Equal(first, AgentBrandingInstaller.ShortcutFileName(longName));
-      Assert.NotEqual(first, AgentBrandingInstaller.ShortcutFileName(longName[..179] + "y"), StringComparer.Ordinal);
+      string first = AgentBrandingShortcuts.ShortcutFileName(longName);
+      Assert.Equal(first, AgentBrandingShortcuts.ShortcutFileName(longName));
+      Assert.NotEqual(first, AgentBrandingShortcuts.ShortcutFileName(longName[..179] + "y"), StringComparer.Ordinal);
       Assert.True(first.Length <= 120);
    }
 
@@ -79,9 +79,9 @@ public sealed class AgentBrandingInstallerTests
    [InlineData("Acme / East: Print*")]
    public void UnsafeLabelsBecomeSingleSafeFilenames(string label)
    {
-      string filename = AgentBrandingInstaller.ShortcutFileName(label);
+      string filename = AgentBrandingShortcuts.ShortcutFileName(label);
       string directory = Path.Combine(Path.GetTempPath(), "synthetic-shortcuts");
-      string path = AgentBrandingInstaller.ShortcutPath(directory, filename);
+      string path = AgentBrandingShortcuts.ShortcutPath(directory, filename);
       Assert.Equal(directory, Path.GetDirectoryName(path));
       Assert.Equal(filename, Path.GetFileName(path));
       Assert.EndsWith(".lnk", filename, StringComparison.Ordinal);
@@ -97,7 +97,7 @@ public sealed class AgentBrandingInstallerTests
    [InlineData("name.lnk:stream")]
    public void RegistryFilenameCannotEscapeItsOwnedDirectory(string filename)
    {
-      Assert.Throws<InvalidDataException>(() => AgentBrandingInstaller.ShortcutPath(Path.GetTempPath(), filename));
+      Assert.Throws<InvalidDataException>(() => AgentBrandingShortcuts.ShortcutPath(Path.GetTempPath(), filename));
    }
 
 
