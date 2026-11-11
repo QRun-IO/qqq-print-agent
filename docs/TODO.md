@@ -3,6 +3,11 @@
 ## Open for 2.0
 
 - [ ] CI definitions still name a literal version for branch builds: `.github/workflows/ci.yml` falls back to `1.2.1`, and so does the Gitea build file proposed in pull request 17. On `release/2.0` the source version is 2.0.0, so `Build-Installer.ps1` refuses those builds ("ProductVersion must match the reviewed source VersionPrefix"). A branch build must name no version (`./build/Build-CiRelease.ps1` then packages the source version); a tag build passes the tag's version. Removing the fallback is not enough: an empty `-ProductVersion` is refused, so the parameter must be left out, and the step that locates the MSI by the same variable needs the value from `./build/Get-SourceVersion.ps1`. Owned by the CI work; the workflow files are deliberately not changed by the 2.0 branches.
+- [ ] Hardware check, early (release condition, [ADR-0003](adr/0003-version-2.md)): after the printing seams step merges, on the development PC, by driving the built print helper without installing anything. A Zebra ZT411 at 300 dpi for ZPL and a Canon office printer for PDF; the owner approves each print at the time. Not run.
+- [ ] Hardware check, final (release condition): on the release candidate, through the installed service, same two printers, each print approved by the owner. "Ready to merge to `main`" is held until it is recorded in [ACCEPTANCE.md](ACCEPTANCE.md), with "the spooler accepted the job" and "paper came out" as separate statements. Not run.
+- [ ] Standards exception EX-0016 (the Windows coverage bar of 90%): proposed in standards pull request 58; the corrected wording awaits the maintainer's approval.
+- [ ] Open findings from the two retrospective reviews of 2026-11-10 and from the review of the printing seams step: listed in [the audit](AUDIT-2026-11-10.md) under "Found by the retrospective reviews". The should-fix findings about the pipe contract close before anything serves the contract.
+- [ ] Qualify the upgrade from 1.2.x to 2.0. Not done: the 2026-11-10 snapshot (`snapshot-2.0.0-rc.1`) was not installed anywhere.
 
 ## Released: 1.2.1 — 2026-11-06
 
