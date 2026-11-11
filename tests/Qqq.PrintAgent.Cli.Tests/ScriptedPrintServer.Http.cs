@@ -48,6 +48,15 @@ internal sealed partial class ScriptedPrintServer
 
 
 
+   /// <summary>
+   /// Counts requests that reached this server's handler but were addressed to another origin. Each is refused. A service
+   /// with several servers gives every session the handler of the server it is for; a request here for another address
+   /// means a session was built on the wrong server's handler.
+   /// </summary>
+   internal int MisroutedRequests;
+
+
+
    /// <summary>Counts discovery requests to distinguish reconnect reuse from an added HTTP polling schedule.</summary>
    internal int DiscoveryRequests;
 
@@ -110,13 +119,18 @@ internal sealed partial class ScriptedPrintServer
    /// </summary>
    private sealed class Handler(ScriptedPrintServer server) : HttpMessageHandler
    {
-      /// <summary>Counts the request, applies a scripted fault, and routes by path.</summary>
+      /// <summary>Counts the request, refuses and counts one addressed to another server, applies a scripted fault, and routes by path.</summary>
       protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
       {
          Interlocked.Increment(ref server.Requests);
+         if(!string.Equals(request.RequestUri!.Authority, server.Origin.Authority, StringComparison.OrdinalIgnoreCase))
+         {
+            Interlocked.Increment(ref server.MisroutedRequests);
+            throw new InvalidOperationException("Request for " + request.RequestUri.Authority + " reached the scripted server at " + server.Origin.Authority + ".");
+         }
          if(server.HttpFault?.Invoke(request) is Exception fault)
          { throw fault; }
-         string path = request.RequestUri!.AbsolutePath;
+         string path = request.RequestUri.AbsolutePath;
          if(string.Equals(path, "/qqq/v1/version", StringComparison.Ordinal))
          {
             Interlocked.Increment(ref server.DiscoveryRequests);

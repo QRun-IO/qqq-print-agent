@@ -102,10 +102,29 @@ internal sealed partial class ScriptedPrintServer : IAsyncDisposable
    /// <summary>Captures the actual HELLO payload so compatibility tests observe the wire rather than duplicating capability selection.</summary>
    internal string[] LastHelloCapabilities { get; private set; } = [];
 
+
+
+   /// <summary>Guards the queue head and the claimed job, so a claim and the RECEIVED event that frees it never interleave.</summary>
    private readonly Lock _claimLock = new();
+
+
+
+   /// <summary>The job this server handed out and has not yet seen a RECEIVED event for; while it is set, every claim is answered with it again.</summary>
    private PrintJob? _claimed;
+
+
+
+   /// <summary>Cancelled when this server stops answering; every connection's pump runs on its token.</summary>
    private readonly CancellationTokenSource _stopping = new();
+
+
+
+   /// <summary>Every connection this server accepted, so that stopping closes them all.</summary>
    private readonly List<Connection> _connections = [];
+
+
+
+   /// <summary>True once the connections were closed, which makes closing them a second time do nothing.</summary>
    private bool _closed;
 
 

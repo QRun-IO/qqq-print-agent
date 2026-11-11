@@ -20,9 +20,22 @@ internal sealed partial class ScriptedPrintServer
    /// </summary>
    internal sealed class Connection(WebSocket socket, ScriptedPrintServer server, bool loseSpoolAck, CancellationToken token) : IAsyncDisposable
    {
+      /// <summary>Lets one sender at a time write to the socket, so frames from the pump and from a test never interleave.</summary>
       private readonly SemaphoreSlim _send = new(1, 1);
+
+
+
+      /// <summary>The running pump; completed until <see cref="Start"/> is called.</summary>
       private Task _pump = Task.CompletedTask;
+
+
+
+      /// <summary>The newest desired state sent on this connection, kept so it can be sent again when the agent reports an older one as applied.</summary>
       private DeviceDesiredState? _newestDesired;
+
+
+
+      /// <summary>The pump's task: once started, it completes when the connection stops answering, whether it was dropped, refused or stopped, so a wait can tell a dead channel from a slow one.</summary>
       internal Task Completion => _pump;
 
 
