@@ -16,6 +16,17 @@ The development-only certificate exception now covers two origins at most (2.0, 
   in the Local Machine trusted root store avoids this. A later change records the provider's origin with the server.
 - A server check now reports the origin of the sign-in provider the server names whenever its sign-in description
   could be read, so both addresses can be shown before an exception is saved.
+- The provider's address is written by the server, so its origin is kept, compared and shown by the host's ASCII
+  name, the name the connection is really made to. A name with a look-alike letter appears as its `xn--` form, a
+  zero-width character is not in it, and a host that has no ASCII name (one holding a line separator, for example)
+  is not an origin: nothing is added to the exception for it and nothing of it is shown. A name written in Unicode
+  and the same name in `xn--` form are one origin. The log line for a refused or excepted certificate names the
+  host the same way.
+- A refused certificate is reported with the origin that presented it and the time, so a caller can tell a refusal
+  from the server from one from its sign-in provider.
+- The service's log no longer says "The server session could not be ended" when a sign-out with a sign-in provider
+  failed after the server session was ended; it says that one of the two steps failed and points to the session
+  entries that say which.
 - Servers with trusted certificates, and setups without the exception, are not affected.
 
 Two cases the print worker now settles with a known outcome (2.0).
