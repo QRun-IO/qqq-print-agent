@@ -119,9 +119,7 @@ public sealed class ApplicationTrafficTransportTests
       finally
       {
          await timeout.CancelAsync();
-         try
-         { await run; }
-         catch(Exception exception) when(exception is OperationCanceledException or WebSocketException) { }
+         await run;
       }
    }
 

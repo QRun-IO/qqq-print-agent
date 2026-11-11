@@ -88,7 +88,13 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       _outgoing.Writer.TryComplete();
       await lifetime.CancelAsync().ConfigureAwait(false);
       socket.Abort();
-      Exception? cause = ended.Exception?.InnerException;
+
+      ///////////////////////////////////////////////////////////////////////
+      // a send still waiting for its acknowledgement is told why the      //
+      // channel closed. a refusal the run takes to be the caller's stop   //
+      // is not a cause, so the waiting send and the run say the same      //
+      ///////////////////////////////////////////////////////////////////////
+      Exception? cause = FailureOf(ended, !callerCancelled);
       foreach(TaskCompletionSource pending in _pending.Values)
       {
          pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
