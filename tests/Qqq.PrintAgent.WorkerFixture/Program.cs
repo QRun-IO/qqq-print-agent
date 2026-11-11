@@ -118,9 +118,19 @@ public static class Program
    /// </summary>
    private sealed class FakeJobs : ISpoolerJobs
    {
+      /// <summary>
+      /// 0x0BADC0DE, the marker every call here leaves as the thread's last error before it does anything else. The native
+      /// imports these calls stand for are declared with SetLastError and replace the last error each time, so a rule that
+      /// reads an error after a later call gets the marker and not the 87 or 122 the sizing call set.
+      /// </summary>
+      private const int StaleError = 0x0BAD_C0DE;
+
+
+
       /// <summary>Opens the one synthetic queue; any other name fails.</summary>
       public bool OpenPrinter(string name, out IntPtr printer)
       {
+         System.Runtime.InteropServices.Marshal.SetLastPInvokeError(StaleError);
          printer = new IntPtr(1);
          return string.Equals(name, "Synthetic queue", StringComparison.Ordinal);
       }
@@ -140,6 +150,7 @@ public static class Program
       /// <summary>Reports the document name of the one job.</summary>
       public bool GetJobDocument(IntPtr printer, uint job, uint size, out string? document)
       {
+         System.Runtime.InteropServices.Marshal.SetLastPInvokeError(StaleError);
          document = "QQQ fixture-job";
          return true;
       }
@@ -147,11 +158,19 @@ public static class Program
 
 
       /// <summary>Accepts the command; there is nothing to delete.</summary>
-      public bool SetJob(IntPtr printer, uint job, uint command) => true;
+      public bool SetJob(IntPtr printer, uint job, uint command)
+      {
+         System.Runtime.InteropServices.Marshal.SetLastPInvokeError(StaleError);
+         return true;
+      }
 
 
 
       /// <summary>Accepts the close.</summary>
-      public bool ClosePrinter(IntPtr printer) => true;
+      public bool ClosePrinter(IntPtr printer)
+      {
+         System.Runtime.InteropServices.Marshal.SetLastPInvokeError(StaleError);
+         return true;
+      }
    }
 }

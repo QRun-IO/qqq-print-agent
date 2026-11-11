@@ -12,8 +12,14 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// A Windows spooler that exists only in memory, for the cancellation rules. It holds queues by name, each with jobs by
 /// number and their document names, records every call it was sent with its arguments, and can be told to fail each call
-/// the way the real one can. A failed call sets the thread's last error, as the native call does, so the rules read it the
-/// same way. No print queue on this computer is opened.
+/// the way the real one can. No print queue on this computer is opened.
+/// <para>
+/// The thread's last error is treated as Windows treats it. All five calls stand for imports declared with SetLastError
+/// (OpenPrinter, GetJob twice, SetJob and ClosePrinter), so each first replaces the last error with
+/// <see cref="StaleLastError.Code"/> (0x0BADC0DE) and sets the configured Windows error only when it then fails. A rule
+/// sees the configured error only if it reads it straight after the failing call; read after the queue was closed, it
+/// is the marker.
+/// </para>
 /// </summary>
 internal sealed class FakeSpoolerJobs : ISpoolerJobs
 {
@@ -79,6 +85,7 @@ internal sealed class FakeSpoolerJobs : ISpoolerJobs
    /// <summary>Opens a known queue and hands out a new handle; an unknown name fails with the configured error.</summary>
    public bool OpenPrinter(string name, out IntPtr printer)
    {
+      StaleLastError.Leave();
       Calls.Add($"OpenPrinter({name})");
       if(!Queues.ContainsKey(name))
       {
@@ -98,6 +105,7 @@ internal sealed class FakeSpoolerJobs : ISpoolerJobs
    /// </summary>
    public bool GetJobSize(IntPtr printer, uint job, out uint needed)
    {
+      StaleLastError.Leave();
       Calls.Add($"GetJobSize({Handle(printer)}, {job})");
       if(!Queues[_open[printer]].TryGetValue(job, out string? document))
       {
@@ -113,6 +121,7 @@ internal sealed class FakeSpoolerJobs : ISpoolerJobs
    /// <summary>Reports the stored document name of a job, or fails with the configured read error.</summary>
    public bool GetJobDocument(IntPtr printer, uint job, uint size, out string? document)
    {
+      StaleLastError.Leave();
       Calls.Add($"GetJobDocument({Handle(printer)}, {job}, {size})");
       document = null;
       if(ReadError is { } error)
@@ -128,6 +137,7 @@ internal sealed class FakeSpoolerJobs : ISpoolerJobs
    /// <summary>Carries out the delete command (5) by removing the job, or fails with the configured command error.</summary>
    public bool SetJob(IntPtr printer, uint job, uint command)
    {
+      StaleLastError.Leave();
       Calls.Add($"SetJob({Handle(printer)}, {job}, {command})");
       if(CommandError is { } error)
       {
@@ -145,6 +155,7 @@ internal sealed class FakeSpoolerJobs : ISpoolerJobs
    /// <summary>Closes a handle this fake handed out; closing anything else is a test failure.</summary>
    public bool ClosePrinter(IntPtr printer)
    {
+      StaleLastError.Leave();
       Calls.Add($"ClosePrinter({Handle(printer)})");
       Assert.True(_open.Remove(printer), "A handle was closed that was not open.");
       return true;
@@ -162,7 +173,7 @@ internal sealed class FakeSpoolerJobs : ISpoolerJobs
 
 
 
-   /// <summary>Leaves the error as the thread's last error, as a failed native call does, and reports the failure.</summary>
+   /// <summary>Leaves the error as the thread's last error in place of the marker the call began with, as a failed native call does, and reports the failure.</summary>
    private static bool Fail(int error)
    {
       Marshal.SetLastPInvokeError(error);

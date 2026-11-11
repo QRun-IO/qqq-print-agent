@@ -32,6 +32,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Answers the sizing call the way Windows does: false, error 122 and the size of a pointer plus the machine defaults (zero for a queue without any).</summary>
    public bool GetPrinterSize(IntPtr printer, uint level, out uint needed)
    {
+      StaleLastError.Leave();
       Calls.Add($"GetPrinterSize({Handle(printer)}, {level})");
       FakeQueue queue = Printer(printer);
       needed = queue.ReportedDefaultsSize ?? (queue.MachineDefaults is null ? 0 : (uint)(IntPtr.Size + queue.MachineDefaults.Length));
@@ -47,6 +48,7 @@ internal sealed partial class FakeWindowsPrinting
    /// </summary>
    public bool GetPrinter(IntPtr printer, uint level, uint size, out byte[] buffer, out long address)
    {
+      StaleLastError.Leave();
       Calls.Add($"GetPrinter({Handle(printer)}, {level}, {size})");
       FakeQueue queue = Printer(printer);
       if(queue.GetPrinterError is { } error)

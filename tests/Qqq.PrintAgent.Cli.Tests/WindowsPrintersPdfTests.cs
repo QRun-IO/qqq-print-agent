@@ -318,7 +318,6 @@ public sealed class WindowsPrintersPdfTests
    [Theory]
    [InlineData("StartPage", 0, 1)]
    [InlineData("StartPage", -1, 1)]
-   [InlineData("SetStretchBltMode", 0, 1)]
    [InlineData("StretchDIBits", 0, 1)]
    [InlineData("StretchDIBits", -1, 1)]
    [InlineData("EndPage", 0, 1)]
@@ -340,6 +339,32 @@ public sealed class WindowsPrintersPdfTests
       FakeGdiDocument document = Assert.Single(windows.GdiDocuments);
       Assert.True(document.Aborted);
       Assert.False(document.Ended);
+      Assert.Equal(pdf.PagesTaken, pdf.PagesReleased);
+      Assert.Equal(0, windows.OpenContexts);
+   }
+
+
+
+   /// <summary>
+   /// A refused stretch mode aborts the document like any other page call, but the Windows error it is reported with is
+   /// not its own. The import of SetStretchBltMode is declared without SetLastError, so the failure carries whatever the
+   /// last call that records an error left, which here is the StartPage that succeeded just before; the fake's marker
+   /// stands for that, and the error the test arranges for the stretch mode is never seen. The code did the same before
+   /// the calls were moved behind <see cref="IGdiPrinter"/>.
+   /// </summary>
+   [Fact]
+   public async Task RefusedStretchModeAbortsTheDocumentWithAnErrorThatIsNotItsOwn()
+   {
+      (WindowsPrinters printers, FakeWindowsPrinting windows, FakePdfRenderer pdf, _) = Setup();
+      windows.Fail("SetStretchBltMode", 29);
+      using StagedDocument staged = new(Content);
+
+      Win32Exception failure = await Assert.ThrowsAsync<Win32Exception>(() => printers.PrintFileAsync(staged.Job(PrinterId, "PDF"), staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None));
+
+      Assert.Equal(StaleLastError.Code, failure.NativeErrorCode);
+      Assert.Equal(["StartPage(0xd01)", "SetStretchBltMode(0xd01, 4)", "DisposePage(0)", "AbortDoc(0xd01)", "DeleteDC(0xd01)"], windows.Calls.TakeLast(5), StringComparer.Ordinal);
+      FakeGdiDocument document = Assert.Single(windows.GdiDocuments);
+      Assert.Equal((true, false, 1, 0), (document.Aborted, document.Ended, document.PagesStarted, document.PagesEnded));
       Assert.Equal(pdf.PagesTaken, pdf.PagesReleased);
       Assert.Equal(0, windows.OpenContexts);
    }

@@ -33,6 +33,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Creates a device context for a known queue; an unknown device, a queue that refuses or a failure a test asked for returns zero with the error.</summary>
    public IntPtr CreateDC(string driver, string device, byte[]? devMode)
    {
+      StaleLastError.Leave();
       Calls.Add($"CreateDC({driver}, {device}, {(devMode is null ? "null" : $"{devMode.Length} bytes")})");
       ContextModes.Add(devMode?.ToArray());
       FakeQueue? queue = Find(device);
@@ -74,6 +75,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Starts a document on the context and returns a new job number, or the failure value a test asked for.</summary>
    public int StartDoc(IntPtr dc, string documentName)
    {
+      StaleLastError.Leave();
       Calls.Add($"StartDoc({Handle(dc)}, {documentName})");
       FakeQueue queue = Context(dc);
       if(Failing("StartDoc", out int result))
@@ -91,6 +93,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Counts a started page.</summary>
    public int StartPage(IntPtr dc)
    {
+      StaleLastError.Leave();
       Calls.Add($"StartPage({Handle(dc)})");
       if(Failing("StartPage", out int result))
       {
@@ -102,11 +105,14 @@ internal sealed partial class FakeWindowsPrinting
 
 
 
-   /// <summary>Accepts a stretch mode and returns the previous one, which is never zero.</summary>
+   /// <summary>
+   /// Accepts a stretch mode and returns the previous one, which is never zero, or the failure value a test asked for. Its
+   /// import is declared without SetLastError, so neither success nor failure changes the thread's last error.
+   /// </summary>
    public int SetStretchBltMode(IntPtr dc, int mode)
    {
       Calls.Add($"SetStretchBltMode({Handle(dc)}, {mode})");
-      return Failing("SetStretchBltMode", out int result) ? result : 1;
+      return Failing("SetStretchBltMode", out int result, recordsError: false) ? result : 1;
    }
 
 
@@ -114,6 +120,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Keeps the bitmap that was drawn and returns the number of rows, as Windows does.</summary>
    public int StretchDIBits(IntPtr dc, int x, int y, int width, int height, int sourceX, int sourceY, int sourceWidth, int sourceHeight, byte[] bits, GdiBitmapHeader header, uint usage, uint operation)
    {
+      StaleLastError.Leave();
       Calls.Add(string.Create(CultureInfo.InvariantCulture, $"StretchDIBits({Handle(dc)}, {x}, {y}, {width}, {height}, {sourceX}, {sourceY}, {sourceWidth}, {sourceHeight}, {bits.Length} bytes, {header.Width}x{header.Height} planes {header.Planes} bits {header.BitCount}, {usage}, 0x{operation:x})"));
       if(Failing("StretchDIBits", out int result))
       {
@@ -128,6 +135,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Counts an ended page.</summary>
    public int EndPage(IntPtr dc)
    {
+      StaleLastError.Leave();
       Calls.Add($"EndPage({Handle(dc)})");
       if(Failing("EndPage", out int result))
       {
@@ -142,6 +150,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Ends the open document, or leaves it open when told to fail.</summary>
    public int EndDoc(IntPtr dc)
    {
+      StaleLastError.Leave();
       Calls.Add($"EndDoc({Handle(dc)})");
       if(Failing("EndDoc", out int result))
       {
@@ -157,6 +166,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Cancels the open document.</summary>
    public int AbortDoc(IntPtr dc)
    {
+      StaleLastError.Leave();
       Calls.Add($"AbortDoc({Handle(dc)})");
       _openGdiDocuments[dc].Aborted = true;
       _ = _openGdiDocuments.Remove(dc);

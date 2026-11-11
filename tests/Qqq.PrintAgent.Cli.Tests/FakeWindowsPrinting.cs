@@ -12,9 +12,17 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// The Windows spooler, printer settings and GDI as one object that exists only in memory. It answers from the queues a
 /// test describes, records every call it was sent with its arguments in one list (so the order across the three is
-/// known), keeps what was written to it, and can be told to fail any call the way the real one can. A failed call sets
-/// the thread's last error, as the native call does, so the rules read it the same way. No print queue on this computer
-/// is listed, opened or printed to. The calls are split by interface across the partial files.
+/// known), keeps what was written to it, and can be told to fail any call the way the real one can. No print queue on
+/// this computer is listed, opened or printed to. The calls are split by interface across the partial files.
+/// <para>
+/// The thread's last error is treated as Windows treats it. Every member that stands for an import declared with
+/// SetLastError (EnumPrinters, OpenPrinter, StartDocPrinter, WritePrinter, EndDocPrinter, AbortPrinter, ClosePrinter,
+/// GetPrinter, CreateDC, StartDoc, StartPage, StretchDIBits, EndPage, EndDoc and AbortDoc) first replaces the last error
+/// with <see cref="StaleLastError.Code"/> (0x0BADC0DE), and sets the arranged Windows error only when it then fails. So
+/// a rule sees the arranged error only if it reads it straight after the failing call; read one call late, it is the
+/// marker. The members that stand for imports without SetLastError (GetDeviceCaps, DeleteDC, SetStretchBltMode,
+/// DeviceCapabilities and DocumentProperties) never touch the last error.
+/// </para>
 /// </summary>
 internal sealed partial class FakeWindowsPrinting : ISpooler, IPrinterSettings, IGdiPrinter
 {
@@ -59,21 +67,28 @@ internal sealed partial class FakeWindowsPrinting : ISpooler, IPrinterSettings, 
    /// <summary>
    /// Makes one call fail: the given occurrence of the named call (the first unless said otherwise) sets the Windows error
    /// and returns the failure value, which is false for a call that answers yes or no and the given number for one that
-   /// answers with a number.
+   /// answers with a number. SetStretchBltMode is the one call that can be failed here whose import records no error:
+   /// it returns the failure value and the given error is not set.
    /// </summary>
    internal void Fail(string call, int error, int occurrence = 1, int result = 0) => _failures.Add((call, occurrence, error, result));
 
 
 
-   /// <summary>Counts a call and says whether this occurrence was told to fail; when it was, the error is left as the thread's last error.</summary>
-   private bool Failing(string call, out int result)
+   /// <summary>
+   /// Counts a call and says whether this occurrence was told to fail. When it was, the arranged error is left as the
+   /// thread's last error, unless the call stands for an import that records no error, which leaves the last error alone.
+   /// </summary>
+   private bool Failing(string call, out int result, bool recordsError = true)
    {
       int occurrence = _seen[call] = _seen.GetValueOrDefault(call) + 1;
       foreach((string name, int at, int error, int value) in _failures)
       {
          if(string.Equals(name, call, StringComparison.Ordinal) && at == occurrence)
          {
-            Marshal.SetLastPInvokeError(error);
+            if(recordsError)
+            {
+               Marshal.SetLastPInvokeError(error);
+            }
             result = value;
             return true;
          }

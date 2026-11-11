@@ -44,6 +44,7 @@ internal sealed partial class FakeWindowsPrinting
    /// </summary>
    public bool EnumPrintersSize(uint flags, out uint needed)
    {
+      StaleLastError.Leave();
       Calls.Add($"EnumPrintersSize({flags})");
       needed = ReportedListSize ?? (uint)(Queues.Count * 136);
       if(Failing("EnumPrintersSize", out _))
@@ -63,6 +64,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Lists the queues as plain records, or nothing when told to fail.</summary>
    public bool EnumPrinters(uint flags, int size, out IReadOnlyList<SpoolerQueue> queues)
    {
+      StaleLastError.Leave();
       Calls.Add($"EnumPrinters({flags}, {size})");
       if(Failing("EnumPrinters", out _))
       {
@@ -78,6 +80,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Opens a known queue and hands out a new handle; an unknown name fails with error 1801, a queue can refuse with its own error, and a test can make one particular open fail.</summary>
    public bool OpenPrinter(string name, out IntPtr printer)
    {
+      StaleLastError.Leave();
       Calls.Add($"OpenPrinter({name})");
       printer = IntPtr.Zero;
       if(Failing("OpenPrinter", out _))
@@ -100,6 +103,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Starts a document on the open queue and returns a new job number, or zero when told to fail.</summary>
    public uint StartDocPrinter(IntPtr printer, string documentName, string dataType)
    {
+      StaleLastError.Leave();
       Calls.Add($"StartDocPrinter({Handle(printer)}, {documentName}, {dataType})");
       FakeQueue queue = Printer(printer);
       if(Failing("StartDocPrinter", out _))
@@ -117,6 +121,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Takes the bytes offered, or only as many as the write limit allows, into the open document and reports the count.</summary>
    public bool WritePrinter(IntPtr printer, byte[] bytes, int count, out int written)
    {
+      StaleLastError.Leave();
       Calls.Add($"WritePrinter({Handle(printer)}, {bytes.Length} bytes, {count})");
       written = 0;
       if(Failing("WritePrinter", out _))
@@ -134,6 +139,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Finishes the open document, or leaves it open when told to fail.</summary>
    public bool EndDocPrinter(IntPtr printer)
    {
+      StaleLastError.Leave();
       Calls.Add($"EndDocPrinter({Handle(printer)})");
       if(Failing("EndDocPrinter", out _))
       {
@@ -149,6 +155,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Discards the open document.</summary>
    public bool AbortPrinter(IntPtr printer)
    {
+      StaleLastError.Leave();
       Calls.Add($"AbortPrinter({Handle(printer)})");
       _openDocuments[printer].Aborted = true;
       _ = _openDocuments.Remove(printer);
@@ -160,6 +167,7 @@ internal sealed partial class FakeWindowsPrinting
    /// <summary>Closes a handle this fake handed out; closing anything else fails the test.</summary>
    public bool ClosePrinter(IntPtr printer)
    {
+      StaleLastError.Leave();
       Calls.Add($"ClosePrinter({Handle(printer)})");
       Assert.True(_printers.Remove(printer), "A queue handle was closed that was not open.");
       return true;
