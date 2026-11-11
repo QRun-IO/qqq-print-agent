@@ -34,13 +34,13 @@ public static class AgentBrandingInstaller
    /// Creates or renames the all-users Start menu shortcut to the customer's brand name; see
    /// <see cref="AgentBrandingShortcuts.ApplyInstalledBranding"/> for what it requires and refuses.
    /// </summary>
-   [ExcludeFromCodeCoverage(Justification = "Runs the branding rules against this computer's all-users Start menu, registry and install folder, which a test must not change and which need administrator rights. It only passes the call on; the rules it runs are tested in AgentBrandingShortcuts with fakes, and the places it binds them to in BrandingPlaces.Installed.")]
+   [ExcludeFromCodeCoverage(Justification = "Runs the branding rules against this computer's all-users Start menu, registry and install folder, which a test must not change and which need administrator rights. It only passes the call on; the rules it runs are tested in AgentBrandingShortcuts with fakes, and what it binds them to is tested where it is chosen: the places in BrandingPlaces.Installed, the record in RegistryShortcutRecord.Machine, and the shell and folder security adapters against Windows in a temporary folder.")]
    public static void ApplyInstalledBranding() => Installed.ApplyInstalledBranding();
 
 
 
    /// <summary>Removes the shortcuts recorded by earlier branding runs, and only those that are still this installer's; see <see cref="AgentBrandingShortcuts.RemoveInstalledShortcut"/>.</summary>
-   [ExcludeFromCodeCoverage(Justification = "Runs the branding rules against this computer's all-users Start menu, registry and install folder, which a test must not change and which need administrator rights. It only passes the call on; the rules it runs are tested in AgentBrandingShortcuts with fakes, and the places it binds them to in BrandingPlaces.Installed.")]
+   [ExcludeFromCodeCoverage(Justification = "Runs the branding rules against this computer's all-users Start menu, registry and install folder, which a test must not change and which need administrator rights. It only passes the call on; the rules it runs are tested in AgentBrandingShortcuts with fakes, and what it binds them to is tested where it is chosen: the places in BrandingPlaces.Installed, the record in RegistryShortcutRecord.Machine, and the shell and folder security adapters against Windows in a temporary folder.")]
    public static void RemoveInstalledShortcut() => Installed.RemoveInstalledShortcut();
 
 
