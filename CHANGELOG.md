@@ -15,8 +15,9 @@ identifiers that existed keep their spelling and their controls. What is covered
 companion's markup and every control its code creates. Four things are not, and have no identifier of the
 companion's: the choices inside a combo box (one of the fifteen in the markup has an identifier), which are found
 through their box; the buttons of a dialog, which are the platform's and carry its names; the views of AppKit (the
-About dialog's frame, the splash, the log viewer), which set their own; and the tray icon's menu, which Windows
-draws as a native menu.
+About dialog's frame, the splash, the log viewer), which are AppKit's to identify: it sets two identifiers,
+`AboutVersionText` on the About dialog's version line and `AppKitSplash` on the splash, and none in the log viewer,
+whose toolbar the UI tests find by name; and the tray icon's menu, which Windows draws as a native menu.
 
 A new test in the presentation suite, `XamlContractTests`, reads the companion's markup and code-behind as text. It
 fails when a control an operator acts on has no identifier, in markup or created in code (a button, a list, a menu
@@ -25,6 +26,8 @@ type created in code is one the test has no list for; when the identifiers, or t
 from `tests/Qqq.PrintAgent.Presentation.Tests/Views/automation-ids.txt`, so that a renamed, removed or moved
 identifier is a changed line in a reviewed file; when an identifier is not written out, other than the positional
 forms ADR-0005 gives the tree and the rows (`Server.<n>`, `Printer.<n>`, `Job.<n>`), which nothing produces yet;
+when an identifier would reach an automation client without being written on its control (a style that sets one, or
+a name that code gives an element from a value, which Windows reports as the identifier);
 when a view stops setting an identifier or an element name that the UI tests or the layout harness look up
 (`interactive-test-ids.txt` beside it records the 68 identifiers they use), or a suite looks one up in a form the
 test cannot read; when a named text is not listed as a status text, as changing without being announced, or as never
