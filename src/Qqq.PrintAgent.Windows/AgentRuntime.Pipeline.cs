@@ -198,6 +198,7 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(wave.Drained || _transitioning)
             { return null; }
             if(_realtimeReady && _activeDownloads < _realtimeSettings.MaxConcurrentDownloads)
@@ -205,7 +206,6 @@ public sealed partial class AgentRuntime
                _activeDownloads++;
                return new ReleaseOnce(() => { lock(_stateLock) { _activeDownloads--; } _pipelineChanged.Raise(); });
             }
-            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -270,6 +270,7 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(job.ContentLength < 1 || job.ContentLength > _realtimeSettings.MaximumDocumentBytes(job.Format) || job.ContentLength > _realtimeSettings.MaxStagedBytes)
             {
                throw new InvalidDataException("Document exceeds the effective format or staging limit.");
@@ -280,7 +281,6 @@ public sealed partial class AgentRuntime
                ticket.Reserved.TrySetResult();
                return new ReleaseOnce(() => { lock(_stateLock) { _stagedBytes -= job.ContentLength; } _pipelineChanged.Raise(); });
             }
-            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }
@@ -305,6 +305,7 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(NormalTrafficAllowed && !_transitioning && _activePrints < _realtimeSettings.MaxConcurrentPrints && _printingQueues.Add(job.PrinterId))
             {
                _activePrints++;
@@ -316,7 +317,6 @@ public sealed partial class AgentRuntime
                   _pipelineChanged.Raise();
                });
             }
-            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }

@@ -149,9 +149,9 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(_jobTickets.Count == 0)
             { return; }
-            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(token).ConfigureAwait(false);
       }

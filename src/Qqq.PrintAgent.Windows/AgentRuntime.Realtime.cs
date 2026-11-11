@@ -369,9 +369,9 @@ public sealed partial class AgentRuntime
          Task changed;
          lock(_stateLock)
          {
+            changed = _pipelineChanged.NextChange;
             if(_realtimeReady)
             { break; }
-            changed = _pipelineChanged.NextChange;
          }
          await changed.WaitAsync(handshake).ConfigureAwait(false);
       }
