@@ -540,6 +540,145 @@ public sealed class ManagementClientLimitsTests
 
 
    /// <summary>
+   /// A snapshot's result says which flight made it: the number the request was handed to the pipe with, counted from
+   /// one. Everyone who shares a flight is handed the one result and so reads the same number, a timer's call and a
+   /// call that asked for a snapshot sent after it alike. A flight that is refused, and one that fails in the pipe,
+   /// made its result too and is numbered. The numbers rise in the order the requests were handed to the pipe, and
+   /// the client's own count is the number of the last.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotResult_SaysWhichFlightMadeIt_SharersReadOneNumber_AndTheNumbersRise()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      Assert.Equal(0, client.SnapshotsSent);
+
+      Task<ServiceResult<ServiceSnapshot>> first = client.SnapshotAsync();
+      Task<ServiceResult<ServiceSnapshot>> sharesTheFirst = client.SnapshotAsync();
+      Task<ServiceResult<ServiceSnapshot>> askedForALaterOne = client.SnapshotAsync(sentAfterTheCall: true);
+      Assert.Equal(1, client.SnapshotsSent);
+      pipe.Held[0].SetResult(Replies.Golden("snapshot.reply.json"));
+      await pipe.Arrived(2);
+      Assert.Equal(2, client.SnapshotsSent);
+      Task<ServiceResult<ServiceSnapshot>> sharesTheSecond = client.SnapshotAsync();
+      pipe.Held[1].SetResult(Replies.Failure(ManagementErrorCode.InternalError));
+      ServiceResult<ServiceSnapshot> second = await askedForALaterOne.WaitAsync(s_guard);
+      pipe.Fail(new IOException("The pipe is broken."));
+      ServiceResult<ServiceSnapshot> third = await client.SnapshotAsync();
+
+      Assert.Equal(1L, (await first).Flight);
+      Assert.Same(await first, await sharesTheFirst);
+      Assert.Equal(2L, second.Flight);
+      Assert.Same(second, await sharesTheSecond);
+      Assert.Equal(3L, third.Flight);
+      Assert.Equal((ServiceOutcome.Success, ServiceOutcome.Rejected, ServiceOutcome.Unavailable), ((await first).Outcome, second.Outcome, third.Outcome));
+      Assert.Equal(3, client.SnapshotsSent);
+      Assert.Equal(3, pipe.Sent.Count);
+   }
+
+
+
+   /// <summary>
+   /// A result that no flight made names none: a read whose caller had left before anything was sent, the result of
+   /// a caller that stopped waiting for the flight it shared (the caller that stayed is handed the flight's own
+   /// result, with its number), and a read that was skipped at the ceiling. The transport reads are numbered apart
+   /// from the snapshots: the first of them is flight one whatever number the snapshots have reached, and it is
+   /// not counted among the snapshots that were sent.
+   /// </summary>
+   [Fact]
+   public async Task ResultNoFlightMade_NamesNone_AndTransportReadsAreNumberedApart()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      using CancellationTokenSource gone = new();
+      using CancellationTokenSource leaving = new();
+      await gone.CancelAsync();
+
+      ServiceResult<ServiceSnapshot> notStarted = await client.SnapshotAsync(cancellationToken: gone.Token);
+      Task<ServiceResult<ServiceSnapshot>> leaver = client.SnapshotAsync(cancellationToken: leaving.Token);
+      Task<ServiceResult<ServiceSnapshot>> stayer = client.SnapshotAsync();
+      await leaving.CancelAsync();
+      ServiceResult<ServiceSnapshot> left = await leaver.WaitAsync(s_guard);
+      pipe.Held[0].SetResult(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> stayed = await stayer;
+      pipe.Answer(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> next = await client.SnapshotAsync();
+      pipe.Answer(Replies.Golden("transport.get.reply.json"));
+      ServiceResult<TransportResult> meter = await client.TransportAsync();
+      Task<ServiceResult<NoResult>>[] inFlight = [.. Enumerable.Range(0, 12).Select(index => client.AcknowledgeJobAsync(Server, "job-" + index))];
+      ServiceResult<ServiceSnapshot> skipped = await AtOnce(client.SnapshotAsync());
+
+      Assert.Equal((ServiceOutcome.Canceled, false), (notStarted.Outcome, notStarted.Unconfirmed));
+      Assert.Equal((ServiceOutcome.Canceled, true), (left.Outcome, left.Unconfirmed));
+      Assert.Equal(ServiceOutcome.Skipped, skipped.Outcome);
+      Assert.All(new[] { notStarted, left, skipped }, result => Assert.Null(result.Flight));
+      Assert.All(new[] { notStarted, left, skipped }, result => Assert.Null(result.SnapshotsSent));
+      Assert.Equal(1L, stayed.Flight);
+      Assert.Equal(2L, next.Flight);
+      Assert.True(meter.Succeeded);
+      Assert.Equal(1L, meter.Flight);
+      Assert.Equal(2L, meter.SnapshotsSent);
+      Assert.Equal(2, client.SnapshotsSent);
+      Assert.All(inFlight, request => Assert.False(request.IsCompleted));
+   }
+
+
+
+   /// <summary>
+   /// The result of a change says how many snapshots the client had handed to the pipe when the change's reply was
+   /// read, so a caller can tell a snapshot that may have been sent before the change was carried out from one that
+   /// was sent after its answer. The count is read when the reply has arrived and not when the change was sent: a
+   /// snapshot handed to the pipe while the change was in flight is counted, because the service may have answered
+   /// it first. A change whose outcome is not known, because the pipe failed or because its caller stopped waiting,
+   /// carries the count as it was at that moment. A request that was never handed to the pipe says nothing, and no
+   /// change's result names a flight.
+   /// </summary>
+   [Fact]
+   public async Task ChangeResult_SaysHowManySnapshotsHadBeenSent_WhenItsReplyWasRead()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      using CancellationTokenSource gone = new();
+      using CancellationTokenSource leaving = new();
+      await gone.CancelAsync();
+
+      pipe.Answer(Replies.Golden("servers.rename.reply.json"));
+      ServiceResult<ServerSummary> beforeAnySnapshot = await client.RenameServerAsync(Server, "Warehouse east");
+      Task<ServiceResult<ServerSummary>> sentBeforeTheSnapshot = client.RenameServerAsync(Server, "Warehouse east");
+      Task<ServiceResult<ServiceSnapshot>> inTheAir = client.SnapshotAsync();
+      pipe.Held[0].SetResult(Replies.Golden("servers.rename.reply.json"));
+      ServiceResult<ServerSummary> answeredWhileItFlew = await sentBeforeTheSnapshot;
+      pipe.Fail(new IOException("The pipe is broken."));
+      ServiceResult<ServerRemoveResult> failed = await client.RemoveServerAsync(Server);
+      Task<ServiceResult<ReconnectResult>> leaver = client.ReconnectAsync(Server, leaving.Token);
+      pipe.Held[1].SetResult(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> first = await inTheAir;
+      pipe.Answer(Replies.Golden("snapshot.reply.json"));
+      ServiceResult<ServiceSnapshot> second = await client.SnapshotAsync();
+      await leaving.CancelAsync();
+      ServiceResult<ReconnectResult> left = await leaver.WaitAsync(s_guard);
+      ServiceResult<ReconnectResult> notStarted = await client.ReconnectAsync(Server, gone.Token);
+      ServiceResult<ServerSummary> refusedHere = await client.RenameServerAsync("not a server", "Warehouse");
+
+      Assert.True(beforeAnySnapshot.Succeeded && answeredWhileItFlew.Succeeded);
+      Assert.Equal(0L, beforeAnySnapshot.SnapshotsSent);
+      Assert.Equal(1L, answeredWhileItFlew.SnapshotsSent);
+      Assert.Equal((ServiceOutcome.Unavailable, true), (failed.Outcome, failed.Unconfirmed));
+      Assert.Equal(1L, failed.SnapshotsSent);
+      Assert.Equal((ServiceOutcome.Canceled, true), (left.Outcome, left.Unconfirmed));
+      Assert.Equal(2L, left.SnapshotsSent);
+      Assert.Equal((1L, 2L), (first.Flight!.Value, second.Flight!.Value));
+      Assert.Equal((1L, 2L), (first.SnapshotsSent!.Value, second.SnapshotsSent!.Value));
+      Assert.Equal((ServiceOutcome.Canceled, false), (notStarted.Outcome, notStarted.Unconfirmed));
+      Assert.Equal((ServiceOutcome.Rejected, ManagementErrorCode.InvalidRequest), (refusedHere.Outcome, refusedHere.Code));
+      Assert.Null(notStarted.SnapshotsSent);
+      Assert.Null(refusedHere.SnapshotsSent);
+      Assert.Null(beforeAnySnapshot.Flight ?? answeredWhileItFlew.Flight ?? failed.Flight ?? left.Flight ?? notStarted.Flight ?? refusedHere.Flight);
+   }
+
+
+
+   /// <summary>
    /// A change whose turn comes at the very moment its caller leaves is not sent either. The place is handed over
    /// first, so the wait ends with a place taken and a token that is cancelled; the client then gives the place back
    /// and reports that nothing was sent. Here the cancellation itself releases the request whose place is handed

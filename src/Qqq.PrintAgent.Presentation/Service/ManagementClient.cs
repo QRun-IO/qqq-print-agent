@@ -164,6 +164,19 @@ public sealed partial class ManagementClient
 
 
    /// <summary>
+   /// How many snapshots this client has handed to the pipe so far. A snapshot's result carries the number it was
+   /// handed over with (<see cref="ServiceResult{T}.Flight"/>), and a snapshot whose number is higher than the
+   /// value read here was handed to the pipe after this was read. The result of every other request carries the
+   /// value as it was when that result was made (<see cref="ServiceResult{T}.SnapshotsSent"/>). The count is this
+   /// client's own and starts again with the companion; the transport reads are counted apart and are not in it. It
+   /// is internal: a caller outside this assembly is given a count only on a result, so it cannot hold one that was
+   /// read before its change was answered.
+   /// </summary>
+   internal long SnapshotsSent => _snapshot.Started(out _);
+
+
+
+   /// <summary>
    /// Sends one request and turns whatever happens into a result. The request is built first: values the contract
    /// refuses are answered here as the service would answer them, and nothing is sent (<see cref="TryBuild"/>). A
    /// token that is already cancelled means the caller is gone before anything happened, so nothing is sent either.
@@ -197,7 +210,10 @@ public sealed partial class ManagementClient
    /// Sends a request whose place under the ceiling is taken, and reads what comes back. Cancelling the token ends
    /// the wait, not the request: it is the caller's decision and not a failure, so it is a result of its own and is
    /// not counted against the service. A pipe failure is a result too; an exception the send function's contract does
-   /// not allow is left to propagate.
+   /// not allow is left to propagate. Each of these results says how many snapshots had been handed to the pipe when
+   /// it was made (<see cref="ServiceResult{T}.SnapshotsSent"/>): the count is read after the reply has arrived, or
+   /// after the failure or the end of the wait is known, and never before, so no snapshot that was sent before the
+   /// request was answered is missing from it.
    /// </summary>
    private async Task<ServiceResult<TResult>> ExchangeAsync<TResult>(ManagementRequest request, Func<TResult, bool>? fits, CancellationToken cancellationToken)
       where TResult : class
@@ -205,15 +221,15 @@ public sealed partial class ManagementClient
       Task<ManagementReplyParse> pending = SendAsync(request);
       try
       {
-         return Read(request, await pending.WaitAsync(cancellationToken).ConfigureAwait(false), fits);
+         return Read(request, await pending.WaitAsync(cancellationToken).ConfigureAwait(false), fits).After(SnapshotsSent);
       }
       catch(OperationCanceledException) when(cancellationToken.IsCancellationRequested)
       {
-         return Abandoned<TResult>(request.Op, request.Server, pending);
+         return Abandoned<TResult>(request.Op, request.Server, pending).After(SnapshotsSent);
       }
       catch(Exception exception) when(Classify(exception) is { Failure: not ServiceFailure.None } kind)
       {
-         return Failed<TResult>(request, kind, exception);
+         return Failed<TResult>(request, kind, exception).After(SnapshotsSent);
       }
    }
 
@@ -238,6 +254,11 @@ public sealed partial class ManagementClient
    /// A flight is started only by a caller that holds a place under the ceiling, and the flight keeps that place
    /// until the pipe is done with it. So every flight was handed to the pipe, and a flight counted later was handed
    /// over later. A caller that took a place and then found a flight to share gives the place back.
+   /// </para>
+   /// <para>
+   /// The result a flight makes says which flight it was (<see cref="ServiceResult{T}.Flight"/>), and every caller
+   /// that shares the flight is handed that one result. A caller whose call ends in any other way (skipped, nothing
+   /// sent, its wait ended) is handed a result of its own, which names no flight.
    /// </para>
    /// </summary>
    private async Task<ServiceResult<TResult>> ShareAsync<TResult>(SingleFlight<ServiceResult<TResult>> flight, string operation, bool sentAfterTheCall, CancellationToken cancellationToken)
@@ -264,7 +285,7 @@ public sealed partial class ManagementClient
          {
             return notSent;
          }
-         shared = flight.ShareOrStart(startedAfter, () => ExchangeAsync<TResult>(request, fits: null, CancellationToken.None), out bool started);
+         shared = flight.ShareOrStart(startedAfter, number => FlyAsync<TResult>(request, number), out bool started);
          if(!started)
          {
             _ceiling.Leave();
@@ -279,6 +300,13 @@ public sealed partial class ManagementClient
          return Abandoned<TResult>(operation, server: null, shared);
       }
    }
+
+
+
+   /// <summary>One flight: the request is sent for no caller in particular, so no caller's token ends it, and the result is made as that of the flight with this number.</summary>
+   private async Task<ServiceResult<TResult>> FlyAsync<TResult>(ManagementRequest request, long number)
+      where TResult : class
+      => (await ExchangeAsync<TResult>(request, fits: null, CancellationToken.None).ConfigureAwait(false)).FromFlight(number);
 
 
 
