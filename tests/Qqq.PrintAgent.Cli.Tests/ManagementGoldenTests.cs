@@ -136,7 +136,7 @@ public sealed class ManagementGoldenTests
       Assert.Equal(code, parse.Reply.Error!.Code);
       Assert.Equal("Synthetic message for people.", parse.Reply.Error.Message);
       object details = ReadTyped(nameof(ManagementJson.TryReadDetails), detailsType, parse.Reply.Error);
-      ManagementError rewritten = parse.Reply.Error with { Details = Payload(details, detailsType) };
+      ManagementError rewritten = new(parse.Reply.Error.Code, parse.Reply.Error.Message, Payload(details, detailsType));
       Assert.Equal(golden, ManagementJson.Write(parse.Reply with { Error = rewritten }));
       Assert.Equal(detailsType, ManagementSamples.Details(code)!.GetType());
       Assert.Equal(golden, ManagementJson.Write(FailureOf(code, ManagementSamples.Details(code)!)));

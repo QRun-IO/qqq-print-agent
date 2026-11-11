@@ -91,7 +91,7 @@ public static class ManagementErrorCode
 
 
 
-   /// <summary>The QQQ server refused the action. The message carries its reason, which <see cref="ManagementReply.Failure(string, string)"/> makes printable and cuts at <see cref="ManagementProtocol.MaximumMessageCharacters"/> as it does every message, so what a server said cannot reach a client raw.</summary>
+   /// <summary>The QQQ server refused the action. The message carries its reason, which <see cref="ManagementError"/> makes printable and cuts at <see cref="ManagementProtocol.MaximumMessageCharacters"/> as it does every message, however the error is built, so what a server said cannot reach a client raw.</summary>
    public const string ServerRefused = "server_refused";
 
 

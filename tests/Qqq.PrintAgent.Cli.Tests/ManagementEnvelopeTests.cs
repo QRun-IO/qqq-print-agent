@@ -798,6 +798,60 @@ public sealed class ManagementEnvelopeTests
 
 
 
+   /// <summary>
+   /// The form and the bound of an error's message hold however the error is made, not only through the reply
+   /// factories: built by its constructor, put into a reply by the reply's constructor or by a <c>with</c> expression,
+   /// handed to the factory that takes an error, and read from the text of a service that did not bound it. Each
+   /// carries the same printable, cut message, and none of them writes the raw text. An error has one constructor and
+   /// no member that can be set afterwards, so there is no second way to give it a message.
+   /// </summary>
+   [Fact]
+   public void ErrorMessage_IsPrintableAndBounded_HoweverTheErrorIsMade()
+   {
+      string hostile = "refused\u202Egnp.exe\nnext\u2028line " + new string('x', 2000);
+      ManagementError built = new(ManagementErrorCode.ServerRefused, hostile);
+      ManagementReply byConstructor = new(ManagementProtocol.Version, false, Error: new ManagementError(ManagementErrorCode.ServerRefused, hostile));
+      ManagementReply byWith = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.") with { Error = new ManagementError(ManagementErrorCode.ServerRefused, hostile) };
+      var byFactory = ManagementReply.Failure(built);
+      ManagementError read = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"server_refused\",\"message\":" + JsonSerializer.Serialize(hostile) + "}}").Reply!.Error!;
+
+      string expected = ManagementReply.Failure(ManagementErrorCode.ServerRefused, hostile).Error!.Message;
+
+      Assert.StartsWith("refused gnp.exe next line xxx", expected, StringComparison.Ordinal);
+      Assert.InRange(expected.Length, ManagementProtocol.MaximumMessageCharacters, ManagementProtocol.MaximumMessageCharacters + 3);
+      Assert.All(new[] { built, byConstructor.Error!, byWith.Error!, byFactory.Error!, read }, error => Assert.Equal(expected, error.Message));
+      Assert.All(new[] { byConstructor, byWith, byFactory }, reply =>
+      {
+         string written = ManagementJson.Write(reply);
+         Assert.DoesNotContain("\\u202E", written, StringComparison.OrdinalIgnoreCase);
+         Assert.DoesNotContain("\\n", written, StringComparison.Ordinal);
+         Assert.DoesNotContain("\\u2028", written, StringComparison.OrdinalIgnoreCase);
+         Assert.InRange(written.Length, expected.Length, expected.Length + 80);
+      });
+      Assert.Single(typeof(ManagementError).GetConstructors());
+      Assert.All(typeof(ManagementError).GetProperties(), member => Assert.Null(member.SetMethod));
+   }
+
+
+
+   /// <summary>The refusal the routing check returns is sent by the factory that takes an error, as it is, so the dispatcher's first reply does not have to be built member by member; a missing error or a missing code is refused.</summary>
+   [Fact]
+   public void RoutingRefusal_IsSentByTheFactoryThatTakesAnError()
+   {
+      ManagementError refusal = ManagementOperations.Check(new ManagementRequest(2, "servers.explode"), out _)!;
+
+      var reply = ManagementReply.Failure(refusal);
+
+      Assert.Equal((ManagementProtocol.Version, false), (reply.V, reply.Ok));
+      Assert.Same(refusal, reply.Error);
+      Assert.Null(reply.Result);
+      Assert.Equal("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"unknown_operation\",\"message\":\"There is no operation with this name.\"}}", ManagementJson.Write(reply));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(null!));
+      Assert.Throws<ArgumentNullException>(() => new ManagementError(null!, "Synthetic message."));
+   }
+
+
+
    /// <summary>Requires a request's text to be refused with one problem and one code, and no request to come back.</summary>
    private static void AssertRefused(string? text, ManagementEnvelopeProblem problem, string code)
    {
