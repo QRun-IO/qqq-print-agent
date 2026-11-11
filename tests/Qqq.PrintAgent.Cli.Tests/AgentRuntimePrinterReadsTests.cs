@@ -157,6 +157,51 @@ public sealed class AgentRuntimePrinterReadsTests
 
 
    /// <summary>
+   /// A round of the synchronizer whose inventory read fails still delivers the receipts that are waiting. The receipt
+   /// here is written into the journal while the full discovery fails and no job is offered, so no lane runs (a lane
+   /// delivers waiting receipts before it claims, and no claim is made) and only the synchronizer can deliver it. Each
+   /// round is set off by a heartbeat on a manual clock. The round after the receipt was written fails its read, sends
+   /// nothing in place of the inventory and delivers the receipt once; the server acknowledges it and the journal no
+   /// longer holds it as waiting.
+   /// </summary>
+   [Fact]
+   public async Task RoundWhoseInventoryReadFailsStillDeliversTheWaitingReceipt()
+   {
+      var clock = new ManualTimeProvider();
+      await using RealtimeRuntimeFixture fixture = new(timeProvider: clock, seed: store => RealtimeRuntimeFixture.SeedSpooledJob(store));
+      ScriptedPrintServer.Connection connection = await fixture.ConnectAsync();
+      await fixture.WaitAsync(() => fixture.Count("INVENTORY") >= 1 && fixture.LastClaimWasEmpty);
+      fixture.Printer.DiscoveryFailure = () => new TimeoutException(Unreadable);
+      int failedFrom = fixture.Printer.Discoveries;
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => fixture.Printer.Discoveries > failedFrom);
+      int inventories = fixture.Count("INVENTORY");
+      int claims = fixture.Claims;
+
+      using(JournalStore store = TestState.OpenStore(fixture.DirectoryPath))
+      {
+         store.Record("job", new PrintEvent("waiting-receipt", PrintJobState.SpoolerCompleted));
+      }
+      await fixture.HeartbeatAsync(clock);
+      await fixture.WaitAsync(() => Receipts(fixture, "job", PrintJobState.SpoolerCompleted) > 0);
+      await fixture.WaitAsync(() =>
+      {
+         using JournalStore store = TestState.OpenStore(fixture.DirectoryPath);
+         return store.Pending().Count == 0;
+      });
+
+      Assert.Equal(1, Receipts(fixture, "job", PrintJobState.SpoolerCompleted));
+      Assert.Equal(inventories, fixture.Count("INVENTORY"));
+      Assert.Equal(claims, fixture.Claims);
+      Assert.Equal(0, fixture.Printer.Prints);
+      Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
+      Assert.False(connection.Completion.IsCompleted);
+      Assert.False(fixture.Running.IsCompleted);
+   }
+
+
+
+   /// <summary>
    /// Cancelling a job that Windows already holds needs the name of the job's queue and nothing else, so it is taken from
    /// the list that reads no settings: the operator's cancel over the pipe and the server's cancel command both reach the
    /// spooler while the full discovery fails, and neither looks a queue up with its media.
@@ -328,6 +373,14 @@ public sealed class AgentRuntimePrinterReadsTests
       Assert.DoesNotContain(fixture.Logs, line => line.StartsWith("Realtime connection stopped", StringComparison.Ordinal));
       Assert.False(fixture.Running.IsCompleted);
    }
+
+
+
+   /// <summary>How many receipts with this status the agent delivered for the job.</summary>
+   private static int Receipts(RealtimeRuntimeFixture fixture, string jobId, string status)
+      => fixture.Messages.Count(message => message.Type is "JOB_EVENT"
+         && string.Equals(message.Payload.GetProperty("jobId").GetString(), jobId, StringComparison.Ordinal)
+         && string.Equals(message.Payload.GetProperty("event").GetProperty("status").GetString(), status, StringComparison.Ordinal));
 
 
 
