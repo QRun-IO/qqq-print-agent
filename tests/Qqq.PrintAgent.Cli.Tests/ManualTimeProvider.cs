@@ -8,17 +8,24 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// A clock that moves only when a test advances it. A wait made through it (<c>Task.Delay</c> with a time provider creates a
 /// timer here) ends during <see cref="Advance"/> instead of after real time has passed, so a test can let exactly one
-/// heartbeat interval elapse, and can first see that the code under test has actually started waiting.
+/// heartbeat interval elapse, and can first see that the code under test has actually started waiting. Unless a test
+/// says otherwise it starts at the real time and uses the machine's time zone; a test of code that writes or reads local
+/// time gives it a fixed instant and a fixed zone, so the result does not depend on when or where the test runs.
 /// </summary>
-internal sealed class ManualTimeProvider : TimeProvider
+internal sealed class ManualTimeProvider(DateTimeOffset? start = null, TimeZoneInfo? localTimeZone = null) : TimeProvider
 {
    private readonly Lock _lock = new();
    private readonly List<ManualTimer> _timers = [];
-   private DateTimeOffset _now = DateTimeOffset.UtcNow;
+   private DateTimeOffset _now = (start ?? DateTimeOffset.UtcNow).ToUniversalTime();
 
 
 
-   /// <summary>The manual time; it starts at the real time of creation so values compared with the system clock stay plausible.</summary>
+   /// <summary>The zone local time is given in: the one the test fixed, or the machine's when the test fixed none.</summary>
+   public override TimeZoneInfo LocalTimeZone => localTimeZone ?? base.LocalTimeZone;
+
+
+
+   /// <summary>The manual time; unless the test fixed a start it begins at the real time of creation, so values compared with the system clock stay plausible.</summary>
    public override DateTimeOffset GetUtcNow()
    {
       lock(_lock)

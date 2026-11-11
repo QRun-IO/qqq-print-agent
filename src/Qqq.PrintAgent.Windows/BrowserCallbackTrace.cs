@@ -48,12 +48,12 @@ internal sealed class BrowserCallbackTrace(ITraceFile file, TimeProvider clock)
       try
       {
          // Entries are stamped to the millisecond, so the start of the window is taken to the millisecond as well.
-         DateTimeOffset now = clock.GetLocalNow();
-         DateTimeOffset cutoff = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond)) - window;
+         long start = clock.GetUtcNow().UtcTicks - window.Ticks;
+         start -= start % TimeSpan.TicksPerMillisecond;
          var recent = new List<string>();
          foreach(string line in file.ReadLines())
          {
-            if(line.Length > 24 && DateTimeOffset.TryParseExact(line[..23], Stamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTimeOffset at) && at >= cutoff)
+            if(StampedAt(line) is long at && at >= start)
             { recent.Add(line); }
          }
          return recent.Count <= MostRecent ? recent : recent[^MostRecent..];
@@ -62,5 +62,22 @@ internal sealed class BrowserCallbackTrace(ITraceFile file, TimeProvider clock)
       {
          return [];
       }
+   }
+
+
+
+   /// <summary>
+   /// The instant an entry was stamped at, in ticks of universal time, or null for a line that does not start with a
+   /// stamp. A stamp is local time without an offset, so it is read in the time zone of the clock that wrote it and
+   /// not in whatever zone the machine reading it is set to; in the hour a daylight-saving change repeats, a stamp is
+   /// read as the later of the two instants it can stand for.
+   /// </summary>
+   private long? StampedAt(string line)
+   {
+      if(line.Length <= 24 || !DateTime.TryParseExact(line[..23], Stamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime local))
+      {
+         return null;
+      }
+      return local.Ticks - clock.LocalTimeZone.GetUtcOffset(local).Ticks;
    }
 }

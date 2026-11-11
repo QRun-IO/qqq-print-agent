@@ -19,6 +19,12 @@ public sealed class BrowserCallbackTraceTests
    private const string CanaryState = "canary-state-55be07a1";
    private static readonly string Callback = QqqBrowserCallback.RedirectUri + "?code=" + CanaryCode + "&state=" + CanaryState;
 
+   /// <summary>A zone five and a half hours ahead of universal time that never changes its clocks, so no local time in these tests is skipped or repeated.</summary>
+   private static readonly TimeZoneInfo Zone = TimeZoneInfo.CreateCustomTimeZone("QQQ test zone", new TimeSpan(5, 30, 0), "QQQ test zone", "QQQ test zone");
+
+   /// <summary>The instant every clock in these tests starts at: 01:45:30.250 on 5 March 2026 in the test zone, plus nine tenths of a millisecond that a stamp drops.</summary>
+   private static readonly DateTimeOffset Start = new DateTimeOffset(2026, 3, 4, 20, 15, 30, 250, TimeSpan.Zero).AddTicks(9000);
+
 
 
    /// <summary>
@@ -29,7 +35,7 @@ public sealed class BrowserCallbackTraceTests
    [Fact]
    public async Task DeliveredCallbackIsTracedByLengthAndFixedTextOnly()
    {
-      var clock = new ManualTimeProvider();
+      ManualTimeProvider clock = Clock();
       var file = new FakeTraceFile();
       string name = "QqqPrintAgent.Auth.Test." + Guid.NewGuid().ToString("N");
       using QqqBrowserCallback inbox = new(name);
@@ -61,7 +67,7 @@ public sealed class BrowserCallbackTraceTests
    public async Task FailedForwardingIsTracedWithItsReasonAndPassedOn(string failure)
    {
       var file = new FakeTraceFile();
-      var trace = new BrowserCallbackTrace(file, new ManualTimeProvider());
+      var trace = new BrowserCallbackTrace(file, Clock());
       string name = "QqqPrintAgent.Auth.Test." + Guid.NewGuid().ToString("N");
       using QqqBrowserCallback inbox = new(name);
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -96,7 +102,7 @@ public sealed class BrowserCallbackTraceTests
    {
       var file = new FakeTraceFile();
       bool forwarded = false;
-      _ = await Assert.ThrowsAsync<ArgumentNullException>(() => QqqBrowserCallback.ForwardFromHandlerAsync(null!, new BrowserCallbackTrace(file, new ManualTimeProvider()), _ =>
+      _ = await Assert.ThrowsAsync<ArgumentNullException>(() => QqqBrowserCallback.ForwardFromHandlerAsync(null!, new BrowserCallbackTrace(file, Clock()), _ =>
       {
          forwarded = true;
          return Task.CompletedTask;
@@ -115,7 +121,7 @@ public sealed class BrowserCallbackTraceTests
    {
       var file = new FakeTraceFile { Length = size };
       file.Lines.Add("an earlier entry");
-      new BrowserCallbackTrace(file, new ManualTimeProvider()).Write("a new entry");
+      new BrowserCallbackTrace(file, Clock()).Write("a new entry");
       Assert.Equal(256 * 1024, BrowserCallbackTrace.Limit);
       Assert.Equal(startedAfresh ? 1 : 0, file.Deleted);
       Assert.Equal(startedAfresh ? 1 : 2, file.Lines.Count);
@@ -132,7 +138,7 @@ public sealed class BrowserCallbackTraceTests
    {
       var file = new FakeTraceFile { AppendFailure = accessDenied ? new UnauthorizedAccessException("Synthetic denied.") : new IOException("Synthetic disk failure.") };
       bool forwarded = false;
-      await QqqBrowserCallback.ForwardFromHandlerAsync(Callback, new BrowserCallbackTrace(file, new ManualTimeProvider()), _ =>
+      await QqqBrowserCallback.ForwardFromHandlerAsync(Callback, new BrowserCallbackTrace(file, Clock()), _ =>
       {
          forwarded = true;
          return Task.CompletedTask;
@@ -150,7 +156,7 @@ public sealed class BrowserCallbackTraceTests
    [Fact]
    public void RecentTraceIsTheStampedEntriesInsideTheWindow()
    {
-      var clock = new ManualTimeProvider();
+      ManualTimeProvider clock = Clock();
       var file = new FakeTraceFile();
       var trace = new BrowserCallbackTrace(file, clock);
       trace.Write("too old");
@@ -172,18 +178,43 @@ public sealed class BrowserCallbackTraceTests
    /// <summary>
    /// An entry written exactly one window ago is still recent, and one millisecond later it is not. Entries are stamped
    /// to the millisecond, so the start of the window is compared at the same precision; otherwise the fraction of a
-   /// millisecond the stamp drops would put such an entry outside its own window.
+   /// millisecond the stamp drops would put such an entry outside its own window. It holds for a window of whole
+   /// milliseconds and for one with a fraction of a millisecond, because the start of the window is rounded down
+   /// after the window is taken off the present time, not before.
+   /// </summary>
+   [Theory]
+   [InlineData(0)]
+   [InlineData(5000)]
+   public void EntryExactlyOneWindowOldIsStillRecent(long extraTicks)
+   {
+      TimeSpan window = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(extraTicks);
+      ManualTimeProvider clock = Clock();
+      var file = new FakeTraceFile();
+      var trace = new BrowserCallbackTrace(file, clock);
+      trace.Write("at the start of the window");
+      Assert.Equal("2026-03-05 01:45:30.250 at the start of the window", Assert.Single(file.Lines));
+      clock.Advance(window);
+      Assert.EndsWith(" at the start of the window", Assert.Single(trace.Recent(window)), StringComparison.Ordinal);
+      clock.Advance(TimeSpan.FromMilliseconds(1));
+      Assert.Empty(trace.Recent(window));
+   }
+
+
+
+   /// <summary>
+   /// Stamps are read in the zone of the clock that wrote them, not in the zone the machine is set to: an entry stamped
+   /// with the clock's local time is recent on any machine, and a line stamped at a time that cannot be turned into an
+   /// instant at all (the first moment of the calendar, in a zone ahead of universal time) is simply not recent.
    /// </summary>
    [Fact]
-   public void EntryExactlyOneWindowOldIsStillRecent()
+   public void StampsAreReadInTheClocksOwnZone()
    {
-      var clock = new ManualTimeProvider();
-      var trace = new BrowserCallbackTrace(new FakeTraceFile(), clock);
-      trace.Write("at the start of the window");
-      clock.Advance(TimeSpan.FromMinutes(10));
-      Assert.EndsWith(" at the start of the window", Assert.Single(trace.Recent(TimeSpan.FromMinutes(10))), StringComparison.Ordinal);
-      clock.Advance(TimeSpan.FromMilliseconds(1));
-      Assert.Empty(trace.Recent(TimeSpan.FromMinutes(10)));
+      var file = new FakeTraceFile();
+      var trace = new BrowserCallbackTrace(file, Clock());
+      file.Lines.Add("2026-03-05 01:45:00.000 stamped half a minute ago in the clock's zone");
+      file.Lines.Add("2026-03-04 20:15:00.000 stamped at the same reading of universal time, five and a half hours earlier");
+      file.Lines.Add("0001-01-01 00:00:00.000 stamped before any instant the zone can express");
+      Assert.Equal(new[] { file.Lines[0] }, trace.Recent(TimeSpan.FromMinutes(10)), StringComparer.Ordinal);
    }
 
 
@@ -192,7 +223,7 @@ public sealed class BrowserCallbackTraceTests
    [Fact]
    public void RecentTraceReturnsAtMostTheNewestForty()
    {
-      var clock = new ManualTimeProvider();
+      ManualTimeProvider clock = Clock();
       var file = new FakeTraceFile();
       var trace = new BrowserCallbackTrace(file, clock);
       for(int entry = 1; entry <= 45; entry++)
@@ -216,7 +247,7 @@ public sealed class BrowserCallbackTraceTests
    public void TraceThatIsMissingOrUnreadableHasNoRecentEntries(string state)
    {
       var file = new FakeTraceFile();
-      var trace = new BrowserCallbackTrace(file, new ManualTimeProvider());
+      var trace = new BrowserCallbackTrace(file, Clock());
       if(state is not "missing")
       {
          trace.Write("an entry");
@@ -231,6 +262,15 @@ public sealed class BrowserCallbackTraceTests
    [Fact]
    public void TraceFileIsInTheUsersLocalApplicationData()
       => Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QqqPrintAgent", "auth-callback.log"), QqqBrowserCallback.TracePath);
+
+
+
+   /// <summary>
+   /// A clock that starts at a fixed instant in a fixed zone. The trace stamps entries in local time and reads the stamps
+   /// back, so a clock started at the real time in the machine's zone would make these tests depend on when and where
+   /// they run: in the hour a daylight-saving change repeats, an entry reads as an hour newer than it is.
+   /// </summary>
+   private static ManualTimeProvider Clock() => new(Start, Zone);
 
 
 
