@@ -13,8 +13,11 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// code. Each time it is opened it hands out a separate handle, as Windows does, and counts the handles that have not
 /// been let go. It behaves as a real process does where the update rules depend on it: its exit code cannot be read
 /// before it has ended, a wait for it ends with a cancellation when the token is cancelled first, and its program path
-/// cannot be read once it has ended: on .NET 10 that read fails with Windows error 299, not with an invalid-operation
-/// failure.
+/// cannot be read once it has ended. What .NET 10 says about that read depends on whether anything else still holds
+/// the ended process. While another handle keeps it, the read fails with Windows error 299, because its memory can no
+/// longer be read; that is what this fake does unless a test says otherwise. When nothing else holds it, which is the
+/// update helper's own situation, the read fails with an invalid-operation failure saying that the process has
+/// exited; a test plays that by setting <see cref="InspectionFailure"/> together with <see cref="ExitsWhenInspected"/>.
 /// </summary>
 internal sealed class FakeProcess(int id, string? program, long startTicks)
 {
@@ -99,7 +102,7 @@ internal sealed class FakeProcess(int id, string? program, long startTicks)
 
 
 
-      /// <summary>The program path, read the way Windows reads it: not when inspection is refused, and not from a process that has ended, whose memory can no longer be read (error 299).</summary>
+      /// <summary>The program path, read the way Windows reads it: not when inspection is refused, and not from a process that has ended. For an ended process this plays the case in which something else still holds it, so that its memory can no longer be read (error 299); the case in which nothing holds it is a failure the test sets.</summary>
       public string? ProgramPath
       {
          get

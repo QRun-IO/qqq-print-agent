@@ -338,7 +338,8 @@ public sealed class MsiUpdateApplyTests
    /// <summary>
    /// A companion that has already closed is not waited for, whether its process is gone, has ended, or ends while it
    /// is looked at and reading its identity fails with an invalid-operation failure for that reason; the installer is
-   /// started.
+   /// started. The last is what .NET 10 reports when nothing else holds the ended process, which is the helper's own
+   /// situation: it looks the companion up by its id and keeps no handle to it while it reads.
    /// </summary>
    [Theory]
    [InlineData("gone")]
@@ -364,9 +365,11 @@ public sealed class MsiUpdateApplyTests
 
 
    /// <summary>
-   /// A companion that closes at the very moment its program is read is reported by .NET 10 with Windows error 299,
-   /// not as an invalid operation, and the helper does not take that for a closed companion. The update stops there,
-   /// with no installer started, and can be run again. This records what the helper does today.
+   /// A companion that closes at the very moment its program is read, while something else still holds its process,
+   /// is reported by .NET 10 with Windows error 299 and not as an invalid operation, and the helper does not take
+   /// that for a closed companion. The update stops there, with no installer started, and can be run again. Nothing
+   /// in the helper holds the companion, so this is the rarer of the two cases: another program must have the
+   /// process open at that moment. This records what the helper does today.
    /// </summary>
    [Fact]
    public async Task CompanionThatClosesWhileItsProgramIsReadStopsTheUpdateWithoutInstalling()
