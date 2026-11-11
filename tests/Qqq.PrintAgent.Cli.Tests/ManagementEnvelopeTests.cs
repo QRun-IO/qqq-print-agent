@@ -335,6 +335,79 @@ public sealed class ManagementEnvelopeTests
 
 
    /// <summary>
+   /// Neither parsing function throws, whatever stands where a string or a name can stand. Each text below has one
+   /// place marked, in the envelope of a request or of a reply or beneath it, and each fragment is put there in turn:
+   /// the escape of a high or a low surrogate without its partner, two of them, one in the wrong order, one followed
+   /// by another character, the surrogate itself, an escape that is cut short or is not one, a NUL written as an
+   /// escape and as itself, a line break, a whole surrogate pair, and nothing. Every text gets an answer from both
+   /// functions, a request or a reply or the reason there is none, and what was read can be put through the routing
+   /// check and the typed readers without an exception either. This is a table, not a fuzzer: it holds the places and
+   /// the shapes that are known, and audit R2 still stands for the rest.
+   /// </summary>
+   [Fact]
+   public void ParsingFunctions_NeverThrow_WhateverStandsWhereAStringOrANameCanStand()
+   {
+      string[] fragments =
+      [
+         "\\ud800", "\\udc00", "\\ud800\\ud800", "\\udc00\\ud800", "\\udbff\\u0041", "\\ud83d\\ude00", "\\u0000", "\\uffff",
+         "\\u12", "\\x", "\\", "\\\\ud800", ((char)0xD800).ToString(), ((char)0xDC00).ToString(), "\0", "\n", "",
+      ];
+      string[] templates =
+      [
+         "{\"v\":2,\"op\":\"@\"}",
+         "{\"v\":2,\"op\":\"snapshot@\"}",
+         "{\"v\":2,\"op\":\"trust.get\",\"server\":\"@\"}",
+         "{\"v\":2,\"op\":\"trust.get\",\"server\":\"" + Server + "@\"}",
+         "{\"v\":2,\"op\":\"snapshot\",\"@\":1}",
+         "{\"@\":2,\"op\":\"snapshot\"}",
+         "{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"name\":\"Ware@house\"}}",
+         "{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"na@me\":\"Warehouse\"}}",
+         "{\"v\":2,\"op\":\"jobs.query\",\"server\":\"" + Server + "\",\"args\":{\"query\":{\"@\":25}}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"@\",\"message\":\"Busy.\"}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy@.\"}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\",\"@\":1}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"reason\":\"@\"}}}",
+         "{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"@\":\"documentGone\"}}}",
+         "{\"v\":2,\"ok\":true,\"result\":{\"reason\":\"@\"}}",
+         "{\"v\":2,\"ok\":true,\"result\":{\"@\":true}}",
+         "{\"v\":2,\"ok\":true,\"result\":{},\"@\":1}",
+         "{\"v\":2,\"ok\":true,\"result\":{},\"error\":{\"code\":\"@\",\"message\":\"@\"}}",
+         "\"@\"",
+         "@",
+      ];
+      int requests = 0;
+      int replies = 0;
+
+      foreach(string text in templates.SelectMany(template => fragments.Select(fragment => template.Replace("@", fragment, StringComparison.Ordinal))))
+      {
+         ManagementRequestParse request = ManagementJson.ParseRequest(text);
+         ManagementReplyParse reply = ManagementJson.ParseReply(text);
+
+         Assert.Equal(request.Problem == ManagementEnvelopeProblem.None, request.Succeeded());
+         Assert.Equal(reply.Problem == ManagementEnvelopeProblem.None, reply.Succeeded());
+         if(request.Succeeded())
+         {
+            requests++;
+            ManagementOperations.Check(request.Request, out _);
+            ManagementJson.TryReadArguments(request.Request, out ServersRenameArgs? _);
+            ManagementJson.TryReadArguments(request.Request, out JobsQueryArgs? _);
+         }
+         if(reply.Succeeded())
+         {
+            replies++;
+            ManagementJson.TryReadResult(reply.Reply, out CancelRefusedDetails? _);
+            Assert.True(reply.Reply.Ok || !ManagementJson.TryReadDetails(reply.Reply.Error!, out CancelRefusedDetails? details) || details.Reason.Length >= 0);
+         }
+      }
+
+      Assert.Equal(templates.Length * fragments.Length, templates.Length * fragments.Distinct(StringComparer.Ordinal).Count());
+      Assert.InRange(requests, 1, templates.Length * fragments.Length);
+      Assert.InRange(replies, 1, templates.Length * fragments.Length);
+   }
+
+
+
+   /// <summary>
    /// A request is built only by the functions that check it, which the parser uses too, so no request exists that
    /// the parser would not read back. Text that is not shaped like an operation's name, and a server named by
    /// anything but a full identifier in its one spelling (a prefix, a name, another letter case, braces, nothing at
