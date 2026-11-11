@@ -8,8 +8,10 @@ sign-in not completed" message repeated Windows' own error text, and that text n
 whole sign-in address, with that attempt's state, nonce and code challenge. When the browser could not be started
 for the identity provider's sign-out, the log entry named the provider's sign-out address the same way, with its ID
 token hint. Both now say only that the default browser could not be opened, with the Windows error number, and what
-to check: that a default browser is set in Windows Settings under Apps, Default apps. Sign-in and sign-out are
-otherwise unchanged. Every release from 0.2.0-rc.1 to 1.2.1 has the sign-in case (0.1.x has no browser sign-in). The
+to check: that a default browser is set in Windows Settings under Apps, Default apps. After a sign-out whose
+provider page could not be opened, the dialog used to say that the provider's sign-out "was opened in your browser
+but did not confirm"; it now says that the page could not be opened, that the provider's session may therefore
+still be there, and what to check. Sign-in and sign-out are otherwise unchanged. Every release from 0.2.0-rc.1 to 1.2.1 has the sign-in case (0.1.x has no browser sign-in). The
 sign-out case is in no release. Both cases are in the development snapshot `snapshot-2.0.0-rc.1`, which was not
 installed anywhere, and on the unreleased `release/1.2.2` branch; 2.0 builds after that snapshot have neither
 ([audit](docs/AUDIT-2026-11-10.md), U22).

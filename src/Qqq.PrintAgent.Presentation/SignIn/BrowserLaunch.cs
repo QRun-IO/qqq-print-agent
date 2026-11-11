@@ -16,7 +16,7 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// </summary>
 internal static class BrowserLaunch
 {
-   /// <summary>What an operator can do about a browser that could not be opened; it follows the kind of failure in the failure's text, which is shown as the reason a sign-in was not completed.</summary>
+   /// <summary>What an operator can do about a browser that could not be opened; it follows the kind of failure in the failure's text, which is shown as the reason a sign-in was not completed, and it ends what the dialog says about a provider sign-out whose page could not be opened.</summary>
    internal const string Remedy = "Check that a default browser is set in Windows Settings under Apps, Default apps, then try again.";
 
 
