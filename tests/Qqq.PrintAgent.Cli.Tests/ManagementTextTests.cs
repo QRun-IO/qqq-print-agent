@@ -175,4 +175,21 @@ public sealed class ManagementTextTests
       Assert.Equal("(missing)", ManagementText.Identity("(missing)"));
       Assert.Equal(" tenant 2", ManagementText.Identity("\ttenant\u202E2"));
    }
+
+
+   /// <summary>
+   /// The cut is the one part of the rule a client calls too, for the members that are plain text on the wire, so it
+   /// is public and refuses what cannot be a text or a limit instead of failing somewhere inside. A limit of nothing
+   /// keeps nothing.
+   /// </summary>
+   [Fact]
+   public void Bounded_IsPublic_AndRefusesNoTextAndANegativeLimit()
+   {
+      Assert.True(typeof(ManagementText).IsPublic);
+      Assert.True(typeof(ManagementText).GetMethod(nameof(ManagementText.Bounded))!.IsPublic);
+      Assert.Equal(nameof(ManagementText.Bounded), Assert.Single(typeof(ManagementText).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)).Name);
+      Assert.Equal("value", Assert.Throws<ArgumentNullException>(() => ManagementText.Bounded(null!, 8)).ParamName);
+      Assert.Equal("limit", Assert.Throws<ArgumentOutOfRangeException>(() => ManagementText.Bounded("text", -1)).ParamName);
+      Assert.Equal("", ManagementText.Bounded("text", 0));
+   }
 }
