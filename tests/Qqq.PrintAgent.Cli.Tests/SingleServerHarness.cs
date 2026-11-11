@@ -68,7 +68,9 @@ internal sealed class SingleServerHarness : IDisposable
    /// management pipe itself, one instance for the current user on a private name, so no test decides how the service listens;
    /// a buffer size is given only by the test that needs a reply to outgrow the pipe's buffer. The last argument runs on the
    /// runtime's command thread just before it saves a command's result, while that thread holds the control state's lock.
-   /// The installed service's pipe name is refused, in any letter case, before anything is built.
+   /// The installed service's pipe name is refused, in any letter case, before anything is built. The journal in the folder
+   /// is migrated here, as the service does at the start of its loop, because many tests call the runtime without ever
+   /// running that loop and a store opens only on a migrated journal.
    /// </summary>
    internal SingleServerHarness(string directory, Action<string> log, IPrinterBackend printerBackend, Func<Uri, IQqqSessionClient>? sessionFactory = null,
       TimeProvider? timeProvider = null, string? pipeName = null, int pipeBufferSize = 0, Action? controlResultSaving = null)
@@ -76,6 +78,7 @@ internal sealed class SingleServerHarness : IDisposable
       if(string.Equals(pipeName, InstalledPipeName, StringComparison.OrdinalIgnoreCase))
       { throw new ArgumentException("A test must not listen on the installed service's management pipe.", nameof(pipeName)); }
       string pipe = PipeName = pipeName ?? "qqq-single-server-" + Guid.NewGuid().ToString("N");
+      _ = TestState.Migrate(directory);
       _runtime = new AgentRuntime(directory, log, printerBackend, pipeName: pipe,
          pipeFactory: () => new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, pipeBufferSize, pipeBufferSize),
          sessionFactory: sessionFactory, timeProvider: timeProvider)

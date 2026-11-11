@@ -17,21 +17,6 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public sealed partial class AgentStore
 {
-   /// <summary>Creates the control tables and their indexes when they do not exist yet; existing data is untouched.</summary>
-   private void InitializeControls()
-   {
-      using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = """
-         CREATE TABLE IF NOT EXISTS control_state(connection_id TEXT PRIMARY KEY,json TEXT NOT NULL,updated_at TEXT NOT NULL);
-         CREATE TABLE IF NOT EXISTS control_commands(connection_id TEXT NOT NULL,command_id TEXT NOT NULL,command_json TEXT NOT NULL,receipt_json TEXT,acknowledged INTEGER NOT NULL DEFAULT 0,expires_at TEXT NOT NULL,PRIMARY KEY(connection_id,command_id));
-         CREATE INDEX IF NOT EXISTS control_outbox ON control_commands(connection_id,acknowledged);
-         CREATE INDEX IF NOT EXISTS control_expiry ON control_commands(expires_at);
-         """;
-      command.ExecuteNonQuery();
-   }
-
-
-
    /// <summary>Reads this connection's saved control state, or the initial (unrestricted-but-unsynchronized) state when none was saved or it cannot be read.</summary>
    public AgentControlState LoadControlState()
    {

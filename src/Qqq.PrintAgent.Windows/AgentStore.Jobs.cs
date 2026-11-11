@@ -31,27 +31,6 @@ public sealed partial class AgentStore
 
 
 
-   /// <summary>Creates the indexes that keep outbox drains, status and printer filters, the attention list, retention and prefix searches fast as history grows; each is created only if missing.</summary>
-   private void CreateJobIndexes()
-   {
-      using SqliteCommand command = _database.CreateCommand();
-      command.CommandText = """
-         CREATE INDEX IF NOT EXISTS events_outbox ON events(connection_id,acknowledged,sequence);
-         CREATE INDEX IF NOT EXISTS events_job ON events(connection_id,job_id,sequence);
-         CREATE INDEX IF NOT EXISTS jobs_recent ON local_jobs(connection_id,updated_at DESC,job_id DESC);
-         CREATE INDEX IF NOT EXISTS jobs_status ON local_jobs(connection_id,state,failure_acknowledged,updated_at DESC,job_id DESC);
-         CREATE INDEX IF NOT EXISTS jobs_printer ON local_jobs(connection_id,printer_id,updated_at DESC,job_id DESC);
-         CREATE INDEX IF NOT EXISTS jobs_attention ON local_jobs(connection_id,CASE WHEN state IN ('FAILED','OUTCOME_UNKNOWN') AND failure_acknowledged=0 THEN 0 ELSE 1 END,updated_at DESC,job_id DESC);
-         CREATE INDEX IF NOT EXISTS jobs_retention ON local_jobs(connection_id,history_pruned,updated_at DESC,job_id DESC);
-         CREATE INDEX IF NOT EXISTS jobs_title_search ON local_jobs(connection_id,title COLLATE NOCASE);
-         CREATE INDEX IF NOT EXISTS jobs_printer_search ON local_jobs(connection_id,printer_name COLLATE NOCASE);
-         CREATE INDEX IF NOT EXISTS jobs_id_search ON local_jobs(connection_id,job_id COLLATE NOCASE);
-         """;
-      command.ExecuteNonQuery();
-   }
-
-
-
    /// <summary>
    /// Returns one page of this connection's jobs in one read transaction, so the count and the rows agree. The query is
    /// validated first; search is an escaped prefix match on job identifier, title or printer name; status, printer and

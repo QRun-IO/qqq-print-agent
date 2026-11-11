@@ -52,12 +52,13 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
-   /// <summary>Owns the data directory until Windows requests shutdown.</summary>
+   /// <summary>Owns the data directory until Windows requests shutdown. The journal is migrated first, once, before anything opens a store.</summary>
    public async Task RunAsync(CancellationToken token)
    {
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
       _log.Write("INFO", "Print service started.");
+      _ = JournalSchema.Migrate(directory);
       await RunRealtimeAsync(token).ConfigureAwait(false);
    }
 

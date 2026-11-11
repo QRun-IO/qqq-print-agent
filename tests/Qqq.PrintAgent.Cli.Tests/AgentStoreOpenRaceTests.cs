@@ -24,15 +24,17 @@ public sealed class AgentStoreOpenRaceTests
 
 
    /// <summary>
-   /// A store takes its database connection only while it holds the journal's schema lock. This thread holds that lock for a
-   /// journal that does not exist yet and lets another thread construct a store for it. The constructor creates the folder,
-   /// then must wait for the lock; while it waits, the journal file must not exist, because opening the connection is what
-   /// creates it. With the open outside the lock the file appears before the constructor waits, and the test fails every
-   /// time. This is the property that keeps two stores from being handed one connection: Microsoft.Data.Sqlite 10.0.0 records
-   /// a pooled connection's owner only after it has left the pool's lock, and another open of the same journal in that gap can
-   /// be given the same connection. There is no event for "the constructor is now waiting", so the test waits until the
-   /// folder exists and the thread is blocked, and then gives it a further fifth of a second in which a constructor that
-   /// opened first would have created the file.
+   /// A store takes its database connection only while it holds the journal's lock. The journal is migrated first, which
+   /// leaves it closed: the migration's connection is not pooled. This thread then holds the journal's lock and lets
+   /// another thread construct a store on it. The constructor must wait for the lock, and while it waits nothing may have
+   /// the journal file open, which the test shows by opening the file for itself alone. With the open outside the lock the
+   /// store's connection has the file before the constructor could be seen waiting, and the test fails every time. (Before
+   /// the journal carried a schema version this test used a journal that did not exist yet and looked for the file the open
+   /// created; a store no longer creates a journal, so it looks for the open handle instead.) This is
+   /// the property that keeps two stores from being handed one connection: Microsoft.Data.Sqlite 10.0.0 records a pooled
+   /// connection's owner only after it has left the pool's lock, and another open of the same journal in that gap can be
+   /// given the same connection. There is no event for "the constructor is now waiting", so the test waits until the thread
+   /// is blocked, and then gives it a further fifth of a second in which a constructor that did not wait would have finished.
    /// </summary>
    [Fact]
    public void StoreOpensItsJournalOnlyWhileItHoldsTheJournalsLock()
@@ -45,12 +47,13 @@ public sealed class AgentStoreOpenRaceTests
          // Loads the SQLite provider and the store's types, so the thread below has nothing else to wait for.
          using(JournalStore warm = TestState.OpenStore(Path.Combine(root, "warm")))
          { Assert.Null(warm.GetState("none")); }
+         _ = TestState.Migrate(folder);
          Exception? failure = null;
          var opening = new Thread(() =>
          {
             try
             {
-               using JournalStore store = TestState.OpenStore(folder);
+               using JournalStore store = TestState.OpenStoreAsFound(folder);
                _ = store.GetState("none");
             }
             catch(Exception exception) when(exception is SqliteException or IOException or InvalidOperationException)
@@ -62,20 +65,38 @@ public sealed class AgentStoreOpenRaceTests
          lock(TestState.SchemaLockFor(folder))
          {
             opening.Start();
-            reachedTheLock = SpinWait.SpinUntil(() => Directory.Exists(folder) && opening.ThreadState.HasFlag(ThreadState.WaitSleepJoin), TimeSpan.FromSeconds(30));
+            reachedTheLock = SpinWait.SpinUntil(() => opening.ThreadState.HasFlag(ThreadState.WaitSleepJoin), TimeSpan.FromSeconds(30));
             finishedWhileHeld = opening.Join(TimeSpan.FromMilliseconds(200));
-            openedWhileHeld = File.Exists(file);
+            // A store that had opened would hold the file for as long as it waits here, so trying for a while costs a correct
+            // run nothing and lets a virus scanner that looked at the new file for a moment get out of the way.
+            openedWhileHeld = !SpinWait.SpinUntil(() => CanBeOpenedAlone(file), TimeSpan.FromSeconds(5));
          }
          opening.Join();
          Assert.True(reachedTheLock, "The constructor never came to wait for the journal's lock.");
          Assert.False(finishedWhileHeld, "The constructor finished while another thread held the journal's lock.");
          Assert.False(openedWhileHeld, "The store opened its journal before it held the journal's lock.");
          Assert.Null(failure);
-         Assert.True(File.Exists(file));
+         Assert.False(CanBeOpenedAlone(file), "The store that opened after the lock was released left no connection in the journal's pool, so the check above proved nothing.");
       }
       finally
       {
          JournalFiles.Delete(root);
+      }
+   }
+
+
+
+   /// <summary>True when nothing has the file open: opening it with no sharing succeeds only then.</summary>
+   private static bool CanBeOpenedAlone(string file)
+   {
+      try
+      {
+         using FileStream alone = new(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+         return true;
+      }
+      catch(IOException)
+      {
+         return false;
       }
    }
 

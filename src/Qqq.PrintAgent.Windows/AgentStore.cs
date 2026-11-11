@@ -15,32 +15,35 @@ namespace Qqq.PrintAgent.Windows;
 /// The service's durable local state in one SQLite journal plus a DPAPI-protected connection file. It records every job
 /// event before it is reported (so a crash never loses an outcome), keeps events and job summaries scoped to the server and
 /// device they belong to, and holds the printer exposure choices. Other parts of this class add controls, metadata,
-/// authentication, paging and retention. One instance owns one connection and is not shared across threads.
+/// authentication, paging and retention. One instance owns one connection and is not shared across threads. The store
+/// works on the journal's schema and never changes it: <see cref="JournalSchema"/> owns the version and the migration.
 /// </summary>
 public sealed partial class AgentStore : IJobJournal, IDisposable
 {
+   private const string UnenrolledScope = "unenrolled";
    private readonly SqliteConnection _database;
    private readonly string _directory;
-   private string _connectionScope = "unenrolled";
+   private string _connectionScope = UnenrolledScope;
    private bool _configurationRecoveryRequired;
 
 
 
    /// <summary>
-   /// Opens (creating if needed) the journal under the protected state directory and brings its schema up to date. With
-   /// recovery enabled, an unreadable saved connection no longer blocks opening: the store switches to an isolated scope so
-   /// old evidence is kept but never attached to a replacement identity. On any failure the connection is closed. The
-   /// connection is opened under the journal's lock, which keeps two stores from being handed one database connection.
+   /// Opens the journal under the protected state directory. The journal must already be at this build's schema version:
+   /// the service migrates it when it starts (<see cref="JournalSchema.Migrate(string)"/>), and a store neither creates
+   /// the journal nor changes its schema, so opening one before that fails. With recovery enabled, an unreadable saved
+   /// connection no longer blocks opening: the store switches to an isolated scope so old evidence is kept but never
+   /// attached to a replacement identity. On any failure the connection is closed. The connection is taken under the
+   /// journal's lock, which keeps two stores from being handed one database connection.
    /// </summary>
    public AgentStore(string directory, bool recoverUnreadableConfiguration = false)
    {
       _directory = Path.GetFullPath(directory);
       Qqq.PrintAgent.Core.MachineStateDirectory.EnsureForPath(_directory);
-      Directory.CreateDirectory(_directory);
-      _database = JournalDatabase.Open(_directory);
+      _database = JournalSchema.OpenCurrent(_directory);
       try
       {
-         InitializeDatabase(recoverUnreadableConfiguration);
+         ResolveScope(recoverUnreadableConfiguration);
       }
       catch
       {
@@ -52,60 +55,46 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
 
 
    /// <summary>
-   /// Creates or migrates the schema under this journal's lock: events, exposure, per-job summaries, and the added
-   /// timestamp and scope columns, with legacy rows assigned to the current scope. Job summaries are rebuilt from the latest
-   /// event only the first time that table appears. The migration runs in a transaction so a failure leaves the old schema usable.
+   /// Sets the connection scope from the saved pairing. A pairing that cannot be read fails the open, unless recovery was
+   /// asked for: then the store works in a scope of its own that nothing else uses.
    /// </summary>
-   private void InitializeDatabase(bool recoverUnreadableConfiguration)
+   private void ResolveScope(bool recoverUnreadableConfiguration)
    {
-      lock(JournalDatabase.LockFor(_directory))
+      try
       {
-         using SqliteCommand command = _database.CreateCommand();
-         command.CommandText = "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, json TEXT NOT NULL, acknowledged INTEGER NOT NULL DEFAULT 0);";
-         command.ExecuteNonQuery();
-         command.CommandText = "CREATE TABLE IF NOT EXISTS exposed_printers(printer_id TEXT PRIMARY KEY); SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='recorded_at';";
-         long hasTimestamp = Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
-         if(hasTimestamp == 0)
-         {
-            command.CommandText = "ALTER TABLE events ADD COLUMN recorded_at TEXT";
-            command.ExecuteNonQuery();
-         }
-         command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('events') WHERE name='connection_id'";
-         if(Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0)
-         {
-            command.CommandText = "ALTER TABLE events ADD COLUMN connection_id TEXT";
-            command.ExecuteNonQuery();
-         }
-         try
-         {
-            _ = LoadConfiguration();
-         }
-         catch(Exception exception) when(recoverUnreadableConfiguration && exception is CryptographicException or JsonException or ArgumentException or UriFormatException)
-         {
-            // Only explicit re-enrollment may replace unreadable credentials. Never attach
-            // unscoped legacy evidence to the new identity when its original scope is unknown.
-            _configurationRecoveryRequired = true;
-            _connectionScope = "unreadable-" + Guid.NewGuid().ToString("N");
-         }
-         command.CommandText = "UPDATE events SET connection_id=$scope WHERE connection_id IS NULL";
-         command.Parameters.AddWithValue("$scope", _connectionScope);
-         command.ExecuteNonQuery();
-         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='local_jobs'";
-         bool migrateJobs = Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) == 0;
-         using SqliteTransaction migration = _database.BeginTransaction();
-         command.Transaction = migration;
-         command.CommandText = "CREATE TABLE IF NOT EXISTS local_jobs(connection_id TEXT NOT NULL, job_id TEXT NOT NULL, printer_id TEXT, printer_name TEXT, title TEXT, format TEXT, state TEXT, last_event_json TEXT, updated_at TEXT, failure_acknowledged INTEGER NOT NULL DEFAULT 0, history_pruned INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(connection_id,job_id));";
-         command.ExecuteNonQuery();
-         if(migrateJobs)
-         {
-            command.CommandText = "INSERT OR IGNORE INTO local_jobs(connection_id,job_id,state,last_event_json,updated_at) SELECT connection_id,job_id,state,json,recorded_at FROM events WHERE sequence IN (SELECT MAX(sequence) FROM events GROUP BY connection_id,job_id);";
-            command.ExecuteNonQuery();
-         }
-         migration.Commit();
-         command.Transaction = null;
-         CreateJobIndexes();
-         MigrateJobCreationTime();
-         InitializeControls();
+         _ = LoadConfiguration();
+      }
+      catch(Exception exception) when(recoverUnreadableConfiguration && exception is CryptographicException or JsonException or ArgumentException or UriFormatException)
+      {
+         // Only explicit re-enrollment may replace unreadable credentials. Never attach
+         // unscoped legacy evidence to the new identity when its original scope is unknown.
+         _configurationRecoveryRequired = true;
+         _connectionScope = UnreadableScope();
+      }
+   }
+
+
+
+   /// <summary>A scope name for a pairing that cannot be read. It is new each time, so nothing recorded under it is ever found under a readable pairing.</summary>
+   private static string UnreadableScope() => "unreadable-" + Guid.NewGuid().ToString("N");
+
+
+
+   /// <summary>
+   /// The scope that journal rows without one belong to: the scope of the pairing saved in the state folder, the
+   /// unenrolled scope when there is none, and a scope of their own when the pairing cannot be read. The 1.x releases gave
+   /// such rows this scope each time the service opened its store; the migration does it once, and is the only caller.
+   /// </summary>
+   internal static string ScopeForUnscopedRows(string directory)
+   {
+      string path = Path.Combine(Path.GetFullPath(directory), "connection.dpapi");
+      try
+      {
+         return File.Exists(path) ? ConnectionScope(ReadConfiguration(path)) : UnenrolledScope;
+      }
+      catch(Exception exception) when(exception is CryptographicException or JsonException or ArgumentException or UriFormatException)
+      {
+         return UnreadableScope();
       }
    }
 
@@ -160,13 +149,20 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
       {
          return null;
       }
+      AgentConfiguration? configuration = ReadConfiguration(path);
+      _connectionScope = ConnectionScope(configuration);
+      return configuration;
+   }
 
+
+
+   /// <summary>Decrypts and parses the pairing file at a path, which must exist. The plaintext buffer is zeroed on every path, and a file that cannot be decrypted or parsed throws.</summary>
+   private static AgentConfiguration? ReadConfiguration(string path)
+   {
       byte[] plaintext = ProtectedData.Unprotect(File.ReadAllBytes(path), optionalEntropy: null, DataProtectionScope.CurrentUser);
       try
       {
-         AgentConfiguration? configuration = JsonSerializer.Deserialize<AgentConfiguration>(plaintext, PrintApiClient.JsonOptions);
-         _connectionScope = ConnectionScope(configuration);
-         return configuration;
+         return JsonSerializer.Deserialize<AgentConfiguration>(plaintext, PrintApiClient.JsonOptions);
       }
       finally { CryptographicOperations.ZeroMemory(plaintext); }
    }
@@ -419,12 +415,10 @@ public sealed partial class AgentStore : IJobJournal, IDisposable
    {
       if(configuration is null)
       {
-         return "unenrolled";
+         return UnenrolledScope;
       }
       string address = new Uri(configuration.ServerUrl).AbsoluteUri.TrimEnd('/');
       return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(address + "\n" + configuration.DeviceId)));
    }
 
 }
-
-

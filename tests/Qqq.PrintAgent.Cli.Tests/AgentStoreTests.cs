@@ -17,7 +17,11 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class AgentStoreTests
 {
-   /// <summary>A database with an unexpected schema makes the constructor fail, and the failure must release the file so the damaged journal can be inspected or replaced rather than left locked by a half-built store.</summary>
+   /// <summary>
+   /// A journal with an unexpected schema cannot be opened, and the failure must release the file so the damaged journal can be
+   /// inspected or replaced rather than left locked. The failure now comes from the migration, which runs before a store opens
+   /// and cannot build on a table it does not recognize; it closes its connection, and no store is constructed at all.
+   /// </summary>
    [Fact]
    public void InvalidSchema_DoesNotKeepDatabaseOpenAfterConstructorFailure()
    {
@@ -442,6 +446,8 @@ public sealed class AgentStoreTests
    /// <summary>
    /// A journal written before connection scoping existed is adopted by the connection that was saved at the time, so its
    /// incomplete job is still visible to that device. Enrolling elsewhere hides it, and re-enrolling the original device brings it back.
+   /// The migration does the adopting, once; a journal that old carries no schema version, so the test takes the version
+   /// away together with the scope column.
    /// </summary>
    [Fact]
    public void LegacyJournal_IsBoundToSavedConnectionBeforeReenrollment()
@@ -459,7 +465,7 @@ public sealed class AgentStoreTests
          using(Microsoft.Data.Sqlite.SqliteConnection connection = TestState.OpenJournal(directory))
          {
             using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "DROP INDEX IF EXISTS events_outbox; DROP INDEX IF EXISTS events_job; DROP TABLE local_jobs; ALTER TABLE events DROP COLUMN connection_id";
+            command.CommandText = "DROP INDEX IF EXISTS events_outbox; DROP INDEX IF EXISTS events_job; DROP TABLE local_jobs; ALTER TABLE events DROP COLUMN connection_id; PRAGMA user_version=0";
             command.ExecuteNonQuery();
          }
          using(JournalStore migrated = TestState.OpenStore(directory))
