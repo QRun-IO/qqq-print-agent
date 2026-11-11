@@ -18,19 +18,23 @@ public sealed class ChangeSignalTests
 
 
 
-   /// <summary>Before any change the task is pending; one change completes it, and the next task is a new, pending one.</summary>
+   /// <summary>
+   /// Before any change the task is pending, and everything that asks before the change is given that same task; one
+   /// change completes it, and the next task is a new, pending one.
+   /// </summary>
    [Fact]
    public void OneChange_CompletesTheTaskThatWasTaken_AndTheNextTaskIsNew()
    {
       ChangeSignal signal = new();
       Task before = signal.NextChange;
+      Task askedAgain = signal.NextChange;
 
       bool pendingBefore = !before.IsCompleted;
       signal.Raise();
       Task after = signal.NextChange;
 
       Assert.True(pendingBefore);
-      Assert.Same(before, before);
+      Assert.Same(before, askedAgain);
       Assert.True(before.IsCompletedSuccessfully);
       Assert.NotSame(before, after);
       Assert.False(after.IsCompleted);

@@ -502,12 +502,15 @@ public sealed class ServiceLogTests : IDisposable
 
 
 
-   /// <summary>Several threads writing at once lose no line and never corrupt the ring.</summary>
+   /// <summary>
+   /// Several threads writing at once, half of them through a server's view, lose no line and never corrupt the ring:
+   /// the host's sink and the file receive all 200 lines, each once, and the ring ends with 100 of them, each once,
+   /// the same 100 whether it is read through the log or through a view.
+   /// </summary>
    [Fact]
    public async Task ConcurrentWriters_LoseNothing()
    {
-      (ServiceLog log, AgentActivityLog file) = Create();
-      ServiceLog server = log.ForServer("Production");
+      (_, AgentActivityLog file) = Create();
       List<string> received = [];
       var shared = new ServiceLog(file, line =>
       {
@@ -523,10 +526,13 @@ public sealed class ServiceLogTests : IDisposable
          }
       })));
 
+      string[] ring = shared.Entries().Select(entry => entry.Message).ToArray();
       Assert.Equal(200, received.Count);
       Assert.Equal(200, received.Distinct(StringComparer.Ordinal).Count());
-      Assert.Equal(100, shared.Entries().Length);
-      Assert.Empty(server.Entries());
+      Assert.Equal(100, ring.Length);
+      Assert.Equal(100, ring.Distinct(StringComparer.Ordinal).Count());
+      Assert.All(ring, line => Assert.Contains(line, received, StringComparer.Ordinal));
+      Assert.Equal(ring, shared.ForServer("Production").Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       Assert.Equal(200, Lines(file).Count);
    }
 
