@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -13,8 +12,9 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>
 /// The real Windows behind <see cref="IShortcutShell"/>: the WScript.Shell automation object and the shortcut object it
 /// creates. It copies values between a <see cref="ShortcutLink"/> and that object, and releases the COM objects afterwards.
+/// It is not excluded from coverage: a test writes and reads a real shortcut file through it in a temporary folder, which
+/// checks the property names it uses against Windows itself.
 /// </summary>
-[ExcludeFromCodeCoverage(Justification = "Drives the WScript.Shell COM automation object to read and write .lnk files. A test cannot run it without Windows Script Host on the machine and without creating real shortcut files through the shell. No rule lives here: it copies five values to the shortcut object and three back. What the values are, whether an existing shortcut is ours and where a shortcut may be written are decided in AgentBrandingShortcuts, which is tested with a fake of IShortcutShell.")]
 internal sealed class WindowsShortcutShell : IShortcutShell
 {
    /// <summary>Opens the shortcut and reads its program, arguments and description, treating a missing value as empty.</summary>
