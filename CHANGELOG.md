@@ -15,7 +15,9 @@ Two cases the print worker now settles with a known outcome (2.0).
   worker can rely on.
 - A job the server offers again while a lane of this computer still holds it is left to that lane. The log says so
   in plain words, nothing is recorded for the replay, and the lane ends its pass. Before, the replay was stopped
-  only by an internal duplicate check that logged "An item with the same key has already been added".
+  only by an internal duplicate check that logged "An item with the same key has already been added". A lane
+  also lets go of a job whose receipt was interrupted when the journal then fails to record that failure; before,
+  the job stayed marked as held until the service restarted, and every later offer of it was turned away.
 
 Branded Start menu shortcut (2.0). The installer step that creates, renames and removes the shortcut under
 **Start → Print Connectors** now records, by name, every shortcut it has put there and may still own, and a file

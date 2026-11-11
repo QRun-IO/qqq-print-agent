@@ -436,6 +436,37 @@ public sealed class PrintWorkerOutcomeTests
 
 
 
+   /// <summary>
+   /// The lane lets go of a job whose receipt was interrupted even when the journal then fails to record FAILED for
+   /// it. The runtime is still told the job is no longer active, so no ticket is left behind to make a later offer of
+   /// the job read as one a lane still holds. The journal's failure is what reaches the caller, nothing was
+   /// downloaded or submitted, and both gates are released.
+   /// </summary>
+   [Fact]
+   public async Task InterruptedReceiptLetsGoOfTheJobEvenWhenRecordingItsFailureFails()
+   {
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      server.Arriving = (kind, _) => string.Equals(kind, "events", StringComparison.Ordinal) ? throw new HttpRequestException("Synthetic refusal.") : Task.CompletedTask;
+      journal.Recorded = (_, recorded) =>
+      {
+         if(string.Equals(recorded.Status, "FAILED", StringComparison.Ordinal))
+         { throw new IOException("Synthetic journal failure."); }
+      };
+      server.Offer(FakePrintServer.Job(Document), Document);
+      var active = new List<string?>();
+      harness.Options = harness.Options with { ActiveJobChanged = job => active.Add(job?.JobId) };
+      IOException failure = await Assert.ThrowsAsync<IOException>(() => harness.RunOnceAsync());
+      Assert.Equal("Synthetic journal failure.", failure.Message);
+      Assert.Equal(new[] { "job-1", null }, active, StringComparer.Ordinal);
+      Assert.Equal(0, server.Downloads);
+      Assert.Equal(0, printer.Submissions);
+      Assert.Equal(1, harness.EventGate.CurrentCount);
+      Assert.Equal(1, harness.ClaimGate.CurrentCount);
+   }
+
+
+
    /// <summary>A lane told that another lane already found the queue empty does not ask the server for work at all.</summary>
    [Fact]
    public async Task LaneThatMayNotClaimSendsNoClaim()

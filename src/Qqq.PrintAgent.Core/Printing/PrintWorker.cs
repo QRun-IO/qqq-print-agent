@@ -89,8 +89,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          }
          catch
          {
-            Record(job, PrintJobState.Failed, "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
-            options.ActiveJobChanged(null);
+            // The lane lets go of the job whatever the recording does: a ticket left behind would make every later offer of the job read as one a lane still holds.
+            try
+            { Record(job, PrintJobState.Failed, "Receipt acknowledgement was interrupted before document submission; no bytes were submitted."); }
+            finally { options.ActiveJobChanged(null); }
             throw;
          }
          return new Claim(job, false);
