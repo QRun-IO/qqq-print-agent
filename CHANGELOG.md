@@ -40,6 +40,19 @@ Core hardening for 2.0. No change to pairing, history or the wire protocol.
   only in printable, bounded form, so a server cannot forge a log line or flood the log. A long value is cut and
   ends in "...", and a long list is counted.
 
+Log redaction recognises two more shapes (2.0). This changes what a log line shows, in the service's log, the
+companion's log and the shared activity log file alike, but only for a line that holds one of them; no line the
+product writes today does (the companion completes the browser sign-in and hands the service a session
+credential, addresses are logged without their query, and cookies are named, never shown), so this is a second
+line of defense.
+
+- The value of a `Cookie:` or `Set-Cookie:` header line is replaced by `[REDACTED]`, to the end of that line.
+  The header's name stays.
+- The values of `code` and `state` in the query or fragment of an address (straight after `?`, `&` or `#`) are
+  replaced by `[REDACTED]`, as in `/oauth/callback?code=[REDACTED]&state=[REDACTED]`. The names stay.
+- `code` and `state` are not keywords on their own. Lines such as "status code: 401", "exit code=1" and
+  "state=Paused" are written as before.
+
 Sign-out now ends the identity provider's browser session as well as the QQQ session, and every browser
 sign-in sends `max_age=0` beside `prompt=login`, so the next sign-in always asks for credentials (the provider
 must stay invisible to users). The companion's Sign out asks the service to log out with the application's

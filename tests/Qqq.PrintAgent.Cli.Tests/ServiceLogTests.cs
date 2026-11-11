@@ -61,6 +61,10 @@ public sealed class ServiceLogTests : IDisposable
    /// What the runtime's log method did before it became this type, transcribed from the runtime as it was: redact, cap at
    /// 1000 characters (4000 for debug detail), write debug detail to the file only and only while it is on, and write
    /// everything else to the file under its level with the "[Service]" marker. It is the reference the moved code is held to.
+   /// It redacts through the shared <see cref="AgentActivityLog.Redact"/>, as the runtime did, so it follows the two
+   /// patterns added to that method since (a cookie header line, and the code and state of a callback address) and is
+   /// otherwise the method as it was; <see cref="LinesWithNeitherNewPattern_AreRedactedAsBefore"/> holds the redaction
+   /// of every other kind of line to the text it gave before those patterns were added.
    /// </summary>
    private static string? WriteAsTheRuntimeDid(AgentActivityLog file, string level, string message)
    {
@@ -145,7 +149,8 @@ public sealed class ServiceLogTests : IDisposable
    /// Each kind of secret the service redacts today is gone from all three places a line reaches (the ring, the host's sink
    /// and the file), with the redaction marker in its place: a bearer credential, a device token, an enrollment code, an
    /// access or refresh token (including in the query of a callback address), a password, a secret, an API key, document
-   /// content, and a user name and password inside an address.
+   /// content, a user name and password inside an address, the value of a cookie header line, and the one-time code and
+   /// the state of a sign-in callback in the query or the fragment of an address.
    /// </summary>
    [Theory]
    [InlineData("Authorization: Bearer synthetic-value-1", "synthetic-value-1")]
@@ -160,6 +165,12 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("contentBase64=synthetic-value-10", "synthetic-value-10")]
    [InlineData("token = synthetic-value-11", "synthetic-value-11")]
    [InlineData("https://operator:synthetic-value-12@print.example.com/qqq", "synthetic-value-12")]
+   [InlineData("Cookie: sessionUUID=synthetic-value-13; theme=dark", "synthetic-value-13")]
+   [InlineData("Set-Cookie: sessionUUID=synthetic-value-14; Path=/; HttpOnly; Secure", "synthetic-value-14")]
+   [InlineData("callback io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-value-15&state=synthetic-value-16", "synthetic-value-15")]
+   [InlineData("callback io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-value-15&state=synthetic-value-16", "synthetic-value-16")]
+   [InlineData("returned to https://print.example.com/signed-in#state=synthetic-value-17&code=synthetic-value-18", "synthetic-value-17")]
+   [InlineData("returned to https://print.example.com/signed-in#state=synthetic-value-17&code=synthetic-value-18", "synthetic-value-18")]
    public void Secrets_NeverReachTheRingTheSinkOrTheFile(string message, string secret)
    {
       (ServiceLog log, AgentActivityLog file) = Create();
@@ -176,15 +187,104 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
-   /// What the redaction does not recognise is unchanged by the move, and recorded here so that it is a known fact and not
-   /// a surprise: a session cookie and the one-time code and state of a sign-in callback are not credential-shaped to the
-   /// patterns. They stay out of the log because the service never writes them: addresses are logged without their query,
-   /// and cookies are never logged at all.
+   /// A cookie header line loses its whole value, to the end of that line and no further, and a callback address loses
+   /// the values of its code and state and keeps everything else, in the ring, the host's sink and the file. The header's
+   /// name and the parameters' names stay, so the log still shows what was hidden. A parameter whose name only ends in
+   /// "state" or begins with "code" is another parameter and is left alone.
    /// </summary>
    [Theory]
-   [InlineData("Cookie: QQQ_SESSION=synthetic-cookie")]
-   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code&state=synthetic-state")]
-   public void WhatTheRedactionDoesNotRecognise_IsTheSameAsBefore(string message)
+   [InlineData("Cookie: sessionUUID=synthetic-cookie; theme=dark", "Cookie: [REDACTED]")]
+   [InlineData("Set-Cookie: sessionUUID=synthetic-cookie; Path=/; HttpOnly; Secure", "Set-Cookie: [REDACTED]")]
+   [InlineData("set-cookie:sessionUUID=synthetic-cookie", "set-cookie:[REDACTED]")]
+   [InlineData("Request headers:\nAccept: */*\nCookie: sessionUUID=synthetic-cookie\nUser-Agent: agent", "Request headers:\n  Accept: */*\n  Cookie: [REDACTED]\n  User-Agent: agent")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code&state=synthetic-state", "io.qrun.qqq-print-agent:/oauth/callback?code=[REDACTED]&state=[REDACTED]")]
+   [InlineData("GET https://print.example.com/cb?state=synthetic-state&session_state=kept&code=synthetic-code#top", "GET https://print.example.com/cb?state=[REDACTED]&session_state=kept&code=[REDACTED]#top")]
+   [InlineData("GET https://print.example.com/cb?codec=h264&stateless=true&STATE=synthetic-state", "GET https://print.example.com/cb?codec=h264&stateless=true&STATE=[REDACTED]")]
+   [InlineData("opened \"https://id.example.com/authorize?client_id=agent&state=synthetic-state\" in the browser", "opened \"https://id.example.com/authorize?client_id=agent&state=[REDACTED]\" in the browser")]
+   [InlineData("returned to https://print.example.com/signed-in#code=synthetic-code&state=synthetic-state", "returned to https://print.example.com/signed-in#code=[REDACTED]&state=[REDACTED]")]
+   public void CookieHeadersAndCallbackParameters_AreRedacted(string message, string expected)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(expected, AgentActivityLog.Redact(message));
+      Assert.Equal(expected, Assert.Single(_sink));
+      Assert.Equal(expected, Assert.Single(log.Entries()).Message);
+      string written = File.ReadAllText(file.CurrentLogFilePath);
+      Assert.DoesNotContain("synthetic-", written, StringComparison.Ordinal);
+      Assert.Contains("[REDACTED]", written, StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// "code" and "state" are ordinary words in a log, so neither is a keyword on its own the way "token" is: only a
+   /// parameter of an address is redacted. Lines that report a status code, an exit code, an error code or a state, with
+   /// a colon, an equals sign or neither, and lines that only mention a cookie, are written exactly as they were given.
+   /// </summary>
+   [Theory]
+   [InlineData("The server answered with status code: 401")]
+   [InlineData("Print helper ended with exit code 1")]
+   [InlineData("Print helper ended: exit code=1")]
+   [InlineData("Worker exit code = -1073741819")]
+   [InlineData("Windows Installer returned code: 1603 (state: rolled back)")]
+   [InlineData("Printer state=Paused, error code=0x80070005")]
+   [InlineData("Queue state: Ready; jobs: 0")]
+   [InlineData("Unexpected status code 502 from /qqq/v1/metaData")]
+   [InlineData("code=0 state=idle")]
+   [InlineData("Is the printer in a ready state? code 0")]
+   [InlineData("HTTP GET /qqq/v1/session: session cookie yes, device proof no")]
+   [InlineData("The server sent no session cookie; sign in again")]
+   public void OrdinaryLinesAboutCodesStatesAndCookies_AreUntouched(string message)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+
+      log.Write("INFO", message);
+
+      Assert.Equal(message, AgentActivityLog.Redact(message));
+      Assert.Equal(message, Assert.Single(_sink));
+      Assert.Equal(message, Assert.Single(log.Entries()).Message);
+      Assert.Equal(" [INFO] [Service] " + message, Assert.Single(Lines(file)));
+   }
+
+
+
+   /// <summary>
+   /// The redaction of a line that holds neither a cookie header nor a callback's code or state is, to the character,
+   /// what it was before those two patterns were added: each expected text here was produced by the method as it stood
+   /// before them. It is what lets the comparison with the runtime's old method keep its meaning.
+   /// </summary>
+   [Theory]
+   [InlineData("Print service started.", "Print service started.")]
+   [InlineData("Authorization: Bearer synthetic-bearer deviceToken=synthetic-device enrollmentCode=\"synthetic-code\"", "Authorization: Bearer [REDACTED] deviceToken=[REDACTED] enrollmentCode=[REDACTED]")]
+   [InlineData("https://operator:synthetic-password@print.example.com/ refused access_token=synthetic-access&refresh_token=synthetic-refresh", "https://[REDACTED]@print.example.com/ refused access_token=[REDACTED]&refresh_token=[REDACTED]")]
+   [InlineData("First line\r\n2026-11-10 12:00:00 [ERROR] forged entry", "First line\n  2026-11-10 12:00:00 [ERROR] forged entry")]
+   [InlineData("{\"enrollmentCode\":\"synthetic-code\",\"name\":\"Front desk\"}", "{\"enrollmentCode\":[REDACTED],\"name\":\"Front desk\"}")]
+   [InlineData("password='synthetic-secret' contentBase64=synthetic-document, api-key: synthetic-key; secret = synthetic-secret", "password=[REDACTED] contentBase64=[REDACTED], api-key: [REDACTED]; secret = [REDACTED]")]
+   [InlineData("[Session] GET /qqq/v1/metaData token=synthetic-debug-token", "[Session] GET /qqq/v1/metaData token=[REDACTED]")]
+   public void LinesWithNeitherNewPattern_AreRedactedAsBefore(string message, string expected)
+      => Assert.Equal(expected, AgentActivityLog.Redact(message));
+
+
+
+   /// <summary>
+   /// What the redaction still does not recognise, recorded so that each is a known fact and not a surprise. A code or a
+   /// state that is not a parameter of an address (on its own, or as members of a JSON object), a PKCE verifier, a
+   /// session cookie outside a cookie header line (as a bare pair, or as a JSON member), and a Basic credential all pass
+   /// through unchanged. The redaction cannot help with these. They stay out of the log only for as long as nothing
+   /// writes them: the service is handed a session credential and not the callback, the session client logs an address
+   /// without its query (asserted below) and says only whether a cookie or a Basic credential was attached. This test
+   /// does not show that nothing writes them; it shows what would happen if something did.
+   /// </summary>
+   [Theory]
+   [InlineData("code=synthetic-code state=synthetic-state")]
+   [InlineData("{\"code\":\"synthetic-code\",\"state\":\"synthetic-state\"}")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback?code_verifier=synthetic-verifier")]
+   [InlineData("sessionUUID=synthetic-session")]
+   [InlineData("{\"Cookie\":\"sessionUUID=synthetic-session\"}")]
+   [InlineData("Authorization: Basic c3ludGhldGlj")]
+   public void WhatTheRedactionStillDoesNotRecognise_IsRecorded(string message)
    {
       (ServiceLog log, _) = Create();
 
