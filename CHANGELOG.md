@@ -97,8 +97,10 @@ Core hardening for 2.0. No change to pairing, history or the wire protocol.
 - A job the server sends in a form the agent cannot use no longer blocks a device. The agent identifies the job
   and refuses it: history shows RECEIVED and then FAILED with a fixed reason ending "No bytes were submitted",
   nothing is downloaded or printed, and the next job is taken. This covers a missing or unusable member, a member
-  given twice in any letter case, and options nested deeper than 64 levels. Only a claim that names no job at all
-  still stops the device's queue until that job is cancelled on the server.
+  given twice in any letter case, options nested deeper than 64 levels, and text the agent cannot read (a
+  surrogate escape without its partner, or bytes that are not UTF-8) in a title, in another member it reads or in
+  a member name. Only a claim that names no job at all, or whose job identifier is itself unreadable, still stops
+  the device's queue until that job is cancelled on the server.
 - Extra fields in a job, including any a submitter adds to its options, are ignored. A job title may be 1,024
   characters of any script, and a byte-order mark in front of a server response is accepted.
 - A job is never printed twice because the server offered it again. One that is still being submitted is left to
