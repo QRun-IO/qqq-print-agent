@@ -179,7 +179,10 @@ public sealed class ServiceLogTests : IDisposable
    /// The last rows are the edges of the header and callback patterns: a header whose value stands on the next
    /// line, an authorization header written with an equals sign, the two headers under the names a web server's
    /// environment gives them, a no-break space or a zero-width space between a name and its separator, and a
-   /// callback whose ampersands are written the way HTML writes them.
+   /// callback whose ampersands are written the way HTML writes them. After them stands the edge of the rule for a
+   /// code beside a code verifier: the code on a line of its own, and the verifier's name where an earlier rule hides
+   /// it with the value around it (on a cookie header's line, on an authorization header's line, inside the quoted
+   /// value of another named secret). The name is looked for in the message as it was given, so the code still goes.
    /// </para>
    /// </summary>
    [Theory]
@@ -274,6 +277,9 @@ public sealed class ServiceLogTests : IDisposable
    [InlineData("\"Authorization\" => \"Basic synthetic-value-85\"", "synthetic-value-85")]
    [InlineData("callback ?x=1&amp;code=synthetic-value-86&amp;state=synthetic-value-87", "synthetic-value-86")]
    [InlineData("callback ?x=1&amp;code=synthetic-value-86&amp;state=synthetic-value-87", "synthetic-value-87")]
+   [InlineData("Cookie: a=b; codeVerifier=synthetic-value-92\ncode=synthetic-value-93", "synthetic-value-93")]
+   [InlineData("Authorization: Basic synthetic-value-94 {\"codeVerifier\":\"synthetic-value-95\"}\n{\"code\":\"synthetic-value-96\"}", "synthetic-value-96")]
+   [InlineData("token=\"codeVerifier\"\ncode=synthetic-value-97", "synthetic-value-97")]
    public void Secrets_NeverReachTheRingTheSinkOrTheFile(string message, string secret)
    {
       (ServiceLog log, AgentActivityLog file) = Create();

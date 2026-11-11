@@ -116,7 +116,9 @@ public sealed partial class AgentActivityLog : IAgentLog
          redacted = CookieHeader().Replace(redacted, "${prefix}[REDACTED]");
          redacted = AuthorizationHeader().Replace(redacted, "${prefix}[REDACTED]");
          redacted = CallbackParameter().Replace(redacted, "${prefix}[REDACTED]");
-         redacted = CodeVerifierName().IsMatch(redacted) ? ExchangedCode().Replace(redacted, "${prefix}[REDACTED]") : redacted;
+         // The verifier's name is looked for in the message as it was given, not in the redacted text: a rule above
+         // may have hidden the name together with the value it stood in (a header's line, another secret's quotes).
+         redacted = CodeVerifierName().IsMatch(bounded) ? ExchangedCode().Replace(redacted, "${prefix}[REDACTED]") : redacted;
          // Continuations cannot forge another timestamped AppKit log entry.
          return redacted.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "\n  ", StringComparison.Ordinal);
       }
