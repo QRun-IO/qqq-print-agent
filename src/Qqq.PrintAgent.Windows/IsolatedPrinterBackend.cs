@@ -50,8 +50,8 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IPrinterBa
    /// Looks up one queue with its media through a helper of its own, with the same 20 second limit and the same failures as
    /// discovery; that helper reads the settings of this queue only. Text that does not have the form of a queue identifier names
    /// no queue, so it reads as absent and no helper is started for it; the request therefore always carries 24 characters. The
-   /// helper answers with no printer or with one, and an answer that holds more than one, or one that was not asked for, is
-   /// refused.
+   /// helper answers with no printer or with one, and an answer that holds more than one, one that was not asked for, or an
+   /// entry that is no printer at all (the JSON word null), is refused.
    /// </summary>
    public PrinterInfo? FindWithMedia(string printerId)
    {
@@ -60,7 +60,7 @@ public sealed class IsolatedPrinterBackend(string helperExecutable) : IPrinterBa
          return null;
       }
       IReadOnlyList<PrinterInfo> found = ReadPrinters(new PrinterWorkerHost.Request("find-with-media", PrinterId: printerId));
-      if(found.Count > 1 || found.Any(printer => !string.Equals(printer.PrinterId, printerId, StringComparison.Ordinal)))
+      if(found.Count > 1 || found.Any(printer => printer is null || !string.Equals(printer.PrinterId, printerId, StringComparison.Ordinal)))
       {
          throw new InvalidDataException("Printer worker returned a printer that was not asked for.");
       }

@@ -155,4 +155,34 @@ public sealed class PrintWorkerPrinterReadsTests
       Assert.Equal(0, printer.Discoveries);
       Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
    }
+
+
+
+   /// <summary>
+   /// A lookup that answers with a printer that has no formats at all, not even an empty list, which is what a print
+   /// helper's answer that names the queue and nothing else is read as. The filter that lets a printer through only when
+   /// it has a format fails on it, and the job ends like any other whose lookup failed: FAILED before SUBMITTING is
+   /// recorded, with the document downloaded once and the printer never handed it. The reason recorded is the
+   /// platform's own for a value that is missing, because nothing refuses such an answer in words of its own.
+   /// </summary>
+   [Fact]
+   public async Task LookupThatAnswersWithAPrinterWithoutFormatsFailsTheJobBeforeSubmitting()
+   {
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      server.Offer(FakePrintServer.Job(Document), Document);
+      printer.Finding = _ => printer.Printers[0] = printer.Printers[0] with { Formats = null! };
+      string[]? none = null;
+      string missingValue = Assert.Throws<NullReferenceException>(() => _ = none!.Length).Message;
+
+      Assert.True(await harness.RunOnceAsync());
+
+      Assert.Equal(["RECEIVED", "FAILED"], journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal(missingValue, journal.Last("job-1").Message);
+      Assert.Equal(journal.StatesOf("job-1"), server.States, StringComparer.Ordinal);
+      Assert.Equal(1, server.Downloads);
+      Assert.Equal(["printer1"], printer.Lookups, StringComparer.Ordinal);
+      Assert.Equal(0, printer.Submissions);
+      Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
+   }
 }

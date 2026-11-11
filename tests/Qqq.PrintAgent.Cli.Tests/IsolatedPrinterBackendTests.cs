@@ -154,6 +154,42 @@ public sealed class IsolatedPrinterBackendTests
 
 
 
+   /// <summary>
+   /// An answer to the lookup whose one entry is the JSON word null holds no printer that was asked for. It is refused in
+   /// the same words as an answer that names another queue, and not by a failure of the service's own code on the
+   /// missing entry.
+   /// </summary>
+   [Fact]
+   public void AnswerWhoseEntryIsNoPrinterAtAllIsRefused()
+   {
+      InvalidDataException refusal = Assert.Throws<InvalidDataException>(() => Backend("--respond", "{\"success\":true,\"printers\":[null]}").FindWithMedia(QueueId));
+      Assert.Equal("Printer worker returned a printer that was not asked for.", refusal.Message);
+   }
+
+
+
+   /// <summary>
+   /// An answer to the lookup whose entry names the queue asked for and nothing else is not judged at this boundary: the
+   /// lookup returns it as it was answered, with no formats at all. The filter the service puts in front of this backend
+   /// lets a printer through only when it has a format, and on this entry it fails instead of offering it, so the printer
+   /// is never offered for a job. The helper the service ships writes the formats of every queue it answers with, so
+   /// only an answer that is not the helper's can look like this.
+   /// </summary>
+   [Fact]
+   public void AnswerWhoseEntryHasNoFormatsIsReturnedAsAnsweredAndTheExposureFilterFailsOnIt()
+   {
+      IsolatedPrinterBackend backend = Backend("--respond", "{\"success\":true,\"printers\":[{\"printerId\":\"" + QueueId + "\"}]}");
+
+      PrinterInfo found = Assert.IsType<PrinterInfo>(backend.FindWithMedia(QueueId));
+      Assert.Equal(QueueId, found.PrinterId);
+      Assert.Null(found.Formats);
+
+      ExposedPrinterBackend filtered = new(backend, () => new HashSet<string>(StringComparer.Ordinal) { QueueId });
+      Assert.Throws<NullReferenceException>(() => filtered.FindWithMedia(QueueId));
+   }
+
+
+
    /// <summary>A failure the helper reports for the list or the lookup arrives as it does for discovery: an I/O failure carrying the helper's message.</summary>
    [Fact]
    public void HelperFailureOfTheListOrTheLookupIsAnIoFailureWithTheHelpersMessage()
