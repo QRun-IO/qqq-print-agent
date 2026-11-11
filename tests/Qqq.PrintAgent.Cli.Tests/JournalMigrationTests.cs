@@ -369,7 +369,8 @@ public sealed class JournalMigrationTests
 
 
    /// <summary>
-   /// A service that is stopped leaves its write-ahead log behind, and what it wrote last may be only there. Here a newer
+   /// A service that is killed leaves its write-ahead log behind, and what it wrote last may be only there; one that is
+   /// stopped in the ordinary way closes its connections as it exits, and SQLite folds the log into the journal. Here a newer
    /// build raised the version and was killed: the journal file alone still says this build's version (its header is read
    /// to show that) and the log says the next. The migration must find the newer version all the same, so it reads the log;
    /// that makes SQLite create its index file beside the journal, which holds no data. The journal and the log keep their bytes.

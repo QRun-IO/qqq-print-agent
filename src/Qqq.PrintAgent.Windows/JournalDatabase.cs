@@ -143,12 +143,14 @@ internal static class JournalDatabase
 
    /// <summary>
    /// The connection string for reading a journal without changing anything on disk. Which one that is depends on the
-   /// write-ahead log. A service that was stopped leaves its log behind with the latest changes still in it, and the
+   /// write-ahead log. A process that was killed leaves its log behind with the latest changes still in it, and the
    /// version may be among them, so a log with content has to be read: SQLite does that through an index file
    /// (<c>journal.db-shm</c>), which it creates or rebuilds beside the journal. That file holds no data, and whichever build
-   /// opens the journal next rebuilds it; the journal and its log are not written. With no log, or an empty one, the
-   /// journal file alone is the truth, and it is opened as immutable: SQLite then takes no lock and creates no file, where
-   /// an ordinary read-only connection would leave an empty log and an index behind.
+   /// opens the journal next rebuilds it; the journal and its log are not written. A process that exits in the ordinary
+   /// way, as a stopped service does, is a different case: Microsoft.Data.Sqlite closes its pooled connections when the
+   /// process exits, and SQLite folds the log into the journal when the last connection closes. With no log, or an
+   /// empty one, the journal file alone is the truth, and it is opened as immutable: SQLite then takes no lock and
+   /// creates no file, where an ordinary read-only connection would leave an empty log and an index behind.
    /// </summary>
    private static string ReadOnlyConnectionString(string path)
    {
