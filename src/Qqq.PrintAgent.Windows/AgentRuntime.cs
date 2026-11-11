@@ -30,6 +30,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    private DateTimeOffset? _lastServerContact;
    private IReadOnlyList<JobSnapshot> _queuedJobs = [];
    private long _queueGeneration;
+   private StateStatus _storedState = new StateStatus.Ready();
    private TimeProvider Clock => timeProvider ?? TimeProvider.System;
    private DateTimeOffset ObservationTime => Clock.GetUtcNow();
 
@@ -52,13 +53,25 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
-   /// <summary>Owns the data directory until Windows requests shutdown. The journal is migrated first, once, before anything opens a store.</summary>
+   /// <summary>
+   /// Owns the data directory until Windows requests shutdown. The journal is migrated first, once, before anything opens
+   /// a store. When the stored state cannot be used (a newer build wrote it), it is left exactly as it was found, no
+   /// connection to a server is started, and only the management pipe is served, so that an operator can see why and the
+   /// newer build can be installed again.
+   /// </summary>
    public async Task RunAsync(CancellationToken token)
    {
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
       _log.Write("INFO", "Print service started.");
-      _ = JournalSchema.Migrate(directory);
+      _storedState = JournalSchema.Migrate(directory);
+      if(_storedState.Refusal is string refusal)
+      {
+         _log.Write("ERROR", refusal + (_storedState is StateStatus.NewerBuild newer ? $" The journal is at schema version {newer.FoundVersion}; this version supports up to {newer.SupportedVersion}." : string.Empty)
+            + " No server connection is started; status, log settings and updates stay available.");
+         await ServePipeAsync(token).ConfigureAwait(false);
+         return;
+      }
       await RunRealtimeAsync(token).ConfigureAwait(false);
    }
 
@@ -68,9 +81,12 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    /// Opens the journal and the protected files of the state directory for one unit of work. Every part of the runtime
    /// opens its store here, so what a store is opened for is decided in one place. With <paramref name="recover"/> a saved
    /// connection that can no longer be read is set aside instead of failing the open, which the paths that must keep
-   /// working without a readable pairing (status, sign-in, enrollment, settings) ask for.
+   /// working without a readable pairing (status, sign-in, enrollment, settings) ask for. While the stored state cannot be
+   /// used no store is opened at all, whatever asked for one: that state belongs to another build.
    /// </summary>
-   private AgentStore OpenStore(bool recover) => new(directory, recoverUnreadableConfiguration: recover);
+   private AgentStore OpenStore(bool recover) => _storedState.Refusal is string refusal
+      ? throw new InvalidOperationException(refusal)
+      : new(directory, recoverUnreadableConfiguration: recover);
 
 
 
@@ -118,9 +134,16 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
 
 
-   /// <summary>Current local observations, with no token or document content.</summary>
+   /// <summary>
+   /// Current local observations, with no token or document content. While the stored state cannot be used the snapshot
+   /// is built without it: red, with the reason as its status, no pairing, no printers and no jobs.
+   /// </summary>
    public AgentSnapshot GetSnapshot()
    {
+      if(_storedState.Refusal is string refusal)
+      {
+         return new AgentSnapshot(Enrolled: false, Connected: false, "RED", refusal, ServerUrl: null, DeviceId: null, LastSuccessfulPoll: null, [], [], _log.Entries(), Transport: GetTransportSnapshot());
+      }
       using AgentStore store = OpenStore(recover: true);
       AgentConfiguration? configuration = store.LoadConfiguration();
       IReadOnlySet<string> exposed = store.GetExposedPrinterIds();
@@ -229,10 +252,16 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
 
    /// <summary>
    /// Dispatches one management-pipe operation by name to its handler and returns the text sent back to the caller. An
-   /// unknown operation is refused, and exposure changes validate their arguments before touching the store.
+   /// unknown operation is refused, and exposure changes validate their arguments before touching the store. While the
+   /// stored state cannot be used, only the operations that need none of it are dispatched and every other one is refused
+   /// with the reason.
    /// </summary>
    private async Task<string> HandleCommandAsync(PipeRequest request, CancellationToken token)
    {
+      if(_storedState.Refusal is string refusal && !AnsweredWithoutStoredState(request.Operation))
+      {
+         throw new InvalidOperationException(refusal);
+      }
       switch(request.Operation)
       {
          case "set-device-profile":
@@ -287,5 +316,14 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
             throw new InvalidOperationException("Unknown command.");
       }
    }
-}
 
+
+
+   /// <summary>
+   /// The operations the service still answers while the stored state cannot be used: what it is doing and why (status,
+   /// snapshot, and the transport read the companion repeats every second), the log operations, and the two update
+   /// operations, without which the build that can use the state could not be installed. None of them opens a store.
+   /// </summary>
+   private static bool AnsweredWithoutStoredState(string operation)
+      => operation is "status" or "snapshot" or "transport" or "get-log-settings" or "set-log-settings" or "clear-logs" or "prepare-update" or "resume-after-update";
+}
