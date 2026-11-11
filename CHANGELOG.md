@@ -14,7 +14,9 @@ what the service and its clients will be able to build on. The last two are abou
   that table names for the code. A client still reads a code it does not know.
 - **The envelope.** A request or a reply is read only by the contract's two parsing functions and written only by
   its writing function. The JSON serializer refuses both, whatever options it is given; it used to refuse reading
-  for the contract's own options only. The text on the wire is unchanged.
+  for the contract's own options only. The text on the wire is unchanged. The parsing functions no longer throw
+  for a text that holds a surrogate without its partner, as itself or as an escape (`\ud800` on its own): it is
+  refused like anything else that is wrong in the same place.
 - **Accounts.** The principal and the tenant are carried one way wherever a reply names an account (a snapshot,
   the result of adding a server or signing in, the details of a changed identity): printable, at most 200 units,
   left out when missing.

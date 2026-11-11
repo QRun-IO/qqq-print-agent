@@ -26,7 +26,9 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <see cref="ManagementProtocol.MaximumMessageCharacters"/> exactly), and nothing can change it afterwards, because
 /// no member can be set once the error exists (a <c>with</c> expression can only copy it). That holds for an error the
 /// service builds and for one a client reads from the wire, so text a server supplied reaches neither the wire nor a
-/// client's screen raw. An error the service builds must also say something: a message with nothing to show is
+/// client's screen raw. A reply whose code or message is not text at all, because it holds the escape of a surrogate
+/// without its partner, is not read as a reply (<see cref="ManagementEnvelopeProblem.ReplyIncomplete"/>), so no error
+/// is ever held with one. An error the service builds must also say something: a message with nothing to show is
 /// refused, and no stand-in text is sent in its place. What a client reads is not refused for that, so that it still
 /// learns the code.
 /// </para>

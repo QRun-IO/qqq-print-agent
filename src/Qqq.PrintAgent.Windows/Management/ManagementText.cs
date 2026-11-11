@@ -13,7 +13,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// server supplied. Which characters are shown is Core's one definition (<see cref="ServerText.IsShown"/>); the rest of
 /// the rule is the contract's own, because a wire member is a value and not a piece of a sentence:
 /// <list type="bullet">
-/// <item>Every code point Core's definition does not show becomes a space, and a surrogate without its partner becomes U+FFFD.</item>
+/// <item>Every code point Core's definition does not show becomes a space, and a surrogate without its partner becomes U+FFFD. That is about a string the service or a client already holds. On the wire such a surrogate can only be written as an escape (<c>\ud800</c> on its own), which is not text and never reaches this rule: <see cref="ManagementJson"/> does not read an envelope whose own strings hold one, nor a record that holds one in a value.</item>
 /// <item>The text is cut at the limit exactly, never inside a surrogate pair, and nothing is added to say that it was cut. A value is at most the limit, whatever it held.</item>
 /// <item>Applying the rule to its own result changes nothing, so the reader of a reply applies it again without harm.</item>
 /// <item>No words stand in for a value that is missing. A member that may be absent stays absent, and a member that must say something refuses to be built from nothing.</item>

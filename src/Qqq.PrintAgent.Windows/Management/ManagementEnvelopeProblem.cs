@@ -19,7 +19,7 @@ public enum ManagementEnvelopeProblem
    /// <summary>The text is longer than the contract allows; it was not parsed.</summary>
    TooLarge,
 
-   /// <summary>The text is empty or is not JSON.</summary>
+   /// <summary>The text is empty or is not JSON. Text that holds a surrogate without its partner, as itself or as an escape in a member's name, is not JSON either: it cannot be read as text, so no member of it can be checked.</summary>
    NotJson,
 
    /// <summary>The text is JSON, but one of its objects has the same member twice: in the envelope, in the arguments or anywhere beneath them. Readers disagree about which of two values counts, so neither is taken.</summary>
@@ -40,15 +40,15 @@ public enum ManagementEnvelopeProblem
    /// <summary>A request has no <c>op</c>, or one that is not text.</summary>
    OperationMissing,
 
-   /// <summary>A request's <c>op</c> does not have the shape of an operation name: lower-case letters, optionally a dot and a camel-case word.</summary>
+   /// <summary>A request's <c>op</c> does not have the shape of an operation name: lower-case letters, optionally a dot and a camel-case word. A value that is not text at all (the escape of a surrogate without its partner) is one of these.</summary>
    OperationMalformed,
 
-   /// <summary>A request's <c>server</c> is not a server identifier in its canonical form.</summary>
+   /// <summary>A request's <c>server</c> is not a server identifier in its canonical form; a value that is not text at all (the escape of a surrogate without its partner) is one of these.</summary>
    ServerMalformed,
 
    /// <summary>A request's <c>args</c> is not an object.</summary>
    ArgumentsNotAnObject,
 
-   /// <summary>A reply lacks what its <c>ok</c> promises: a result object for a success, or an error with a code and a message for a failure; or it has no <c>ok</c>.</summary>
+   /// <summary>A reply lacks what its <c>ok</c> promises: a result object for a success, or an error with a code and a message for a failure, each of them text (the escape of a surrogate without its partner is not); or it has no <c>ok</c>.</summary>
    ReplyIncomplete,
 }

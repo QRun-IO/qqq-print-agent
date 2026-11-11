@@ -83,6 +83,13 @@ public static class ManagementJson
    /// members this one does not know. After that the envelope allows exactly <c>v</c>, <c>op</c>, <c>server</c> and
    /// <c>args</c>. Whether the operation exists, and whether it should name a server, is not decided here but by
    /// <see cref="ManagementOperations.Check"/>, and the arguments are read by <see cref="TryReadArguments"/>.
+   /// <para>
+   /// Nothing a text holds makes this throw. JSON's grammar lets a string hold the escape of a surrogate without its
+   /// partner (<c>\ud800</c> on its own), which is not text. It is answered like any other value that is wrong where
+   /// it stands: in <c>op</c> the operation is malformed, in <c>server</c> the server is, and in a member's name, at
+   /// any depth, the text is not JSON, because the parse cannot know that no member is repeated. In a value of the
+   /// arguments it leaves the envelope readable, and the arguments are then not read.
+   /// </para>
    /// </summary>
    public static ManagementRequestParse ParseRequest(string? text)
    {
@@ -102,7 +109,9 @@ public static class ManagementJson
    /// <summary>
    /// Reads a reply's envelope. A success must carry a result object and a failure an error with a code and a message;
    /// members this version does not know are skipped. The result and the details are read into their own types by
-   /// <see cref="TryReadResult"/> and <see cref="TryReadDetails"/>.
+   /// <see cref="TryReadResult"/> and <see cref="TryReadDetails"/>. Nothing a text holds makes this throw: a code or a
+   /// message that holds the escape of a surrogate without its partner is not text, so the reply is incomplete, and
+   /// such an escape in a member's name makes the text not JSON, as it does for a request.
    /// </summary>
    public static ManagementReplyParse ParseReply(string? text)
    {
@@ -248,6 +257,16 @@ public static class ManagementJson
       {
          return IsJsonWithARepeatedMember(text) ? ManagementEnvelopeProblem.RepeatedMember : ManagementEnvelopeProblem.NotJson;
       }
+      catch(Exception exception) when(exception is InvalidOperationException or ArgumentException)
+      {
+         /////////////////////////////////////////////////////////////////////////////////////////
+         // The text holds a surrogate without its partner where the parse has to read it: as  //
+         // itself, so the text cannot be carried as UTF-8 at all, or as an escape in a        //
+         // member's name, which the parse must read to know that no member is repeated. The   //
+         // parser reports neither as a JSON error. Nothing in such a text can be trusted.     //
+         /////////////////////////////////////////////////////////////////////////////////////////
+         return ManagementEnvelopeProblem.NotJson;
+      }
       if(parsed.RootElement.ValueKind != JsonValueKind.Object)
       {
          parsed.Dispose();
@@ -305,13 +324,13 @@ public static class ManagementJson
          problem = member.Name switch
          {
             "v" => ManagementEnvelopeProblem.None,
-            "op" => kind == JsonValueKind.String ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.OperationMissing,
-            "server" => kind == JsonValueKind.String && ManagementProtocol.IsServerId(member.Value.GetString()) ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ServerMalformed,
+            "op" => kind != JsonValueKind.String ? ManagementEnvelopeProblem.OperationMissing : TextOf(member.Value) is null ? ManagementEnvelopeProblem.OperationMalformed : ManagementEnvelopeProblem.None,
+            "server" => kind == JsonValueKind.String && ManagementProtocol.IsServerId(TextOf(member.Value)) ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ServerMalformed,
             "args" => kind == JsonValueKind.Object ? ManagementEnvelopeProblem.None : ManagementEnvelopeProblem.ArgumentsNotAnObject,
             _ => ManagementEnvelopeProblem.UnexpectedMember,
          };
-         operation = member.NameEquals("op") ? member.Value.ToString() : operation;
-         server = member.NameEquals("server") ? member.Value.ToString() : server;
+         operation = member.NameEquals("op") ? TextOf(member.Value) : operation;
+         server = member.NameEquals("server") ? TextOf(member.Value) : server;
          arguments = member.NameEquals("args") && kind == JsonValueKind.Object ? ManagementPayload.FromElement(member.Value) : arguments;
       }
       if(problem == ManagementEnvelopeProblem.None && operation is null)
@@ -350,17 +369,41 @@ public static class ManagementJson
 
 
 
-   /// <summary>Reads an error object, or returns null when it lacks a code or a message as text. Details of any kind but an object are dropped, because every details type is an object.</summary>
+   /// <summary>
+   /// Reads an error object, or returns null when it lacks a code or a message as text; a code or a message that
+   /// holds a surrogate without its partner is not text (<see cref="TextOf"/>). Details of any kind but an object are
+   /// dropped, because every details type is an object.
+   /// </summary>
    private static ManagementError? ReadError(JsonElement error)
    {
       if(error.ValueKind != JsonValueKind.Object
-         || !error.TryGetProperty("code", out JsonElement code) || code.ValueKind != JsonValueKind.String
-         || !error.TryGetProperty("message", out JsonElement message) || message.ValueKind != JsonValueKind.String)
+         || !error.TryGetProperty("code", out JsonElement code) || code.ValueKind != JsonValueKind.String || TextOf(code) is not { } codeText
+         || !error.TryGetProperty("message", out JsonElement message) || message.ValueKind != JsonValueKind.String || TextOf(message) is not { } messageText)
       {
          return null;
       }
       ManagementPayload? details = error.TryGetProperty("details", out JsonElement found) && found.ValueKind == JsonValueKind.Object ? ManagementPayload.FromElement(found) : null;
-      return ManagementError.FromWire(code.ToString(), message.ToString(), details);
+      return ManagementError.FromWire(codeText, messageText, details);
+   }
+
+
+
+   /// <summary>
+   /// The text of a JSON string, or null when it has none to give. JSON's grammar lets a string hold the escape of a
+   /// surrogate without its partner (<c>\ud800</c> on its own), which is not text: it cannot be turned into a string,
+   /// and the platform throws when asked to. The envelope's own strings are read through here, so such a value is
+   /// answered like any other value that is not what its member needs, and never thrown.
+   /// </summary>
+   private static string? TextOf(JsonElement value)
+   {
+      try
+      {
+         return value.GetString();
+      }
+      catch(InvalidOperationException)
+      {
+         return null;
+      }
    }
 
 
@@ -416,14 +459,23 @@ public static class ManagementJson
    /// <summary>
    /// Writes one envelope as text. The envelope is written here and not by the serializer, so its form does not depend
    /// on any options object: one line, never indented, with the escaping the serializer's own default gives, which is
-   /// also what the arguments, results and details inside it were written with.
+   /// also what the arguments, results and details inside it were written with. A payload that was read from the
+   /// wire can hold, in a value, the escape of a surrogate without its partner; that is not text and cannot be
+   /// written, and the failure is a <see cref="JsonException"/>, as it was when the serializer wrote the envelope.
    /// </summary>
    private static string WriteLine(Action<Utf8JsonWriter> write)
    {
       ArrayBufferWriter<byte> buffer = new();
       using(Utf8JsonWriter writer = new(buffer))
       {
-         write(writer);
+         try
+         {
+            write(writer);
+         }
+         catch(InvalidOperationException exception)
+         {
+            throw new JsonException("The envelope holds a value that is not text (a surrogate without its partner) and cannot be written.", exception);
+         }
       }
       return Encoding.UTF8.GetString(buffer.WrittenSpan);
    }

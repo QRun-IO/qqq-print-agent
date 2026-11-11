@@ -16,7 +16,8 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <see cref="IdentityChangedDetails"/> gives the approved account. So one account reads the same wherever a reply
 /// names it, in a snapshot, in the result of adding a server or signing in, and in the details of a changed identity.
 /// <see cref="From"/> builds the record from the service's own status through that constructor, and the serializer
-/// reads the wire through it, so a client holds bounded values even when a service did not send them so. A value that
+/// reads the wire through it, so a client holds bounded values even when a service did not send them so; a result
+/// in which one of them is not text at all (the escape of a surrogate without its partner) is not read. A value that
 /// is missing is absent and left out of the text.
 /// </summary>
 public sealed record ServerAuthentication

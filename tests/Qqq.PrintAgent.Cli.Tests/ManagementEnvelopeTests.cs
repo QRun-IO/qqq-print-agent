@@ -256,6 +256,84 @@ public sealed class ManagementEnvelopeTests
 
 
 
+   /// <summary>
+   /// JSON's grammar lets a string hold the escape of a surrogate without its partner, which is not text and cannot
+   /// be read into a string. A request that holds one is refused like any other request that is wrong in that place,
+   /// and reading it never throws: in the operation it is a malformed operation, in the server a malformed server,
+   /// and in a member's name, in the envelope or at any depth beneath it, the text is not JSON, because the parse
+   /// has to read every name to know that none is repeated. A high surrogate and a low one are the same in this, and
+   /// so is one that follows text that would have been valid. The texts are plain ASCII: the escape is six characters.
+   /// </summary>
+   [Theory]
+   [InlineData("{\"v\":2,\"op\":\"\\ud800\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"\\udc00\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\\ud800\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"\\ud800\",\"server\":\"" + Server + "\"}", ManagementEnvelopeProblem.OperationMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"server\":\"\\ud800\"}", ManagementEnvelopeProblem.ServerMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"trust.get\",\"server\":\"" + Server + "\\udc00\"}", ManagementEnvelopeProblem.ServerMalformed)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"\\ud800\":1}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"op\":\"snapshot\",\"args\":{\"\\ud800\":1}}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"op\":\"jobs.query\",\"server\":\"" + Server + "\",\"args\":{\"query\":{\"page\\udc00Size\":25}}}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"\\ud800\":2,\"op\":\"snapshot\"}", ManagementEnvelopeProblem.NotJson)]
+   public void Request_ThatHoldsASurrogateWithoutItsPartner_IsRefusedAndNeverThrows(string text, ManagementEnvelopeProblem problem)
+   {
+      AssertRefused(text, problem, ManagementErrorCode.InvalidRequest);
+   }
+
+
+
+   /// <summary>
+   /// The same for a string that holds the surrogate itself, which only code can build (text read from the pipe as
+   /// UTF-8 cannot hold one): it cannot be carried as UTF-8, so a request and a reply that hold one are refused as
+   /// not JSON, wherever it stands, and reading them never throws.
+   /// </summary>
+   [Fact]
+   public void Text_ThatHoldsASurrogateItself_IsRefusedAsNotJson()
+   {
+      string lone = ((char)0xD800).ToString();
+
+      AssertRefused("{\"v\":2,\"op\":\"snap" + lone + "shot\"}", ManagementEnvelopeProblem.NotJson, ManagementErrorCode.InvalidRequest);
+      AssertRefused("{\"v\":2,\"op\":\"snapshot\"}" + lone, ManagementEnvelopeProblem.NotJson, ManagementErrorCode.InvalidRequest);
+      AssertRefused("{\"v\":2,\"op\":\"snapshot\",\"op\":\"snap" + lone + "shot\"}", ManagementEnvelopeProblem.NotJson, ManagementErrorCode.InvalidRequest);
+      Assert.Equal(ManagementEnvelopeProblem.NotJson, ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"a" + lone + "b\"}}").Problem);
+      Assert.Equal(ManagementEnvelopeProblem.NotJson, ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"reason\":\"a" + lone + "b\"}}").Problem);
+   }
+
+
+
+   /// <summary>
+   /// The escape of a surrogate without its partner in a value inside the arguments, a result or the details leaves
+   /// the envelope readable, and the record that holds it is then not read: arguments are refused, and a result and
+   /// details do not fit their type. Writing such a payload back fails with the serializer's own error for text it
+   /// cannot write, as it did when the serializer wrote the envelope, and not with a stray error of the writer. A
+   /// surrogate pair written as two escapes is text, and is read.
+   /// </summary>
+   [Fact]
+   public void Payload_ThatHoldsASurrogateWithoutItsPartner_IsNotReadAndIsNotWritten()
+   {
+      ManagementRequestParse request = ManagementJson.ParseRequest("{\"v\":2,\"op\":\"servers.rename\",\"server\":\"" + Server + "\",\"args\":{\"name\":\"a\\ud800\"}}");
+      ManagementReplyParse result = ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"reason\":\"a\\ud800b\"}}");
+      ManagementReplyParse details = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"reason\":\"\\udc00\"}}}");
+      ManagementReplyParse pair = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy \\ud83d\\ude00.\"}}");
+
+      Assert.True(request.Succeeded());
+      Assert.False(ManagementJson.TryReadArguments(request.Request, out ServersRenameArgs? arguments));
+      Assert.Null(arguments);
+      Assert.True(result.Succeeded());
+      Assert.False(ManagementJson.TryReadResult(result.Reply, out CancelRefusedDetails? read));
+      Assert.Null(read);
+      Assert.True(details.Succeeded());
+      Assert.False(ManagementJson.TryReadDetails(details.Reply.Error!, out CancelRefusedDetails? refused));
+      Assert.Null(refused);
+      Assert.Throws<JsonException>(() => ManagementJson.Write(request.Request));
+      Assert.Throws<JsonException>(() => ManagementJson.Write(result.Reply));
+      Assert.Throws<JsonException>(() => ManagementJson.Write(details.Reply));
+      Assert.True(pair.Succeeded());
+      Assert.Equal("Busy \U0001F600.", pair.Reply.Error!.Message);
+   }
+
+
+
    /// <summary>The routing check is the one rule for whether a request names a server correctly: an operation on the computer must not name one, and an operation on one server must name it by a full identifier. Each refusal has its code, finds no more than the operation, and never repeats the request.</summary>
    [Theory]
    [InlineData(2, "snapshot", null, null)]
@@ -412,7 +490,16 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>Each way a reply's text can be unusable is told apart: text that is not JSON (which is what a version 1 service answers), a root that is not an object, no version, another version, a reply that lacks what its ok promises, one longer than the limit, and one in which any object has the same member twice (in the envelope, in the result, in the error or in its details, or under a name written with an escape), which is refused whole as a request is.</summary>
+   /// <summary>
+   /// Each way a reply's text can be unusable is told apart: text that is not JSON (which is what a version 1 service
+   /// answers), a root that is not an object, no version, another version, a reply that lacks what its ok promises,
+   /// one longer than the limit, and one in which any object has the same member twice (in the envelope, in the
+   /// result, in the error or in its details, or under a name written with an escape), which is refused whole as a
+   /// request is. The last rows hold the escape of a surrogate without its partner, which is not text: as an error's
+   /// code or message it leaves the reply without one, so the reply is incomplete (and not "not JSON", which a
+   /// client takes for a version 1 service); in a member's name, at any depth, the text is not JSON. A success whose
+   /// stray error holds one is still a success, since that error is dropped. None of them makes the read throw.
+   /// </summary>
    [Theory]
    [InlineData(null, ManagementEnvelopeProblem.NotJson)]
    [InlineData("", ManagementEnvelopeProblem.NotJson)]
@@ -443,6 +530,13 @@ public sealed class ManagementEnvelopeTests
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"code\":\"internal_error\",\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.RepeatedMember)]
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"reason\":\"documentGone\",\"reason\":\"ownershipMismatch\"}}}", ManagementEnvelopeProblem.RepeatedMember)]
    [InlineData("{\"v\":2,\"ok\":true,\"\\u006fk\":false,\"result\":{}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"a\\ud800b\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"\\udc00\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"\\ud800\",\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\\ud800\",\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":true,\"result\":{},\"\\ud800\":1}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"ok\":true,\"result\":{\"\\ud800\":1}}", ManagementEnvelopeProblem.NotJson)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\",\"details\":{\"rea\\udc00son\":\"x\"}}}", ManagementEnvelopeProblem.NotJson)]
    public void Reply_ThatIsUnusable_IsToldApart(string? text, ManagementEnvelopeProblem problem)
    {
       ManagementReplyParse parse = ManagementJson.ParseReply(text);
@@ -454,14 +548,19 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>A reply longer than the limit is refused for its size without being parsed; details that are not an object are dropped, since every details type is one, and the failure is still read.</summary>
+   /// <summary>A reply longer than the limit is refused for its size without being parsed; details that are not an object are dropped, since every details type is one, and the failure is still read; and a success that also carries an error is read as the success, whatever that error holds, a code and a message that are not text included.</summary>
    [Fact]
    public void Reply_SizeLimitAndStrayDetails()
    {
       ManagementReplyParse oversize = ManagementJson.ParseReply(new string(' ', ManagementProtocol.MaximumReplyCharacters + 1));
       ManagementReplyParse strayDetails = ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":\"Busy.\",\"details\":\"text\"}}");
 
+      ManagementReplyParse strayError = ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{},\"error\":{\"code\":\"\\ud800\",\"message\":\"\\ud800\"}}");
+
       Assert.Equal(ManagementEnvelopeProblem.TooLarge, oversize.Problem);
+      Assert.True(strayError.Succeeded());
+      Assert.True(strayError.Reply.Ok);
+      Assert.Null(strayError.Reply.Error);
       Assert.True(strayDetails.Succeeded());
       Assert.Null(strayDetails.Reply.Error!.Details);
       Assert.False(ManagementJson.TryReadDetails(strayDetails.Reply.Error, out EnrollmentUnconfirmedDetails? details));
