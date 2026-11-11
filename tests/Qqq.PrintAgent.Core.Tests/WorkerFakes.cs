@@ -4,6 +4,7 @@
  */
 
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -19,7 +20,7 @@ namespace Qqq.PrintAgent.Core.Tests;
 /// </summary>
 internal sealed class FakePrintServer : HttpMessageHandler
 {
-   private readonly Queue<string> _claims = new();
+   private readonly Queue<byte[]> _claims = new();
 
 
 
@@ -74,7 +75,12 @@ internal sealed class FakePrintServer : HttpMessageHandler
 
 
    /// <summary>Answers the next claim with exactly this body, for claims a well-behaved server would never send.</summary>
-   internal FakePrintServer OfferRaw(string body)
+   internal FakePrintServer OfferRaw(string body) => OfferBytes(Encoding.UTF8.GetBytes(body));
+
+
+
+   /// <summary>Answers the next claim with exactly these bytes, for a body that is not text at all: one holding bytes that are not UTF-8.</summary>
+   internal FakePrintServer OfferBytes(byte[] body)
    {
       _claims.Enqueue(body);
       return this;
@@ -108,20 +114,25 @@ internal sealed class FakePrintServer : HttpMessageHandler
       {
          case "claim":
             Claims++;
-            return Json(_claims.Count > 0 ? _claims.Dequeue() : """{"job":null}""");
+            return Json(_claims.Count > 0 ? _claims.Dequeue() : """{"job":null}"""u8.ToArray());
          case "content":
             Downloads++;
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Document) };
          default:
             Unexpected.Add(path);
-            return Json("{}");
+            return Json("{}"u8.ToArray());
       }
    }
 
 
 
-   /// <summary>A 200 JSON response.</summary>
-   private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+   /// <summary>A 200 JSON response with exactly these bytes as its body.</summary>
+   private static HttpResponseMessage Json(byte[] body)
+   {
+      var content = new ByteArrayContent(body);
+      content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+      return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+   }
 }
 
 
