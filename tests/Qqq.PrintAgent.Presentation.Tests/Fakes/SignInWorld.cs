@@ -30,6 +30,9 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
    /// <summary>The callback the fake installation has registered.</summary>
    internal const string Callback = "io.qrun.qqq-print-agent:/oauth/callback";
 
+   /// <summary>The marked text of an inbox failure of a kind no exchange lists, so a test can show that nothing of it is logged or shown.</summary>
+   internal const string UnlistedFailureText = "synthetic-inbox-failure-text";
+
    private volatile TaskCompletionSource<FakeInbox>? _awaitedInbox;
 
 
@@ -149,6 +152,25 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
    /// <summary>A certificate refusal as the session client records one: an untrusted authority, presented by the given origin.</summary>
    internal static QqqCertificateRejection Refusal(string origin) => new(System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors, "CN=synthetic.example", "CN=Synthetic Test Authority",
       new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), "00112233445566778899AABBCCDDEEFF00112233", new Uri(origin), new DateTimeOffset(2026, 11, 10, 10, 0, 0, TimeSpan.Zero));
+
+
+
+   /// <summary>
+   /// An inbox failure of a kind no exchange lists as one to report, by the name of its type: the argument error the
+   /// real inbox gives when the process that sent a callback has already exited, an arithmetic overflow, or a
+   /// time-out. Its text is the marked one.
+   /// </summary>
+   internal static Exception UnlistedInboxFailure(string kind) => kind switch
+   {
+      nameof(ArgumentException) => new ArgumentException(UnlistedFailureText, nameof(kind)),
+      nameof(OverflowException) => new OverflowException(UnlistedFailureText),
+      _ => new TimeoutException(UnlistedFailureText),
+   };
+
+
+
+   /// <summary>What an exchange is told, and reports, when the inbox failed in such a way: fixed text and the kind of failure.</summary>
+   internal static string InboxFailedReport(string kind) => "The browser callback inbox failed (" + kind + "), so no callback could be received. Try again.";
 
 
 

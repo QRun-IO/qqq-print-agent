@@ -363,6 +363,39 @@ public sealed class SignInFlowBrowserTests
 
 
    /// <summary>
+   /// The inbox fails, while the dialog's sign-in waits, in a way the flow does not list as a failure to report: the
+   /// argument error the real inbox gives when the process that sent a callback has already exited, an overflow, a
+   /// time-out. It does not escape the flow: the sign-in is reported as not completed with a reason that names the
+   /// kind of failure in fixed text, the session stays for an explicit retry, and nothing of the failure's own text
+   /// is logged or shown.
+   /// </summary>
+   [Theory]
+   [InlineData(nameof(ArgumentException))]
+   [InlineData(nameof(OverflowException))]
+   [InlineData(nameof(TimeoutException))]
+   public async Task InboxFailsInAWayTheFlowDoesNotList_IsReportedByItsKindAndDoesNotEscape(string kind)
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      string report = SignInWorld.InboxFailedReport(kind);
+
+      Task<bool> running = fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+      fixture.Inboxes[0].Fail(SignInWorld.UnlistedInboxFailure(kind));
+
+      Assert.True(await SignInFixture.EndsAsync(running));
+      Assert.Equal(new FeedbackMessage("Browser sign-in not completed", "No validated account session was received. Reason: " + report + " Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly. The activity log has the full detail.", FeedbackSeverity.Warning), fixture.Shown[^1]);
+      Assert.Contains("ERROR Browser sign-in not completed: IOException: " + report, fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains(SignInWorld.UnlistedFailureText, StringComparison.Ordinal));
+      Assert.DoesNotContain(fixture.Shown, message => message.Message.Contains(SignInWorld.UnlistedFailureText, StringComparison.Ordinal));
+      Assert.Empty(fixture.Requests);
+      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
+      Assert.True(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.IsBusy);
+      Assert.True(fixture.Inboxes[0].Disposed);
+   }
+
+
+
+   /// <summary>
    /// When Windows cannot start the browser, the failure it gives names what it could not start: the whole sign-in
    /// address, with the attempt's state, nonce and code challenge. None of that is logged or shown. The operator is
    /// told that the default browser could not be opened and what to check, the log says the same with the kind of

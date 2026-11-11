@@ -238,6 +238,61 @@ public sealed class BrowserCallbackDispatcherTests
 
 
 
+   /// <summary>
+   /// The inbox is fed by other processes and can fail in a way no exchange lists as a failure to report: the real
+   /// one gives an argument error when the process that sent a callback has already exited. Left as it is, such a
+   /// failure would leave every waiting exchange as an exception nobody handles. Both waiting tickets get one
+   /// failure of a kind every exchange reports instead: its text is fixed and names the kind of failure, the
+   /// original is not attached to it, and nothing of the original's own text reaches the log.
+   /// </summary>
+   [Theory]
+   [InlineData(nameof(ArgumentException))]
+   [InlineData(nameof(OverflowException))]
+   [InlineData(nameof(TimeoutException))]
+   public async Task Dispatcher_InboxFailsInAWayNoExchangeLists_EveryWaiterGetsAFailureItReports(string kind)
+   {
+      SignInWorld world = new();
+      using BrowserCallbackTicket first = world.Dispatcher.Register("synthetic-state-a");
+      using BrowserCallbackTicket second = world.Dispatcher.Register("synthetic-state-b");
+
+      world.Inboxes[0].Fail(SignInWorld.UnlistedInboxFailure(kind));
+
+      IOException reported = await Assert.ThrowsAsync<IOException>(() => SignInWorld.EndsAsync(first.Callback));
+      Assert.Same(reported, await Assert.ThrowsAsync<IOException>(() => SignInWorld.EndsAsync(second.Callback)));
+      Assert.Equal(SignInWorld.InboxFailedReport(kind), reported.Message);
+      Assert.Null(reported.InnerException);
+      Assert.DoesNotContain(SignInWorld.UnlistedFailureText, reported.ToString(), StringComparison.Ordinal);
+      Assert.True(world.Inboxes[0].Disposed);
+      Assert.Equal([InboxOpen, $"ERROR The browser callback inbox failed ({kind}); 2 waiting browser exchange(s) were ended and have to be started again."], world.Log.Entries);
+   }
+
+
+
+   /// <summary>
+   /// The same holds when the inbox cannot be opened: a failure of a kind no exchange lists is thrown to whoever
+   /// registered as one that names only its kind, nothing of its text is kept, and nothing is left registered.
+   /// </summary>
+   [Fact]
+   public async Task InboxThatCannotBeOpenedInAWayNoExchangeLists_FailsTheRegistrationWithAFailureItReports()
+   {
+      SignInWorld world = new() { InboxFailure = SignInWorld.UnlistedInboxFailure(nameof(ArgumentException)) };
+
+      IOException reported = Assert.Throws<IOException>(() => world.Dispatcher.Register("synthetic-state-a"));
+
+      Assert.Equal(SignInWorld.InboxFailedReport(nameof(ArgumentException)), reported.Message);
+      Assert.Null(reported.InnerException);
+      Assert.DoesNotContain(SignInWorld.UnlistedFailureText, reported.ToString(), StringComparison.Ordinal);
+      Assert.Empty(world.Inboxes);
+      Assert.Empty(world.Log.Entries);
+
+      world.InboxFailure = null;
+      using BrowserCallbackTicket ticket = world.Dispatcher.Register("synthetic-state-a");
+      Assert.Single(world.Inboxes).Deliver(CallbackFor("synthetic-state-a"));
+      Assert.Equal(CallbackFor("synthetic-state-a"), await SignInWorld.EndsAsync(ticket.Callback));
+   }
+
+
+
    /// <summary>When the inbox cannot be opened for the first ticket, the failure goes to whoever registered and nothing is left registered: the same state can be registered again once the inbox can be opened.</summary>
    [Fact]
    public async Task InboxThatCannotBeOpened_FailsTheRegistration_AndLeavesNothingBehind()

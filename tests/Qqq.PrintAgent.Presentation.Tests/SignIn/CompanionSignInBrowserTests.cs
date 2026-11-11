@@ -310,6 +310,44 @@ public sealed class CompanionSignInBrowserTests
 
 
    /// <summary>
+   /// Two servers are signing in through the browser when the inbox fails in a way no sign-in lists as a failure to
+   /// report: the argument error the real inbox gives when the process that sent a callback has already exited, an
+   /// overflow, a time-out. Nothing escapes either sign-in. Each ends as "not completed" with a reason that names
+   /// the kind of failure in fixed text, keeps its session and is free again, and nothing of the failure's own text
+   /// reaches the log or a property a view binds to.
+   /// </summary>
+   [Theory]
+   [InlineData(nameof(ArgumentException))]
+   [InlineData(nameof(OverflowException))]
+   [InlineData(nameof(TimeoutException))]
+   public async Task Browser_InboxFailsInAWayNoSignInLists_EveryWaitingSignInReportsItAndNothingEscapes(string kind)
+   {
+      SignInWorld world = new();
+      using CompanionSignIn first = await world.BrowserReadyAsync();
+      using CompanionSignIn second = await world.BrowserReadyAsync(SignInWorld.OtherServer);
+      Task<QqqSessionCredential?> firstRunning = first.SignInWithBrowserAsync();
+      Task<QqqSessionCredential?> secondRunning = second.SignInWithBrowserAsync();
+
+      Assert.Single(world.Inboxes).Fail(SignInWorld.UnlistedInboxFailure(kind));
+
+      Assert.Null(await SignInWorld.EndsAsync(firstRunning));
+      Assert.Null(await SignInWorld.EndsAsync(secondRunning));
+      Assert.All([first, second], signIn =>
+      {
+         Assert.Equal(CompanionSignInState.BrowserFailed, signIn.State);
+         Assert.Equal(SignInWorld.InboxFailedReport(kind), signIn.Failure);
+         Assert.True(signIn.HasSession);
+         Assert.False(signIn.IsBusy);
+         Assert.DoesNotContain(BrowserStartFailure.Bound(signIn), text => text is not null && text.Contains(SignInWorld.UnlistedFailureText, StringComparison.Ordinal));
+      });
+      Assert.Equal(2, world.Log.Entries.Count(entry => string.Equals(entry, "ERROR Browser sign-in not completed: IOException: " + SignInWorld.InboxFailedReport(kind), StringComparison.Ordinal)));
+      Assert.Contains($"ERROR The browser callback inbox failed ({kind}); 2 waiting browser exchange(s) were ended and have to be started again.", world.Log.Entries, StringComparer.Ordinal);
+      Assert.DoesNotContain(world.Log.Entries, entry => entry.Contains(SignInWorld.UnlistedFailureText, StringComparison.Ordinal) || Secret(entry));
+   }
+
+
+
+   /// <summary>
    /// When Windows cannot start the browser, the failure it gives names what it could not start: the whole sign-in
    /// address, with the attempt's state, nonce and code challenge. None of that is logged or kept. The reason the
    /// wizard is given says that the default browser could not be opened and what to check, the log says the same

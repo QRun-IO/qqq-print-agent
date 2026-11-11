@@ -12,10 +12,15 @@ to check: that a default browser is set in Windows Settings under Apps, Default 
 otherwise unchanged. Every release up to 1.2.1 has the sign-in case; the sign-out case was never in a release
 ([audit](docs/AUDIT-2026-11-10.md), U22).
 
+An unexpected failure of the browser callback inbox no longer leaves the connection dialog's browser sign-in as an
+unhandled error (2.0). The inbox gives an argument error when the process that sent a callback has already exited,
+which the dialog's flow did not expect. It is now reported as "Browser sign-in not completed", with the kind of
+failure as the reason.
+
 Sign-in in the companion, rebuilt for several servers (2.0; not used by the window yet). Three types were added to
 the presentation assembly for the connection wizard and the per-server Connection page of
 [ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md). Nothing the operator sees changes through them in
-this build: the connection dialog still runs on the existing flow, whose one change is the entry above.
+this build: the connection dialog still runs on the existing flow, whose only changes are the entries above.
 
 - `CompanionSignIn` is the part of signing in that needs a session and runs as the signed-in Windows user. It reads
   the server's sign-in description, signs in by password or through the browser, and returns the session credential
@@ -29,7 +34,9 @@ this build: the connection dialog still runs on the existing flow, whose one cha
   OAuth state it sent and waits for the callback that carries it, so two servers can be signing in at once. A
   callback that carries no state, more than one, or a state nobody waits for is dropped, and the log says only that
   one was dropped. An inbox is open exactly while something waits. When the inbox fails, everything that waits fails
-  once and the next registration opens a new inbox.
+  once and the next registration opens a new inbox. Whatever the inbox fails with, each sign-in or sign-out that
+  waits ends as a failure it reports: a failure of a kind they do not expect (the inbox gives an argument error when
+  the process that sent a callback has already exited) reaches them as one that names only its kind.
 - `ProviderSignOut` is the identity provider's half of a sign-out: it opens the provider's sign-out page and waits
   up to two minutes for the browser to return with that sign-out's own state.
 - When Windows cannot start the browser, its failure text names what it could not start, which is the whole sign-in

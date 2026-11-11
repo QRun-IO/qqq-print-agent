@@ -14,9 +14,12 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// when tickets still wait, a new one is opened. A callback that carries no state, more than one, or a state nobody
 /// waits for is dropped, and the log says only that one was dropped: nothing of a callback, its state or its code is
 /// ever logged, and a registered state is held only while its ticket waits. When the inbox itself fails, which
-/// includes an inbox that refuses what it received as no callback at all, every waiting ticket fails with that
-/// failure and the next registration opens a new inbox. Tickets are registered from the window's thread and
-/// callbacks arrive on others, so the waiting set is guarded, and this never continues on a caller's thread.
+/// includes an inbox that refuses what it received as no callback at all, every waiting ticket fails and the next
+/// registration opens a new inbox. The tickets are given the inbox's failure when it is of a kind every exchange
+/// reports, and otherwise one that names only its kind (see <see cref="BrowserCallbackFailure"/>), so whatever an
+/// inbox fails with ends each exchange as a failure it reports and never as an exception nobody handles. Tickets
+/// are registered from the window's thread and callbacks arrive on others, so the waiting set is guarded, and this
+/// never continues on a caller's thread.
 /// </summary>
 public sealed class BrowserCallbackDispatcher
 {
@@ -42,8 +45,9 @@ public sealed class BrowserCallbackDispatcher
    /// Registers the state a browser exchange sent and returns the ticket to await. The inbox is open when this
    /// returns, so the caller opens the browser afterwards and a fast redirect is not lost. A state that is already
    /// waiting is refused, because two exchanges could not be told apart. When the inbox cannot be opened the failure is
-   /// thrown to the caller and nothing is registered. The caller disposes the ticket when its exchange ends, however
-   /// it ends.
+   /// thrown to the caller and nothing is registered; a failure of a kind the exchanges do not report is thrown as
+   /// one that names only its kind, as it is for a ticket. The caller disposes the ticket when its exchange ends,
+   /// however it ends.
    /// </summary>
    public BrowserCallbackTicket Register(string state)
    {
@@ -60,6 +64,11 @@ public sealed class BrowserCallbackDispatcher
             try
             {
                Listen();
+            }
+            catch(Exception exception) when(!BrowserCallbackFailure.Listed(exception))
+            {
+               _waiting.Remove(state);
+               throw BrowserCallbackFailure.Reported(exception);
             }
             catch(Exception)
             {
@@ -259,13 +268,19 @@ public sealed class BrowserCallbackDispatcher
 
 
 
-   /// <summary>Fails the tickets a broken inbox left waiting, each once, and logs the kind of failure and how many it ended. The failure's own text is left to each exchange to report, so nothing an inbox put in a message is logged from here.</summary>
+   /// <summary>
+   /// Fails the tickets a broken inbox left waiting, each once, and logs the kind of failure and how many it ended.
+   /// The tickets get the failure itself when it is of a kind every exchange reports, whose text is then left to
+   /// each exchange to report, and otherwise one that names only its kind. Nothing an inbox put in a message is
+   /// logged from here.
+   /// </summary>
    private void End(BrowserCallbackTicket[] stranded, Exception failure)
    {
       _log.Error("The browser callback inbox failed ({Failure}); {Waiting} waiting browser exchange(s) were ended and have to be started again.", failure.GetType().Name, stranded.Length);
+      Exception reported = BrowserCallbackFailure.Reported(failure);
       foreach(BrowserCallbackTicket ticket in stranded)
       {
-         ticket.Fail(failure);
+         ticket.Fail(reported);
       }
    }
 }

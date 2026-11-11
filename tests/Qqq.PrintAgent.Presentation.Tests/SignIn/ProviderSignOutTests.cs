@@ -143,6 +143,31 @@ public sealed class ProviderSignOutTests
 
 
    /// <summary>
+   /// The inbox fails, while the sign-out waits, in a way the sign-out does not list as a failure to report: the
+   /// argument error the real inbox gives when the process that sent a callback has already exited, an overflow, a
+   /// time-out. Nothing escapes: the sign-out is not confirmed, and the log names the kind of failure in fixed text
+   /// and holds nothing of the failure's own text.
+   /// </summary>
+   [Theory]
+   [InlineData(nameof(ArgumentException))]
+   [InlineData(nameof(OverflowException))]
+   [InlineData(nameof(TimeoutException))]
+   public async Task InboxFailsInAWayTheSignOutDoesNotList_IsNotConfirmedAndNothingEscapes(string kind)
+   {
+      SignInWorld world = new();
+
+      Task<bool> running = Over(world).CompleteAsync(Logout());
+      Assert.Single(world.Inboxes).Fail(SignInWorld.UnlistedInboxFailure(kind));
+
+      Assert.False(await SignInWorld.EndsAsync(running));
+      Assert.Equal("WARN Identity provider sign-out was not confirmed: IOException: " + SignInWorld.InboxFailedReport(kind), world.Log.Entries[^1]);
+      Assert.True(world.Inboxes[0].Disposed);
+      Assert.DoesNotContain(world.Log.Entries, entry => entry.Contains(SignInWorld.UnlistedFailureText, StringComparison.Ordinal) || entry.Contains(Hint, StringComparison.Ordinal) || entry.Contains(State, StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
    /// When Windows cannot start the browser, the failure it gives names what it could not start: the whole
    /// end-session address, with the provider's ID token hint and this sign-out's state. The sign-out is reported as
    /// not confirmed, the log says that the default browser could not be opened, with the kind of failure and what to
