@@ -1,5 +1,14 @@
 # TODO
 
+## Needs the owner
+
+Written on 2026-11-11. Four things wait for the owner; the detail of the last three is in the items under "Open for 2.0".
+
+- [ ] **Whether a 1.2.x release gets the fix for the sign-in address in the log.** Every version from 0.2.0-rc.1 to 1.2.1 (the eleven version tags `v0.2.0-rc.1` to `v1.2.1`) writes the identity provider's sign-in address to the companion's log, and shows it in the dialog, when Windows cannot start the browser: the whole address, with that attempt's `state` and `code_challenge`, and its `nonce` in the versions that send one. It takes a failed browser start to happen: no default browser, or a broken handler for web addresses. The unreleased `release/1.2.2` branch (`d6c3013`, in no tag) has that case and would add a second one: the provider's sign-out address, with its `id_token_hint`, in the log. 2.0 has the fix since pull request 53 ([audit](AUDIT-2026-11-10.md) U22, and the first entry of the changelog); `main` and `release/1.2.2` were not changed by it. Whether a 1.2.x release gets the fix is the owner's decision. A 1.2.2 must not be released without it. [ADR-0003](adr/0003-version-2.md) says that no 1.2.x patch follows once 2.0.0 is released, so the decision is about the time until then.
+- [ ] **The check on real printers after the printing changes is due** (pull requests 42 and 50), and it needs the owner present, to approve each print at the time it is sent. "Hardware check, early" and the item about the one-queue change below say what it has to look at. Not run.
+- [ ] **The upgrade qualification needs an administrator prompt answered.** Installing 1.2.1, updating it to a 2.0 build and the elevated runs listed under "Qualify the upgrade from 1.2.x to 2.0" below raise Windows' consent prompt, which the owner answers each time ([ADR-0004](adr/0004-multi-server-runtime.md), "About the process"). Not run.
+- [ ] **The corrected exception record EX-0016 awaits the owner's approval** (the Windows coverage bar of 90%; the item "Standards exception EX-0016" below). Read on 2026-11-11 in the local clone of the standards repository: the record is on the branch of standards pull request 58 at `7a58fb4` with the status "Proposed, awaiting approval", and it is not on that clone's `main`. Whether the pull request is still open on the server was not checked.
+
 ## Open for 2.0
 
 - [ ] A printer whose settings cannot be read still stops printing after a restart or a reconnect, because dispatch waits for one full discovery (decided 2026-11-10, not built; the open part of W65; see "About printing" in `docs/adr/0004-multi-server-runtime.md`): report such a queue as UNKNOWN with no formats and no media, read each queue in its own helper when the helper for all of them fails, and do not ask an unreadable queue again until a retry interval has passed. Its own pull request, with its own review and the check on real printers.
