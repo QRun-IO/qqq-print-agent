@@ -171,7 +171,8 @@ public sealed class ManagementClientOperationsTests
    /// answered with another server's summary would put the name on the wrong server. An add answered with another
    /// address is not the server that was added; the address is compared as an origin, so one place written two ways
    /// is one place. A reorder answered with other servers than those given is not the list that was ordered; the
-   /// order itself is the service's to say.
+   /// order itself is the service's to say. A server's identifier is compared exactly, as a job's is: the contract
+   /// gives an identifier one spelling, so the same letters in upper case are not that server.
    /// </summary>
    [Fact]
    public async Task ReplyForAnotherSubject_IsUnreadable()
@@ -180,7 +181,10 @@ public sealed class ManagementClientOperationsTests
       ManagementReplyParse renamed = Replies.Golden("servers.rename.reply.json");
       ManagementReplyParse added = Replies.Golden("servers.add.reply.json");
       ManagementReplyParse reordered = Replies.Golden("servers.reorder.reply.json");
-      FakePipe pipe = new FakePipe().Answer(renamed).Answer(added).Answer(added).Answer(reordered).Answer(reordered).Answer(reordered).Answer(renamed).Answer(added).Answer(reordered);
+      ServerSummary inUpperCase = new(SampleValues.Golden.ServerId.ToUpperInvariant(), "Warehouse", "https://qqq.example.test", 0, "GREEN", "Connected.");
+      FakePipe pipe = new FakePipe().Answer(renamed).Answer(added).Answer(added).Answer(reordered).Answer(reordered).Answer(reordered)
+         .Answer(Replies.Success(inUpperCase)).Answer(Replies.Success(new ServerListResult([inUpperCase])))
+         .Answer(renamed).Answer(added).Answer(reordered);
       ManagementClient client = new(pipe.SendAsync, log);
       SampleValues given = SampleValues.Golden;
 
@@ -192,6 +196,8 @@ public sealed class ManagementClientOperationsTests
          CallResult.Of(await client.ReorderServersAsync([given.ServerId])),
          CallResult.Of(await client.ReorderServersAsync([given.ServerId, "3f2b8c1e-1111-4f6b-9a7c-0e1d2c3b4a61"])),
          CallResult.Of(await client.ReorderServersAsync([given.ServerId, given.ServerId])),
+         CallResult.Of(await client.RenameServerAsync(given.ServerId, given.NewName)),
+         CallResult.Of(await client.ReorderServersAsync([given.ServerId])),
       ];
       CallResult[] forTheOneAsked =
       [
@@ -203,7 +209,7 @@ public sealed class ManagementClientOperationsTests
       Assert.All(forAnother, result => Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.UnreadableReply, true, "The service's reply could not be read."), (result.Outcome, result.Failure, result.Unconfirmed, result.Message)));
       Assert.All(forAnother, result => Assert.Null(result.Payload));
       Assert.All(forTheOneAsked, result => Assert.Equal(ServiceOutcome.Success, result.Outcome));
-      Assert.Equal(9, pipe.Sent.Count);
+      Assert.Equal(11, pipe.Sent.Count);
       Assert.Contains($"WARN Management request servers.rename on {given.SecondServerId} succeeded, but its result could not be read as ServerSummary.", log.Entries, StringComparer.Ordinal);
       Assert.Contains("WARN Management request servers.add on the computer succeeded, but its result could not be read as ServerAddResult.", log.Entries, StringComparer.Ordinal);
       Assert.Contains("WARN Management request servers.reorder on the computer succeeded, but its result could not be read as ServerListResult.", log.Entries, StringComparer.Ordinal);
