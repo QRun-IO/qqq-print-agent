@@ -19,10 +19,13 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// <summary>
    /// One pass of a lane. It first drains the durable event outbox, because an outcome the server never heard of would
    /// stay invisible. Only when nothing is pending, the connection is synchronized and dispatch is allowed does it
-   /// discover printers and claim at most one job. Returns true whenever a claimed job was processed, whatever its
-   /// outcome, and when a malformed job was refused and reported, so the lane keeps draining; false when idle,
-   /// paused, blocked, or the claimed job was one a lane of this computer already holds, or one the journal already
-   /// holds as final or as submitting, which ends the lane's pass because the server would only offer that job again.
+   /// list the printers and claim at most one job. The list is the one that reads no printer's settings: it is used
+   /// only to name the claimed job's printer in the journal, so a printer whose driver hangs or fails cannot stop a
+   /// pass before it claims. A platform that cannot list its printers at all still stops the pass here, with nothing
+   /// claimed. Returns true whenever a claimed job was processed, whatever its outcome, and when a malformed job was
+   /// refused and reported, so the lane keeps draining; false when idle, paused, blocked, or the claimed job was one
+   /// a lane of this computer already holds, or one the journal already holds as final or as submitting, which ends
+   /// the lane's pass because the server would only offer that job again.
    /// </summary>
    public async Task<bool> RunOnceAsync(CancellationToken token)
    {
@@ -37,7 +40,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          return false;
       }
       long inventoryStarted = Time.GetTimestamp();
-      IReadOnlyList<PrinterInfo> inventory = printers.Discover();
+      IReadOnlyList<PrinterInfo> inventory = printers.ListWithoutMedia();
       TimeSpan inventoryElapsed = Time.GetElapsedTime(inventoryStarted);
       if(!canSynchronize() || !canDispatch())
       {
@@ -221,7 +224,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// caller can tell a refusal before any bytes from an uncertain submission. Between recording SUBMITTING and calling
    /// Windows nothing has been sent, so the two things that can stop the job there (delivery of the receipt not being
    /// confirmed, and cancellation) say in their own words that no bytes were submitted. Handing the verified staged
-   /// file to the backend is the only step after which an outcome is uncertain. The printer is discovered again once,
+   /// file to the backend is the only step after which an outcome is uncertain. The printer is looked up once,
    /// after the download, and not a second time when its turn is held: that would start the print helper once more
    /// for every job, while the job holds the printer's turn and a print slot. What changes during the wait for the
    /// turn is refused later by whoever can tell that nothing was sent: the exposure filter for a printer that is no
@@ -275,15 +278,16 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
    /// <summary>
-   /// Discovers the printers again after the download and requires the assigned queue to still be shared, to still
-   /// offer the job's format and to still have the selected media profile, so a printer withdrawn, or a queue or driver
-   /// default changed, while the document streamed is refused before SUBMITTING is recorded, with Windows never asked,
-   /// instead of printing on the wrong stock.
+   /// Reads the job's own printer again after the download and requires it to still be shared, to still offer the
+   /// job's format and to still have the selected media profile, so a printer withdrawn, or a queue or driver default
+   /// changed, while the document streamed is refused before SUBMITTING is recorded, with Windows never asked, instead
+   /// of printing on the wrong stock. Only that one printer is asked about: what another printer on the computer
+   /// answers, or fails to answer, has no part in whether this job may print.
    /// </summary>
    private void RequireCurrentPrinter(PrintJob job)
    {
-      PrinterInfo? currentPrinter = printers.Discover().SingleOrDefault(p => string.Equals(p.PrinterId, job.PrinterId, StringComparison.Ordinal) && p.Formats.Contains(job.Format, StringComparer.Ordinal));
-      if(currentPrinter is null)
+      PrinterInfo? currentPrinter = printers.FindWithMedia(job.PrinterId);
+      if(currentPrinter is null || !currentPrinter.Formats.Contains(job.Format, StringComparer.Ordinal))
       {
          throw new InvalidOperationException("Assigned printer or document format is unavailable.");
       }

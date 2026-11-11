@@ -4,6 +4,7 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -46,13 +47,79 @@ public sealed partial class WindowsPrinters : IPrinterBackend
 
 
    /// <summary>
-   /// Enumerates the queues visible to this Windows identity (for the service, the machine-wide ones). A queue whose port
-   /// or driver needs a person at the keyboard (file output, print-to-PDF, XPS, fax, OneNote) is reported UNKNOWN with no
-   /// formats so it can never be exposed to unattended printing. ZPL is offered only for Zebra and ZDesigner queues, and
-   /// the queue's configured default media is attached when it can be read. The queue identifier is a hash of the name, so
-   /// the raw queue name is never used as an identifier on the wire.
+   /// Lists the queues visible to this Windows identity (for the service, the machine-wide ones), each with the queue's
+   /// configured default media when it can be read. A queue whose port or driver needs a person at the keyboard (file
+   /// output, print-to-PDF, XPS, fax, OneNote) is reported UNKNOWN with no formats so it can never be exposed to
+   /// unattended printing. ZPL is offered only for Zebra and ZDesigner queues. The queue identifier is a hash of the
+   /// name, so the raw queue name is never used as an identifier on the wire.
+   /// <para>
+   /// Native calls: the two enumeration calls, then for every queue that can print unattended, in the order the spooler
+   /// lists them, the settings read (open the queue, its level 8 details, the driver's paper lists, a device context
+   /// for the resolution). So every such queue's driver is asked, and one that hangs holds the whole list.
+   /// </para>
    /// </summary>
-   public IReadOnlyList<PrinterInfo> Discover()
+   public IReadOnlyList<PrinterInfo> Discover() => [.. EnumerateQueues().Select(queue => WithMedia(Identify(queue)))];
+
+
+
+   /// <summary>
+   /// Lists the same queues as <see cref="Discover"/>, identified and classified by the same rule, without their media.
+   /// Native calls: the two enumeration calls and nothing else. This process opens no queue and asks no driver, so a
+   /// queue whose driver hangs or fails neither slows this nor fails it. What the spooler does to answer the
+   /// enumeration is its own: a connection to a print server that does not answer can still hold it, as
+   /// <see cref="EnumerateQueues"/> says.
+   /// </summary>
+   public IReadOnlyList<PrinterInfo> ListWithoutMedia() => [.. EnumerateQueues().Select(Identify)];
+
+
+
+   /// <summary>
+   /// The one queue with this identifier, exactly as <see cref="Discover"/> lists it, or null when no queue has it. The
+   /// identifier of each listed queue is worked out from its name, which needs no native call, and only the queue that
+   /// matches has its settings read. Native calls: the two enumeration calls, then the settings read of that one queue
+   /// when it can print unattended; this process opens no other queue and asks no other driver. Two queues with one
+   /// identifier are refused before either is read, because there is no telling which was meant.
+   /// </summary>
+   public PrinterInfo? FindWithMedia(string printerId)
+   {
+      PrinterInfo? queue = EnumerateQueues().Select(Identify).SingleOrDefault(item => string.Equals(item.PrinterId, printerId, StringComparison.Ordinal));
+      return queue is null ? null : WithMedia(queue);
+   }
+
+
+
+   /// <summary>
+   /// Whether the text has the form of a queue identifier as <see cref="QueueIdentifier"/> makes them: exactly 24
+   /// hexadecimal digits in lower case. Nothing else can name a queue, so anything else is refused, or read as absent,
+   /// before it is used.
+   /// </summary>
+   internal static bool IsQueueIdentifier([NotNullWhen(true)] string? text)
+      => text is { Length: 24 } && text.All(character => character is (>= '0' and <= '9') or (>= 'a' and <= 'f'));
+
+
+
+   /// <summary>The identifier of the queue with this name: the first 24 hexadecimal digits, in lower case, of the SHA-256 of the name in UTF-8.</summary>
+   internal static string QueueIdentifier(string name) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name))).ToLowerInvariant()[..24];
+
+
+
+   /// <summary>
+   /// Asks the spooler for its list of queues with the two enumeration calls every read begins with: one for the size of
+   /// the list and one for the list. A spooler with nothing installed answers the first with no size, and the second is
+   /// not made. These are the only calls a read makes that concern every queue at once.
+   /// <para>
+   /// This process opens no queue for them, but the spooler may. Both calls ask for the queues installed here and for
+   /// the connections this identity has to printers on print servers, at the level that carries each queue's driver,
+   /// port and status (level 2). Microsoft documents that an enumeration at that level opens every such connection, and
+   /// waits for the remote call to time out when the connection is down, its server no longer exists or its printer no
+   /// longer exists (the remarks on PRINTER_INFO_4). So one connection to a print server that is switched off or
+   /// cannot be reached can hold every read that begins here, the list without media included, although no driver on
+   /// this computer is asked. That was so before the three reads existed and they do not change it. It has not been
+   /// measured on Windows. Listing at another level would change what reaches Windows, so it is not done here; it
+   /// belongs with the check on real printers. docs/REALTIME.md states the limit for operators.
+   /// </para>
+   /// </summary>
+   private IReadOnlyList<SpoolerQueue> EnumerateQueues()
    {
       ////////////////////////////////////////////////////////////////////
       // 6 is PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS: the queues //
@@ -66,21 +133,38 @@ public sealed partial class WindowsPrinters : IPrinterBackend
       }
 
       Check(_spooler.EnumPrinters(6, checked((int)needed), out IReadOnlyList<SpoolerQueue> queues));
-      List<PrinterInfo> printers = [];
-      foreach(SpoolerQueue queue in queues)
-      {
-         string name = queue.Name ?? "";
-         string driver = queue.Driver ?? "";
-         bool zebra = (name + driver).Contains("Zebra", StringComparison.OrdinalIgnoreCase) || driver.Contains("ZDesigner", StringComparison.OrdinalIgnoreCase);
-         string status = MapStatus(queue.Status);
-         string port = queue.Port ?? "";
-         bool interactive = RequiresInteractiveOutput(port, driver);
-         string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name))).ToLowerInvariant()[..24];
-         QueueDefaultMedia? media = interactive ? null : ReadQueueMedia(id, name, driver, port);
-         printers.Add(new PrinterInfo(id, name, driver, port, interactive ? "UNKNOWN" : status, interactive ? [] : zebra ? ["PDF", "ZPL"] : ["PDF"],
-            MediaProfiles: media?.Profile is null ? [] : [media.Profile]));
-      }
-      return printers;
+      return queues;
+   }
+
+
+
+   /// <summary>
+   /// Turns one line of the spooler's list into the queue as it is reported, without its media and without a native
+   /// call: the identifier from the name, the health word from the status flags, and the formats from what the name,
+   /// driver and port say. A queue that needs a person is UNKNOWN with no formats. This is the one mapping behind all
+   /// three reads, so they cannot disagree about a queue.
+   /// </summary>
+   internal static PrinterInfo Identify(SpoolerQueue queue)
+   {
+      string name = queue.Name ?? "";
+      string driver = queue.Driver ?? "";
+      bool zebra = (name + driver).Contains("Zebra", StringComparison.OrdinalIgnoreCase) || driver.Contains("ZDesigner", StringComparison.OrdinalIgnoreCase);
+      string status = MapStatus(queue.Status);
+      string port = queue.Port ?? "";
+      bool interactive = RequiresInteractiveOutput(port, driver);
+      return new PrinterInfo(QueueIdentifier(name), name, driver, port, interactive ? "UNKNOWN" : status, interactive ? [] : zebra ? ["PDF", "ZPL"] : ["PDF"]);
+   }
+
+
+
+   /// <summary>
+   /// Adds the queue's configured default media to an identified queue, which is the step that asks its driver. A queue
+   /// with no formats is one that needs a person: it is never opened and has no media.
+   /// </summary>
+   private PrinterInfo WithMedia(PrinterInfo queue)
+   {
+      QueueDefaultMedia? media = queue.Formats.Length == 0 ? null : ReadQueueMedia(queue.PrinterId, queue.Name, queue.DriverName, queue.PortName);
+      return queue with { MediaProfiles = media?.Profile is null ? [] : [media.Profile] };
    }
 
 

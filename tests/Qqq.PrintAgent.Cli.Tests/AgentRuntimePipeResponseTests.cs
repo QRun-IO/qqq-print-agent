@@ -198,6 +198,16 @@ public sealed class AgentRuntimePipeResponseTests
 
 
 
+      /// <summary>Reports the same empty inventory.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia() => [];
+
+
+
+      /// <summary>Has no queue to find.</summary>
+      public PrinterInfo? FindWithMedia(string printerId) => null;
+
+
+
       /// <summary>Always throws: physical printing is forbidden here.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken) => throw new InvalidOperationException("Physical printing is forbidden in this test.");
    }

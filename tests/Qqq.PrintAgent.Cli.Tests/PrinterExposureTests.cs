@@ -100,6 +100,16 @@ public sealed class PrinterExposureTests
 
 
 
+      /// <summary>Reports the same queue; it has no media to leave out.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia() => Discover();
+
+
+
+      /// <summary>Returns the queue when it is the one asked for.</summary>
+      public PrinterInfo? FindWithMedia(string printerId) => Discover().SingleOrDefault(printer => string.Equals(printer.PrinterId, printerId, StringComparison.Ordinal));
+
+
+
       /// <summary>Marks that a print arrived and returns a fixed receipt.</summary>
       public Task<string> PrintFileAsync(PrintJob job, string path, TimeSpan submissionTimeout, CancellationToken cancellationToken)
       {

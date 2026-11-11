@@ -88,8 +88,37 @@ public sealed class PrinterWorkerIsolationTests
       };
       Assert.Throws<TimeoutException>(() => backend.Discover());
       Assert.True(ProcessExited(hungProcessId));
-      Assert.Equal("fixture", Assert.Single(backend.Discover()).PrinterId);
+      Assert.Equal(WorkerFixture.Program.QueueId, Assert.Single(backend.Discover()).PrinterId);
       Assert.Equal(2, launches);
+   }
+
+
+
+   /// <summary>
+   /// The three reads cross the boundary to the real helper loop and come back as what they are. Here the fixture stands for
+   /// a station where a queue other than its own has a driver that never answers: the list without media and the lookup of
+   /// the fixture's queue are answered (the list without the media profile, the lookup with it, an unknown identifier as
+   /// absent), while the full discovery, which asks every driver, runs into its limit.
+   /// </summary>
+   [Fact]
+   public void ListAndLookupAreAnsweredWhileTheFullDiscoveryHangs()
+   {
+      static Process Hanging(ProcessStartInfo start)
+      {
+         start.ArgumentList.Add("--hang");
+         return Process.Start(start) ?? throw new InvalidOperationException("Fixture launch failed.");
+      }
+      IsolatedPrinterBackend backend = new(FixtureExecutable) { StartProcess = Hanging };
+
+      PrinterInfo listed = Assert.Single(backend.ListWithoutMedia());
+      PrinterInfo found = Assert.IsType<PrinterInfo>(backend.FindWithMedia(WorkerFixture.Program.QueueId));
+
+      Assert.Equal((WorkerFixture.Program.QueueId, "Synthetic queue"), (listed.PrinterId, listed.Name));
+      Assert.Null(listed.MediaProfiles);
+      Assert.Equal((WorkerFixture.Program.QueueId, "Synthetic queue"), (found.PrinterId, found.Name));
+      Assert.Equal("fixture-default", Assert.Single(found.MediaProfiles!).Id);
+      Assert.Null(backend.FindWithMedia("000000000000000000000000"));
+      Assert.Throws<TimeoutException>(() => new IsolatedPrinterBackend(FixtureExecutable) { OperationTimeoutOverride = TimeSpan.FromSeconds(2), StartProcess = Hanging }.Discover());
    }
 
 

@@ -165,7 +165,7 @@ public sealed class PrintWorkerOutcomeTests
 
 
    /// <summary>
-   /// Jobs can wait a long time for a printer's turn, and the worker does not discover the printers again when the
+   /// Jobs can wait a long time for a printer's turn, and the worker does not look the printer up again when the
    /// turn is held: that would start the print helper once more for every job, while the job holds the turn and a
    /// print slot. What happened to the printer during the wait is therefore settled after SUBMITTING is recorded, by
    /// whoever can tell whether anything was sent. A printer the operator stopped sharing is refused by the exposure
@@ -173,8 +173,8 @@ public sealed class PrintWorkerOutcomeTests
    /// before it prints: both are FAILED. A queue that is gone is found by the native layer as well, but its failure
    /// carries no type the worker can rely on, so the job is OUTCOME_UNKNOWN like any other failure after the staged
    /// file was handed over. The fake backend plays the native layer here: it finds the queue, then matches the job's
-   /// selected media against the queue's current default, and only then would print. In every case the printer is
-   /// discovered twice and no more (the inventory and the check after the download), the turn is released, nothing
+   /// selected media against the queue's current default, and only then would print. In every case the printers are
+   /// listed once (before the claim) and the job's printer is looked up once (after the download), the turn is released, nothing
    /// stays in the staging folder, and the job is neither downloaded nor printed when the server offers it again.
    /// </summary>
    [Theory]
@@ -226,7 +226,7 @@ public sealed class PrintWorkerOutcomeTests
       Assert.Null(journal.Last("job-1").SpoolerJobId);
       Assert.Equal(new[] { "RECEIVED", "SUBMITTING", outcome }, server.States, StringComparer.Ordinal);
       Assert.Equal(submissions, printer.Submissions);
-      Assert.Equal(2, printer.Discoveries);
+      Assert.Equal((0, 1, 1), (printer.Discoveries, printer.Listings, printer.Lookups.Count));
       Assert.Equal(new[] { "take printer turn", "release printer turn" }, steps, StringComparer.Ordinal);
       Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
 
@@ -338,11 +338,7 @@ public sealed class PrintWorkerOutcomeTests
       };
       if(string.Equals(fault, "printer-gone", StringComparison.Ordinal))
       {
-         printer.Discovering = () =>
-         {
-            if(printer.Discoveries > 1)
-            { printer.Printers.Clear(); }
-         };
+         printer.Finding = _ => printer.Printers.Clear();
       }
       Assert.True(await harness.RunOnceAsync());
       Assert.Equal(submittingRecorded ? new[] { "RECEIVED", "SUBMITTING", "FAILED" } : ["RECEIVED", "FAILED"], journal.StatesOf("job-1"), StringComparer.Ordinal);
@@ -499,15 +495,15 @@ public sealed class PrintWorkerOutcomeTests
 
 
 
-   /// <summary>If the connection stops being synchronized while printers are being discovered, the worker does not claim, and sends the server nothing.</summary>
+   /// <summary>If the connection stops being synchronized while the printers are being listed before the claim, the worker does not claim, and sends the server nothing.</summary>
    [Fact]
    public async Task LosingSynchronizationDuringDiscoveryStopsBeforeTheClaim()
    {
       await using var harness = new WorkerHarness();
       harness.Server.Offer(FakePrintServer.Job(Document), Document);
-      harness.CanSynchronize = () => harness.Printer.Discoveries == 0;
+      harness.CanSynchronize = () => harness.Printer.Listings == 0;
       Assert.False(await harness.RunOnceAsync());
-      Assert.Equal(1, harness.Printer.Discoveries);
+      Assert.Equal(1, harness.Printer.Listings);
       Assert.Equal(0, harness.Server.Claims);
       Assert.Empty(harness.Server.Unexpected);
    }
@@ -762,7 +758,7 @@ public sealed class PrintWorkerOutcomeTests
 
 
    /// <summary>
-   /// A file-taking printer for one fault of the staged path: its queue disappears after the first discovery, or its
+   /// A file-taking printer for one fault of the staged path: its queue disappears at the lookup after the download, or its
    /// submission is refused for changed media, fails, times out or is cancelled part-way by stopping the worker. For
    /// the faults that happen before submission it is an ordinary printer that is never reached.
    /// </summary>
@@ -789,11 +785,7 @@ public sealed class PrintWorkerOutcomeTests
       };
       if(string.Equals(fault, "printer-gone", StringComparison.Ordinal))
       {
-         printer.Discovering = () =>
-         {
-            if(printer.Discoveries > 1)
-            { printer.Printers.Clear(); }
-         };
+         printer.Finding = _ => printer.Printers.Clear();
       }
       return printer;
    }

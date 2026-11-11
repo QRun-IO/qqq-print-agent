@@ -19,6 +19,14 @@ public sealed class PrinterWorkerHostTests
 {
    private const string Queue = "Synthetic label queue";
 
+
+
+   /// <summary>The identifier of that queue, in the form the helper accepts: the first 24 hexadecimal digits of the SHA-256 of its name.</summary>
+   private const string QueueId = "72a900462ca6a6e18ecb8fb2";
+
+
+
+   /// <summary>A synthetic job; the fake printers the helper loop is given never open its document.</summary>
    private static readonly PrintJob Job = new("job-1", "printer-1", "Synthetic", "PDF", new string('0', 64), 1, new PrintOptions(), "2026-11-01T00:00:00Z", "QUEUED");
 
 
@@ -74,6 +82,104 @@ public sealed class PrinterWorkerHostTests
       Assert.Equal(4242, watch.ParentId);
       Assert.True(watchedDuringTheCall);
       Assert.True(watch.Stopped);
+   }
+
+
+
+   /// <summary>List-without-media answers with the backend's list as it is, media profiles absent, and exit code 0. It is its own read: neither the full discovery nor a lookup is run for it.</summary>
+   [Fact]
+   public async Task ListWithoutMediaAnswersWithTheBackendsListAndRunsNoOtherRead()
+   {
+      RecordingPrinters printers = new() { OnList = () => [new PrinterInfo(QueueId, Queue, "Synthetic label driver", "USB001", "READY", ["PDF"])] };
+
+      (int exit, PrinterWorkerHost.Response response) = await RunAsync(new PrinterWorkerHost.Request("list-without-media"), printers);
+
+      Assert.Equal(0, exit);
+      Assert.True(response.Success);
+      PrinterInfo listed = Assert.Single(response.Printers!);
+      Assert.Equal((QueueId, Queue), (listed.PrinterId, listed.Name));
+      Assert.Null(listed.MediaProfiles);
+      Assert.Equal((0, 1), (printers.Discoveries, printers.Listings));
+      Assert.Empty(printers.Lookups);
+   }
+
+
+
+   /// <summary>Find-with-media hands the backend the identifier it was sent and answers with the one queue the backend found, media profile included. Neither the full discovery nor the list is run for it.</summary>
+   [Fact]
+   public async Task FindWithMediaAnswersWithTheOneQueueAndItsMedia()
+   {
+      PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
+      RecordingPrinters printers = new() { OnFind = id => new PrinterInfo(id, Queue, "Synthetic label driver", "USB001", "READY", ["PDF"], MediaProfiles: [profile]) };
+
+      (int exit, PrinterWorkerHost.Response response) = await RunAsync(new PrinterWorkerHost.Request("find-with-media", PrinterId: QueueId), printers);
+
+      Assert.Equal(0, exit);
+      Assert.True(response.Success);
+      PrinterInfo found = Assert.Single(response.Printers!);
+      Assert.Equal((QueueId, Queue), (found.PrinterId, found.Name));
+      Assert.Equal(profile, Assert.Single(found.MediaProfiles!));
+      Assert.Equal([QueueId], printers.Lookups, StringComparer.Ordinal);
+      Assert.Equal((0, 0), (printers.Discoveries, printers.Listings));
+   }
+
+
+
+   /// <summary>A queue the backend does not have is answered as success with an empty list, which is not the same answer as a failure or as no list at all.</summary>
+   [Fact]
+   public async Task FindWithMediaAnswersWithAnEmptyListWhenTheBackendHasNoSuchQueue()
+   {
+      RecordingPrinters printers = new();
+      (int exit, PrinterWorkerHost.Response response) = await RunAsync(new PrinterWorkerHost.Request("find-with-media", PrinterId: QueueId), printers);
+      Assert.Equal(0, exit);
+      Assert.True(response.Success);
+      Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<PrinterInfo>>(response.Printers));
+      Assert.Equal([QueueId], printers.Lookups, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// Find-with-media is refused before the backend is asked anything unless the request names its queue by text in the
+   /// form of a queue identifier: not when it names none, and not a queue name, a job's printer field from another system,
+   /// upper case, or one digit too few or too many.
+   /// </summary>
+   [Theory]
+   [InlineData(null)]
+   [InlineData("")]
+   [InlineData("printer-1")]
+   [InlineData(Queue)]
+   [InlineData("72A900462CA6A6E18ECB8FB2")]
+   [InlineData("72a900462ca6a6e18ecb8fb")]
+   [InlineData("72a900462ca6a6e18ecb8fb20")]
+   public async Task FindWithMediaRefusesAnIdentifierThatIsNotInTheFormOfAQueueIdentifier(string? identifier)
+   {
+      RecordingPrinters printers = new();
+      (int exit, PrinterWorkerHost.Response response) = await RunAsync(new PrinterWorkerHost.Request("find-with-media", PrinterId: identifier), printers);
+      Assert.Equal(1, exit);
+      Assert.Equal((false, "The print worker requires the identifier of the queue to find.", null), (response.Success, response.Error, response.ErrorCode));
+      Assert.Null(response.Printers);
+      Assert.Empty(printers.Lookups);
+      Assert.Equal((0, 0), (printers.Discoveries, printers.Listings));
+   }
+
+
+
+   /// <summary>A list or a lookup that fails in the backend is reported as discovery's failure is: exit code 1, the message, no code, and no printers.</summary>
+   [Theory]
+   [InlineData("list-without-media")]
+   [InlineData("find-with-media")]
+   public async Task FailedListOrLookupIsReportedLikeAFailedDiscovery(string operation)
+   {
+      RecordingPrinters printers = new()
+      {
+         OnList = () => throw new InvalidOperationException("Synthetic: the spooler did not answer."),
+         OnFind = _ => throw new InvalidOperationException("Synthetic: the spooler did not answer."),
+      };
+      (int exit, PrinterWorkerHost.Response response) = await RunAsync(new PrinterWorkerHost.Request(operation, PrinterId: QueueId), printers);
+      Assert.Equal(1, exit);
+      Assert.Equal((false, "Synthetic: the spooler did not answer.", null), (response.Success, response.Error, response.ErrorCode));
+      Assert.Null(response.Printers);
    }
 
 
@@ -189,6 +295,9 @@ public sealed class PrinterWorkerHostTests
    [InlineData("null\n", "Missing printer worker request.")]
    [InlineData("{\"operation\":\"print\"}\n", "Unknown printer worker operation.")]
    [InlineData("{\"operation\":\"DISCOVER\"}\n", "Unknown printer worker operation.")]
+   [InlineData("{\"operation\":\"list\"}\n", "Unknown printer worker operation.")]
+   [InlineData("{\"operation\":\"find\",\"printerId\":\"72a900462ca6a6e18ecb8fb2\"}\n", "Unknown printer worker operation.")]
+   [InlineData("{\"operation\":\"Find-With-Media\",\"printerId\":\"72a900462ca6a6e18ecb8fb2\"}\n", "Unknown printer worker operation.")]
    [InlineData("{\"operation\":\n", null)]
    public async Task UnusableRequestIsAnsweredWithAFailure(string text, string? message)
    {
@@ -207,7 +316,8 @@ public sealed class PrinterWorkerHostTests
       {
          Assert.Equal(message, response.Error);
       }
-      Assert.Equal((0, 0), (printers.Discoveries, printers.Prints));
+      Assert.Equal((0, 0, 0), (printers.Discoveries, printers.Listings, printers.Prints));
+      Assert.Empty(printers.Lookups);
       Assert.True(watch.Stopped);
    }
 
@@ -283,8 +393,28 @@ public sealed class PrinterWorkerHostTests
 
 
 
+      /// <summary>What the list without media returns or throws; an empty list unless a test says otherwise.</summary>
+      internal Func<IReadOnlyList<PrinterInfo>> OnList { get; init; } = () => [];
+
+
+
+      /// <summary>What the lookup of one queue returns or throws, given the identifier; no queue unless a test says otherwise.</summary>
+      internal Func<string, PrinterInfo?> OnFind { get; init; } = _ => null;
+
+
+
       /// <summary>How often discovery was asked for.</summary>
       internal int Discoveries { get; private set; }
+
+
+
+      /// <summary>How often the list without media was asked for.</summary>
+      internal int Listings { get; private set; }
+
+
+
+      /// <summary>The identifier every lookup of one queue was made with, in order.</summary>
+      internal List<string> Lookups { get; } = [];
 
 
 
@@ -298,6 +428,24 @@ public sealed class PrinterWorkerHostTests
       {
          Discoveries++;
          return OnDiscover();
+      }
+
+
+
+      /// <summary>Counts the call and does what the test said.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia()
+      {
+         Listings++;
+         return OnList();
+      }
+
+
+
+      /// <summary>Notes the identifier and does what the test said.</summary>
+      public PrinterInfo? FindWithMedia(string printerId)
+      {
+         Lookups.Add(printerId);
+         return OnFind(printerId);
       }
 
 

@@ -99,6 +99,17 @@ internal sealed partial class FakeWindowsPrinting : ISpooler, IPrinterSettings, 
 
 
 
+   /// <summary>Stands for the hang of a queue whose driver never answers: called after the call was recorded, it throws when the named queue was described that way.</summary>
+   private void Ask(string name)
+   {
+      if(Find(name)?.NeverAnswers is { } hang)
+      {
+         throw hang();
+      }
+   }
+
+
+
    /// <summary>Finds a queue by name; a name the spooler does not know is null.</summary>
    private FakeQueue? Find(string name) => Queues.Find(queue => string.Equals(queue.Name, name, StringComparison.Ordinal));
 

@@ -209,9 +209,10 @@ internal sealed class RecordingJournal : IJobJournal
 
 
 /// <summary>
-/// A printing platform that prints nothing: it lists the printers a test gives it, reads each staged file as the spooler
-/// would, and counts every submission that reached the native step, with hooks at discovery and at submission so a test
-/// can change the queue or fail the print at that exact point.
+/// A printing platform that prints nothing: it answers each of the three reads from the printers a test gives it, reads
+/// each staged file as the spooler would, and counts every submission that reached the native step. It counts each read
+/// separately and has a hook at each and at submission, so a test can change the queue, fail a read or fail the print at
+/// that exact point, and can tell which read the worker used.
 /// </summary>
 internal sealed class FakePrinterBackend : IPrinterBackend
 {
@@ -220,8 +221,18 @@ internal sealed class FakePrinterBackend : IPrinterBackend
 
 
 
-   /// <summary>How many times discovery ran.</summary>
+   /// <summary>How many times the full discovery ran, the read that asks about every printer's settings.</summary>
    internal int Discoveries { get; private set; }
+
+
+
+   /// <summary>How many times the list without media ran, the read that asks about no printer's settings.</summary>
+   internal int Listings { get; private set; }
+
+
+
+   /// <summary>The identifier every lookup of one printer was made with, in order.</summary>
+   internal List<string> Lookups { get; } = [];
 
 
 
@@ -235,8 +246,18 @@ internal sealed class FakePrinterBackend : IPrinterBackend
 
 
 
-   /// <summary>Runs at the start of each discovery.</summary>
+   /// <summary>Runs at the start of each full discovery.</summary>
    internal Action? Discovering { get; set; }
+
+
+
+   /// <summary>Runs at the start of each list without media.</summary>
+   internal Action? Listing { get; set; }
+
+
+
+   /// <summary>Runs at the start of each lookup of one printer, with the identifier asked for.</summary>
+   internal Action<string>? Finding { get; set; }
 
 
 
@@ -251,6 +272,26 @@ internal sealed class FakePrinterBackend : IPrinterBackend
       Discoveries++;
       Discovering?.Invoke();
       return [.. Printers];
+   }
+
+
+
+   /// <summary>Counts the list, runs the hook and returns the configured printers with their media profiles left out, as a read that asked no printer for its settings must.</summary>
+   public IReadOnlyList<PrinterInfo> ListWithoutMedia()
+   {
+      Listings++;
+      Listing?.Invoke();
+      return [.. Printers.Select(printer => printer with { MediaProfiles = null })];
+   }
+
+
+
+   /// <summary>Notes the lookup, runs the hook and returns the configured printer with that identifier, media profiles included, or null when there is none.</summary>
+   public PrinterInfo? FindWithMedia(string printerId)
+   {
+      Lookups.Add(printerId);
+      Finding?.Invoke(printerId);
+      return Printers.SingleOrDefault(printer => string.Equals(printer.PrinterId, printerId, StringComparison.Ordinal));
    }
 
 

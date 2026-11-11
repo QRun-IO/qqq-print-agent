@@ -37,6 +37,16 @@ internal sealed class FakeQueue(string? name, string? driver = "Synthetic label 
 
 
 
+   /// <summary>
+   /// When set, this queue's driver never answers: every call that names the queue (opening it, asking its driver for its
+   /// paper lists, creating a device context for it) is recorded and then throws what this makes. The exception stands for
+   /// the hang, because a test cannot wait for a call that never returns. It is not a Windows error, so no rule can take
+   /// it for a queue that merely has no settings; a rule that asks this queue anything fails.
+   /// </summary>
+   internal Func<Exception>? NeverAnswers { get; set; }
+
+
+
    /// <summary>The machine default settings (a complete DEVMODE with its private part), or null for a queue that has none.</summary>
    internal byte[]? MachineDefaults { get; set; }
 

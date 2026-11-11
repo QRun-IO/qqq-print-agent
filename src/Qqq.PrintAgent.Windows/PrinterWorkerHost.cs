@@ -31,8 +31,12 @@ public static class PrinterWorkerHost
 
 
 
-   /// <summary>One operation sent to the helper as a single JSON line: discover, print a staged file, or cancel a spool job, with only the fields that operation needs. A staged file travels by path, never by content.</summary>
-   internal sealed record Request(string Operation, PrintJob? Job = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null, string? ContentPath = null);
+   /// <summary>
+   /// One operation sent to the helper as a single JSON line: one of the three reads (discover, list without media, find one
+   /// queue with its media), print a staged file, or cancel a spool job, with only the fields that operation needs. A staged
+   /// file travels by path, never by content, and the one queue to find by its identifier, never by its name.
+   /// </summary>
+   internal sealed record Request(string Operation, PrintJob? Job = null, string? PrinterName = null, string? JobId = null, string? SpoolerJobId = null, string? ContentPath = null, string? PrinterId = null);
 
 
 
@@ -128,9 +132,11 @@ public static class PrinterWorkerHost
 
 
    /// <summary>
-   /// Carries out the one operation a request names and builds its answer: the inventory for discover, nothing but success
-   /// for cancel (which reads the job back and proves it is ours before deleting it), and the spooler receipt for
-   /// print-file, which needs both a job and the path of its verified file. Any other operation is refused.
+   /// Carries out the one operation a request names and builds its answer: the inventory for discover, the same queues
+   /// without their media for list-without-media, no printer or one for find-with-media, nothing but success for cancel
+   /// (which reads the job back and proves it is ours before deleting it), and the spooler receipt for print-file, which
+   /// needs both a job and the path of its verified file. Find-with-media is refused, before the printers are asked
+   /// anything, unless it names its queue by text that has the form of a queue identifier. Any other operation is refused.
    /// </summary>
    private static async Task<Response> ExecuteAsync(Request request, IPrinterBackend printers, ISpoolerJobs spoolerJobs, CancellationToken token)
    {
@@ -138,6 +144,14 @@ public static class PrinterWorkerHost
       {
          case "discover":
             return new Response(true, printers.Discover());
+         case "list-without-media":
+            return new Response(true, printers.ListWithoutMedia());
+         case "find-with-media":
+            if(!WindowsPrinters.IsQueueIdentifier(request.PrinterId))
+            {
+               throw new InvalidDataException("The print worker requires the identifier of the queue to find.");
+            }
+            return new Response(true, printers.FindWithMedia(request.PrinterId) is { } found ? [found] : []);
          case "cancel":
             WindowsSpoolerJobs.Cancel(spoolerJobs, request.PrinterName ?? "", request.JobId ?? "", request.SpoolerJobId ?? "");
             return new Response(true);

@@ -328,14 +328,17 @@ public sealed class WindowsPrintersRawTests
 
 
 
-   /// <summary>A job for a printer that is not installed any more fails after discovery and starts nothing.</summary>
+   /// <summary>
+   /// A job for a printer that is not installed any more fails once the queues were listed and starts nothing. The one
+   /// queue that is installed is not the job's own, so it is not opened and its settings are not read.
+   /// </summary>
    [Fact]
    public async Task JobForAPrinterThatIsGoneStartsNothing()
    {
       (WindowsPrinters printers, FakeWindowsPrinting windows, _) = Setup();
       using StagedDocument staged = new(Label);
       await Assert.ThrowsAsync<InvalidOperationException>(() => printers.PrintFileAsync(staged.Job("000000000000000000000000", "ZPL"), staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None));
-      Assert.Equal(Discovery, windows.Calls, StringComparer.Ordinal);
+      Assert.Equal(Discovery.Take(2), windows.Calls, StringComparer.Ordinal);
       Assert.Empty(windows.RawDocuments);
    }
 

@@ -19,6 +19,12 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class IsolatedPrinterBackendTests
 {
+   /// <summary>A queue identifier in the form the lookup sends: 24 hexadecimal digits in lower case.</summary>
+   private const string QueueId = "72a900462ca6a6e18ecb8fb2";
+
+
+
+   /// <summary>A synthetic job; the fixture helper never opens its document.</summary>
    private static readonly PrintJob Job = new("job-1", "fixture", "Synthetic", "PDF", new string('0', 64), 1, new PrintOptions(), "2026-11-01T00:00:00Z", "QUEUED");
 
 
@@ -67,6 +73,159 @@ public sealed class IsolatedPrinterBackendTests
       Assert.Equal("Printer worker returned no spooler receipt.", noReceipt.Message);
       InvalidDataException noInventory = Assert.Throws<InvalidDataException>(() => backend.Discover());
       Assert.Equal("Printer worker returned no inventory.", noInventory.Message);
+   }
+
+
+
+   /// <summary>
+   /// The list without media and the lookup of one queue are each one helper, started as a print's helper is, sent one JSON
+   /// line that names the operation and, for the lookup, the identifier of the queue. Nothing else travels: no job, no
+   /// queue name, no path.
+   /// </summary>
+   [Theory]
+   [InlineData("list-without-media")]
+   [InlineData("find-with-media")]
+   public async Task ListAndLookupEachSendOneRequestThatCarriesOnlyWhatItNeeds(string operation)
+   {
+      bool lookup = string.Equals(operation, "find-with-media", StringComparison.Ordinal);
+      string record = Path.Combine(Path.GetTempPath(), "qqq-helper-request-" + Guid.NewGuid().ToString("N") + ".txt");
+      try
+      {
+         IsolatedPrinterBackend backend = Backend("--record", record, "--respond", "{\"success\":true,\"printers\":[]}");
+
+         if(lookup)
+         {
+            Assert.Null(backend.FindWithMedia(QueueId));
+         }
+         else
+         {
+            Assert.Empty(backend.ListWithoutMedia());
+         }
+
+         string[] recorded = await File.ReadAllLinesAsync(record);
+         Assert.Equal("--printer-worker --record " + record, recorded[0]);
+         Assert.Equal(Environment.ProcessId.ToString(CultureInfo.InvariantCulture), recorded[1]);
+         Assert.Equal(lookup ? "{\"operation\":\"find-with-media\",\"printerId\":\"" + QueueId + "\"}" : "{\"operation\":\"list-without-media\"}", recorded[2]);
+      }
+      finally
+      {
+         File.Delete(record);
+      }
+   }
+
+
+
+   /// <summary>The lookup returns the one queue the helper answered with, as it answered it, media profile included.</summary>
+   [Fact]
+   public void LookupReturnsTheQueueTheHelperFound()
+   {
+      PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
+      PrinterInfo queue = new(QueueId, "Synthetic queue", "Fixture", "None", "READY", ["PDF"], MediaProfiles: [profile]);
+
+      PrinterInfo found = Assert.IsType<PrinterInfo>(Backend("--respond", Answer(queue)).FindWithMedia(QueueId));
+
+      Assert.Equal((QueueId, "Synthetic queue", "Fixture", "None", "READY"), (found.PrinterId, found.Name, found.DriverName, found.PortName, found.Status));
+      Assert.Equal(["PDF"], found.Formats, StringComparer.Ordinal);
+      Assert.Equal(profile, Assert.Single(found.MediaProfiles!));
+   }
+
+
+
+   /// <summary>
+   /// An answer to the lookup that holds a queue other than the one asked for, or more than one queue, is refused: the
+   /// service asked about one queue and takes nothing else for it. An answer to the list or the lookup that claims
+   /// success and carries no list is refused as discovery's is.
+   /// </summary>
+   [Fact]
+   public void AnswerThatIsNotWhatWasAskedForIsRefused()
+   {
+      PrinterInfo asked = new(QueueId, "Synthetic queue", "Fixture", "None", "READY", ["PDF"]);
+      PrinterInfo other = asked with { PrinterId = "000000000000000000000000" };
+
+      InvalidDataException another = Assert.Throws<InvalidDataException>(() => Backend("--respond", Answer(other)).FindWithMedia(QueueId));
+      Assert.Equal("Printer worker returned a printer that was not asked for.", another.Message);
+      InvalidDataException several = Assert.Throws<InvalidDataException>(() => Backend("--respond", Answer(asked, asked)).FindWithMedia(QueueId));
+      Assert.Equal("Printer worker returned a printer that was not asked for.", several.Message);
+      InvalidDataException noQueue = Assert.Throws<InvalidDataException>(() => Backend("--respond", "{\"success\":true}").FindWithMedia(QueueId));
+      Assert.Equal("Printer worker returned no inventory.", noQueue.Message);
+      InvalidDataException noList = Assert.Throws<InvalidDataException>(() => Backend("--respond", "{\"success\":true}").ListWithoutMedia());
+      Assert.Equal("Printer worker returned no inventory.", noList.Message);
+   }
+
+
+
+   /// <summary>
+   /// An answer to the lookup whose one entry is the JSON word null holds no printer that was asked for. It is refused in
+   /// the same words as an answer that names another queue, and not by a failure of the service's own code on the
+   /// missing entry.
+   /// </summary>
+   [Fact]
+   public void AnswerWhoseEntryIsNoPrinterAtAllIsRefused()
+   {
+      InvalidDataException refusal = Assert.Throws<InvalidDataException>(() => Backend("--respond", "{\"success\":true,\"printers\":[null]}").FindWithMedia(QueueId));
+      Assert.Equal("Printer worker returned a printer that was not asked for.", refusal.Message);
+   }
+
+
+
+   /// <summary>
+   /// An answer to the lookup whose entry names the queue asked for and nothing else is not judged at this boundary: the
+   /// lookup returns it as it was answered, with no formats at all. The filter the service puts in front of this backend
+   /// lets a printer through only when it has a format, and on this entry it fails instead of offering it, so the printer
+   /// is never offered for a job. The helper the service ships writes the formats of every queue it answers with, so
+   /// only an answer that is not the helper's can look like this.
+   /// </summary>
+   [Fact]
+   public void AnswerWhoseEntryHasNoFormatsIsReturnedAsAnsweredAndTheExposureFilterFailsOnIt()
+   {
+      IsolatedPrinterBackend backend = Backend("--respond", "{\"success\":true,\"printers\":[{\"printerId\":\"" + QueueId + "\"}]}");
+
+      PrinterInfo found = Assert.IsType<PrinterInfo>(backend.FindWithMedia(QueueId));
+      Assert.Equal(QueueId, found.PrinterId);
+      Assert.Null(found.Formats);
+
+      ExposedPrinterBackend filtered = new(backend, () => new HashSet<string>(StringComparer.Ordinal) { QueueId });
+      Assert.Throws<NullReferenceException>(() => filtered.FindWithMedia(QueueId));
+   }
+
+
+
+   /// <summary>A failure the helper reports for the list or the lookup arrives as it does for discovery: an I/O failure carrying the helper's message.</summary>
+   [Fact]
+   public void HelperFailureOfTheListOrTheLookupIsAnIoFailureWithTheHelpersMessage()
+   {
+      const string answer = "{\"success\":false,\"error\":\"Synthetic failure.\"}";
+      IOException list = Assert.Throws<IOException>(() => Backend("--respond", answer, "--exit-code", "1").ListWithoutMedia());
+      Assert.Equal("Synthetic failure.", list.Message);
+      IOException lookup = Assert.Throws<IOException>(() => Backend("--respond", answer, "--exit-code", "1").FindWithMedia(QueueId));
+      Assert.Equal("Synthetic failure.", lookup.Message);
+   }
+
+
+
+   /// <summary>
+   /// Text that does not have the form of a queue identifier names no queue: the lookup answers that there is none and
+   /// starts no helper for it, so nothing but 24 hexadecimal digits is ever put in a request.
+   /// </summary>
+   [Theory]
+   [InlineData("")]
+   [InlineData("fixture")]
+   [InlineData("Synthetic queue")]
+   [InlineData("72A900462CA6A6E18ECB8FB2")]
+   [InlineData("72a900462ca6a6e18ecb8fb20")]
+   public void LookupOfTextThatIsNotAQueueIdentifierIsAbsentAndStartsNoHelper(string text)
+   {
+      int launches = 0;
+      IsolatedPrinterBackend backend = new(FixtureExecutable)
+      {
+         StartProcess = start =>
+         {
+            launches++;
+            return Process.Start(start) ?? throw new InvalidOperationException("Fixture launch failed.");
+         },
+      };
+      Assert.Null(backend.FindWithMedia(text));
+      Assert.Equal(0, launches);
    }
 
 
@@ -192,6 +351,11 @@ public sealed class IsolatedPrinterBackendTests
 
       Assert.True(HelperIsGone(helperId));
    }
+
+
+
+   /// <summary>The answer a helper gives when a read succeeded with these queues, as one JSON line.</summary>
+   private static string Answer(params PrinterInfo[] queues) => JsonSerializer.Serialize(new PrinterWorkerHost.Response(true, queues), PrintApiClient.JsonOptions);
 
 
 

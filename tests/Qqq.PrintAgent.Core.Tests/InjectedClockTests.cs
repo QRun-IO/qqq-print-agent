@@ -179,7 +179,7 @@ public sealed class InjectedClockTests
    /// <summary>
    /// The per-job timing line reports each phase as measured on the worker's clock: inventory, the claim with its receipt,
    /// the download, the printer recheck, the submission gate with its receipt, and the native submission. The printer
-   /// is rechecked once, so the figure is one discovery.
+   /// is rechecked once, so the figure is one lookup.
    /// </summary>
    [Fact]
    public async Task WorkerTimingLineReportsEachPhaseFromItsClock()
@@ -188,7 +188,8 @@ public sealed class InjectedClockTests
       byte[] document = [1, 2, 3];
       var printer = new FakePrinterBackend
       {
-         Discovering = () => time.Advance(TimeSpan.FromMilliseconds(5)),
+         Listing = () => time.Advance(TimeSpan.FromMilliseconds(5)),
+         Finding = _ => time.Advance(TimeSpan.FromMilliseconds(5)),
          Printing = (_, _, _) =>
          {
             time.Advance(TimeSpan.FromMilliseconds(13));
@@ -204,7 +205,7 @@ public sealed class InjectedClockTests
       harness.Server.Offer(FakePrintServer.Job(document), document);
       Assert.True(await harness.RunOnceAsync());
       Assert.Contains("job-1: timing inventory=5ms claim=9ms download=11ms revalidate=5ms gate=2ms submit=13ms", harness.Log, StringComparer.Ordinal);
-      Assert.Equal(2, printer.Discoveries);
+      Assert.Equal((0, 1, 1), (printer.Discoveries, printer.Listings, printer.Lookups.Count));
    }
 
 

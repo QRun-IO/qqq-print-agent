@@ -82,6 +82,7 @@ internal sealed partial class FakeWindowsPrinting
    {
       StaleLastError.Leave();
       Calls.Add($"OpenPrinter({name})");
+      Ask(name);
       printer = IntPtr.Zero;
       if(Failing("OpenPrinter", out _))
       {

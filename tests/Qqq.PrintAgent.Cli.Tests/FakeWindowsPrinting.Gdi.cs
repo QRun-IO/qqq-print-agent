@@ -35,6 +35,7 @@ internal sealed partial class FakeWindowsPrinting
    {
       StaleLastError.Leave();
       Calls.Add($"CreateDC({driver}, {device}, {(devMode is null ? "null" : $"{devMode.Length} bytes")})");
+      Ask(device);
       ContextModes.Add(devMode?.ToArray());
       FakeQueue? queue = Find(device);
       if(queue is null || queue.CreateContextError is not null)

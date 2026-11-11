@@ -15,12 +15,21 @@ namespace Qqq.PrintAgent.WorkerFixture;
 public static class Program
 {
    /// <summary>
+   /// The identifier of the fixture's one queue. It has the form the real queue identifiers have (24 hexadecimal digits in
+   /// lower case), because the helper loop refuses to look up anything else.
+   /// </summary>
+   public const string QueueId = "f1c7a2e5f1c7a2e5f1c7a2e5";
+
+
+
+   /// <summary>
    /// Selects the fixture behavior from the arguments. With --launch-parent it starts a hanging child worker whose parent id is this
    /// process, reports the child's id, and exits, so a test can check the child dies with its parent. With --stand-in first it is
    /// the plain child program of <see cref="StandIn"/> and never touches the worker. With --respond or --flood it stands in for a
    /// helper that answers something of its own (see <see cref="AnswerAsync"/>). Otherwise it runs the real worker loop, with the
    /// real parent watch, against a fake backend that can hang (--hang) or report a media change (--media-drift) and a fake spooler
-   /// that holds one job.
+   /// that holds one job. In hang mode the backend behaves as a station does when a queue other than the fixture's has a driver
+   /// that never answers: the read that asks every driver hangs, and the two that do not ask that driver answer.
    /// </summary>
    public static async Task<int> Main(string[] args)
    {
@@ -84,6 +93,12 @@ public static class Program
    /// <summary>The fake printer backend the worker loop talks to: one synthetic queue, with optional hanging or media-drift behavior, and no ability to print anything.</summary>
    private sealed class FakePrinters(bool hang, bool mediaDrift) : IPrinterBackend
    {
+      /// <summary>The fixture's one queue, with a media profile, as a read that asked its driver reports it.</summary>
+      private static PrinterInfo Queue => new(QueueId, "Synthetic queue", "Fixture", "None", "READY", ["PDF"],
+         MediaProfiles: [new PrinterMediaProfile("fixture-default", new string('a', 64), "Fixture default", 101600, 152400, 300, 300)]);
+
+
+
       /// <summary>Returns the single synthetic queue; in hang mode it first announces READY and then blocks forever, simulating a native call that never returns.</summary>
       public IReadOnlyList<PrinterInfo> Discover()
       {
@@ -93,8 +108,18 @@ public static class Program
             Console.Out.Flush();
             Thread.Sleep(Timeout.Infinite);
          }
-         return [new PrinterInfo("fixture", "Synthetic queue", "Fixture", "None", "READY", ["PDF"])];
+         return [Queue];
       }
+
+
+
+      /// <summary>Returns the single synthetic queue without its media profile. It never hangs: this read asks no driver, so a driver that does not answer cannot hold it.</summary>
+      public IReadOnlyList<PrinterInfo> ListWithoutMedia() => [Queue with { MediaProfiles = null }];
+
+
+
+      /// <summary>Returns the single synthetic queue when it is the one asked for, and null for any other identifier. It never hangs: only the fixture queue's own driver would be asked, and that one answers.</summary>
+      public PrinterInfo? FindWithMedia(string printerId) => string.Equals(printerId, QueueId, StringComparison.Ordinal) ? Queue : null;
 
 
 
