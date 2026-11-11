@@ -40,10 +40,19 @@ public sealed class ShellNavigationTests
 
 
 
-   /// <summary>The window lands once. A later snapshot does not move the operator, and neither does the first answer when they had already chosen a page while the service was not answering.</summary>
+   /// <summary>
+   /// The window lands once. A later snapshot does not move the operator, and neither does the first answer when
+   /// they had already chosen a page while the service was not answering. A page the owner of the wizard had the
+   /// shell open counts as chosen in the same way, whenever it was opened: the first answer does not replace it.
+   /// </summary>
    [Fact]
    public async Task Landing_HappensOnce_AndNeverAfterTheOperatorChose()
    {
+      using ShellFixture told = new();
+      told.Shell.WizardEnded(PageKey.Logs);
+      await told.Tick(Snapshots.Server(1));
+      Assert.Equal(PageKey.Logs, told.Shell.Selected);
+
       using ShellFixture fixture = new();
       await fixture.Tick(Snapshots.Server(1), Snapshots.Server(2));
       Assert.True(fixture.Shell.Select(PageKey.Logs));

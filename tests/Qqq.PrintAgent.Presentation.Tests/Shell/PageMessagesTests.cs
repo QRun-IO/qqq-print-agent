@@ -32,7 +32,7 @@ public sealed class PageMessagesTests
 
 
 
-   /// <summary>Opens a page and dismisses its messages one after the other: what the operator reads there, in order.</summary>
+   /// <summary>Opens a page and dismisses its messages one after the other: what the operator reads there, in order. A bar that never comes to the end fails the test here.</summary>
    private static List<string> Read(PageMessages messages, PageKey page)
    {
       List<string> read = [];
@@ -40,6 +40,7 @@ public sealed class PageMessagesTests
       while(messages.Current is { } current)
       {
          read.Add(current.Message);
+         Assert.True(read.Count <= 64, "Dismissing does not come to the end of the messages.");
          messages.Dismiss();
       }
       return read;
