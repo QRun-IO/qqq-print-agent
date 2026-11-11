@@ -15,7 +15,8 @@ namespace Qqq.PrintAgent.Presentation.Service;
 /// <para>
 /// The flights are counted as they start, which is what lets a caller ask for an outcome that is newer than a moment
 /// it names: it notes the count (<see cref="Started"/>), and a flight with a higher number started after that. A
-/// caller that names no moment shares the flight that is in the air, whenever it started.
+/// caller that names no moment shares the flight that is in the air, whenever it started. The work of a flight is
+/// told the number of its flight, so that the outcome it makes can say which flight made it.
 /// </para>
 /// </summary>
 internal sealed class SingleFlight<TOutcome>
@@ -65,11 +66,13 @@ internal sealed class SingleFlight<TOutcome>
 
    /// <summary>
    /// Returns the flight the caller can share (<see cref="TryShare"/>), or starts one and says so. The work is
-   /// started on the calling thread, after the lock is released, so nothing the work does can run while the lock is
-   /// held; a caller that arrives in between shares the flight that is about to start. Work that fails is shared as
-   /// a failure in the same way.
+   /// given the number of the flight it is: the count as it is once this flight is counted, which is given under
+   /// the lock, so the numbers rise in the order the flights were started. The work is started on the calling
+   /// thread, after the lock is released, so nothing the work does can run while the lock is held; a caller that
+   /// arrives in between shares the flight that is about to start. Work that fails is shared as a failure in the
+   /// same way.
    /// </summary>
-   internal Task<TOutcome> ShareOrStart(long? startedAfter, Func<Task<TOutcome>> start, out bool started)
+   internal Task<TOutcome> ShareOrStart(long? startedAfter, Func<long, Task<TOutcome>> start, out bool started)
    {
       Task<Task<TOutcome>> starter;
       Task<TOutcome> flight;
@@ -80,9 +83,9 @@ internal sealed class SingleFlight<TOutcome>
             started = false;
             return shared;
          }
-         starter = new Task<Task<TOutcome>>(start);
+         long number = ++_started;
+         starter = new Task<Task<TOutcome>>(() => start(number));
          _last = flight = starter.Unwrap();
-         _started++;
       }
       starter.RunSynchronously(TaskScheduler.Default);
       started = true;

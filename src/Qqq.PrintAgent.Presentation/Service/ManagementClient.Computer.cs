@@ -35,6 +35,12 @@ public sealed partial class ManagementClient
    /// share that one. Over the ceiling it waits its turn and is not skipped. A token cancelled while it waits ends
    /// it with nothing sent.
    /// </para>
+   /// <para>
+   /// Either way, a result that a request to the service made says which request it was: the number the snapshot
+   /// was handed to the pipe with (<see cref="ServiceResult{T}.Flight"/>), the same for everyone who shared it. A
+   /// caller that keeps what it shows of a server it has changed compares that number with what the change's own
+   /// result says (<see cref="ServiceResult{T}.SnapshotsSent"/>).
+   /// </para>
    /// </summary>
    public Task<ServiceResult<ServiceSnapshot>> SnapshotAsync(bool sentAfterTheCall = false, CancellationToken cancellationToken = default)
       => ShareAsync(_snapshot, ManagementOperations.Snapshot, sentAfterTheCall, cancellationToken);
@@ -43,7 +49,8 @@ public sealed partial class ManagementClient
 
    /// <summary>
    /// Reads each server's transport state, traffic meter and last contact, for the meter between snapshots. It is
-   /// single-flight and skipped over the ceiling, as <see cref="SnapshotAsync"/> is when the timer calls it.
+   /// single-flight and skipped over the ceiling, as <see cref="SnapshotAsync"/> is when the timer calls it. Its
+   /// flights are numbered apart from the snapshot's.
    /// </summary>
    public Task<ServiceResult<TransportResult>> TransportAsync(CancellationToken cancellationToken = default)
       => ShareAsync(_transport, ManagementOperations.TransportGet, sentAfterTheCall: false, cancellationToken);

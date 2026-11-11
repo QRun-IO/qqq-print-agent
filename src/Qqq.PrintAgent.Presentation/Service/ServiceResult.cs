@@ -102,6 +102,45 @@ public sealed class ServiceResult<T>
 
 
 
+   /// <summary>
+   /// Which flight made this result, for a result of one of the two reads <see cref="ManagementClient"/> sends
+   /// single-flight (<see cref="ManagementClient.SnapshotAsync"/>, <see cref="ManagementClient.TransportAsync"/>):
+   /// the number the flight was given when it was handed to the pipe. The first flight is 1, and a flight with a
+   /// higher number was handed to the pipe later. Every caller that shared the flight is given the same result and
+   /// so the same number. It is null for a result that no flight made: a read that was skipped, one whose wait had
+   /// ended before anything was sent, the result of a caller that stopped waiting for its flight, and every result
+   /// of any other operation.
+   /// <para>
+   /// For a snapshot it is what a caller compares with <see cref="SnapshotsSent"/> of a change's result: a snapshot
+   /// whose number is higher than that was sent after the change's answer had arrived. It says "sent after", and
+   /// not "shows the change". The numbers are one client's and start again with the companion, so they mean
+   /// nothing between two clients; the snapshots and the transport reads are numbered apart, so a transport
+   /// result's number is compared with nothing of a snapshot's.
+   /// </para>
+   /// </summary>
+   public long? Flight { get; private set; }
+
+
+
+   /// <summary>
+   /// How many snapshots <see cref="ManagementClient"/> had handed to the pipe when this result was made, for the
+   /// result of a request that was itself handed to the pipe: read when the reply had arrived, or, for a result
+   /// that is <see cref="Unconfirmed"/>, when the failure or the end of the caller's wait was known. Every snapshot
+   /// counted in it may have been sent before the request was carried out; a snapshot whose
+   /// <see cref="Flight"/> is higher was sent after this result was made. It is null when nothing was handed to
+   /// the pipe (a request refused before it was sent, a wait that had ended before, a read that was skipped), and
+   /// for a caller that stopped waiting for a flight it shared.
+   /// <para>
+   /// For a change whose outcome is not known the service may carry the change out after this result was made, so
+   /// a snapshot with a higher number is one that was sent after the companion stopped knowing, and not one that
+   /// is known to show the change. It is the same counter as <see cref="Flight"/> of a snapshot: one client's,
+   /// starting again with the companion. The transport reads are not counted in it.
+   /// </para>
+   /// </summary>
+   public long? SnapshotsSent { get; private set; }
+
+
+
    /// <summary>True when the request succeeded, which also tells the compiler the payload is present.</summary>
    [MemberNotNullWhen(true, nameof(Payload))]
    public bool Succeeded => Outcome == ServiceOutcome.Success;
@@ -120,6 +159,26 @@ public sealed class ServiceResult<T>
    {
       details = null;
       return _error is not null && ManagementErrorCode.DetailsType(Code!) == typeof(TDetails) && ManagementJson.TryReadDetails(_error, out details);
+   }
+
+
+
+   /// <summary>This result as the flight with this number made it. The flight calls it once, before anyone is handed the result, so everyone who shares the flight is handed one result with one number.</summary>
+   internal ServiceResult<T> FromFlight(long number)
+   {
+      var made = (ServiceResult<T>)MemberwiseClone();
+      made.Flight = number;
+      return made;
+   }
+
+
+
+   /// <summary>This result as one made when the client had handed this many snapshots to the pipe.</summary>
+   internal ServiceResult<T> After(long snapshotsSent)
+   {
+      var made = (ServiceResult<T>)MemberwiseClone();
+      made.SnapshotsSent = snapshotsSent;
+      return made;
    }
 
 
