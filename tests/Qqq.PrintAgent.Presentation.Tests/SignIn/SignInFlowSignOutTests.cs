@@ -310,12 +310,49 @@ public sealed class SignInFlowSignOutTests
 
 
    /// <summary>
+   /// When Windows cannot start the browser for the provider's sign-out, the failure it gives names what it could not
+   /// start: the whole end-session address, with the provider's ID token hint and this sign-out's state. None of that
+   /// is logged or shown. The log says that the default browser could not be opened, with the kind of failure and what
+   /// to check, the sign-out still completes on this computer with the warning the dialog already gave for a provider
+   /// that did not confirm, and no log line, message or property a view binds to holds one of those values or any
+   /// query at all. The same holds for a launcher that fails in another way and names the address in its text.
+   /// </summary>
+   [Theory]
+   [InlineData(true, BrowserStartFailure.WindowsReport)]
+   [InlineData(false, BrowserStartFailure.OtherReport)]
+   public async Task ProviderSignOutPageThatCannotBeStarted_IsReportedWithoutAnythingOfTheSignOutAddress(bool asWindows, string report)
+   {
+      QqqProviderLogout logout = new(BrowserStartFailure.SignOutAddress, new Uri(SignInFixture.Callback), BrowserStartFailure.State);
+      SignInFixture fixture = new()
+      {
+         Service = _ => Task.FromResult(JsonSerializer.Serialize(new PipeSignOutResult("Signed out of QQQ.", logout), PrintApiClient.JsonOptions)),
+         BrowserFailure = asWindows ? BrowserStartFailure.AsWindows(BrowserStartFailure.SignOutAddress) : BrowserStartFailure.AsAnotherKind(BrowserStartFailure.SignOutAddress),
+      };
+      Assert.True(BrowserStartFailure.Leaks(fixture.BrowserFailure.Message));
+
+      Assert.True(await fixture.Flow.SignOutAsync());
+
+      Assert.Equal("WARN Identity provider sign-out was not confirmed: IOException: " + report, fixture.Log.Entries[^1]);
+      Assert.Equal([new FeedbackMessage("Account sign-out", "Signed out of QQQ. Finish signing out of the identity provider on the page that opened in your browser.", FeedbackSeverity.Informational),
+         new FeedbackMessage("Account sign-out", "Signed out of QQQ. The identity provider sign-out was opened in your browser but did not confirm; close that page and sign out there if it is still open.", FeedbackSeverity.Warning)], fixture.Shown);
+      Assert.DoesNotContain(fixture.Log.Entries, BrowserStartFailure.Leaks);
+      Assert.DoesNotContain(fixture.Shown, message => BrowserStartFailure.Leaks(message.Title) || BrowserStartFailure.Leaks(message.Message));
+      Assert.DoesNotContain(BrowserStartFailure.Bound(fixture.Flow), BrowserStartFailure.Leaks);
+      Assert.Empty(fixture.Opened);
+      Assert.True(Assert.Single(fixture.Inboxes).Disposed);
+      Assert.Equal(SignInStage.Idle, fixture.Flow.Stage);
+      Assert.False(fixture.Flow.IsBusy);
+   }
+
+
+
+   /// <summary>
    /// When the provider does not come back within two minutes, the browser cannot be opened, or the caller cancels, the
    /// wait ends, the sign-out still completes locally, and the operator is warned that the provider did not confirm.
    /// </summary>
    [Theory]
    [InlineData("limit", "TaskCanceledException")]
-   [InlineData("browser", "Win32Exception: The system cannot find the file specified.")]
+   [InlineData("browser", "IOException: " + BrowserStartFailure.WindowsReport)]
    [InlineData("token", "TaskCanceledException")]
    public async Task ProviderThatDoesNotReturn_IsReportedAsUnconfirmed(string ending, string cause)
    {

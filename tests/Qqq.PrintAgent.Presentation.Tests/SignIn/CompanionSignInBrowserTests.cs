@@ -253,8 +253,8 @@ public sealed class CompanionSignInBrowserTests
    [InlineData("begin", 0, "The server's sign-in configuration is not usable.", "QqqSessionException: The server's sign-in configuration is not usable.")]
    [InlineData("no state", 0, "The sign-in address the session prepared carries no state of its own, so its callback could not be told from another.", "InvalidOperationException: The sign-in address the session prepared carries no state of its own, so its callback could not be told from another.")]
    [InlineData("no inbox", 0, "synthetic open failure", "IOException: synthetic open failure")]
-   [InlineData("browser", 0, "The default browser could not be opened (Windows error 2).", "IOException: The default browser could not be opened (Windows error 2).")]
-   [InlineData("launcher", 0, "The default browser could not be opened (InvalidOperationException).", "IOException: The default browser could not be opened (InvalidOperationException).")]
+   [InlineData("browser", 0, BrowserStartFailure.WindowsReport, "IOException: " + BrowserStartFailure.WindowsReport)]
+   [InlineData("launcher", 0, BrowserStartFailure.OtherReport, "IOException: " + BrowserStartFailure.OtherReport)]
    [InlineData("inbox", 1, "Invalid QQQ browser callback.", "InvalidDataException: Invalid QQQ browser callback.")]
    [InlineData("complete", 1, "The server's answer was not usable.", "QqqSessionException: The server's answer was not usable.")]
    [InlineData("export", 1, "Sign in before exporting the session.", "QqqSessionException: Sign in before exporting the session.")]
@@ -305,6 +305,40 @@ public sealed class CompanionSignInBrowserTests
       Assert.Contains("ERROR Browser sign-in not completed: " + logged, world.Log.Entries, StringComparer.Ordinal);
       Assert.DoesNotContain(world.Log.Entries, Secret);
       Assert.False(Secret(signIn.Failure!));
+   }
+
+
+
+   /// <summary>
+   /// When Windows cannot start the browser, the failure it gives names what it could not start: the whole sign-in
+   /// address, with the attempt's state, nonce and code challenge. None of that is logged or kept. The reason the
+   /// wizard is given says that the default browser could not be opened and what to check, the log says the same
+   /// with the kind of failure, and no log line and no property a view binds to holds one of those values or any
+   /// query at all. The same holds for a launcher that fails in another way and names the address in its text.
+   /// </summary>
+   [Theory]
+   [InlineData(true, BrowserStartFailure.WindowsReport)]
+   [InlineData(false, BrowserStartFailure.OtherReport)]
+   public async Task Browser_ThatCannotBeStarted_IsReportedWithoutAnythingOfTheSignInAddress(bool asWindows, string report)
+   {
+      SignInWorld world = new();
+      using CompanionSignIn signIn = await world.BrowserReadyAsync();
+      world.Sessions[0].AuthorizationOverride = BrowserStartFailure.SignInAddress;
+      world.BrowserFailure = asWindows ? BrowserStartFailure.AsWindows(BrowserStartFailure.SignInAddress) : BrowserStartFailure.AsAnotherKind(BrowserStartFailure.SignInAddress);
+      Assert.True(BrowserStartFailure.Leaks(world.BrowserFailure.Message));
+
+      Assert.Null(await SignInWorld.EndsAsync(signIn.SignInWithBrowserAsync()));
+
+      Assert.Equal(CompanionSignInState.BrowserFailed, signIn.State);
+      Assert.Equal(report, signIn.Failure);
+      Assert.Contains("ERROR Browser sign-in not completed: IOException: " + report, world.Log.Entries, StringComparer.Ordinal);
+      Assert.Contains(world.Log.Entries, entry => entry.StartsWith("DEBUG Browser sign-in not completed detail: System.IO.IOException: " + report, StringComparison.Ordinal));
+      Assert.DoesNotContain(world.Log.Entries, BrowserStartFailure.Leaks);
+      Assert.DoesNotContain(BrowserStartFailure.Bound(signIn), BrowserStartFailure.Leaks);
+      Assert.Empty(world.Opened);
+      Assert.True(Assert.Single(world.Inboxes).Disposed);
+      Assert.True(signIn.HasSession);
+      Assert.False(signIn.IsBusy);
    }
 
 

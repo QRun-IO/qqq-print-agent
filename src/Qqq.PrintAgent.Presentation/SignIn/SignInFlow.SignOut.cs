@@ -99,7 +99,9 @@ public sealed partial class SignInFlow
    /// <summary>
    /// Opens the identity provider's end-session page in the default browser and waits up to two minutes for the browser to return
    /// to this application's registered callback with this sign-out's own state. The inbox is opened first so a fast redirect is not lost.
-   /// The request carries a sensitive token hint, so only its host is logged. Returns whether the provider confirmed; the wait
+   /// The request carries a sensitive token hint, so only its host is logged, and a browser that cannot be started is logged by
+   /// the kind of failure only, because Windows' own text for it names the whole request (see <see cref="BrowserLaunch"/>).
+   /// Returns whether the provider confirmed; the wait
    /// also ends when the caller's token does. When the flow is disposed the wait ends without a result, and that is left
    /// to the runner as a quiet end instead of being reported as an unconfirmed sign-out.
    /// </summary>
@@ -111,7 +113,7 @@ public sealed partial class SignInFlow
          using CancellationTokenSource limit = new(ProviderSignOutLimit, _time);
          using var wait = CancellationTokenSource.CreateLinkedTokenSource(limit.Token, cancellationToken);
          _log.Info("Opening the identity provider's sign-out page in the default browser (" + QqqOrigin.ShownAuthority(logout.EndSessionUri) + ").");
-         _browser.Open(logout.EndSessionUri);
+         BrowserLaunch.Open(_browser, logout.EndSessionUri);
          Uri callback = await inbox.ReceiveAsync(wait.Token);
          ThrowIfDisposed();
          bool matched = logout.Matches(callback);

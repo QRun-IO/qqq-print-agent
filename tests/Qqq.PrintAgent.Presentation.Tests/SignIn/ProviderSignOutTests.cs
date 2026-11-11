@@ -107,7 +107,7 @@ public sealed class ProviderSignOutTests
    [Theory]
    [InlineData("limit", "TaskCanceledException: A task was canceled.")]
    [InlineData("token", "TaskCanceledException: A task was canceled.")]
-   [InlineData("browser", "IOException: The default browser could not be opened (Windows error 2).")]
+   [InlineData("browser", "IOException: " + BrowserStartFailure.WindowsReport)]
    [InlineData("no inbox", "UnauthorizedAccessException: synthetic open failure")]
    [InlineData("inbox", "IOException: synthetic pipe failure")]
    public async Task ProviderThatDoesNotReturn_IsNotConfirmed(string ending, string cause)
@@ -138,6 +138,34 @@ public sealed class ProviderSignOutTests
       Assert.All(world.Inboxes, inbox => Assert.True(inbox.Disposed));
       Assert.Equal(string.Equals(ending, "browser", StringComparison.Ordinal) || string.Equals(ending, "no inbox", StringComparison.Ordinal) ? 0 : 1, world.Opened.Count);
       Assert.DoesNotContain(world.Log.Entries, entry => entry.Contains(Hint, StringComparison.Ordinal) || entry.Contains(State, StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// When Windows cannot start the browser, the failure it gives names what it could not start: the whole
+   /// end-session address, with the provider's ID token hint and this sign-out's state. The sign-out is reported as
+   /// not confirmed, the log says that the default browser could not be opened, with the kind of failure and what to
+   /// check, and no log line holds one of those values or any query at all. The same holds for a launcher that fails
+   /// in another way and names the address in its text.
+   /// </summary>
+   [Theory]
+   [InlineData(true, BrowserStartFailure.WindowsReport)]
+   [InlineData(false, BrowserStartFailure.OtherReport)]
+   public async Task BrowserThatCannotBeStarted_IsReportedWithoutAnythingOfTheSignOutAddress(bool asWindows, string report)
+   {
+      QqqProviderLogout logout = new(BrowserStartFailure.SignOutAddress, new Uri(SignInWorld.Callback), BrowserStartFailure.State);
+      SignInWorld world = new() { BrowserFailure = asWindows ? BrowserStartFailure.AsWindows(BrowserStartFailure.SignOutAddress) : BrowserStartFailure.AsAnotherKind(BrowserStartFailure.SignOutAddress) };
+      Assert.True(BrowserStartFailure.Leaks(world.BrowserFailure.Message));
+
+      Assert.False(await SignInWorld.EndsAsync(Over(world).CompleteAsync(logout)));
+
+      Assert.Equal(["INFO Browser callback inbox open.",
+         "INFO Opening the identity provider's sign-out page in the default browser (id.example.com).",
+         "WARN Identity provider sign-out was not confirmed: IOException: " + report], world.Log.Entries);
+      Assert.DoesNotContain(world.Log.Entries, BrowserStartFailure.Leaks);
+      Assert.Empty(world.Opened);
+      Assert.True(Assert.Single(world.Inboxes).Disposed);
    }
 
 

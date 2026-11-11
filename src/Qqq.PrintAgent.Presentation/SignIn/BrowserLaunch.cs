@@ -16,11 +16,16 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// </summary>
 internal static class BrowserLaunch
 {
+   /// <summary>What an operator can do about a browser that could not be opened; it follows the kind of failure in the failure's text, which is shown as the reason a sign-in was not completed.</summary>
+   internal const string Remedy = "Check that a default browser is set in Windows Settings under Apps, Default apps, then try again.";
+
+
+
    /// <summary>
-   /// Opens the address. Any failure is replaced by one with fixed text that names only the kind of failure and,
-   /// for a Windows error, its number. The new failure is thrown after the original has been let go, so the original
-   /// is not attached as its cause: a report of the new failure, whichever way it is written out, then cannot
-   /// contain the address.
+   /// Opens the address. Any failure is replaced by one with fixed text: that the default browser could not be
+   /// opened, the kind of failure (for a Windows error, its number) and what to do about it. The new failure is
+   /// thrown after the original has been let go, so the original is not attached as its cause: a report of the new
+   /// failure, whichever way it is written out, then cannot contain the address.
    /// </summary>
    internal static void Open(IBrowserLauncher browser, Uri address)
    {
@@ -34,6 +39,6 @@ internal static class BrowserLaunch
       {
          kind = exception is Win32Exception windows ? "Windows error " + windows.NativeErrorCode.ToString(CultureInfo.InvariantCulture) : exception.GetType().Name;
       }
-      throw new IOException("The default browser could not be opened (" + kind + ").");
+      throw new IOException("The default browser could not be opened (" + kind + "). " + Remedy);
    }
 }

@@ -309,7 +309,8 @@ public sealed class SignInFlowBrowserTests
    /// <summary>
    /// A failure anywhere in the exchange (the inbox cannot be opened, the server refuses to begin, the browser cannot be started,
    /// the inbox breaks, a malformed or oversize callback is written to the inbox, the server rejects the callback) is reported as
-   /// not completed with its reason and never escapes the flow; the session stays for an explicit retry.
+   /// not completed with its reason and never escapes the flow; the session stays for an explicit retry. The reason is the
+   /// failure's own text, except for a browser that cannot be started, whose text is replaced by the kind of failure.
    /// </summary>
    [Theory]
    [InlineData("inbox")]
@@ -346,14 +347,51 @@ public sealed class SignInFlowBrowserTests
       }
       await running;
 
-      Assert.Equal(new FeedbackMessage("Browser sign-in not completed", "No validated account session was received. Reason: " + failure.Message + " Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly. The activity log has the full detail.", FeedbackSeverity.Warning), fixture.Shown[^1]);
-      Assert.Contains("ERROR Browser sign-in not completed: " + failure.GetType().Name + ": " + failure.Message, fixture.Log.Entries, StringComparer.Ordinal);
+      string reason = step is "browser" ? BrowserStartFailure.WindowsReport : failure.Message;
+      string logged = step is "browser" ? "IOException: " + reason : failure.GetType().Name + ": " + reason;
+      Assert.Equal(new FeedbackMessage("Browser sign-in not completed", "No validated account session was received. Reason: " + reason + " Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly. The activity log has the full detail.", FeedbackSeverity.Warning), fixture.Shown[^1]);
+      Assert.Contains("ERROR Browser sign-in not completed: " + logged, fixture.Log.Entries, StringComparer.Ordinal);
       Assert.Empty(fixture.Requests);
       Assert.True(fixture.Flow.HasSession);
       Assert.True(fixture.Flow.BrowserOffered);
       Assert.False(fixture.Flow.BrowserPending);
       Assert.False(fixture.Flow.IsBusy);
       Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
+      Assert.All(fixture.Inboxes, inbox => Assert.True(inbox.Disposed));
+   }
+
+
+
+   /// <summary>
+   /// When Windows cannot start the browser, the failure it gives names what it could not start: the whole sign-in
+   /// address, with the attempt's state, nonce and code challenge. None of that is logged or shown. The operator is
+   /// told that the default browser could not be opened and what to check, the log says the same with the kind of
+   /// failure, and no log line, message or property a view binds to holds one of those values or any query at all.
+   /// The same holds for a launcher that fails in another way and names the address in its text.
+   /// </summary>
+   [Theory]
+   [InlineData(true, BrowserStartFailure.WindowsReport)]
+   [InlineData(false, BrowserStartFailure.OtherReport)]
+   public async Task BrowserThatCannotBeStarted_IsReportedWithoutAnythingOfTheSignInAddress(bool asWindows, string report)
+   {
+      SignInFixture fixture = await DiscoveredAsync();
+      fixture.Sessions[0].AuthorizationOverride = BrowserStartFailure.SignInAddress;
+      fixture.BrowserFailure = asWindows ? BrowserStartFailure.AsWindows(BrowserStartFailure.SignInAddress) : BrowserStartFailure.AsAnotherKind(BrowserStartFailure.SignInAddress);
+      Assert.True(BrowserStartFailure.Leaks(fixture.BrowserFailure.Message));
+
+      await fixture.Flow.SignInWithBrowserAsync(PairingChoice.KeepCurrent);
+
+      Assert.Equal(new FeedbackMessage("Browser sign-in not completed", "No validated account session was received. Reason: " + report + " Check the server's advertised native sign-in grant and installed callback configuration, then try again explicitly. The activity log has the full detail.", FeedbackSeverity.Warning), fixture.Shown[^1]);
+      Assert.Contains("ERROR Browser sign-in not completed: IOException: " + report, fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Contains(fixture.Log.Entries, entry => entry.StartsWith("DEBUG Browser sign-in not completed detail: System.IO.IOException: " + report, StringComparison.Ordinal));
+      Assert.DoesNotContain(fixture.Log.Entries, BrowserStartFailure.Leaks);
+      Assert.DoesNotContain(fixture.Shown, message => BrowserStartFailure.Leaks(message.Title) || BrowserStartFailure.Leaks(message.Message));
+      Assert.DoesNotContain(BrowserStartFailure.Bound(fixture.Flow), BrowserStartFailure.Leaks);
+      Assert.Empty(fixture.Opened);
+      Assert.Empty(fixture.Requests);
+      Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
+      Assert.True(fixture.Flow.HasSession);
+      Assert.False(fixture.Flow.IsBusy);
       Assert.All(fixture.Inboxes, inbox => Assert.True(inbox.Disposed));
    }
 

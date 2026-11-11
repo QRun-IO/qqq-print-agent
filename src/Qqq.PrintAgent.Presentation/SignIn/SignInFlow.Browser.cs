@@ -137,7 +137,9 @@ public sealed partial class SignInFlow
    /// <summary>
    /// The browser exchange itself: open the callback inbox first (so a fast redirect is not lost), begin the login, open the
    /// provider's page in the default browser, wait for the forwarded callback, and complete the login on the session
-   /// that started it. The inbox is disposed when the exchange ends. Only the provider's host is logged. A callback that is
+   /// that started it. The inbox is disposed when the exchange ends. Only the provider's host is logged, and a browser that
+   /// cannot be started is reported by the kind of failure only, because Windows' own text for it names the whole address
+   /// with its state (see <see cref="BrowserLaunch"/>). A callback that is
    /// malformed or too large is refused by the inbox as invalid data, which the caller reports like any other failed exchange.
    /// The token is looked at again after each wait, so a browser is not opened and a login is not completed for a wait
    /// that has already ended.
@@ -149,7 +151,7 @@ public sealed partial class SignInFlow
       Uri authorization = await session.BeginBrowserSignInAsync(redirect, cancellationToken);
       cancellationToken.ThrowIfCancellationRequested();
       _log.Info("Opening the identity provider's sign-in page in the default browser (" + QqqOrigin.ShownAuthority(authorization) + ").");
-      _browser.Open(authorization);
+      BrowserLaunch.Open(_browser, authorization);
       Uri callback = await inbox.ReceiveAsync(cancellationToken);
       cancellationToken.ThrowIfCancellationRequested();
       _callbackArrived = true;

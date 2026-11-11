@@ -2,10 +2,20 @@
 
 ## Unreleased
 
+A failed browser start no longer writes the sign-in address to the companion log or the dialog (2.0). When Windows
+could not start the default browser for a browser sign-in, the companion's log entry and the dialog's "Browser
+sign-in not completed" message repeated Windows' own error text, and that text names what it could not start: the
+whole sign-in address, with that attempt's state, nonce and code challenge. When the browser could not be started
+for the identity provider's sign-out, the log entry named the provider's sign-out address the same way, with its ID
+token hint. Both now say only that the default browser could not be opened, with the Windows error number, and what
+to check: that a default browser is set in Windows Settings under Apps, Default apps. Sign-in and sign-out are
+otherwise unchanged. Every release up to 1.2.1 has the sign-in case; the sign-out case was never in a release
+([audit](docs/AUDIT-2026-11-10.md), U22).
+
 Sign-in in the companion, rebuilt for several servers (2.0; not used by the window yet). Three types were added to
 the presentation assembly for the connection wizard and the per-server Connection page of
-[ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md). Nothing the operator sees changes in this build: the
-connection dialog still runs on the existing flow, which is untouched.
+[ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md). Nothing the operator sees changes through them in
+this build: the connection dialog still runs on the existing flow, whose one change is the entry above.
 
 - `CompanionSignIn` is the part of signing in that needs a session and runs as the signed-in Windows user. It reads
   the server's sign-in description, signs in by password or through the browser, and returns the session credential
