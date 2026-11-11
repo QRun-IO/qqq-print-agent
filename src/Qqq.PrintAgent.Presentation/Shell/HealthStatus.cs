@@ -7,7 +7,10 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 
 /// <summary>
 /// The service's health word turned into a color level, the sentence shown beside it and the name of the tray icon, so
-/// color is never the only signal. Any word this build does not know is treated as red.
+/// color is never the only signal. There are two readings of a word this build does not know. <see cref="From"/> is
+/// the rule of the 1.x window, which the window still uses: any such word is red. <see cref="LevelOf"/> is the rule
+/// for a server of a version 2 snapshot: such a word is <see cref="HealthLevel.Unknown"/>, neither healthy nor a
+/// failure.
 /// </summary>
 public sealed record HealthStatus(HealthLevel Level, string Label, string IconName)
 {

@@ -122,14 +122,21 @@ public sealed class FooterStatusTests
 
 
 
-   /// <summary>The node of a server whose session is not authorized says so without repeating the name it stands beside; alone in the footer the sentence names the server.</summary>
+   /// <summary>
+   /// The node of a server that is not authorized to print says what is missing without repeating the name it
+   /// stands beside: "Sign in required" when nobody is signed in, "Authorization required" when somebody is and the
+   /// session is not authorized. Alone in the footer both are the 1.x sentence, which names the server.
+   /// </summary>
    [Fact]
    public void Footer_OneServer_NotAuthorized_NamesTheServer_TheNodeDoesNot()
    {
       var status = ServerStatus.From(Snapshots.Server(1, "Warehouse", authorized: false, health: ServerSnapshot.Red), []);
+      var signedOut = ServerStatus.From(Snapshots.Server(1, "Warehouse", signedIn: false, authorized: false, health: ServerSnapshot.Red), []);
 
       Assert.Equal("Authorization required", status.Sentence);
       Assert.Equal("Warehouse authorization required", status.Alone);
+      Assert.Equal("Sign in required", signedOut.Sentence);
+      Assert.Equal("Warehouse authorization required", signedOut.Alone);
       Assert.Equal("Connected and ready", ServerStatus.From(Snapshots.Server(), [Snapshots.Printer()]).Alone);
       Assert.Equal("Open Warehouse", FooterStatus.From(s_reached, [status]).AttentionText);
    }

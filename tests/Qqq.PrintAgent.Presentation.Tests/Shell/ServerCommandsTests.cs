@@ -12,7 +12,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.Shell;
 /// <summary>The commands of a server's menu: which there are, when each can be chosen, why not, and the keys that choose them.</summary>
 public sealed class ServerCommandsTests
 {
-   /// <summary>The menu's commands and when each can be chosen: reconnect needs a pairing and a session and is not the operator's while the administrator holds the computer disconnected; sign out needs a session; the ends of the list cannot move past them. Each disabled command says why.</summary>
+   /// <summary>The menu's commands and when each can be chosen: reconnect needs a session and a pairing and is not the operator's while the administrator holds the computer disconnected; a server that has neither a session nor a pairing is told to sign in, because pairing needs a session first; sign out needs a session; the ends of the list cannot move past them. Each disabled command says why.</summary>
    [Fact]
    public void Commands_EnabledRules_AndReasons()
    {
@@ -24,6 +24,8 @@ public sealed class ServerCommandsTests
          Reasons(Snapshots.Server(paired: false), 0, 3));
       Assert.Equal(["Nobody is signed in to this server. Open Connection to sign in.", "Nobody is signed in to this server.", "enabled", "enabled", "enabled", "This server is already last."],
          Reasons(Snapshots.Server(signedIn: false, authorized: false), 2, 3));
+      Assert.Equal(["Nobody is signed in to this server. Open Connection to sign in.", "Nobody is signed in to this server.", "enabled", "enabled", "enabled", "enabled"],
+         Reasons(Snapshots.Server(paired: false, signedIn: false, authorized: false), 1, 3));
       Assert.Equal(["The server's administrator has disconnected this computer. Only they can connect it again.", "enabled", "enabled", "enabled", "This is the only server.", "This is the only server."],
          Reasons(Snapshots.Server(connection: "DISCONNECTED"), 0, 1));
       Assert.Empty(ServerCommands.For(Snapshots.Server(removing: true), 0, 1).All);

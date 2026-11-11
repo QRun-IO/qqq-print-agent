@@ -34,7 +34,7 @@ public sealed class TreeAccessibilityTests
 
       Assert.Equal(["Server 1, Ready", "Server 2, Not ready", "Server 3, Needs attention, certificate exception on", "Server 4, Unknown"],
          (await Names(Snapshots.Server(1), Snapshots.Server(2, health: ServerSnapshot.Orange), Snapshots.Server(3, health: ServerSnapshot.Red, exception: true), Snapshots.Server(4, health: "PURPLE"))).Take(4), StringComparer.Ordinal);
-      Assert.Equal(["Add server", "Computer", "Logs", "Settings"], fixture.Shell.Tree.Nodes.TakeLast(4).Select(node => node.AccessibleName), StringComparer.Ordinal);
+      Assert.Equal(["Add server, unavailable: The local print service could not be reached.", "Computer", "Logs", "Settings"], fixture.Shell.Tree.Nodes.TakeLast(4).Select(node => node.AccessibleName), StringComparer.Ordinal);
       Assert.Equal(["AddServer", "Computer", "Logs", "Settings"], fixture.Shell.Tree.Nodes.TakeLast(4).Select(node => node.GlyphName), StringComparer.Ordinal);
       Assert.Equal(["Printers for Server 1", "Jobs for Server 1", "Connection for Server 1"], fixture.Shell.Tree.Servers[0].Children.Select(page => page.AccessibleName), StringComparer.Ordinal);
       Assert.Equal(["Printers", "Jobs", "Connection"], fixture.Shell.Tree.Servers[0].Children.Select(page => page.GlyphName), StringComparer.Ordinal);
@@ -45,16 +45,23 @@ public sealed class TreeAccessibilityTests
 
 
 
-   /// <summary>A server's pages are named after the server, and follow it when it is renamed.</summary>
+   /// <summary>A server's pages are named after the server, and follow it when it is renamed. A view bound to the node's name is told of the rename, as one bound to its label is, and of nothing when the name stays.</summary>
    [Fact]
    public async Task Tree_AServersPages_AreNamedAfterIt_AndFollowARename()
    {
       using ShellFixture fixture = new();
       await fixture.Tick(Snapshots.Server(1, "Warehouse"));
       ServerNode server = fixture.Shell.Tree.Servers[0];
+      List<string?> raised = [];
+      server.PropertyChanged += (_, change) => raised.Add(change.PropertyName);
+
+      await fixture.Tick(Snapshots.Server(1, "Warehouse"));
+      Assert.Empty(raised);
 
       await fixture.Tick(Snapshots.Server(1, "Warehouse east"));
 
+      Assert.Equal([nameof(TreeNode.Text), nameof(ServerNode.Name), nameof(TreeNode.AccessibleName)], raised);
+      Assert.Equal("Warehouse east", server.Name);
       Assert.Equal("Warehouse east", server.Text);
       Assert.Equal("Warehouse east, Ready", server.AccessibleName);
       Assert.Equal(["Printers for Warehouse east", "Jobs for Warehouse east", "Connection for Warehouse east"], server.Children.Select(page => page.AccessibleName), StringComparer.Ordinal);
@@ -106,13 +113,20 @@ public sealed class TreeAccessibilityTests
 
 
 
-   /// <summary>The Add server node says in its name that a wizard is in progress, and stays enabled while one is open even when no new one could start.</summary>
+   /// <summary>
+   /// The Add server node says in its name that a wizard is in progress, and stays enabled while one is open even
+   /// when no new one could start. While it is disabled its name says that it is unavailable and why, from before
+   /// the first answer on, because a screen reader reads the name and not the reason beside it.
+   /// </summary>
    [Fact]
    public async Task AddServer_WhileAWizardIsOpen_SaysSo_AndStaysEnabled()
    {
       using ShellFixture fixture = new();
-      await fixture.Tick(Snapshots.WithServers(7));
       AddServerNode add = fixture.Shell.Tree.AddServer;
+      Assert.False(add.IsEnabled);
+      Assert.Equal("Add server, unavailable: Checking the local print service…", add.AccessibleName);
+      await fixture.Tick(Snapshots.WithServers(7));
+      Assert.Equal("Add server", add.AccessibleName);
       Assert.False(add.InProgress);
 
       fixture.Shell.StartAddServer();
@@ -132,7 +146,7 @@ public sealed class TreeAccessibilityTests
       Assert.False(add.InProgress);
       Assert.False(add.IsEnabled);
       Assert.Equal(ShellMessages.ServerLimit, add.DisabledReason);
-      Assert.Equal("Add server", add.AccessibleName);
+      Assert.Equal("Add server, unavailable: " + ShellMessages.ServerLimit, add.AccessibleName);
    }
 
 

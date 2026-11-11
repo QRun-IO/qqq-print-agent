@@ -10,12 +10,16 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// <summary>
 /// One server's state in words, worked out once from its snapshot and used by its node, the footer and the tray: its
 /// name as it is shown, its health as a badge, the sentence beside its name, and the sentence that stands for it when
-/// it is the only server (<see cref="Alone"/>, which is what the footer of 1.x said).
+/// it is the only server (<see cref="Alone"/>, which for a paired server in the states 1.x had is what the footer of
+/// 1.x said).
 /// <para>
 /// The sentence follows the footer rule of 1.x for a server that is paired: the health's own sentence, replaced by
 /// the more exact reason when the administrator has disconnected or paused dispatch, and by the missing
-/// authorization before either. Three states 1.x did not have come first: a server that is being removed, one whose
-/// stored state cannot be read, and one this computer is not paired with. No sentence says more than the snapshot:
+/// authorization before either. Beside the name the missing authorization is said as what the snapshot shows to be
+/// missing: "Sign in required" when nobody is signed in, "Authorization required" when somebody is and the session
+/// is not authorized; alone in the footer both keep the words of 1.x. Three states 1.x did not have come first: a
+/// server that is being removed, one whose stored state cannot be read, and one this computer is not paired with.
+/// No sentence says more than the snapshot:
 /// an orange server is said to be connected with printers needing attention, as in 1.x, only when its transport is
 /// connected and it has nothing shared or a shared printer that is not ready; and a health word this build does
 /// not know is said to be unknown.
@@ -59,7 +63,7 @@ public sealed record ServerStatus(string ServerId, string Name, HealthBadge Heal
       }
       HealthLevel level = HealthStatus.LevelOf(server.Health);
       string sentence = SentenceOf(server, level, printers);
-      bool unauthorized = string.Equals(sentence, ShellMessages.AuthorizationRequired, StringComparison.Ordinal);
+      bool unauthorized = sentence is ShellMessages.AuthorizationRequired or ShellMessages.SignInRequired;
       return new ServerStatus(server.ServerId, name, HealthBadge.For(level), sentence, unauthorized ? ShellMessages.AuthorizationRequiredFor(name) : sentence);
    }
 
@@ -82,7 +86,7 @@ public sealed record ServerStatus(string ServerId, string Name, HealthBadge Heal
       }
       if(!server.Authentication.Authorized)
       {
-         return ShellMessages.AuthorizationRequired;
+         return server.Authentication.SignedIn ? ShellMessages.AuthorizationRequired : ShellMessages.SignInRequired;
       }
       if(HeldDisconnected(server))
       {

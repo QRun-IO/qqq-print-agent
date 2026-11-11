@@ -9,7 +9,9 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// The Add server node, which shows the connection wizard. It is disabled, with the reason, while a wizard cannot
 /// start: the service has not answered or its stored data is not ready, or the computer already has as many servers
 /// as it may hold, counting one that is being removed. While a wizard is open the node stays enabled whatever else is
-/// true, so the operator can always go back to it, and it says that one is in progress.
+/// true, so the operator can always go back to it, and it says that one is in progress. What a screen reader calls
+/// the node says the same: "Add server", "Add server, in progress", or that it is unavailable and why, because a
+/// disabled node that only says "Add server" does not say what to do.
 /// </summary>
 public sealed class AddServerNode : TreeNode
 {
@@ -25,7 +27,7 @@ public sealed class AddServerNode : TreeNode
 
 
    /// <summary>Makes the node, disabled until the service has answered.</summary>
-   internal AddServerNode() : base(PageKey.Wizard, "AddServer", ShellMessages.NodeText(PageKind.Wizard), "AddServer", ShellMessages.NodeText(PageKind.Wizard), level: 1)
+   internal AddServerNode() : base(PageKey.Wizard, "AddServer", ShellMessages.NodeText(PageKind.Wizard), "AddServer", ShellMessages.AddServerUnavailable(ServiceAvailability.Checking.Summary), level: 1)
    {
    }
 
@@ -64,6 +66,6 @@ public sealed class AddServerNode : TreeNode
       IsEnabled = wizardOpen || reasonNotToStart is null;
       DisabledReason = IsEnabled ? null : reasonNotToStart;
       InProgress = wizardOpen;
-      AccessibleName = wizardOpen ? ShellMessages.AddServerInProgress : ShellMessages.AddServer;
+      AccessibleName = wizardOpen ? ShellMessages.AddServerInProgress : reasonNotToStart is null ? ShellMessages.AddServer : ShellMessages.AddServerUnavailable(reasonNotToStart);
    }
 }

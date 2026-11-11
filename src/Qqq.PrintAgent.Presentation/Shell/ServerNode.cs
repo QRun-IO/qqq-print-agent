@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.ComponentModel;
 using System.Globalization;
 using Qqq.PrintAgent.Windows.Management;
 
@@ -71,7 +72,7 @@ public sealed class ServerNode : TreeNode
 
 
 
-   /// <summary>The server's name, printable. It is the node's label.</summary>
+   /// <summary>The server's name, printable. It is the node's label, and a view bound to it is told when the server is renamed.</summary>
    public string Name => Text;
 
 
@@ -140,6 +141,18 @@ public sealed class ServerNode : TreeNode
    {
       get => _commands;
       private set => SetProperty(ref _commands, value);
+   }
+
+
+
+   /// <summary>Tells the bindings of <see cref="Name"/> whenever the label changed, because the name is the label.</summary>
+   protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+   {
+      base.OnPropertyChanged(e);
+      if(string.Equals(e.PropertyName, nameof(Text), StringComparison.Ordinal))
+      {
+         base.OnPropertyChanged(new PropertyChangedEventArgs(nameof(Name)));
+      }
    }
 
 

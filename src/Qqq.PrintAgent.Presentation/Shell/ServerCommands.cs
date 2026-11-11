@@ -40,8 +40,9 @@ public sealed record ServerCommands(IReadOnlyList<ServerCommand> All)
 
    /// <summary>
    /// The commands for a server at a place in the list (counted from zero) among so many servers. Reconnect needs a
-   /// pairing and a session and is not the operator's to give while the administrator holds the computer
-   /// disconnected; sign out needs a session; the first server cannot move up and the last cannot move down.
+   /// session and a pairing and is not the operator's to give while the administrator holds the computer
+   /// disconnected. A server that has neither is told to sign in, because pairing needs a session first. Sign out
+   /// needs a session; the first server cannot move up and the last cannot move down.
    /// </summary>
    public static ServerCommands For(ServerSnapshot server, int index, int count)
    {
@@ -50,8 +51,8 @@ public sealed record ServerCommands(IReadOnlyList<ServerCommand> All)
       {
          return None;
       }
-      string? reconnect = !server.Paired ? ShellMessages.ReconnectNotPaired
-         : !server.Authentication.SignedIn ? ShellMessages.ReconnectNotSignedIn
+      string? reconnect = !server.Authentication.SignedIn ? ShellMessages.ReconnectNotSignedIn
+         : !server.Paired ? ShellMessages.ReconnectNotPaired
          : ServerStatus.HeldDisconnected(server) ? ShellMessages.ReconnectHeld
          : null;
       string? up = count == 1 ? ShellMessages.MoveOnlyServer : index == 0 ? ShellMessages.MoveAlreadyFirst : null;

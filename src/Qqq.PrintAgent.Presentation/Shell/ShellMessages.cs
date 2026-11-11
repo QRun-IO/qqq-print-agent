@@ -28,7 +28,10 @@ public static class ShellMessages
    /// <summary>A server this computer is not paired with.</summary>
    public const string NotPaired = "Not paired";
 
-   /// <summary>A server whose session is not authorized to print, as its node says it.</summary>
+   /// <summary>A paired server nobody is signed in to, as its node says it: a sign-in is exactly what is missing.</summary>
+   public const string SignInRequired = "Sign in required";
+
+   /// <summary>A server somebody is signed in to whose session is not authorized to print, as its node says it: signing in again may not be what helps.</summary>
    public const string AuthorizationRequired = "Authorization required";
 
    /// <summary>A server whose administrator holds this computer disconnected. The 1.x sentence.</summary>
@@ -149,7 +152,7 @@ public static class ShellMessages
 
 
 
-   /// <summary>The footer's sentence for one server whose session is not authorized, alone on the computer: the 1.x sentence, naming the server where 1.x named the edition.</summary>
+   /// <summary>The footer's sentence for one server that is not authorized to print, alone on the computer, signed in or not: the 1.x sentence, naming the server where 1.x named the edition.</summary>
    public static string AuthorizationRequiredFor(string name) => name + " authorization required";
 
 
@@ -157,6 +160,11 @@ public static class ShellMessages
    /// <summary>What a screen reader calls a server's node: its name, its health in words, and the two markers when they apply.</summary>
    public static string ServerNodeName(string name, HealthBadge health, bool exception, bool removing)
       => name + ", " + health.Text + (exception ? ", certificate exception on" : string.Empty) + (removing ? ", being removed" : string.Empty);
+
+
+
+   /// <summary>What a screen reader calls the Add server node while it is disabled: that it is unavailable, and why.</summary>
+   public static string AddServerUnavailable(string reason) => AddServer + ", unavailable: " + reason;
 
 
 

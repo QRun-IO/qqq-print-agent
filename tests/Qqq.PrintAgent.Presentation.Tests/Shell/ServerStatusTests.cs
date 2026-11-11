@@ -12,7 +12,7 @@ namespace Qqq.PrintAgent.Presentation.Tests.Shell;
 /// <summary>One server's state in words: the sentence beside its name, by precedence, saying no more than the snapshot does.</summary>
 public sealed class ServerStatusTests
 {
-   /// <summary>The sentence beside a server's name, by precedence: being removed, stored state unreadable, not paired, then the footer rule of 1.x (authorization, the administrator's hold, the health's own sentence).</summary>
+   /// <summary>The sentence beside a server's name, by precedence: being removed, stored state unreadable, not paired, then the footer rule of 1.x (authorization, the administrator's hold, the health's own sentence). The missing authorization is a sign-in when nobody is signed in, and an authorization when somebody is.</summary>
    [Fact]
    public void ServerStatus_Sentence_FollowsThePrecedence()
    {
@@ -23,6 +23,8 @@ public sealed class ServerStatusTests
       Assert.Equal("Stored data for this server cannot be read · see Connection", Sentence(Snapshots.Server(stateUnreadable: true, paired: false)));
       Assert.Equal("Not paired", Sentence(Snapshots.Server(paired: false, authorized: false, health: ServerSnapshot.Orange)));
       Assert.Equal("Authorization required", Sentence(Snapshots.Server(authorized: false, connection: "DISCONNECTED", health: ServerSnapshot.Red)));
+      Assert.Equal("Sign in required", Sentence(Snapshots.Server(signedIn: false, authorized: false, connection: "DISCONNECTED", health: ServerSnapshot.Red)));
+      Assert.Equal("Not paired", Sentence(Snapshots.Server(paired: false, signedIn: false, authorized: false, health: ServerSnapshot.Red)));
       Assert.Equal("Dispatch disconnected by administrator", Sentence(Snapshots.Server(connection: "DISCONNECTED", paused: true, health: ServerSnapshot.Orange)));
       Assert.Equal("Dispatch paused by administrator", Sentence(Snapshots.Server(paused: true, health: ServerSnapshot.Orange)));
       Assert.Equal("Connected and ready", Sentence(Snapshots.Server()));
