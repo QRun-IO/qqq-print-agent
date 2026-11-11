@@ -18,12 +18,17 @@ what the service and its clients will be able to build on. The last two are abou
 - **Accounts.** The principal and the tenant are carried one way wherever a reply names an account (a snapshot,
   the result of adding a server or signing in, the details of a changed identity): printable, at most 200 units,
   left out when missing.
-- **Server names.** A name is 1 to 64 characters of visible text after trimming, without square brackets, and not
-  shaped like a server identifier or the first eight or more characters of one. `servers.add` and `servers.rename`
-  refuse any other name as `invalid_request`.
-- **Adding a server.** `servers.add` carries the sign-in provider's address that `servers.check` reported, for
-  comparison only. When the service reads another provider from the server, nothing is stored and the answer is
-  the new error code `provider_changed`; the client checks the server again.
+- **Server names and addresses.** A name is 1 to 64 characters of visible text after trimming, without square
+  brackets, and not shaped like a server identifier or the first eight or more characters of one. `servers.add` and
+  `servers.rename` refuse any other name as `invalid_request`. The rule is one function for the service and the
+  companion, it says which part a name breaks, and it proposes a name from a server's address that always passes
+  (the host; "Server" in front of a host that looks like an identifier). The rule for an address is beside it:
+  HTTPS, or plain HTTP for this computer itself, with no user name, query, fragment or path, and a host that has
+  an ASCII name. The existing checks of an address are unchanged.
+- **Adding a server, and switching the certificate exception on.** `servers.add` and `trust.set` carry the sign-in
+  provider's address that `servers.check` reported, for comparison only. When the service reads another provider
+  from the server, nothing is stored or changed and the answer is the new error code `provider_changed`; the
+  client checks the server again.
 - **Printer discovery.** The operation table marks `printers.discover` as single-flight: one discovery runs at a
   time, and a request that arrives during it shares its result. The discovery itself is built with the pipe.
 - **Log redaction recognises more shapes.** As with the two shapes below, this changes what a log line shows only
