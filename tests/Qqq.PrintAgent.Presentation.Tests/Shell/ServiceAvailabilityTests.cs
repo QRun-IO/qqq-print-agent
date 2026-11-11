@@ -233,8 +233,10 @@ public sealed class ServiceAvailabilityTests
    /// <summary>
    /// A service that is not reached, one that is older and one that is newer are told apart by the typed result,
    /// and each has its own guidance: the service controls (led by what Windows says of the service, when that is
-   /// known), finishing the update, and updating the companion. The Computer page stays on screen, no wizard is
-   /// asked for, and Add server is disabled with the reason.
+   /// known), finishing the update, and updating the companion. A time limit and a pipe that was closed under the
+   /// call are results of the client too, however the pipe reports them, and read as a service that is not
+   /// reached, where anything else the pipe threw would leave the tick as an exception. The Computer page stays on
+   /// screen, no wizard is asked for, and Add server is disabled with the reason.
    /// </summary>
    [Fact]
    public async Task ServiceNotReached_OlderService_NewerService_EachHasItsGuidance()
@@ -257,6 +259,9 @@ public sealed class ServiceAvailabilityTests
       await fixture.TickFailing(new OperationCanceledException("The reply did not arrive in time."));
       Assert.StartsWith("Use the service controls on this page", fixture.Shell.Availability.Guidance, StringComparison.Ordinal);
       Assert.Equal(ServiceAvailabilityKind.NotReached, fixture.Shell.Availability.Kind);
+      await fixture.TickFailing(new TimeoutException("The reply did not arrive in time."));
+      await fixture.TickFailing(new ObjectDisposedException("pipe"));
+      Assert.Equal(ServiceAvailabilityKind.NotReached, fixture.Shell.Availability.Kind);
 
       await fixture.Tick(Replies.Text("Error: Unknown command."));
       Assert.Equal(new ServiceAvailability(ServiceAvailabilityKind.OlderService, "The Windows service is older than this companion and does not know its requests.",
@@ -276,7 +281,7 @@ public sealed class ServiceAvailabilityTests
 
 
 
-   /// <summary>A reply that cannot be read, and a refusal to give a snapshot, are each said as what they are; a refusal shows the service's reason, which the contract has already made printable.</summary>
+   /// <summary>A reply that cannot be read, and a refusal to give a snapshot, are each said as what they are; a refusal shows the service's reason, which the contract has already made printable. A reply in JSON that states no version has no known sender: it is an answer that cannot be read, not an older service.</summary>
    [Fact]
    public async Task UnreadableReply_AndARefusal_AreSaidAsWhatTheyAre()
    {
@@ -294,6 +299,10 @@ public sealed class ServiceAvailabilityTests
 
       await fixture.Tick(Replies.Text("""{"v":2,"ok":false,"error":{"code":"internal_error","message":""}}"""));
       Assert.Equal("The local print service refused to report its state.", fixture.Shell.Availability.Summary);
+
+      await fixture.Tick(Replies.Text("""{"ok":true,"result":{}}"""));
+      Assert.Equal(ServiceAvailabilityKind.Unreadable, fixture.Shell.Availability.Kind);
+      Assert.Equal("Cannot read the local service's answer", fixture.Shell.Footer.Text);
    }
 
 
