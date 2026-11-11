@@ -11,10 +11,10 @@ token hint. Both now say only that the default browser could not be opened, with
 to check: that a default browser is set in Windows Settings under Apps, Default apps. After a sign-out whose
 provider page could not be opened, the dialog used to say that the provider's sign-out "was opened in your browser
 but did not confirm"; it now says that the page could not be opened, that the provider's session may therefore
-still be there, and what to check. Sign-in and sign-out are otherwise unchanged. Every release from 0.2.0-rc.1 to 1.2.1 has the sign-in case (0.1.x has no browser sign-in). The
-sign-out case is in no release. Both cases are in the development snapshot `snapshot-2.0.0-rc.1`, which was not
-installed anywhere, and on the unreleased `release/1.2.2` branch; 2.0 builds after that snapshot have neither
-([audit](docs/AUDIT-2026-11-10.md), U22).
+still be there, and what to check. Sign-in and sign-out are otherwise unchanged. Every release from 0.2.0-rc.1 to
+1.2.1 has the sign-in case (0.1.x has no browser sign-in). The sign-out case is in no release. Both cases are in the
+development snapshot `snapshot-2.0.0-rc.1`, which was not installed anywhere, and on the unreleased `release/1.2.2`
+branch; 2.0 builds after that snapshot have neither ([audit](docs/AUDIT-2026-11-10.md), U22).
 
 An unexpected failure of the browser callback inbox no longer leaves the connection dialog's browser sign-in as an
 unhandled error (2.0). The inbox gives an argument error when the process that sent a callback has already exited,
@@ -40,10 +40,11 @@ this build: the connection dialog still runs on the existing flow, whose only ch
   OAuth state it sent and waits for the callback that carries it, so two servers can be signing in at once. A
   callback that carries no state, more than one, or a state nobody waits for is dropped, and so is one the session
   would refuse to read (an entry without a value, a repeated name, a control character, a fragment); the log says
-  only that one was dropped. An inbox is open exactly while something waits. When the inbox fails, everything that waits fails
-  once and the next registration opens a new inbox. Whatever the inbox fails with, each sign-in or sign-out that
-  waits ends as a failure it reports: a failure of a kind they do not expect (the inbox gives an argument error when
-  the process that sent a callback has already exited) reaches them as one that names only its kind.
+  only that one was dropped. An inbox is open exactly while something waits. When the inbox fails, everything that
+  waits fails once and the next registration opens a new inbox. Whatever the inbox fails with, each sign-in or
+  sign-out that waits ends as a failure it reports: a failure of a kind they do not expect (the inbox gives an
+  argument error when the process that sent a callback has already exited) reaches them as one that names only its
+  kind. A log that cannot be written to does not stop the dispatcher.
 - `ProviderSignOut` is the identity provider's half of a sign-out: it opens the provider's sign-out page and waits
   up to two minutes for the browser to return with that sign-out's own state. Its result says how it ended:
   confirmed, not opened (the browser or the callback inbox could not be opened, so the operator saw no page), not
