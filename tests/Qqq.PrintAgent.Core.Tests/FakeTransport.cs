@@ -110,6 +110,27 @@ internal sealed class FakeSocketConnector : IQqqSocketConnector
 
 
 
+   /// <summary>The headers the fake server answers the upgrade with, accepted or refused; null, the default, means there was no HTTP answer.</summary>
+   internal Dictionary<string, IEnumerable<string>>? UpgradeHeaders { get; set; }
+
+
+
+   /// <summary>How many times the client took the upgrade answer's headers.</summary>
+   internal int HeadersTaken { get; private set; }
+
+
+
+   /// <summary>Hands the answer's headers over once and keeps none, as the platform connector does.</summary>
+   public IReadOnlyDictionary<string, IEnumerable<string>>? TakeUpgradeHeaders()
+   {
+      HeadersTaken++;
+      Dictionary<string, IEnumerable<string>>? headers = UpgradeHeaders;
+      UpgradeHeaders = null;
+      return headers;
+   }
+
+
+
    /// <summary>Keeps the request and runs the test's hook.</summary>
    public async Task ConnectAsync(QqqSocketRequest request, CancellationToken cancellationToken)
    {

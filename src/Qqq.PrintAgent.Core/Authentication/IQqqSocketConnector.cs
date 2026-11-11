@@ -25,6 +25,15 @@ internal interface IQqqSocketConnector : IDisposable
 
 
 
+   /// <summary>
+   /// Hands over the headers of the server's answer to the upgrade, whether it accepted or refused, and lets go of them;
+   /// null when there was no HTTP answer, or when they were already taken. The session client reads the load balancer's
+   /// cookies from them. The connector passes on what the platform collected and selects nothing.
+   /// </summary>
+   IReadOnlyDictionary<string, IEnumerable<string>>? TakeUpgradeHeaders();
+
+
+
    /// <summary>Performs the upgrade described by the request; it throws when the connection or the upgrade fails.</summary>
    Task ConnectAsync(QqqSocketRequest request, CancellationToken cancellationToken);
 
