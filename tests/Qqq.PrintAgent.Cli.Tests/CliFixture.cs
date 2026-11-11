@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Text;
 using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
@@ -45,12 +46,12 @@ internal sealed class CliFixture : IDisposable
 
 
 
-   /// <summary>The lines redirected standard input holds, in order; when they run out, standard input is at its end.</summary>
-   internal Queue<string?> TypedLines { get; } = new();
+   /// <summary>The bytes redirected standard input holds, exactly as a shell or a file would deliver them; none by default, which is standard input at its end.</summary>
+   internal byte[] Input { get; set; } = [];
 
 
 
-   /// <summary>How many times a line was asked for from standard input.</summary>
+   /// <summary>How many times redirected standard input was opened to read a line from it.</summary>
    internal int LinesRead { get; private set; }
 
 
@@ -112,7 +113,7 @@ internal sealed class CliFixture : IDisposable
 
    /// <summary>Runs one invocation of the command line against the fakes and returns its exit code.</summary>
    internal Task<int> RunAsync(params string[] args)
-      => new CommandLine(new CommandLineHost(_output, _error, ReadVariable, () => InputRedirected, ReadLine, ReadKey, SendAsync, ApplyUpdateAsync, ForwardCallbackAsync)).RunAsync(args);
+      => new CommandLine(new CommandLineHost(_output, _error, ReadVariable, () => InputRedirected, OpenInput, ReadKey, SendAsync, ApplyUpdateAsync, ForwardCallbackAsync)).RunAsync(args);
 
 
 
@@ -124,6 +125,17 @@ internal sealed class CliFixture : IDisposable
          Keys.Enqueue(new ConsoleKeyInfo(character, ConsoleKey.None, shift: false, alt: false, control: false));
       }
    }
+
+
+
+   /// <summary>The bytes a shell or a file delivers on standard input: the byte-order marks given in hexadecimal ("EF BB BF", or none), then the text in the named encoding ("utf-8", "utf-16", "utf-16BE"), which adds no mark of its own.</summary>
+   internal static byte[] Bytes(string mark, string encoding, string text)
+      => [.. Convert.FromHexString(mark.Replace(" ", "", StringComparison.Ordinal)), .. Encoding.GetEncoding(encoding).GetBytes(text)];
+
+
+
+   /// <summary>Puts one line of text on redirected standard input the plain way: as UTF-8 with no byte-order mark, ended as a Windows shell ends a line.</summary>
+   internal void Pipe(string line) => Input = Encoding.UTF8.GetBytes(line + "\r\n");
 
 
 
@@ -142,11 +154,11 @@ internal sealed class CliFixture : IDisposable
 
 
 
-   /// <summary>Hands out the next typed line, or null once the operator has nothing more to type.</summary>
-   private string? ReadLine()
+   /// <summary>Opens redirected standard input: a stream over the scripted bytes, which the command line reads and closes.</summary>
+   private MemoryStream OpenInput()
    {
       LinesRead++;
-      return TypedLines.Count > 0 ? TypedLines.Dequeue() : null;
+      return new MemoryStream(Input);
    }
 
 

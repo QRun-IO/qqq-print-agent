@@ -18,7 +18,7 @@ public static class Program
    /// is no code here that a test cannot reach: asking for help exercises this whole composition without touching the service.
    /// </summary>
    public static Task<int> Main(string[] args)
-      => new CommandLine(new CommandLineHost(Console.Out, Console.Error, Environment.GetEnvironmentVariable, IsInputRedirected, Console.ReadLine, Console.ReadKey,
+      => new CommandLine(new CommandLineHost(Console.Out, Console.Error, Environment.GetEnvironmentVariable, IsInputRedirected, Console.OpenStandardInput, Console.ReadKey,
          AgentPipeClient.SendAsync, MsiUpdateInstaller.ApplyAsync, QqqBrowserCallback.ForwardFromHandlerAsync)).RunAsync(args);
 
 

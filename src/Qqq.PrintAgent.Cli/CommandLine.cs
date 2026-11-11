@@ -253,7 +253,7 @@ internal sealed class CommandLine(CommandLineHost host)
          // error record, which with ErrorActionPreference Stop ends the script      //
          // after the single-use code has already been spent                         //
          //////////////////////////////////////////////////////////////////////////////
-         code = WithoutShellAdditions(host.IsInputRedirected() ? host.ReadLine() : PromptWithoutEcho());
+         code = WithoutShellAdditions(host.IsInputRedirected() ? ReadPipedLine() : PromptWithoutEcho());
       }
       return code.Length > 0 ? code : throw new InvalidOperationException("Enrollment code is required.");
    }
@@ -261,10 +261,31 @@ internal sealed class CommandLine(CommandLineHost host)
 
 
    /// <summary>
+   /// Reads the first line of redirected standard input from its bytes; null when there are none. The console's own
+   /// text reader would decode them in the console input code page and look for no byte-order mark, so the three bytes
+   /// of a UTF-8 mark arrived as three other characters in front of the code on any code page but UTF-8, and the server
+   /// rejected the code as unknown. Windows PowerShell 5.1 sends that mark whenever its output encoding is UTF-8,
+   /// whatever the console code page. A code is ASCII, so the bytes are read as UTF-8, which is the same for it under
+   /// every code page; a mark at the very start is taken for what it says and is not part of the text, so a file
+   /// saved as UTF-16, which is what redirection in Windows PowerShell 5.1 writes, is read as UTF-16. Nothing else is
+   /// guessed: UTF-16 with no mark is read as UTF-8, and a byte that is not UTF-8 becomes the replacement character,
+   /// so what is sent is then not the code. The reader is given the stream to close.
+   /// </summary>
+   private string? ReadPipedLine()
+   {
+      using StreamReader reader = new(host.OpenInput(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+      return reader.ReadLine();
+   }
+
+
+
+   /// <summary>
    /// Drops what a shell can put around a code that never has any of it: surrounding white space (cmd's "echo CODE | ..."
-   /// pipes a trailing space) and a leading byte-order mark (Windows PowerShell 5.1 puts one in front of piped text when
-   /// the console code page is UTF-8). The mark is not white space, so it is removed between two trims; left in, the
-   /// code would pass the blank check and the server would reject it as unknown. Nothing at all returns an empty string.
+   /// pipes a trailing space) and a leading byte-order mark. Piped input has lost one mark already, to the reader that
+   /// decoded it, but Windows PowerShell 5.1 sends two when both the console code page and its output encoding are
+   /// UTF-8, and the variable is never decoded here at all. The mark is not white space, so it is removed between two
+   /// trims; left in, the code would pass the blank check and the server would reject it as unknown. Nothing at all
+   /// returns an empty string.
    /// </summary>
    private static string WithoutShellAdditions(string? text) => (text ?? "").Trim().TrimStart('\uFEFF').Trim();
 

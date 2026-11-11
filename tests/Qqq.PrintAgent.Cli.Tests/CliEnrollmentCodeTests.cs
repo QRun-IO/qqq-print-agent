@@ -50,7 +50,7 @@ public sealed class CliEnrollmentCodeTests
    {
       using CliFixture cli = new() { Reply = "Enrolled." };
       cli.Variables["QQQ_PRINT_ENROLLMENT_CODE"] = variable;
-      cli.TypedLines.Enqueue(Code);
+      cli.Pipe(Code);
 
       int exitCode = await cli.RunAsync("enroll", "--server", Server);
 
@@ -297,7 +297,7 @@ public sealed class CliEnrollmentCodeTests
             cli.Variables["QQQ_PRINT_ENROLLMENT_CODE"] = text;
             break;
          case "piped":
-            cli.TypedLines.Enqueue(text);
+            cli.Pipe(text);
             break;
          default:
             cli.InputRedirected = false;

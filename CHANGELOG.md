@@ -170,7 +170,10 @@ Command line (2.0, breaking). `qqq-print-agent.exe` now only manages the install
   programs a pipe instead of a console (the default Git Bash window) is read as redirected input and may echo
   what is typed; an unattended caller whose console nobody types at must set the variable or redirect input.
   White space around the code and a leading byte-order mark are dropped, whether it comes from the variable or
-  standard input.
+  standard input. Piped input is read as bytes and decoded as UTF-8 on every console code page, so the mark
+  Windows PowerShell 5.1 puts in front of piped text is recognized whether the console code page is UTF-8 or
+  not; input that begins with a UTF-16 mark, such as a file Windows PowerShell 5.1 wrote with `>`, is read as
+  UTF-16. UTF-16 text without a mark is not recognized; use the variable for it.
 - `service-status` and `snapshot` exit 1 when the service replies with `Error:`, as the other commands already
   did. The reply itself is still printed on standard output.
 

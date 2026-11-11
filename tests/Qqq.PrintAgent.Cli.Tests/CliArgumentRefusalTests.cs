@@ -152,7 +152,7 @@ public sealed class CliArgumentRefusalTests
    public async Task HelpFlagAfterACommand_PrintsTheUsageAndSucceeds(params string[] args)
    {
       using CliFixture cli = new();
-      cli.TypedLines.Enqueue("synthetic-code-4471");
+      cli.Pipe("synthetic-code-4471");
 
       int exitCode = await cli.RunAsync(args);
 
@@ -184,7 +184,7 @@ public sealed class CliArgumentRefusalTests
    {
       using CliFixture cli = new();
       cli.Variables[CommandLine.EnrollmentCodeVariable] = "synthetic-code-4471";
-      cli.TypedLines.Enqueue("synthetic-code-4471");
+      cli.Pipe("synthetic-code-4471");
 
       int exitCode = await cli.RunAsync(args);
 
