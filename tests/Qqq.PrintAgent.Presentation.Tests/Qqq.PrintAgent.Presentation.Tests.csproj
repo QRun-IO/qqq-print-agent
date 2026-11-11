@@ -27,4 +27,10 @@
       <ProjectReference Include="..\..\src\Qqq.PrintAgent.Presentation\Qqq.PrintAgent.Presentation.csproj" />
    </ItemGroup>
 
+   <!-- The management contract's golden files belong to the Windows layer's suite, which holds them to the
+        contract. They are linked here, not copied, so the companion's client is held to the same files. -->
+   <ItemGroup>
+      <Content Include="..\Qqq.PrintAgent.Cli.Tests\Fixtures\management\*.json" Link="Fixtures\management\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+   </ItemGroup>
+
 </Project>

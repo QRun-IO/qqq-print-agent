@@ -9,8 +9,11 @@ namespace Qqq.PrintAgent.Windows.Management;
 
 /// <summary>
 /// The outcome of reading one reply's text: the reply, or what was wrong with its envelope. A client needs the
-/// difference: text that is not JSON, or has no version, came from a service that speaks version 1; an unknown version
-/// came from a newer one; and either is something to tell the operator, not a failed operation.
+/// difference: text that is not JSON is what a service that speaks version 1 answers; an unknown version is what a
+/// newer one answers; and either tells the operator which side to update. Neither proves that the operation was not
+/// carried out, because the same text can come from elsewhere, so a client says "nothing to check" only for a read.
+/// JSON without a version has no known sender (a version 1 service does not answer a version 2 request in JSON; it
+/// answers requests of its own version that way, a snapshot for one) and is a reply that could not be read.
 /// </summary>
 public sealed record ManagementReplyParse(ManagementReply? Reply, ManagementEnvelopeProblem Problem)
 {

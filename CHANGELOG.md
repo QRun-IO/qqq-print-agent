@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+The companion has a client for version 2 of the management pipe (2.0). The window does not use it yet: it still
+talks to the service through the version 1 client, and no service answers version 2 yet, so nothing an operator
+sees changes. The connection wizard and the server tree will be built on it.
+
+- **One method for each operation.** The client sends the 26 operations the companion sends, each through one
+  method that takes plain values and returns the contract's own result record; nothing above it spells an
+  operation's name or reads a reply. The other four are not the companion's to send: `servers.list` and
+  `computer.getProfile`, because the snapshot carries both, and `update.prepare` and `update.resume`, which the
+  update service sends itself. What each method sends is held to the contract's golden files. A method takes the
+  contract's own type where there is one: the log limits as the contract's record, a server's address as the origin
+  the contract's address rule returned, and a sign-in repair as one of the contract's two values.
+- **What the contract refuses is not sent.** A request is put to the contract's own check and its arguments are
+  read back the way the service reads them, so a server that is not named by its full identifier, a value a
+  request needs and was not given, and an address the address rule refuses are answered at once as
+  `invalid_request`. The client adds one rule of its own to the contract's, about the check the operator saw
+  (below): it must be given wherever something is accepted, and a server is not added with one that failed.
+- **A reply is read only for what was asked.** A rename answered with another server, an add answered with
+  another address, a reorder answered with other servers and job details for another job are unreadable replies,
+  so nothing is shown under the wrong server or row.
+- **A refusal carries the contract's code.** A result says why the service refused as one of the contract's
+  codes, with typed details for the codes that have them, so nothing is decided by a message's text. A code this
+  version does not know is handled as `internal_error` and shows the service's message; the log warns of it once
+  while it repeats.
+- **An older and a newer service are told apart, and neither is taken as proof that nothing happened.** A
+  reply that is not JSON, which is what a service that speaks version 1 sends, and a reply in a later version
+  each say which side has to be updated. For a read that is all. For every other operation the result also says
+  that the operation may have been carried out and must be checked before it is repeated, because the form of a
+  reply does not show what the service did. A reply of this version that cannot be read, and JSON without a
+  version, are reported the same way for every operation.
+- **The sign-in provider's address comes from the check the operator saw.** Adding a server and switching a
+  certificate exception on take the result of the check the operator was shown, as an argument that cannot be left
+  out, and send the provider's address that check reported, or none when it named none. They take no address as
+  text, which could hold another read of the provider. Switching an exception on without a check is refused
+  before anything is sent; switching it off needs none. Adding a server with a check that failed is refused too.
+- **Limits.** The client has at most twelve requests in flight, of the sixteen clients the pipe serves at once.
+  Over that, the three reads the window repeats on a timer (the snapshot, the transport read, a page of jobs) are
+  skipped and asked again on the next tick, and every other request waits its turn. The snapshot and the
+  transport read are single-flight: a second caller shares the answer of the one in flight. A request whose
+  caller stops waiting before its turn comes is not sent.
+- **A snapshot that is newer than a change.** A caller that reads the state to learn the outcome of a change can
+  ask for a snapshot that is sent after its call. It is never answered from a snapshot sent earlier: it waits
+  out one that is in flight and then sends another, and over the limit it waits its turn instead of being
+  skipped.
+- **Logging.** A log entry names the operation, the server's identifier and the kind of failure. It holds
+  nothing from a request's arguments and, of a reply, at most the code of a refusal this version does not know,
+  so a session credential, an enrollment code and the identity provider's sign-out request reach no log line.
+  The entry for a failure of the pipe itself also carries the exception's own description (its type names and
+  messages), and at debug level the exception's full text with its stack. That is why the function that sends a
+  request over the pipe is held to a stated contract: no exception it throws may carry text of a request or of a
+  reply in its message.
+
 A failed browser start no longer writes the sign-in address to the companion log or the dialog (2.0). When Windows
 could not start the default browser for a browser sign-in, the companion's log entry and the dialog's "Browser
 sign-in not completed" message repeated Windows' own error text, and that text names what it could not start: the
