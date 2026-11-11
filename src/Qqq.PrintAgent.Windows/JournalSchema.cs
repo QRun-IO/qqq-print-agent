@@ -26,6 +26,40 @@ internal static class JournalSchema
 
 
 
+   /// <summary>
+   /// What the service logs when the journal in a state folder could not be brought up to date and the service therefore
+   /// does not start: which journal, the kind of failure, that the journal was not changed, and what an operator can
+   /// check. A migration changes the journal in one transaction or not at all, so whatever failed, the journal holds
+   /// what it held. The failure is named by its kind only. Its own message is not repeated: a message can quote what a
+   /// statement was working on, and this line must be safe to show whatever the journal and the pairing file contain.
+   /// </summary>
+   internal static string StartFailureText(string directory, Exception failure)
+      => $"The print journal in {Path.GetFullPath(directory)} could not be brought up to date: {KindOf(failure)}. The journal was not changed; its changes are made together or not at all. "
+         + "Printing does not start. Check that the print service can read and write that folder and the file journal.db in it, that no other program has the file open, "
+         + "and that the disk has free space, then start the service again. Every start tries again.";
+
+
+
+   /// <summary>The kind of a migration failure in an operator's words, with SQLite's error number where SQLite reported it, and the failure's type where it did not.</summary>
+   private static string KindOf(Exception failure)
+   {
+      if(failure is not SqliteException sqlite)
+      {
+         return "the migration stopped with " + failure.GetType().Name;
+      }
+      string number = " (SQLite error " + sqlite.SqliteErrorCode.ToString(CultureInfo.InvariantCulture) + ")";
+      return sqlite.SqliteErrorCode switch
+      {
+         3 or 8 or 10 or 14 => "the journal file could not be opened or written" + number,
+         5 or 6 => "another program has the journal file in use" + number,
+         11 or 26 => "the journal file is damaged or is not a journal" + number,
+         13 => "the disk is full" + number,
+         _ => "SQLite refused a change" + number,
+      };
+   }
+
+
+
    /// <summary>Brings the journal in a state folder to this build's schema version, creating the folder and the journal when they are missing, and says whether the stored state may be used.</summary>
    internal static StateStatus Migrate(string directory) => Migrate(directory, JournalMigration.Steps);
 

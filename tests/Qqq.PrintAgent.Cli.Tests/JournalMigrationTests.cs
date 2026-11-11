@@ -683,6 +683,73 @@ public sealed class JournalMigrationTests
 
 
 
+   /// <summary>
+   /// When the journal cannot be brought up to date the service does not start, and before it gives up it logs one line
+   /// an operator can act on. Here the journal of a paired, signed-in computer has been replaced by a file that is not a
+   /// database. The start fails with SQLite's error. The line names the journal's folder and the kind of failure, says
+   /// that the journal was not changed and what to check, and has nothing in it of SQLite's own text, the pairing or the
+   /// session. The file has the bytes it had, and no session was created.
+   /// </summary>
+   [Fact]
+   public async Task ServiceStart_JournalCannotBeMigrated_LogsWhichJournalAndThatItWasNotChanged()
+   {
+      using SessionFixture fixture = new();
+      fixture.SaveSession();
+      string directory = fixture.Local.DirectoryPath;
+      using SingleServerHarness runtime = fixture.Runtime();
+      JournalFiles.Release(directory);
+      foreach(string file in Directory.EnumerateFiles(directory, "journal.db*"))
+      { File.Delete(file); }
+      byte[] notAJournal = [.. Enumerable.Range(0, 8192).Select(position => (byte)(position * 31))];
+      File.WriteAllBytes(Path.Combine(directory, "journal.db"), notAJournal);
+      using CancellationTokenSource stop = new(TimeSpan.FromSeconds(60));
+
+      SqliteException failure = await Assert.ThrowsAsync<SqliteException>(() => runtime.RunAsync(stop.Token));
+
+      Assert.Equal(26, failure.SqliteErrorCode);
+      string line = Assert.Single(fixture.Logs, entry => entry.Contains("could not be brought up to date", StringComparison.Ordinal));
+      Assert.StartsWith("The print journal in " + Path.GetFullPath(directory) + " could not be brought up to date: the journal file is damaged or is not a journal (SQLite error 26). The journal was not changed;", line, StringComparison.Ordinal);
+      Assert.Contains("Check that the print service can read and write that folder", line, StringComparison.Ordinal);
+      Assert.All((string[])["file is not a database", "synthetic-token", "synthetic-qqq-cookie", "synthetic.invalid", "principal"], secret => Assert.DoesNotContain(secret, line, StringComparison.Ordinal));
+      Assert.Equal(notAJournal, File.ReadAllBytes(Path.Combine(directory, "journal.db")));
+      Assert.Equal(["connection.dpapi", "journal.db", "qqq-session.dpapi", "worker.lock"], Directory.EnumerateFiles(directory).Select(file => Path.GetFileName(file)).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Equal(0, fixture.Created);
+   }
+
+
+
+   /// <summary>
+   /// The line logged for a failed start names the failure by its kind: what an operator would call it, with SQLite's
+   /// error number, or the failure's type when SQLite did not report it. It never repeats the failure's message, which
+   /// here carries text shaped like a credential and like a row of the journal.
+   /// </summary>
+   [Fact]
+   public void StartFailureText_NamesTheKindOfFailure_AndNeverItsMessage()
+   {
+      const string Message = "token=synthetic-secret {\"eventId\":\"ev-1001-received\"}";
+      (Exception Failure, string Kind)[] failures =
+      [
+         (new SqliteException(Message, 14), "the journal file could not be opened or written (SQLite error 14)"),
+         (new SqliteException(Message, 8), "the journal file could not be opened or written (SQLite error 8)"),
+         (new SqliteException(Message, 5), "another program has the journal file in use (SQLite error 5)"),
+         (new SqliteException(Message, 11), "the journal file is damaged or is not a journal (SQLite error 11)"),
+         (new SqliteException(Message, 13), "the disk is full (SQLite error 13)"),
+         (new SqliteException(Message, 1), "SQLite refused a change (SQLite error 1)"),
+         (new InvalidDataException(Message), "the migration stopped with InvalidDataException"),
+      ];
+      string folder = NewFolder();
+      foreach((Exception failure, string kind) in failures)
+      {
+         string text = JournalSchema.StartFailureText(folder, failure);
+         Assert.StartsWith("The print journal in " + folder + " could not be brought up to date: " + kind + ". The journal was not changed; its changes are made together or not at all. Printing does not start.", text, StringComparison.Ordinal);
+         Assert.EndsWith("then start the service again. Every start tries again.", text, StringComparison.Ordinal);
+         Assert.DoesNotContain("synthetic-secret", text, StringComparison.Ordinal);
+         Assert.DoesNotContain("ev-1001-received", text, StringComparison.Ordinal);
+      }
+   }
+
+
+
    /// <summary>The three cases of the stored state say the same thing in the form the management contract's snapshot carries, and only a ready state refuses nothing.</summary>
    [Fact]
    public void StateStatus_MapsToTheSnapshotsStoredState()

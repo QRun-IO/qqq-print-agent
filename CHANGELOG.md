@@ -9,6 +9,10 @@ The journal has a schema version (2.0). Printing, pairing and history are unchan
   opened the journal created and altered tables as it went. A journal left by any 1.x release, and by the
   prereleases before it, is brought to the same schema; no row is changed, except that job events written before
   events recorded which pairing they belong to are given the saved pairing's, as 1.x did each time it started.
+- When the journal cannot be brought up to date the service does not start, as before. The log now has one line
+  for the operator: the journal's folder, the kind of failure (the file could not be opened or written, another
+  program has it in use, it is damaged, the disk is full), that the journal was not changed, and what to check.
+  Until now the log had only SQLite's own message.
 - An older version installed over data that a newer version wrote no longer runs on it. This can happen between
   release candidates, which share a version number. The service leaves the data exactly as it found it, contacts
   no server, and reports "A newer version of this application wrote the print data on this computer, and this

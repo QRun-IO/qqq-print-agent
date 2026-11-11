@@ -64,7 +64,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
       Directory.CreateDirectory(directory);
       using FileStream instance = new(Path.Combine(directory, "worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
       _log.Write("INFO", "Print service started.");
-      _storedState = JournalSchema.Migrate(directory);
+      _storedState = MigrateJournal();
       if(_storedState.Refusal is string refusal)
       {
          _log.Write("ERROR", refusal + (_storedState is StateStatus.NewerBuild newer ? $" The journal is at schema version {newer.FoundVersion}; this version supports up to {newer.SupportedVersion}." : string.Empty)
@@ -73,6 +73,27 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          return;
       }
       await RunRealtimeAsync(token).ConfigureAwait(false);
+   }
+
+
+
+   /// <summary>
+   /// Brings the journal up to date, which is the first thing the service does with its stored state. A failure stops
+   /// the service from starting, as a failed first open of the store did before there was a migration. Before the
+   /// failure is passed on, one line is logged for the operator: which journal it was, that it was not changed, and
+   /// what to check.
+   /// </summary>
+   private StateStatus MigrateJournal()
+   {
+      try
+      {
+         return JournalSchema.Migrate(directory);
+      }
+      catch(Exception exception)
+      {
+         _log.Write("ERROR", JournalSchema.StartFailureText(directory, exception));
+         throw;
+      }
    }
 
 
