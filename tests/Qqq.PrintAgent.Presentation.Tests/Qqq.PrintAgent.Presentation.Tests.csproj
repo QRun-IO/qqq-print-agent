@@ -33,4 +33,23 @@
       <Content Include="..\Qqq.PrintAgent.Cli.Tests\Fixtures\management\*.json" Link="Fixtures\management\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
    </ItemGroup>
 
+   <!-- The view contract (Views\XamlContractTests.cs) reads the companion's markup and code-behind, and the two
+        interactive suites that find controls by identifier, as text. They are copied beside the tests, never
+        compiled and never referenced: this project must stay free of WinUI and of the companion (ArchitectureTests).
+        IfDifferent, not PreserveNewest: a file put back to an earlier version is older than its copy and must still replace it. -->
+   <ItemGroup>
+      <ViewContractSource Include="..\..\src\Qqq.PrintAgent\**\*.xaml;..\..\src\Qqq.PrintAgent\**\*.cs" Exclude="..\..\src\Qqq.PrintAgent\bin\**;..\..\src\Qqq.PrintAgent\obj\**" Link="Companion\%(RecursiveDir)%(Filename)%(Extension)" />
+      <ViewContractSource Include="..\Qqq.PrintAgent.UiTests\*.cs" Link="InteractiveTests\UiTests\%(Filename)%(Extension)" />
+      <ViewContractSource Include="..\Qqq.PrintAgent.LayoutTests\*.cs" Link="InteractiveTests\LayoutTests\%(Filename)%(Extension)" />
+      <Content Include="@(ViewContractSource)" CopyToOutputDirectory="IfDifferent" />
+      <None Remove="Views\*.txt" />
+      <Content Include="Views\*.txt" CopyToOutputDirectory="IfDifferent" />
+   </ItemGroup>
+
+   <!-- A copied file outlives its source in the output folder, so the tests read only the files this build names
+        here: a view that was deleted or renamed is not read from an earlier build's copy. -->
+   <Target Name="WriteViewContractSources" AfterTargets="CopyFilesToOutputDirectory">
+      <WriteLinesToFile File="$(OutDir)view-contract-sources.txt" Lines="@(ViewContractSource->'%(Link)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+   </Target>
+
 </Project>
