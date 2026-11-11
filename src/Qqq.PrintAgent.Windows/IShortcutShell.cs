@@ -12,8 +12,15 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 internal interface IShortcutShell
 {
-   /// <summary>Reads the program, arguments and description of an existing shortcut file.</summary>
-   ShortcutLink Read(string path);
+   /// <summary>
+   /// Reads the program, arguments and description of an existing shortcut file. Three outcomes are kept apart, because
+   /// they mean different things to the rules. A file that cannot be opened for reading (another program holds it, or
+   /// access is denied) is a failure, passed on as the file system gives it, an <see cref="IOException"/> or an
+   /// <see cref="UnauthorizedAccessException"/>: nothing is known about that file. A file that opens and holds no
+   /// shortcut at all (an empty file, or anything else under the name) is null. Anything else is what the shortcut
+   /// says. A shell that cannot do its work fails with an <see cref="InvalidOperationException"/>.
+   /// </summary>
+   ShortcutLink? Read(string path);
 
 
 

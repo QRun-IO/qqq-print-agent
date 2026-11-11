@@ -34,6 +34,11 @@ internal interface IPathSecurity
 
 
 
+   /// <summary>True when what exists at the path is a link or a junction to somewhere else instead of an ordinary file or folder.</summary>
+   bool IsLink(string path);
+
+
+
    /// <summary>Creates a folder that has the given owner and access list from the moment it exists.</summary>
    void CreateDirectory(string directory, DirectorySecurity security);
 }

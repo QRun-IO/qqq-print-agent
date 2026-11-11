@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using Qqq.PrintAgent.Windows;
@@ -68,6 +69,43 @@ public sealed class WindowsPathSecurityTests
       Assert.Matches("^S-1-\\d+(-\\d+)+$", security.CurrentUserSid);
       Assert.Equal(identity.User!.Value, security.CurrentUserSid);
       Assert.Equal(identity.Groups!.Contains(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)), security.IsAdministrator);
+   }
+
+
+
+   /// <summary>
+   /// An ordinary file and an ordinary folder are not links, and a junction is. The junction is made inside the
+   /// temporary folder with the command interpreter's own mklink, which needs no administrator rights, and points at a
+   /// folder beside it; it is removed again before the folder is.
+   /// </summary>
+   [Fact]
+   public void JunctionIsALinkAndAnOrdinaryFileOrFolderIsNot()
+   {
+      string root = Path.Combine(Path.GetTempPath(), "qqq-path-security-" + Guid.NewGuid().ToString("N"));
+      string target = Path.Combine(root, "target");
+      string junction = Path.Combine(root, "junction");
+      Directory.CreateDirectory(target);
+      try
+      {
+         string file = Path.Combine(target, "inside.txt");
+         File.WriteAllText(file, "synthetic");
+         using(Process mklink = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), ["/d", "/c", "mklink", "/J", junction, target]) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })!)
+         {
+            string said = mklink.StandardOutput.ReadToEnd() + mklink.StandardError.ReadToEnd();
+            mklink.WaitForExit();
+            Assert.True(mklink.ExitCode == 0, "The junction this test needs could not be made in its temporary folder: " + said);
+         }
+         var security = new WindowsPathSecurity();
+         Assert.True(security.IsLink(junction));
+         Assert.False(security.IsLink(target));
+         Assert.False(security.IsLink(file));
+         Directory.Delete(junction);
+         Assert.True(File.Exists(file));
+      }
+      finally
+      {
+         Directory.Delete(root, recursive: true);
+      }
    }
 
 

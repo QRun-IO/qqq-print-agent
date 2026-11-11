@@ -72,22 +72,32 @@ public sealed class AgentBrandingRemovalTests
 
 
    /// <summary>
-   /// A recorded shortcut that has become someone else's file, or a recorded name that is not a shortcut file name in the
+   /// A recorded file that is not a shortcut of ours, or a recorded name that is not a shortcut file name in the
    /// shortcut folder, does not fail the uninstall: the file is left exactly as it is, one note says so, the record is
-   /// forgotten, and a shortcut of ours recorded beside it is still removed.
+   /// forgotten, and a shortcut of ours recorded beside it is still removed. Not ours are someone else's shortcut, a
+   /// file that holds no shortcut at all (empty, or anything else) and a link, which this product never writes.
    /// </summary>
    [Theory]
    [InlineData("foreign", "The recorded shortcut \"Old Brand.lnk\" no longer belongs to this application. It was left unchanged and is no longer recorded.")]
+   [InlineData("empty", "The recorded shortcut \"Old Brand.lnk\" no longer belongs to this application. It was left unchanged and is no longer recorded.")]
+   [InlineData("garbage", "The recorded shortcut \"Old Brand.lnk\" no longer belongs to this application. It was left unchanged and is no longer recorded.")]
+   [InlineData("link", "The recorded shortcut \"Old Brand.lnk\" no longer belongs to this application. It was left unchanged and is no longer recorded.")]
    [InlineData("name-escapes", "A recorded shortcut name is not a shortcut file name in the shortcut folder. Nothing was removed for it, and it is no longer recorded.")]
    public void RemovalLeavesAndForgetsWhatIsNoLongerOurs(string problem, string note)
    {
       using var setup = new BrandingSetup();
       string ours = setup.PlantShortcut(Acme, setup.OurLink);
       string theirs = setup.PlantShortcut(Old, problem is "foreign" ? new ShortcutLink(setup.Installed, "--other", BrandingSetup.Ours) : setup.OurLink);
+      if(problem is "empty")
+      { File.WriteAllBytes(theirs, []); }
+      else if(problem is "garbage")
+      { File.WriteAllText(theirs, "not a shortcut at all"); }
+      else if(problem is "link")
+      { _ = setup.Security.Links.Add(theirs); }
       string outside = Path.Combine(setup.Programs, Old);
       FakeShortcutShell.Plant(outside, setup.OurLink);
       string theirsBefore = File.ReadAllText(theirs);
-      setup.Record.Name = problem is "foreign" ? Old : "..\\" + Old;
+      setup.Record.Name = problem is "name-escapes" ? "..\\" + Old : Old;
       setup.Record.Pending.Add(Acme);
       setup.Rules.RemoveInstalledShortcut();
       Assert.Equal(theirsBefore, File.ReadAllText(theirs));
@@ -133,6 +143,39 @@ public sealed class AgentBrandingRemovalTests
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
       Assert.Equal(problem is "unreadable" ? 2 : 0, setup.Shell.Reads.Count);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
+   /// <summary>
+   /// A recorded shortcut that cannot be opened, because another program holds it and shares nothing, is never judged:
+   /// it may well be ours. The uninstall fails with a failure that names the shortcut, before anything is deleted or
+   /// forgotten; run again once the file is free, it removes the shortcut and forgets the record.
+   /// </summary>
+   [Fact]
+   public void RemovalOfAShortcutThatCannotBeOpenedFailsWithTheRecordKeptAndCanBeRunAgain()
+   {
+      using var setup = new BrandingSetup();
+      string current = setup.PlantShortcut(Acme, setup.OurLink);
+      string earlier = setup.PlantShortcut(Old, setup.OurLink);
+      setup.Record.Name = Acme;
+      setup.Record.Pending.Add(Old);
+      using(new FileStream(earlier, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+      {
+         IOException refused = Assert.Throws<IOException>(setup.Rules.RemoveInstalledShortcut);
+         Assert.StartsWith("The shortcut \"Old Brand.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
+      }
+      Assert.True(File.Exists(current));
+      Assert.True(File.Exists(earlier));
+      Assert.Empty(setup.Record.Changes);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
+      Assert.Empty(setup.Notes);
+      setup.Rules.RemoveInstalledShortcut();
+      Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
+      Assert.Null(setup.Record.Name);
+      Assert.Empty(setup.Record.Pending);
       Assert.Empty(setup.Notes);
    }
 

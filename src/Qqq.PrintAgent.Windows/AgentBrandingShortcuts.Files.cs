@@ -60,12 +60,31 @@ internal sealed partial class AgentBrandingShortcuts
 
 
 
-   /// <summary>Reads an existing shortcut through the shell and reports whether it matches this application's ownership marks.</summary>
+   /// <summary>
+   /// Looks at an existing file under a shortcut name and reports whether it is a shortcut of ours. A link is not ours and
+   /// is not opened, because this product never writes one. A file that opens and holds no shortcut at all is not ours.
+   /// A shortcut that says anything but what ours says is not ours. A file that cannot be opened is not judged: nothing
+   /// is known about it, so the failure is passed on, naming the shortcut, and the caller decides what that means. At a
+   /// first look it stops the run before anything has changed; at the look before a delete or a replacement the file is
+   /// left alone and its name stays on record.
+   /// </summary>
    private bool IsOwnedShortcut(string path)
    {
-      MsiUpdateInstaller.ValidateNoReparseComponents(path);
-      ShortcutLink link = shell.Read(path);
-      return MatchesOwnedShortcut(link.Target, link.Arguments, link.Description);
+      MsiUpdateInstaller.ValidateNoReparseComponents(Path.GetDirectoryName(path)!);
+      if(security.IsLink(path))
+      {
+         return false;
+      }
+      ShortcutLink? link;
+      try
+      {
+         link = shell.Read(path);
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         throw new IOException($"The shortcut \"{Path.GetFileName(path)}\" could not be read, so it cannot be known whether it belongs to this application: {exception.Message}", exception);
+      }
+      return link is not null && MatchesOwnedShortcut(link.Target, link.Arguments, link.Description);
    }
 
 

@@ -53,6 +53,11 @@ internal sealed class WindowsPathSecurity : IPathSecurity
 
 
 
+   /// <summary>Reads the attributes of what exists at the path and reports whether it is a reparse point, which is what a link or a junction is.</summary>
+   public bool IsLink(string path) => File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+
+
+
    /// <summary>Creates the folder with the descriptor applied at creation.</summary>
    public void CreateDirectory(string directory, DirectorySecurity security) => new DirectoryInfo(directory).Create(security);
 }

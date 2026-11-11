@@ -11,7 +11,7 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// Shortcut files without the Windows shell. A shortcut is written as a small text file that holds what the shortcut says,
 /// so it survives being moved or replaced like the real file does, and is read back from that text. Every read and write
-/// is recorded. Reading can be made to fail, and writing can be made to fail either before any file exists or part way,
+/// is recorded. Reading fails or finds no shortcut where the real shell would, and can also be made to fail; writing can be made to fail either before any file exists or part way,
 /// leaving a broken file behind as the real shell can. A test can also act between the steps of the rules under test,
 /// as another program on the same computer could.
 /// </summary>
@@ -67,13 +67,24 @@ internal sealed class FakeShortcutShell : IShortcutShell
 
 
 
-   /// <summary>Reads what the file at the path says, or fails as asked.</summary>
-   public ShortcutLink Read(string path)
+   /// <summary>
+   /// Reads what the file at the path says, as the real shell does: the file is opened for reading, shared for reading
+   /// only, so a file another handle holds exclusively fails here as it does on Windows; a file that opens and does
+   /// not hold a shortcut (an empty file, or anything that is not this fake's text) is null.
+   /// </summary>
+   public ShortcutLink? Read(string path)
    {
       Reads.Add(path);
       if(ReadFailure is not null && (ReadFailureOn is null || string.Equals(ReadFailureOn, path, StringComparison.OrdinalIgnoreCase)))
       { throw ReadFailure; }
-      ShortcutLink link = JsonSerializer.Deserialize<ShortcutLink>(File.ReadAllText(path))!;
+      ShortcutLink? link;
+      using(var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)))
+      {
+         try
+         { link = JsonSerializer.Deserialize<ShortcutLink>(reader.ReadToEnd()); }
+         catch(JsonException)
+         { link = null; }
+      }
       AfterRead?.Invoke();
       return link;
    }

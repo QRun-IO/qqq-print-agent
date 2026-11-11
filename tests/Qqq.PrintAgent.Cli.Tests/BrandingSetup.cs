@@ -100,8 +100,12 @@ internal sealed class BrandingSetup : IDisposable
 
 
 
-   /// <summary>Creates the install folder with a companion file and the programs folder, and binds the rules to them and to the fakes.</summary>
-   internal BrandingSetup()
+   /// <summary>
+   /// Creates the install folder with a companion file and the programs folder, and binds the rules to them and to the
+   /// fakes. A test that wants the rules to meet Windows itself passes the real shortcut shell, which then reads and
+   /// writes real shortcut files in the temporary shortcut folder in place of the shell fake.
+   /// </summary>
+   internal BrandingSetup(IShortcutShell? realShell = null)
    {
       Installed = Path.Combine(Root, "Program Files", "QQQ Print Agent", "App", "Qqq.PrintAgent.exe");
       Programs = Path.Combine(Root, "Start Menu", "Programs");
@@ -109,7 +113,7 @@ internal sealed class BrandingSetup : IDisposable
       Directory.CreateDirectory(Path.GetDirectoryName(Installed)!);
       File.WriteAllText(Installed, "synthetic companion");
       Directory.CreateDirectory(Programs);
-      Rules = new AgentBrandingShortcuts(Shell, Security, Record, new BrandingPlaces(Installed, Programs, State, EnsureState, LoadBranding, WriteNote));
+      Rules = new AgentBrandingShortcuts(realShell ?? Shell, Security, Record, new BrandingPlaces(Installed, Programs, State, EnsureState, LoadBranding, WriteNote));
    }
 
 
@@ -130,8 +134,13 @@ internal sealed class BrandingSetup : IDisposable
 
 
 
-   /// <summary>Removes the temporary root.</summary>
-   public void Dispose() => Directory.Delete(Root, recursive: true);
+   /// <summary>Removes the temporary root, first clearing the read-only mark from any file a test put it on.</summary>
+   public void Dispose()
+   {
+      foreach(string file in Directory.GetFiles(Root, "*", SearchOption.AllDirectories))
+      { File.SetAttributes(file, FileAttributes.Normal); }
+      Directory.Delete(Root, recursive: true);
+   }
 
 
 

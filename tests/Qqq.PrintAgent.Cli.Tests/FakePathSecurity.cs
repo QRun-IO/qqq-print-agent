@@ -46,6 +46,11 @@ internal sealed class FakePathSecurity : IPathSecurity
 
 
 
+   /// <summary>Paths the test says have become links; nothing on disk is changed to make them so.</summary>
+   internal HashSet<string> Links { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+
+
    /// <summary>Every folder created, in order, with the descriptor asked for.</summary>
    internal List<(string Directory, DirectorySecurity Security)> Created { get; } = [];
 
@@ -82,6 +87,11 @@ internal sealed class FakePathSecurity : IPathSecurity
       { throw new FileNotFoundException("Synthetic: no such file to read a security descriptor from.", file); }
       return Descriptors.TryGetValue(file, out FileSystemSecurity? descriptor) ? descriptor : Descriptor();
    }
+
+
+
+   /// <summary>Reports a link where the test said there is one.</summary>
+   public bool IsLink(string path) => Links.Contains(path);
 
 
 

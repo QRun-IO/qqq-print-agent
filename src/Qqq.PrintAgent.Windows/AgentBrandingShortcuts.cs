@@ -134,9 +134,9 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
 
    /// <summary>
    /// Judges recorded names before anything is changed and returns those whose file exists and is still ours. A name
-   /// that is not a shortcut file name in the shortcut folder, or whose file has become someone else's, is dropped with
-   /// a note; a name without a file is dropped silently. A shortcut that cannot be read at all throws, so the caller
-   /// stops while nothing has been changed.
+   /// that is not a shortcut file name in the shortcut folder, or whose file is not ours (someone else's shortcut, no
+   /// shortcut at all, or a link), is dropped with a note; a name without a file is dropped silently. A file that
+   /// cannot be opened is not judged: that throws, so the caller stops while nothing has been changed.
    /// </summary>
    private List<string> StillOurs(IEnumerable<string> names, List<string> notes)
    {
@@ -178,9 +178,10 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
 
    /// <summary>
    /// Removes the earlier shortcuts the new one replaces and returns the names of those that are still there and still
-   /// ours. Nothing here fails the run: the new shortcut is already in place and recorded, so an earlier one that
-   /// cannot be looked at or deleted now (another program may hold the file) is noted and stays recorded, and the next
-   /// branding run or the uninstall removes it.
+   /// ours. Nothing the shell or the file system refuses here fails the run: the new shortcut is already in place and
+   /// recorded, so an earlier one that cannot be opened or deleted now (another program may hold the file), or that
+   /// the shell cannot read, is noted with the reason and stays recorded, and the next branding run or the uninstall
+   /// removes it.
    /// </summary>
    private List<string> RemoveLeaving(List<string> leaving, List<string> notes)
    {
@@ -191,7 +192,7 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
          {
             RemoveIfStillOurs(name, notes);
          }
-         catch(Exception exception)
+         catch(Exception exception) when(exception is IOException or UnauthorizedAccessException or InvalidOperationException)
          {
             remaining.Add(name);
             notes.Add($"The previous shortcut \"{name}\" could not be removed ({exception.GetType().Name}: {exception.Message}). It stays recorded, and the next branding run or the uninstall will try again.");
