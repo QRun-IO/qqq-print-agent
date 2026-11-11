@@ -9,12 +9,13 @@ using Qqq.PrintAgent.Windows.Management;
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// What a server's name may be (ADR-0004, "Server names"), and where the contract enforces it: in the arguments of
-/// <c>servers.add</c> and <c>servers.rename</c>, which cannot be built with a name that breaks the rule, so a request
-/// that gives one is refused as an invalid request when its arguments are read. The characters are written as escapes
-/// so this file holds none of them.
+/// What a server's name may be (ADR-0004, "Server names"): the one rule the service and the companion both call. It
+/// says which part of the rule a name breaks, so the companion can tell the operator; the contract enforces it in the
+/// arguments of <c>servers.add</c> and <c>servers.rename</c>, which cannot be built with a name that breaks it, so a
+/// request that gives one is refused as an invalid request when its arguments are read; and it proposes a name from a
+/// server's address that always passes. The characters are written as escapes so this file holds none of them.
 /// </summary>
-public sealed class ManagementServerNameTests
+public sealed class ServerNameTests
 {
    /// <summary>The identifier the shape examples are cut from.</summary>
    private const string Identifier = ManagementSamples.ServerId;
@@ -49,6 +50,7 @@ public sealed class ManagementServerNameTests
    [InlineData("Server 3f2b8c1e")]
    public void AName_OfVisibleTextThatIsNotAnIdentifier_IsAccepted(string name)
    {
+      Assert.Equal(ServerNameProblem.None, ServerName.Check(name));
       Assert.True(ServerName.TryAccept(name, out string? accepted));
       Assert.Equal(name, accepted);
       Assert.Equal(name, ServerName.Require(name));
@@ -64,6 +66,7 @@ public sealed class ManagementServerNameTests
    {
       string longest = new('n', 64);
 
+      Assert.Equal(ServerNameProblem.None, ServerName.Check("  padded \t"));
       Assert.Equal("padded", ServerName.Require("  padded \t"));
       Assert.Equal("Warehouse east", ServerName.Require("\r\nWarehouse east\n"));
       Assert.Equal(longest, ServerName.Require("   " + longest + "   "));
@@ -76,14 +79,15 @@ public sealed class ManagementServerNameTests
 
    /// <summary>A name is refused when it is missing, empty or blank, or longer than 64 units once trimmed. The refusal is fixed text and never repeats the name.</summary>
    [Theory]
-   [InlineData(null)]
-   [InlineData("")]
-   [InlineData("   ")]
-   [InlineData("\t\r\n")]
-   [InlineData("nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn")]
-   [InlineData("  nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn  ")]
-   public void AName_ThatIsEmptyOrTooLong_IsRefused(string? name)
+   [InlineData(null, ServerNameProblem.Empty)]
+   [InlineData("", ServerNameProblem.Empty)]
+   [InlineData("   ", ServerNameProblem.Empty)]
+   [InlineData("\t\r\n", ServerNameProblem.Empty)]
+   [InlineData("nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn", ServerNameProblem.TooLong)]
+   [InlineData("  nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn  ", ServerNameProblem.TooLong)]
+   public void AName_ThatIsEmptyOrTooLong_IsRefused(string? name, ServerNameProblem problem)
    {
+      Assert.Equal(problem, ServerName.Check(name));
       Assert.False(ServerName.TryAccept(name, out string? accepted));
       Assert.Null(accepted);
       ArgumentException refusal = Assert.Throws<ArgumentException>(() => ServerName.Require(name));
@@ -124,6 +128,7 @@ public sealed class ManagementServerNameTests
    {
       string character = char.ConvertFromUtf32(codePoint);
 
+      Assert.Equal(ServerNameProblem.NotPrintable, ServerName.Check("Ware" + character + "house"));
       Assert.False(ServerName.TryAccept("Ware" + character + "house", out string? accepted));
       Assert.Null(accepted);
       Assert.False(ServerName.TryAccept(character + "W" + character + "W", out _));
@@ -140,6 +145,8 @@ public sealed class ManagementServerNameTests
       const char High = (char)0xD83D;
       const char Low = (char)0xDE00;
 
+      Assert.Equal(ServerNameProblem.NotPrintable, ServerName.Check("Ware" + High + "house"));
+      Assert.Equal(ServerNameProblem.NotPrintable, ServerName.Check("Ware" + Low + "house"));
       Assert.False(ServerName.TryAccept("Warehouse " + High, out _));
       Assert.False(ServerName.TryAccept(Low + " Warehouse", out _));
       Assert.False(ServerName.TryAccept("Ware" + High + "house", out _));
@@ -161,6 +168,7 @@ public sealed class ManagementServerNameTests
    [InlineData("a] [ERROR] forged [b")]
    public void AName_WithASquareBracket_IsRefused(string name)
    {
+      Assert.Equal(ServerNameProblem.SquareBracket, ServerName.Check(name));
       Assert.False(ServerName.TryAccept(name, out _));
       Assert.Throws<ArgumentException>(() => new ServersRenameArgs(name));
    }
@@ -179,6 +187,7 @@ public sealed class ManagementServerNameTests
    {
       string[] shaped = ["deadbeef", "DEADBEEF", "DeadBeef", "00000000", "3f2b8c1e-", "3f2b8c1e-5d4a", "3F2B8C1E-5D4A-", " 3f2b8c1e ", Identifier, Identifier.ToUpperInvariant()];
 
+      Assert.All(shaped, name => Assert.Equal(ServerNameProblem.LikeAnIdentifier, ServerName.Check(name)));
       Assert.All(shaped, name => Assert.False(ServerName.TryAccept(name, out _)));
       Assert.All(Enumerable.Range(ServerSelector.MinimumPrefixLength, Identifier.Length - ServerSelector.MinimumPrefixLength + 1), length =>
       {
@@ -189,6 +198,88 @@ public sealed class ManagementServerNameTests
       Assert.All(Enumerable.Range(1, ServerSelector.MinimumPrefixLength - 1), length => Assert.True(ServerName.TryAccept(Identifier[..length], out _)));
       Assert.Equal(36, Identifier.Length);
       Assert.True(ManagementProtocol.IsServerId(Identifier));
+   }
+
+
+
+   /// <summary>
+   /// A name that breaks the rule in several ways is reported under the first of them in the rule's order (empty, too
+   /// long, not printable, a square bracket, shaped like an identifier), so the same name always gets the same answer
+   /// and the companion has one thing to say.
+   /// </summary>
+   [Fact]
+   public void AName_ThatBreaksTheRuleInSeveralWays_IsReportedUnderTheFirst()
+   {
+      Assert.Equal(ServerNameProblem.TooLong, ServerName.Check(new string('[', 65)));
+      Assert.Equal(ServerNameProblem.TooLong, ServerName.Check(new string('n', 60) + "\n[x]\n" + new string('n', 60)));
+      Assert.Equal(ServerNameProblem.NotPrintable, ServerName.Check("Ware\nhouse [east]"));
+      Assert.Equal(ServerNameProblem.SquareBracket, ServerName.Check("[deadbeef]"));
+      Assert.Equal(ServerNameProblem.LikeAnIdentifier, ServerName.Check("  deadbeef  "));
+      Assert.Equal([ServerNameProblem.None, ServerNameProblem.Empty, ServerNameProblem.TooLong, ServerNameProblem.NotPrintable, ServerNameProblem.SquareBracket, ServerNameProblem.LikeAnIdentifier],
+         Enum.GetValues<ServerNameProblem>());
+   }
+
+
+
+   /// <summary>
+   /// A name proposed from a server's address always passes the rule. It is the host by its ASCII name, without a port,
+   /// a path or anything else of the address; a host shaped like an identifier or its beginning gets "Server" in front;
+   /// a long host is cut at 64 units; and an address with no host to name is proposed as "Server".
+   /// </summary>
+   [Theory]
+   [InlineData("https://qqq.example.test/", "qqq.example.test")]
+   [InlineData("https://QQQ.Example.Test:8443/app?x=1#top", "qqq.example.test")]
+   [InlineData("https://operator:synthetic@qqq.example.test/", "qqq.example.test")]
+   [InlineData("http://localhost:18581/", "localhost")]
+   [InlineData("https://127.0.0.1/", "127.0.0.1")]
+   [InlineData("https://[2001:db8::8a2e:370:7334]/", "2001:db8::8a2e:370:7334")]
+   [InlineData("https://b\u00FCcher.example/", "xn--bcher-kva.example")]
+   [InlineData("https://deadbeef.example/", "deadbeef.example")]
+   [InlineData("https://deadbeef-cafe/", "Server deadbeef-cafe")]
+   [InlineData("https://DEADBEEF-CAFE-4F6B/", "Server deadbeef-cafe-4f6b")]
+   [InlineData("https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccccccccc.example.test/", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.cc")]
+   [InlineData("wss://qqq.example.test/qqq/v1/qbit/printing/device/realtime", "qqq.example.test")]
+   [InlineData("io.qrun.qqq-print-agent:/oauth/callback", "Server")]
+   [InlineData("mailto:operator@example.test", "Server")]
+   [InlineData("custom://qqq.example.test/x", "Server")]
+   [InlineData("/qqq/v1/version", "Server")]
+   [InlineData("https://id\u2028.example.test/", "Server")]
+   public void Propose_EveryHostInTheTable_PassesCheck(string address, string expected)
+   {
+      string proposed = ServerName.Propose(new Uri(address, UriKind.RelativeOrAbsolute));
+
+      Assert.Equal(expected, proposed);
+      Assert.Equal(ServerNameProblem.None, ServerName.Check(proposed));
+      Assert.Equal(proposed, ServerName.Require(proposed));
+      Assert.Equal(proposed, new ServersRenameArgs(proposed).Name);
+      Assert.True(proposed.Length <= ServerName.MaximumCharacters);
+   }
+
+
+
+   /// <summary>The host of an IPv6 address is written in square brackets, which a name may not hold; the proposal is the address without them.</summary>
+   [Fact]
+   public void Propose_Ipv6Literal_HasNoBrackets_AndPasses()
+   {
+      string proposed = ServerName.Propose(new Uri("https://[::1]:8443/"));
+
+      Assert.Equal("::1", proposed);
+      Assert.Equal(ServerNameProblem.SquareBracket, ServerName.Check("[::1]"));
+      Assert.Equal(ServerNameProblem.None, ServerName.Check(proposed));
+   }
+
+
+
+   /// <summary>A host of eight hexadecimal digits is what the command line would take for the beginning of an identifier; the proposal puts "Server" in front, and a missing address is refused.</summary>
+   [Fact]
+   public void Propose_HostOfEightHexDigits_Passes()
+   {
+      string proposed = ServerName.Propose(new Uri("https://deadbeef/"));
+
+      Assert.Equal("Server deadbeef", proposed);
+      Assert.Equal(ServerNameProblem.LikeAnIdentifier, ServerName.Check("deadbeef"));
+      Assert.Equal(ServerNameProblem.None, ServerName.Check(proposed));
+      Assert.Throws<ArgumentNullException>(() => ServerName.Propose(null!));
    }
 
 
