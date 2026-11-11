@@ -281,7 +281,7 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
    {
       if(_storedState.Refusal is string refusal && !AnsweredWithoutStoredState(request.Operation))
       {
-         throw new InvalidOperationException(refusal);
+         return RefuseWithoutStoredState(request.Operation, refusal);
       }
       switch(request.Operation)
       {
@@ -336,6 +336,20 @@ public sealed partial class AgentRuntime(string directory, Action<string> log, I
          default:
             throw new InvalidOperationException("Unknown command.");
       }
+   }
+
+
+
+   /// <summary>
+   /// Answers an operation that is refused because the stored state cannot be used. The caller gets the reason as an
+   /// error, in the form a failed command has. The reason was logged once, as an error, when the service started; each
+   /// refusal is logged as debug detail only, to the file and only while debug logging is on. A companion that keeps
+   /// asking would otherwise add an error line for every request and push the reason out of the entries it shows.
+   /// </summary>
+   private string RefuseWithoutStoredState(string operation, string refusal)
+   {
+      _log.Write("DEBUG", $"Refused '{operation}': the stored state cannot be used.");
+      return "Error: " + refusal;
    }
 
 

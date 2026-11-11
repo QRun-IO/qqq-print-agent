@@ -50,6 +50,9 @@ public sealed class NewerStateTests
    /// must be installed again, the transport read, the three log operations and the two update operations; each of those
    /// is asked by name below. Every other operation, each also by name, gets that one sentence as an error. No session is
    /// created, so no server is contacted, and the journal and the protected files have the same bytes at the end.
+   /// The reason is in the service's log once, as the error written at the start. A refusal is not an error there: the
+   /// entries the snapshot shows have none after all eighteen, and each refusal is in the log file as debug detail,
+   /// which is on at that point because the log settings were changed above.
    /// </summary>
    [Fact]
    public async Task NewerState_ServiceAnswersStatusLogsUpdates_NothingElse()
@@ -76,6 +79,9 @@ public sealed class NewerStateTests
          {
             Assert.Equal((request.Operation, "Error: " + StateStatus.NewerBuildText), (request.Operation, await runtime.PipeAsync(request, stop.Token)));
          }
+         Assert.DoesNotContain(JsonSerializer.Deserialize<AgentSnapshot>(await runtime.PipeAsync(new PipeRequest("snapshot"), stop.Token), PrintApiClient.JsonOptions)!.Logs, entry => string.Equals(entry.Level, "ERROR", StringComparison.Ordinal));
+         string logFiles = string.Concat(Directory.EnumerateFiles(Path.Combine(directory, "logs")).Select(file => System.Text.Encoding.UTF8.GetString(JournalProbe.ReadShared(file))));
+         Assert.All(Refused, request => Assert.Contains("Refused '" + request.Operation + "': the stored state cannot be used.", logFiles, StringComparison.Ordinal));
          Assert.Equal("Ready for update.", await runtime.PipeAsync(new PipeRequest("prepare-update"), stop.Token));
          Assert.Equal("Printing resumed.", await runtime.PipeAsync(new PipeRequest("resume-after-update"), stop.Token));
          // Past the pipe, the runtime itself opens no store on this state: the authorization check, which starts by reading the saved session, is refused before it reads anything.
@@ -88,7 +94,7 @@ public sealed class NewerStateTests
       }
       Assert.Equal(0, fixture.Created);
       fixture.AssertSentNothing(fixture.Session);
-      Assert.Contains(fixture.Logs, line => line.Contains(StateStatus.NewerBuildText, StringComparison.Ordinal) && line.Contains("No server connection is started", StringComparison.Ordinal));
+      Assert.Contains("No server connection is started", Assert.Single(fixture.Logs, line => line.Contains(StateStatus.NewerBuildText, StringComparison.Ordinal)), StringComparison.Ordinal);
       Assert.Equal(stateBefore, StoredFiles(directory));
    }
 

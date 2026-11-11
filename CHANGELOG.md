@@ -18,7 +18,9 @@ The journal has a schema version (2.0). Printing, pairing and history are unchan
   no server, and reports "A newer version of this application wrote the print data on this computer, and this
   version cannot use it. Nothing was changed. Install the newer version again to continue printing." Status, log
   settings and updates stay available, so the newer version can be installed again; every other operation is
-  refused with that sentence.
+  refused with that sentence. The log has the reason once, as an error written when the service starts. A refused
+  operation is recorded only as debug detail, so a companion that keeps asking does not push the reason out of
+  the log entries it shows.
 
 Servers that run as several nodes (2.0; the 1.2.x fix carried over). A load balancer in front of such a server
 names the node it chose in a cookie; the client attached only the session cookie, so its realtime socket could open
