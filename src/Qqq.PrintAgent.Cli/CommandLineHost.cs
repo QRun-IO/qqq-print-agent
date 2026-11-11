@@ -15,7 +15,7 @@ namespace Qqq.PrintAgent.Cli;
 /// <param name="Error">Standard error: failures, usage shown because the arguments were wrong, and the enrollment prompt when the code is typed at a console. A command that succeeds without that prompt writes nothing here.</param>
 /// <param name="ReadEnvironmentVariable">Reads one environment variable; the enrollment code arrives this way so it stays out of the command line and shell history.</param>
 /// <param name="IsInputRedirected">Says whether standard input is a file or a pipe instead of a console, which decides how the enrollment code is read and whether it is prompted for.</param>
-/// <param name="ReadLine">Reads one line of redirected standard input, for an enrollment code that is piped in; null at end of input.</param>
+/// <param name="OpenInput">Opens redirected standard input as the bytes that were piped in, for an enrollment code that arrives that way. The bytes, not the console's text reader, because that reader decodes in the console input code page and looks for no byte-order mark.</param>
 /// <param name="ReadKey">Reads one key from the console, for an enrollment code that is typed; the argument says whether to keep the key off the screen.</param>
 /// <param name="SendAsync">Sends one request to the installed service over its administrator pipe and returns the reply text.</param>
 /// <param name="ApplyUpdateAsync">Applies the prepared MSI update named by a request file and returns the exit code.</param>
@@ -25,7 +25,7 @@ internal sealed record CommandLineHost(
    TextWriter Error,
    Func<string, string?> ReadEnvironmentVariable,
    Func<bool> IsInputRedirected,
-   Func<string?> ReadLine,
+   Func<Stream> OpenInput,
    Func<bool, ConsoleKeyInfo> ReadKey,
    Func<PipeRequest, Task<string>> SendAsync,
    Func<string, Task<int>> ApplyUpdateAsync,

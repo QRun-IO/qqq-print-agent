@@ -4,6 +4,10 @@
  */
 
 using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using Qqq.PrintAgent.Core.Printing;
+using Qqq.PrintAgent.Windows;
 
 namespace Qqq.PrintAgent.Cli.Tests;
 
@@ -14,6 +18,14 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class CliProcessTests
 {
+   private const string NoCode = "Enrollment code is required.";
+   private const string TooLarge = "Local pipe message exceeds the permitted size.";
+
+   /// <summary>A synthetic server address that no request can carry to the service: each of its 11,000 ampersands is six characters in JSON, which is more than the pipe accepts.</summary>
+   private static readonly string s_unsendableServer = "https://qqq.example.test/?" + new string('&', 11_000);
+
+
+
    /// <summary>The executable built beside this test assembly.</summary>
    private static string Executable => Path.ChangeExtension(typeof(Program).Assembly.Location, ".exe");
 
@@ -105,6 +117,43 @@ public sealed class CliProcessTests
 
 
    /// <summary>
+   /// The real executable reads piped standard input as bytes and decodes them as UTF-8, or as a byte-order mark at the
+   /// very start says, whatever the console input code page is. A child started here has a console of its own on the
+   /// computer's OEM code page, which is where reading through the console's text reader went wrong: the three bytes
+   /// of a UTF-8 mark became three other characters and were taken for a code. Each row is the bytes a shell or a
+   /// file would deliver and what the executable then says. With a code in them it reaches the point of sending, and
+   /// is stopped there by the size of the request (see <see cref="EnrollWithBytesAsync"/>): plain text, behind a UTF-8
+   /// mark, as UTF-16 behind its mark, and with letters outside ASCII. With a mark and nothing after it, a mark and a
+   /// line end (what Windows PowerShell 5.1 pipes for an empty string), two marks, or white space from outside ASCII
+   /// that only UTF-8 makes white space, there is no code and it says so. Read in a code page, every row of the
+   /// second kind but the blank line would hold some characters and end the first way. Either way nothing is
+   /// prompted and nothing is written to standard output.
+   /// </summary>
+   [Theory]
+   [InlineData("", "utf-8", "synthetic-code-4471\r\n", TooLarge)]
+   [InlineData("EF BB BF", "utf-8", "synthetic-code-4471\r\n", TooLarge)]
+   [InlineData("FF FE", "utf-16", "synthetic-code-4471\r\n", TooLarge)]
+   [InlineData("", "utf-8", "synthétique-код-4471\r\n", TooLarge)]
+   [InlineData("", "utf-8", "\r\n", NoCode)]
+   [InlineData("EF BB BF", "utf-8", "", NoCode)]
+   [InlineData("EF BB BF", "utf-8", "\r\n", NoCode)]
+   [InlineData("EF BB BF EF BB BF", "utf-8", "\r\n", NoCode)]
+   [InlineData("FF FE", "utf-16", "", NoCode)]
+   [InlineData("FF FE", "utf-16", " \r\n", NoCode)]
+   [InlineData("", "utf-8", "　 \r\n", NoCode)]
+   [InlineData("EF BB BF", "utf-8", "　 \r\n", NoCode)]
+   public async Task Enroll_ReadsPipedBytesAsUtf8OrAsTheirMarkSays(string mark, string encoding, string text, string said)
+   {
+      (int exitCode, string output, string error) = await EnrollWithBytesAsync(CliFixture.Bytes(mark, encoding, text));
+
+      Assert.Equal(1, exitCode);
+      Assert.Equal("", output);
+      Assert.Equal(said + Environment.NewLine, error);
+   }
+
+
+
+   /// <summary>
    /// Executes the real binding for "is standard input redirected" in this process, and nothing more: it compares the
    /// binding with the property it should read, so it would not notice most wrong bindings. What proves the two branches
    /// is elsewhere. The redirected branch is proved by Enroll_WithNoCodeAndClosedInput_FailsBeforeContactingTheService,
@@ -120,14 +169,41 @@ public sealed class CliProcessTests
 
 
    /// <summary>
+   /// Runs "enroll" in the real executable with exactly the given bytes on standard input, in a way that cannot reach
+   /// the installed service whatever the executable makes of them. The server address is one no request can carry:
+   /// written as JSON it alone is longer than the pipe accepts, and a request that large is refused before a
+   /// connection is opened. So the executable ends in one of two ways, both before the service: it found no code and
+   /// says a code is required, or it found one, built the request and was told the request is too large. That the
+   /// address really is too large is checked here first, with the shortest code there could be, so a change to how
+   /// requests are written fails this test before any process is started and not by contacting the service.
+   /// </summary>
+   private static Task<(int ExitCode, string Output, string Error)> EnrollWithBytesAsync(byte[] input)
+   {
+      Assert.True(JsonSerializer.Serialize(new PipeRequest("enroll", s_unsendableServer, "x"), PrintApiClient.JsonOptions).Length > AgentPipeFraming.MaximumCommandCharacters,
+         "The server address no longer makes the request too large for the pipe, so this test could reach the installed service. It was not started.");
+      return RunWithBytesAsync(input, "enroll", "--server", s_unsendableServer);
+   }
+
+
+
+   /// <summary>
+   /// Starts the executable with the given arguments and standard input carrying the given line, if any. See
+   /// <see cref="RunWithBytesAsync"/>, which does the work; the line goes in as UTF-8 with the platform's line end.
+   /// </summary>
+   private static Task<(int ExitCode, string Output, string Error)> RunAsync(string? input, params string[] args)
+      => RunWithBytesAsync(input is null ? null : Encoding.UTF8.GetBytes(input + Environment.NewLine), args);
+
+
+
+   /// <summary>
    /// Starts the executable with the given arguments and waits for it to end, returning its exit code and exactly what it
-   /// wrote, line ends included. Standard input carries the given line, if any, and is then closed. A program that ends
-   /// without reading its input closes the pipe, and when it does so before the line is written the write fails; that is
+   /// wrote, line ends included. Standard input carries exactly the given bytes, if any, and is then closed. A program that ends
+   /// without reading its input closes the pipe, and when it does so before the bytes are written the write fails; that is
    /// the program not reading, which is what such a test is showing, so it is not a failure of the test. The enrollment
    /// code variable is removed from the child's environment, so the result does not depend on the machine running the
    /// test. A process that has not finished within a minute is killed, so a hang fails the test instead of blocking the run.
    /// </summary>
-   private static async Task<(int ExitCode, string Output, string Error)> RunAsync(string? input, params string[] args)
+   private static async Task<(int ExitCode, string Output, string Error)> RunWithBytesAsync(byte[]? input, params string[] args)
    {
       ProcessStartInfo start = new(Executable)
       {
@@ -152,7 +228,8 @@ public sealed class CliProcessTests
          {
             if(input is not null)
             {
-               await process.StandardInput.WriteLineAsync(input.AsMemory(), limit.Token);
+               await process.StandardInput.BaseStream.WriteAsync(input, limit.Token);
+               await process.StandardInput.BaseStream.FlushAsync(limit.Token);
             }
             process.StandardInput.Close();
          }
