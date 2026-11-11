@@ -82,8 +82,8 @@ public sealed record HealthStatus(HealthLevel Level, string Label, string IconNa
 
 
 
-   /// <summary>How bad a level is, for <see cref="Worst"/>: green, orange, unknown, red.</summary>
-   private static int Rank(HealthLevel level) => level switch
+   /// <summary>How bad a level is, for <see cref="Worst"/> and for naming the worst servers first: green, orange, unknown, red.</summary>
+   internal static int Rank(HealthLevel level) => level switch
    {
       HealthLevel.Green => 0,
       HealthLevel.Orange => 1,

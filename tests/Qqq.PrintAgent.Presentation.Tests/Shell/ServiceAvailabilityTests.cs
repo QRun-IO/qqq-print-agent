@@ -241,7 +241,7 @@ public sealed class ServiceAvailabilityTests
 
 
 
-   /// <summary>While an update is installed the service is reached and its stored data is ready, so the window works as usual; the Computer page says that printing is paused and until when the pause lasts by itself.</summary>
+   /// <summary>While an update is installed the service is reached and its stored data is ready, so the window works as usual; the Computer page says that printing is paused and until when the pause lasts by itself, and the footer says that printing is paused, is not green and points at the Computer page.</summary>
    [Fact]
    public async Task UpdatePaused_SaysUntilWhen()
    {
@@ -254,7 +254,8 @@ public sealed class ServiceAvailabilityTests
       Assert.True(fixture.Shell.Availability.StoredDataReady);
       Assert.Equal(PageKey.ForServer(PageKind.Printers, Snapshots.Id(1)), fixture.Shell.Selected);
       Assert.True(fixture.Shell.Tree.AddServer.IsEnabled);
-      Assert.Equal("Connected and ready", fixture.Shell.Footer.Text);
+      Assert.Equal(new FooterStatus(HealthBadge.For(HealthLevel.Orange), "Printing paused while an update is installed", 0, 0, 0, 1, PageKey.Computer, "Open Computer"), fixture.Shell.Footer);
+      Assert.Equal("Connected and ready", fixture.Shell.Tree.Servers[0].StatusText);
       Assert.Contains("INFO The local print service answered a snapshot (UpdatePaused).", fixture.Log.Entries, StringComparer.Ordinal);
 
       await fixture.Tick(new ServiceSnapshot(Snapshots.Computer(update: new UpdateState(true)), [Snapshots.Server(1)]));

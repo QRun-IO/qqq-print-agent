@@ -87,9 +87,12 @@ public sealed class FooterStatusTests
 
    /// <summary>
    /// With one server the footer is that server's own sentence, and for an operator who upgraded from 1.x with one
-   /// paired server it is the sentence the 1.x footer showed: the same inputs are given to the 1.x texts and to the
-   /// footer, for every health, with dispatch running, paused and disconnected, authorized and not. The one
-   /// difference is the name in "authorization required": 1.x named the edition, and this names the server.
+   /// paired server whose service answers it is the sentence the 1.x footer showed in these eleven states: the same
+   /// inputs are given to the 1.x texts and to the footer, for every health, with dispatch running, paused and
+   /// disconnected, authorized and not. The 1.x side is given "Warehouse" as the edition's name, which hides the
+   /// difference in "authorization required": 1.x named the edition, and this names the server. What else an
+   /// upgraded operator reads differently (before the first answer, while the service is not answering, and in the
+   /// states 1.x did not have) is listed in ADR-0005.
    /// </summary>
    [Theory]
    [InlineData("GREEN", false, "CONNECTED", true, "Connected and ready")]
@@ -139,6 +142,33 @@ public sealed class FooterStatusTests
       Assert.Equal("Warehouse authorization required", signedOut.Alone);
       Assert.Equal("Connected and ready", ServerStatus.From(Snapshots.Server(), [Snapshots.Printer()]).Alone);
       Assert.Equal("Open Warehouse", FooterStatus.From(s_reached, [status]).AttentionText);
+   }
+
+
+
+   /// <summary>
+   /// While printing is paused for an update a computer that has servers says so, whatever the servers say, and is
+   /// never green; the link opens the Computer page, which says until when, and the counts stay the servers' own.
+   /// A computer with no server still says to add one.
+   /// </summary>
+   [Theory]
+   [InlineData("GREEN", HealthLevel.Orange)]
+   [InlineData("ORANGE", HealthLevel.Orange)]
+   [InlineData("PURPLE", HealthLevel.Unknown)]
+   [InlineData("RED", HealthLevel.Red)]
+   public void Footer_WhileAnUpdatePausesPrinting_SaysSo_IsNeverGreen(string health, HealthLevel expected)
+   {
+      ServiceAvailability paused = new(ServiceAvailabilityKind.UpdatePaused, "Printing is paused while an update is installed.", "The pause ends when the update has finished.");
+      ServerStatus[] servers = [ServerStatus.From(Snapshots.Server(1, "Warehouse", health: health), [Snapshots.Printer()]), ServerStatus.From(Snapshots.Server(2, "Bench"), [Snapshots.Printer()])];
+
+      var one = FooterStatus.From(paused, [servers[0]]);
+      var two = FooterStatus.From(paused, servers);
+
+      Assert.Equal(new FooterStatus(HealthBadge.For(expected), "Printing paused while an update is installed", one.NeedAttention, one.Unknown, one.NotReady, one.Ready, PageKey.Computer, "Open Computer"), one);
+      Assert.Equal(1, one.NeedAttention + one.Unknown + one.NotReady + one.Ready);
+      Assert.Equal((expected, "Printing paused while an update is installed", PageKey.Computer), (two.Health.Level, two.Text, two.Attention));
+      Assert.Equal(2, two.NeedAttention + two.Unknown + two.NotReady + two.Ready);
+      Assert.Equal(new FooterStatus(HealthBadge.For(HealthLevel.Red), "Add a server to start printing", 0, 0, 0, 0, PageKey.Wizard, "Add server"), FooterStatus.From(paused, []));
    }
 
 

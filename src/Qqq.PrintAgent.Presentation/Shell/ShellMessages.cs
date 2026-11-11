@@ -11,8 +11,9 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// <summary>
 /// Every sentence the shell, the tree, the footer and the tray say to the operator, in one place, so the wording of
 /// each can be read and tested together. A sentence says what is known and what to do next, and none says more than
-/// the snapshot or the result it is built from. The sentences that 1.x already showed keep their 1.x wording, so an
-/// operator who upgrades with one server reads what they read before.
+/// the snapshot or the result it is built from: a sentence that states a change (a server went) is used only where
+/// the snapshots show that the change happened. A sentence the 1.x footer showed for a state keeps its 1.x wording
+/// for that state and says so here; ADR-0005 lists what an operator who upgrades with one server reads differently.
 /// </summary>
 public static class ShellMessages
 {
@@ -67,14 +68,17 @@ public static class ShellMessages
    /// <summary>The footer and the tray when the service answered, its stored data is ready and the computer has no server.</summary>
    public const string NoServers = "Add a server to start printing";
 
-   /// <summary>The footer before the first read has ended. The 1.x sentence.</summary>
+   /// <summary>The footer before the first read has ended. The 1.x window was built with these words in its footer, but replaced them with the red sentence before it was shown, so an operator did not read them there.</summary>
    public const string FooterChecking = "Checking local service…";
 
-   /// <summary>The footer when the service cannot be reached. The 1.x sentence.</summary>
+   /// <summary>The footer when the service cannot be reached. In 1.x these words were the status line of the Settings page; the 1.x footer said the red sentence.</summary>
    public const string FooterNotReached = "Local print service unavailable";
 
-   /// <summary>The footer when the service refused to report its state. The 1.x sentence.</summary>
+   /// <summary>The footer when the service refused to report its state. In 1.x these words were the status line of the Settings page; the 1.x footer said the red sentence.</summary>
    public const string FooterRefused = "Local service needs attention";
+
+   /// <summary>The footer and the tray while printing is paused for an update, whatever the servers say.</summary>
+   public const string FooterUpdatePaused = "Printing paused while an update is installed";
 
    /// <summary>The footer when an older service answered.</summary>
    public const string FooterOlderService = "Windows service is older than this companion";
@@ -238,7 +242,7 @@ public static class ShellMessages
 
 
 
-   /// <summary>What the tray tooltip says in place of the servers it has no room for.</summary>
+   /// <summary>What the tray tooltip says after the servers it names, in place of those it has no room for. It is not used when no server is named: the count before it then already says how many there are.</summary>
    public static string More(int count) => string.Create(CultureInfo.InvariantCulture, $"+{count} more");
 
 
