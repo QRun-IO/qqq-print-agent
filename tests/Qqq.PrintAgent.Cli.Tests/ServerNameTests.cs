@@ -24,9 +24,12 @@ public sealed class ServerNameTests
 
    /// <summary>
    /// A name of 1 to 64 UTF-16 units of visible text is accepted and held as given, in any script, with spaces inside
-   /// it, with punctuation other than square brackets, and with a character outside the first plane. Hexadecimal text
-   /// is a name as long as it could not be taken for an identifier: fewer than eight digits, digits that run on where
-   /// an identifier has its first hyphen, a space where the hyphen would be, and text longer than an identifier.
+   /// it, with punctuation other than square brackets (other brackets, fullwidth parentheses among them, are not
+   /// the log's delimiters), and with a character outside the first plane. Hexadecimal text is a name as long as it
+   /// could not be taken for an identifier: fewer than eight digits, digits that run on where an identifier has its
+   /// first hyphen, a space where the hyphen would be, and text longer than an identifier. A name may begin with a
+   /// hyphen, and may be spelled like an option of the command line; the rule is about what a name is, and the
+   /// command line, when it is built, has to take such a name as a value (recorded in the audit for that step).
    /// </summary>
    [Theory]
    [InlineData("Warehouse")]
@@ -48,6 +51,11 @@ public sealed class ServerNameTests
    [InlineData("3f2b8c1e_5d4a")]
    [InlineData("3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f0")]
    [InlineData("Server 3f2b8c1e")]
+   [InlineData("Dock \uFF08east\uFF09")]
+   [InlineData("-")]
+   [InlineData("-h")]
+   [InlineData("--server")]
+   [InlineData("- Warehouse")]
    public void AName_OfVisibleTextThatIsNotAnIdentifier_IsAccepted(string name)
    {
       Assert.Equal(ServerNameProblem.None, ServerName.Check(name));
@@ -158,7 +166,13 @@ public sealed class ServerNameTests
 
 
 
-   /// <summary>A square bracket anywhere in a name is refused, because a name in a line that puts something in brackets could forge that line's structure; the brackets of an IPv6 address are the case a proposed name must avoid.</summary>
+   /// <summary>
+   /// A square bracket anywhere in a name is refused. Square brackets delimit the prefixes of the service log's lines
+   /// (the service's marker, a server's short identifier), so a name written into a line that puts something in
+   /// brackets could forge that line's structure; the brackets of an IPv6 address are the case a proposed name must
+   /// avoid. The fullwidth pair (U+FF3B, U+FF3D) is refused with the ASCII pair, alone and mixed with it: a program
+   /// does not take it for a delimiter, but a person reading the line does.
+   /// </summary>
    [Theory]
    [InlineData("[")]
    [InlineData("]")]
@@ -166,6 +180,11 @@ public sealed class ServerNameTests
    [InlineData("https://[fe80::1]:8443")]
    [InlineData("Warehouse [east]")]
    [InlineData("a] [ERROR] forged [b")]
+   [InlineData("\uFF3B")]
+   [InlineData("\uFF3D")]
+   [InlineData("Warehouse \uFF3Beast\uFF3D")]
+   [InlineData("a\uFF3D \uFF3BERROR\uFF3D forged \uFF3Bb")]
+   [InlineData("Warehouse [east\uFF3D")]
    public void AName_WithASquareBracket_IsRefused(string name)
    {
       Assert.Equal(ServerNameProblem.SquareBracket, ServerName.Check(name));

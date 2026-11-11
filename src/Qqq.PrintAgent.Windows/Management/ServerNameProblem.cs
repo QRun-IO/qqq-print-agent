@@ -25,7 +25,7 @@ public enum ServerNameProblem
    /// <summary>The name holds a character that is not shown as itself (a line break or another control character, a character that reorders or hides text, a private-use or unassigned one), or a surrogate without its partner.</summary>
    NotPrintable,
 
-   /// <summary>The name holds a square bracket.</summary>
+   /// <summary>The name holds a square bracket, ASCII or fullwidth (U+FF3B, U+FF3D).</summary>
    SquareBracket,
 
    /// <summary>The name is shaped like a server identifier or like the first eight or more characters of one, which the command line's <c>--server</c> would take for an identifier.</summary>

@@ -20,7 +20,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <list type="bullet">
 /// <item>it has 1 to <see cref="MaximumCharacters"/> UTF-16 units;</item>
 /// <item>every code point of it is one Core's definition of printable text shows (<see cref="ServerText.IsShown"/>), and no surrogate stands without its partner;</item>
-/// <item>it holds no square bracket, which would forge structure in a line that puts something in brackets;</item>
+/// <item>it holds no square bracket, because square brackets are the delimiters of the service log's line prefixes (the marker of the service, a server's short identifier) and of other lines that put something in brackets, so a bracket in a name could forge that structure wherever a name is written into such a line. The fullwidth pair (U+FF3B, U+FF3D) is refused with the ASCII pair: it is not a delimiter to a program, but it reads as the same brackets to a person;</item>
 /// <item>it is not shaped like a server identifier or like the first eight or more characters of one, in either letter case, because that is what the command line's <c>--server</c> takes as an identifier or a prefix (<see cref="ServerSelector"/>).</item>
 /// </list>
 /// The upgrade and the wizard propose a name from the server's address, and a host can break the rule (the brackets of
@@ -35,6 +35,11 @@ public static class ServerName
 
    /// <summary>The code a request is refused with when it gives a name that breaks the rule.</summary>
    public const string RefusalCode = ManagementErrorCode.InvalidRequest;
+
+
+
+   /// <summary>The square brackets a name may not hold: the ASCII pair, which the service log's prefixes are delimited by, and the fullwidth pair (U+FF3B, U+FF3D), which a person reads as the same brackets.</summary>
+   private static readonly SearchValues<char> s_squareBrackets = SearchValues.Create("[]\uFF3B\uFF3D");
 
 
 
@@ -59,7 +64,7 @@ public static class ServerName
       return trimmed.Length == 0 ? ServerNameProblem.Empty
          : trimmed.Length > MaximumCharacters ? ServerNameProblem.TooLong
          : !IsPrintable(trimmed) ? ServerNameProblem.NotPrintable
-         : trimmed.AsSpan().ContainsAny('[', ']') ? ServerNameProblem.SquareBracket
+         : trimmed.AsSpan().ContainsAny(s_squareBrackets) ? ServerNameProblem.SquareBracket
          : IsIdentifierOrItsBeginning(trimmed) ? ServerNameProblem.LikeAnIdentifier
          : ServerNameProblem.None;
    }
