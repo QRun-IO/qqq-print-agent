@@ -129,11 +129,15 @@ public sealed class QqqServerCompatibilityTests
    /// <summary>
    /// An exception for another origin does not let this server's certificate through. With the exception naming only
    /// the sign-in provider, the server's own untrusted certificate is refused, and the check reports the secure
-   /// connection failure together with the refused certificate, as it does when there is no exception at all.
+   /// connection failure together with the refused certificate, as it does when there is no exception at all. The
+   /// reported certificate says which origin presented it, here the server's, and when, on the client's clock; the
+   /// client's own record of its last refusal is the same one, and the next check begins without it.
    /// </summary>
    [Fact]
    public async Task CertificateFromAHostTheExceptionDoesNotNameIsRefusedAndReported()
    {
+      var time = new ManualTimeProvider();
+      time.Advance(TimeSpan.FromHours(2));
       using X509Certificate2 certificate = SelfSigned("CN=Synthetic Local Authority");
       using var server = new ScriptedServer();
       QqqSessionClient? client = null;
@@ -142,15 +146,21 @@ public sealed class QqqServerCompatibilityTests
          Assert.False(client!.EvaluateCertificate(new Uri(ScriptedServer.Origin, "/qqq/v1/version"), certificate, SslPolicyErrors.RemoteCertificateChainErrors));
          return Task.FromException<HttpResponseMessage>(new HttpRequestException(HttpRequestError.SecureConnectionError, "The SSL connection could not be established.",
             new AuthenticationException("The remote certificate was rejected by the provided RemoteCertificateValidationCallback.")));
-      });
-      using(client = new QqqSessionClient(ScriptedServer.Origin, server, certificateException: QqqCertificateExceptionOrigins.For(new Uri("https://id.example.invalid"))))
+      }).Add(ScriptedServer.Discovery).Add(ScriptedServer.Table);
+      using(client = new QqqSessionClient(ScriptedServer.Origin, server, time, certificateException: QqqCertificateExceptionOrigins.For(new Uri("https://id.example.invalid"))))
       {
          QqqServerCompatibility result = await client.CheckCompatibilityAsync();
          Assert.Equal(QqqCompatibilityIssue.SecureConnectionFailed, Assert.Single(result.Problems).Issue);
          QqqCertificateRejection rejection = Assert.IsType<QqqCertificateRejection>(result.Certificate);
          Assert.Equal(certificate.Thumbprint, rejection.Thumbprint);
          Assert.True(rejection.IsUntrustedAuthority);
+         Assert.Equal("https://printing.example.invalid/", rejection.Origin?.AbsoluteUri);
+         Assert.Equal(new DateTimeOffset(2026, 1, 1, 2, 0, 0, TimeSpan.Zero), rejection.ObservedAt);
+         Assert.Same(rejection, client.LastCertificateRejection);
          Assert.Null(result.ProviderOrigin);
+
+         Assert.True((await client.CheckCompatibilityAsync()).IsCompatible);
+         Assert.Null(client.LastCertificateRejection);
       }
    }
 
@@ -161,7 +171,9 @@ public sealed class QqqServerCompatibilityTests
    /// read and names one: for a usable browser sign-in, and equally when sign-in cannot be offered (here the callback
    /// is not listed), so the operator can be shown both addresses before a certificate exception is saved. A password
    /// server names no provider, a description that could not be read names nothing, and an issuer that is not a plain
-   /// HTTPS address is not an origin a certificate could come from.
+   /// HTTPS address is not an origin a certificate could come from. The server writes the issuer, so the origin is
+   /// reported with the host's ASCII name: a look-alike letter shows as the "xn--" name it is, a zero-width space is
+   /// not there, and an issuer whose host holds a line separator has no ASCII name and is reported as no origin.
    /// </summary>
    [Theory]
    [InlineData("usable", "https://id.example.invalid/")]
@@ -170,6 +182,9 @@ public sealed class QqqServerCompatibilityTests
    [InlineData("unreadable", null)]
    [InlineData("issuer-not-https", null)]
    [InlineData("issuer-with-user", null)]
+   [InlineData("issuer-look-alike", "https://xn--d-evb.example.invalid/")]
+   [InlineData("issuer-zero-width", "https://id.example.invalid/")]
+   [InlineData("issuer-line-separator", null)]
    public async Task CompatibilityReportsTheOriginOfTheProviderTheServerNames(string description, string? provider)
    {
       using var server = new ScriptedServer();
@@ -179,6 +194,9 @@ public sealed class QqqServerCompatibilityTests
          "unreadable" => "<html>sign in</html>",
          "issuer-not-https" => ScriptedServer.OAuth.Replace("\"issuer\":\"https://", "\"issuer\":\"http://", StringComparison.Ordinal),
          "issuer-with-user" => ScriptedServer.OAuth.Replace("\"issuer\":\"https://", "\"issuer\":\"https://operator@", StringComparison.Ordinal),
+         "issuer-look-alike" => ScriptedServer.OAuth.Replace("\"issuer\":\"https://id.", "\"issuer\":\"https://\u0456d.", StringComparison.Ordinal),
+         "issuer-zero-width" => ScriptedServer.OAuth.Replace("\"issuer\":\"https://id.", "\"issuer\":\"https://id\u200B.", StringComparison.Ordinal),
+         "issuer-line-separator" => ScriptedServer.OAuth.Replace("\"issuer\":\"https://id.", "\"issuer\":\"https://id\u2028.", StringComparison.Ordinal),
          _ => ScriptedServer.OAuth,
       });
       using var client = new QqqSessionClient(ScriptedServer.Origin, server);
@@ -187,7 +205,7 @@ public sealed class QqqServerCompatibilityTests
       QqqServerCompatibility result = await client.CheckCompatibilityAsync(redirect);
 
       Assert.Equal(provider, result.ProviderOrigin?.AbsoluteUri);
-      Assert.Equal(description is "usable" or "password", result.IsCompatible);
+      Assert.Equal(description is not ("callback-not-listed" or "unreadable" or "issuer-not-https" or "issuer-with-user"), result.IsCompatible);
       Assert.NotNull(result.Discovery);
    }
 

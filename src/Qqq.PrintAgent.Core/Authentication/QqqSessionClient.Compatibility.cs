@@ -18,6 +18,15 @@ public sealed partial class QqqSessionClient
 
 
    /// <summary>
+   /// The certificate this client refused most recently, with the origin that presented it and the time on the
+   /// client's clock, or null when it has refused none since its last compatibility check began. The client talks to
+   /// its server and to the sign-in provider that server names, and the rejection's origin says which of them it was.
+   /// </summary>
+   public QqqCertificateRejection? LastCertificateRejection => Volatile.Read(ref _certificateRejection);
+
+
+
+   /// <summary>
    /// Checks whether this origin is a server the agent can use and says how a user may sign in. The server is asked
    /// afresh each time, so a retry after the operator fixed something sees the fix. An unreachable address, a refused
    /// certificate, an answer that is not QQQ discovery, a missing or unusable printing extension and an unsupported

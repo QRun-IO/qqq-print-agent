@@ -17,13 +17,16 @@ public sealed class QqqAuthenticationMetadata
 
    /// <summary>
    /// The origin of the sign-in provider this description names: scheme, host and port of the issuer in the native
-   /// browser grant. Null when the server signs in with a password, publishes no such grant, or names an issuer that
-   /// is not a plain HTTPS address. It is derived from what the server sent and is never part of the document.
+   /// browser grant, with the host as its ASCII name (see <see cref="QqqOrigin.Of"/>). The server wrote the issuer,
+   /// and an operator is shown this origin before deciding to trust it, so a look-alike letter appears as the
+   /// "xn--" name it really is and no invisible or line-ending character can appear at all. Null when the server
+   /// signs in with a password, publishes no such grant, or names an issuer that is not a plain HTTPS address or
+   /// whose host has no ASCII name. It is derived from what the server sent and is never part of the document.
    /// </summary>
    [System.Text.Json.Serialization.JsonIgnore]
    public Uri? ProviderOrigin => Uri.TryCreate(Values?.NativeSessionLogin?.Issuer, UriKind.Absolute, out Uri? issuer)
       && string.Equals(issuer.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) && issuer.UserInfo.Length == 0
-      ? new Uri(issuer.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute)
+      ? QqqOrigin.Of(issuer)
       : null;
 
 

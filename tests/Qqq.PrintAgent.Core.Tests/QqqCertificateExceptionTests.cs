@@ -67,10 +67,11 @@ public sealed class QqqCertificateExceptionTests
 
    /// <summary>
    /// Only a well-formed HTTPS origin can be named: plain HTTP (which presents no certificate), another scheme, user
-   /// information, a path, a query, a fragment, a relative address and a missing one are each refused, and so is a
-   /// missing list.
+   /// information, a path, a query, a fragment, a relative address, a host with no ASCII name (here one that holds a
+   /// line separator) and a missing address are each refused, and so is a missing list.
    /// </summary>
    [Theory]
+   [InlineData("https://id\u2028.example.invalid")]
    [InlineData("http://dev.example.invalid:8443")]
    [InlineData("wss://dev.example.invalid:8443")]
    [InlineData("https://operator@dev.example.invalid:8443")]
@@ -116,11 +117,65 @@ public sealed class QqqCertificateExceptionTests
 
 
    /// <summary>
-   /// The exception an operator accepted for a server is built from the server's address as the caller holds it: only
-   /// its origin is used, a server on plain HTTP contributes nothing because it presents no certificate, and the
-   /// provider's origin is added when it is known. A provider on the server's own origin adds nothing.
+   /// A host name written in Unicode and the same name in its "xn--" form are one origin, as they are for the session
+   /// client's own same-origin rule: the exception holds it once, in the ASCII form, shows it in that form, and covers
+   /// an address written either way. The name that only looks the same in Latin letters is another host.
+   /// </summary>
+   [Fact]
+   public void UnicodeNameAndItsAsciiFormAreOneOrigin()
+   {
+      var exception = QqqCertificateExceptionOrigins.For(new Uri("https://\u0430pple.example.invalid"), new Uri("https://xn--pple-43d.example.invalid"));
+
+      Assert.Equal(["https://xn--pple-43d.example.invalid/"], exception.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
+      Assert.Equal("https://xn--pple-43d.example.invalid", exception.ToString());
+      Assert.True(exception.Covers(new Uri("https://\u0430pple.example.invalid/.well-known/openid-configuration")));
+      Assert.True(exception.Covers(new Uri("https://xn--pple-43d.example.invalid/.well-known/openid-configuration")));
+      Assert.True(exception.Covers(new Uri("https://XN--PPLE-43D.example.invalid/")));
+      Assert.False(exception.Covers(new Uri("https://apple.example.invalid/")));
+      Assert.Equal(exception.Origins, QqqCertificateExceptionOrigins.ForServer(new Uri("https://\u0430pple.example.invalid/qqq")).Origins);
+   }
+
+
+
+   /// <summary>
+   /// Coverage is decided on the ASCII host and the port, for the forms an address can take. The default port may be
+   /// written or left out. A name with a trailing dot is another name, in both directions. An IPv6 literal is covered
+   /// in any spelling of the same address on the same port, and an IPv4 address written short or in hexadecimal is
+   /// the address it stands for. A zero-width space is not part of the name the connection is made to, so the address
+   /// is the covered host; a line separator leaves a host with no ASCII name, which nothing covers.
    /// </summary>
    [Theory]
+   [InlineData("https://id.example.invalid", "https://id.example.invalid:443/authorize", true)]
+   [InlineData("https://id.example.invalid:443", "https://id.example.invalid/authorize", true)]
+   [InlineData("https://id.example.invalid", "https://id.example.invalid./", false)]
+   [InlineData("https://id.example.invalid.", "https://id.example.invalid/", false)]
+   [InlineData("https://id.example.invalid.", "https://id.example.invalid./", true)]
+   [InlineData("https://[::1]:8443", "wss://[::1]:8443/qqq/v1/qbit/printing/device/realtime", true)]
+   [InlineData("https://[::1]:8443", "https://[0:0:0:0:0:0:0:1]:8443/", true)]
+   [InlineData("https://[::1]:8443", "https://[::1]/", false)]
+   [InlineData("https://[::1]:8443", "https://[::2]:8443/", false)]
+   [InlineData("https://127.0.0.1:8443", "https://127.1:8443/", true)]
+   [InlineData("https://127.0.0.1:8443", "https://0x7f.1:8443/", true)]
+   [InlineData("https://127.1:8443", "https://127.0.0.1:8443/", true)]
+   [InlineData("https://127.0.0.1:8443", "https://127.0.0.2:8443/", false)]
+   [InlineData("https://id.example.invalid", "https://id\u200B.example.invalid/", true)]
+   [InlineData("https://id.example.invalid", "https://id\u2028.example.invalid/", false)]
+   public void CoverageIsDecidedOnTheAsciiHostAndThePort(string named, string address, bool covered)
+   {
+      Assert.Equal(covered, QqqCertificateExceptionOrigins.For(new Uri(named)).Covers(new Uri(address)));
+   }
+
+
+
+   /// <summary>
+   /// The exception an operator accepted for a server is built from the server's address as the caller holds it: only
+   /// its origin is used, a server on plain HTTP contributes nothing because it presents no certificate, and the
+   /// provider's origin is added when it is known. A provider on the server's own origin adds nothing, and a server
+   /// whose host has no ASCII name contributes nothing, because no certificate can be asked about it.
+   /// </summary>
+   [Theory]
+   [InlineData("https://dev\u2028.example.invalid:8443", null, "")]
+   [InlineData("https://dev\u2028.example.invalid:8443", "https://id.example.invalid", "https://id.example.invalid/")]
    [InlineData("https://dev.example.invalid:8443/some/path?x=1", null, "https://dev.example.invalid:8443/")]
    [InlineData("https://operator@dev.example.invalid:8443", "https://id.example.invalid", "https://dev.example.invalid:8443/ https://id.example.invalid/")]
    [InlineData("https://dev.example.invalid:8443", "https://dev.example.invalid:8443", "https://dev.example.invalid:8443/")]
@@ -199,6 +254,69 @@ public sealed class QqqCertificateExceptionTests
       using var client = new QqqSessionClient(Server, null, null, false, null, null, QqqCertificateExceptionOrigins.For(serverNamed ? Server : Provider), transport);
       using var unaddressed = new HttpRequestMessage();
       Assert.Equal(serverNamed, transport.HttpCertificate!(unaddressed, certificate, null, SslPolicyErrors.RemoteCertificateChainErrors));
+   }
+
+
+
+   /// <summary>
+   /// One session client talks to its server and to the sign-in provider that server names, so a refused certificate
+   /// is kept with the origin that presented it and the time on the client's clock. A refusal from the server names
+   /// the server's origin; a later one from the provider's discovery address names the provider's, in its ASCII form
+   /// although the server wrote the name with a look-alike letter, and carries the later time. The log names the
+   /// same ASCII host. Before any refusal there is none to report.
+   /// </summary>
+   [Fact]
+   public void RefusedCertificateIsKeptWithTheOriginThatPresentedItAndTheTime()
+   {
+      var time = new ManualTimeProvider();
+      var info = new List<string>();
+      using var scripted = new ScriptedServer();
+      var transport = new FakeTransport(scripted);
+      using X509Certificate2 certificate = SelfSigned("CN=Synthetic Local Authority");
+      using var client = new QqqSessionClient(Server, null, time, false, null, new QqqSessionDiagnostics(info.Add), QqqCertificateExceptionOrigins.None, transport);
+      using var toServer = new HttpRequestMessage(HttpMethod.Get, "https://dev.example.invalid:8443/qqq/v1/version");
+      using var toProvider = new HttpRequestMessage(HttpMethod.Get, "https://\u0430pple.example.invalid/application/.well-known/openid-configuration");
+      Assert.Null(client.LastCertificateRejection);
+
+      time.Advance(TimeSpan.FromMinutes(3));
+      Assert.False(transport.HttpCertificate!(toServer, certificate, null, SslPolicyErrors.RemoteCertificateChainErrors));
+      QqqCertificateRejection fromServer = Assert.IsType<QqqCertificateRejection>(client.LastCertificateRejection);
+      Assert.Equal("https://dev.example.invalid:8443/", fromServer.Origin?.AbsoluteUri);
+      Assert.Equal(new DateTimeOffset(2026, 1, 1, 0, 3, 0, TimeSpan.Zero), fromServer.ObservedAt);
+      Assert.Equal(certificate.Thumbprint, fromServer.Thumbprint);
+
+      time.Advance(TimeSpan.FromSeconds(30));
+      Assert.False(transport.HttpCertificate(toProvider, certificate, null, SslPolicyErrors.RemoteCertificateChainErrors));
+      QqqCertificateRejection fromProvider = Assert.IsType<QqqCertificateRejection>(client.LastCertificateRejection);
+      Assert.Equal("https://xn--pple-43d.example.invalid/", fromProvider.Origin?.AbsoluteUri);
+      Assert.Equal(new DateTimeOffset(2026, 1, 1, 0, 3, 30, TimeSpan.Zero), fromProvider.ObservedAt);
+      Assert.Equal(time.GetUtcNow(), fromProvider.ObservedAt);
+      Assert.Contains(info, line => line.StartsWith("TLS certificate for dev.example.invalid:8443 rejected: RemoteCertificateChainErrors.", StringComparison.Ordinal));
+      Assert.Contains(info, line => line.StartsWith("TLS certificate for xn--pple-43d.example.invalid rejected: RemoteCertificateChainErrors.", StringComparison.Ordinal));
+      Assert.All(info, line => Assert.DoesNotContain('\u0430', line));
+   }
+
+
+
+   /// <summary>
+   /// An address whose host has no ASCII name cannot be shown as an origin. A certificate presented for one is still
+   /// refused and logged, with the host in printable form (the line separator a space), and the rejection that is kept
+   /// names no origin instead of one that could lay a screen out differently.
+   /// </summary>
+   [Fact]
+   public void RefusalForAHostWithoutAnAsciiNameIsLoggedInPrintableFormAndNamesNoOrigin()
+   {
+      var info = new List<string>();
+      using X509Certificate2 certificate = SelfSigned("CN=Synthetic Local Authority");
+      using var client = new QqqSessionClient(Server, diagnostics: new QqqSessionDiagnostics(info.Add), certificateException: QqqCertificateExceptionOrigins.For(Server, Provider));
+
+      Assert.False(client.EvaluateCertificate(new Uri("https://id\u2028.example.invalid:9443/application/"), certificate, SslPolicyErrors.RemoteCertificateChainErrors));
+
+      Assert.Single(info, line => line.StartsWith("TLS certificate for id .example.invalid:9443 rejected: RemoteCertificateChainErrors.", StringComparison.Ordinal));
+      Assert.All(info, line => Assert.DoesNotContain('\u2028', line));
+      QqqCertificateRejection rejection = Assert.IsType<QqqCertificateRejection>(client.LastCertificateRejection);
+      Assert.Null(rejection.Origin);
+      Assert.Equal(certificate.Thumbprint, rejection.Thumbprint);
    }
 
 

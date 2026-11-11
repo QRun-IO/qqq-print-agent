@@ -104,11 +104,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// or the socket upgrade is going to is on an origin the certificate exception names, and then with a warning naming
    /// the certificate so the exception is never silent. From any other host it is rejected, whatever exception the
    /// client holds, with the exact policy errors, the subject, issuer and validity, and the remedy; the rejection is
-   /// kept for the compatibility check to report.
+   /// kept, with the origin that presented the certificate and the time, for the compatibility check to report. The
+   /// address may be one a server supplied (its sign-in provider's discovery document), so the log names its host
+   /// by the ASCII name the connection is made to, never as the server wrote it.
    /// </summary>
    internal bool EvaluateCertificate(Uri address, X509Certificate2? certificate, SslPolicyErrors errors)
    {
-      string host = address.Authority;
+      Uri? origin = QqqOrigin.Of(address);
+      string host = origin?.Authority ?? ShownText(address.Authority);
       string summary = certificate is null ? "no certificate presented"
          : $"subject '{ShownText(certificate.Subject)}', issuer '{ShownText(certificate.Issuer)}', valid {certificate.NotBefore.ToUniversalTime():yyyy-MM-dd} to {certificate.NotAfter.ToUniversalTime():yyyy-MM-dd}, thumbprint {certificate.Thumbprint}";
       if(errors == SslPolicyErrors.None)
@@ -122,7 +125,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          return true;
       }
       Volatile.Write(ref _certificateRejection, new QqqCertificateRejection(errors, certificate is null ? null : ShownText(certificate.Subject), certificate is null ? null : ShownText(certificate.Issuer),
-         certificate?.NotBefore.ToUniversalTime(), certificate?.NotAfter.ToUniversalTime(), certificate?.Thumbprint));
+         certificate?.NotBefore.ToUniversalTime(), certificate?.NotAfter.ToUniversalTime(), certificate?.Thumbprint, origin, _timeProvider.GetUtcNow()));
       _diagnostics.Info($"TLS certificate for {host} rejected: {errors}. Certificate: {summary}. "
          + (errors.HasFlag(SslPolicyErrors.RemoteCertificateChainErrors)
             ? "Windows does not trust the issuing authority for the account this process runs as (the service runs as LocalSystem and reads the machine store, not your user store). Install the issuer's root certificate in the Local Machine Trusted Root store, or enable 'Allow untrusted server certificate' in Connection settings for a development server."

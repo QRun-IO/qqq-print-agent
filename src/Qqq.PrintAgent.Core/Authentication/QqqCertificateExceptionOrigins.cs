@@ -32,7 +32,7 @@ public sealed class QqqCertificateExceptionOrigins
 
 
 
-   /// <summary>The origins the exception covers, each as an HTTPS address of scheme, host and port with the path "/"; none for no exception.</summary>
+   /// <summary>The origins the exception covers, each as an HTTPS address of scheme, the host's ASCII name and port with the path "/" (see <see cref="QqqOrigin.Of"/>); none for no exception.</summary>
    public IReadOnlyList<Uri> Origins { get; }
 
 
@@ -44,9 +44,10 @@ public sealed class QqqCertificateExceptionOrigins
 
    /// <summary>
    /// Builds the exception for the given origins. Each must be an absolute HTTPS address with no user information,
-   /// query or fragment and no path beyond "/"; the same origin given twice counts once. More than two distinct
-   /// origins, or one that is not such an address, is refused with an <see cref="ArgumentException"/>, so a wider or
-   /// malformed exception cannot exist. No origins gives <see cref="None"/>.
+   /// query or fragment and no path beyond "/", and its host must have an ASCII name; the same origin given twice
+   /// counts once, and a name in Unicode and the same name in its "xn--" form are the same origin. More than two
+   /// distinct origins, or one that is not such an address, is refused with an <see cref="ArgumentException"/>, so a
+   /// wider or malformed exception cannot exist. No origins gives <see cref="None"/>.
    /// </summary>
    public static QqqCertificateExceptionOrigins For(params Uri[] origins)
    {
@@ -75,9 +76,7 @@ public sealed class QqqCertificateExceptionOrigins
    public static QqqCertificateExceptionOrigins ForServer(Uri server, Uri? provider = null)
    {
       ArgumentNullException.ThrowIfNull(server);
-      Uri? own = server.IsAbsoluteUri && string.Equals(server.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
-         ? new Uri(Uri.UriSchemeHttps + Uri.SchemeDelimiter + server.Authority + "/", UriKind.Absolute)
-         : null;
+      Uri? own = server.IsAbsoluteUri && string.Equals(server.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ? QqqOrigin.Of(server) : null;
       return (own, provider) switch
       {
          (not null, null) => For(own),
@@ -91,29 +90,32 @@ public sealed class QqqCertificateExceptionOrigins
 
    /// <summary>
    /// True when the address a request or a socket upgrade is going to is on one of the covered origins: the same host
-   /// and port, over HTTPS or its WebSocket form. Anything else, a relative address included, is not covered.
+   /// and port, over HTTPS or its WebSocket form. The host is compared by its ASCII name, as the session client's own
+   /// same-origin rule compares it, so a name written in Unicode and the same name in its "xn--" form are one host.
+   /// Anything else, a relative address or a host with no ASCII name included, is not covered.
    /// </summary>
    public bool Covers(Uri address)
    {
       ArgumentNullException.ThrowIfNull(address);
       return address.IsAbsoluteUri
          && (string.Equals(address.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) || string.Equals(address.Scheme, Uri.UriSchemeWss, StringComparison.Ordinal))
-         && Origins.Any(origin => Uri.Compare(origin, address, UriComponents.HostAndPort, UriFormat.SafeUnescaped, StringComparison.OrdinalIgnoreCase) == 0);
+         && QqqOrigin.AsciiHost(address) is { } host
+         && Origins.Any(origin => string.Equals(origin.IdnHost, host, StringComparison.OrdinalIgnoreCase) && origin.Port == address.Port);
    }
 
 
 
-   /// <summary>The covered origins for a log line or a warning: "none", or the origins separated by commas.</summary>
+   /// <summary>The covered origins for a log line or a warning: "none", or the origins separated by commas. Each is shown with its host's ASCII name, the form it is kept in, so nothing a server wrote in a host name can look like another name or lay the line out differently.</summary>
    public override string ToString() => IsEmpty ? "none" : string.Join(", ", Origins.Select(origin => origin.GetLeftPart(UriPartial.Authority)));
 
 
 
-   /// <summary>Returns the origin in its stored form, or null when the address is not a well-formed HTTPS origin.</summary>
+   /// <summary>Returns the origin in its stored form (see <see cref="QqqOrigin.Of"/>), or null when the address is not a well-formed HTTPS origin or its host has no ASCII name.</summary>
    private static Uri? Normalize(Uri? origin)
    {
       return origin is not null && origin.IsAbsoluteUri && string.Equals(origin.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
          && origin.UserInfo.Length == 0 && origin.Query.Length == 0 && origin.Fragment.Length == 0 && string.Equals(origin.AbsolutePath, "/", StringComparison.Ordinal)
-         ? new Uri(origin.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute)
+         ? QqqOrigin.Of(origin)
          : null;
    }
 }
