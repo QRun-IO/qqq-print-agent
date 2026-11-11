@@ -70,17 +70,24 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
 
 
 
+   /// <summary>The printers the runtime is given in place of <see cref="Printer"/>, for the test that runs the service over the real Windows rules and a fake Windows; null for every other test.</summary>
+   private readonly IPrinterBackend? _printers;
+
+
+
    /// <summary>
    /// Seeds an enrolled, signed-in agent store with two shared queues, lets the test add its own starting state, then starts the
    /// runtime with a session client wired to this fixture's fake HTTP server and loopback WebSocket. The concurrent-download
    /// limit and (optionally) cached realtime settings are set up front so tests start from a known negotiated state, and an
-   /// HTTP fault can be in place before the runtime makes its first request.
+   /// HTTP fault can be in place before the runtime makes its first request. A test may give the runtime printers of its
+   /// own in place of the fake printer; it then shares their queues itself, through the seed.
    /// </summary>
    internal RealtimeRuntimeFixture(int downloads = 1, RealtimeSettings? settings = null, TimeProvider? timeProvider = null, bool cacheSettings = false, string printingVersion = "2.0.0",
-      Action<JournalStore>? seed = null, Func<HttpRequestMessage, Exception?>? httpFault = null)
+      Action<JournalStore>? seed = null, Func<HttpRequestMessage, Exception?>? httpFault = null, IPrinterBackend? printers = null)
    {
       Server = new ScriptedPrintServer { PrintingVersion = printingVersion, HttpFault = httpFault };
       _timeProvider = timeProvider;
+      _printers = printers;
       Settings = (settings ?? Settings) with { MaxConcurrentDownloads = downloads };
       using(JournalStore store = TestState.OpenStore(DirectoryPath))
       {
@@ -103,7 +110,7 @@ internal sealed partial class RealtimeRuntimeFixture : IAsyncDisposable
    {
       Server.EndClaimSpan();
       _running = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-      Runtime = new SingleServerHarness(DirectoryPath, Logs.Enqueue, Printer, Server.CreateSession, _timeProvider, PipeName, controlResultSaving: () => ControlResultSaving?.Invoke());
+      Runtime = new SingleServerHarness(DirectoryPath, Logs.Enqueue, _printers ?? Printer, Server.CreateSession, _timeProvider, PipeName, controlResultSaving: () => ControlResultSaving?.Invoke());
       Running = Runtime.RunAsync(_running.Token);
    }
 

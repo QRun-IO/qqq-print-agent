@@ -5,6 +5,7 @@
 
 using System.Text.Json;
 using System.Threading.Channels;
+using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 
 namespace Qqq.PrintAgent.Windows;
@@ -49,10 +50,13 @@ public sealed partial class AgentRuntime
    /// Publishes the exposed printers whenever they change, and delivers pending receipts. It waits for a status request
    /// rather than a timer, sends inventory only when the serialized list differs from the last one sent, re-checks that traffic
    /// is still allowed before sending, and marks inventory ready (which lets claims start) only after the server accepted it.
+   /// A round in which the printers cannot be read sends nothing and goes on to the receipts, so the connection, and the
+   /// jobs on it, outlive a printer whose driver hangs or fails; see <see cref="TryReadInventory"/>.
    /// </summary>
    private async Task RealtimeSynchronizeAsync(CancellationToken token)
    {
       string? previousInventory = null;
+      string? inventoryFailure = null;
       while(!token.IsCancellationRequested)
       {
          await _statusRequested.WaitAsync(token).ConfigureAwait(false);
@@ -63,10 +67,8 @@ public sealed partial class AgentRuntime
          if(configuration is null)
          { continue; }
          using PrintApiClient api = CreateApi();
-         if(NormalTrafficAllowed)
+         if(NormalTrafficAllowed && TryReadInventory(store, ref inventoryFailure) is { } inventory)
          {
-            ExposedPrinterBackend backend = new(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds);
-            IReadOnlyList<PrinterInfo> inventory = backend.Discover();
             string serialized = JsonSerializer.Serialize(inventory.OrderBy(item => item.PrinterId, StringComparer.Ordinal), PrintApiClient.JsonOptions);
             bool freshInventory = false;
             if(!string.Equals(serialized, previousInventory, StringComparison.Ordinal))
@@ -89,6 +91,46 @@ public sealed partial class AgentRuntime
          }
          await ReconcileRealtimeReceiptsAsync(store, token).ConfigureAwait(false);
          _ = store.PruneHistory();
+      }
+   }
+
+
+
+   /// <summary>
+   /// Reads the shared printers with their media for the inventory report, which asks every queue's driver. A read that
+   /// fails (a driver that hangs until the helper's limit, a helper that died, a spooler that cannot list its queues)
+   /// returns null: the caller then sends nothing, so a station that cannot be read is never reported as a station with
+   /// no printers, and the connection is kept. Jobs go on being claimed on the inventory this connection already
+   /// delivered; on a connection that has delivered none yet, nothing is claimed until a read succeeds, because
+   /// dispatch waits for the server to have the inventory. The failure is logged as an error when its reason is not the
+   /// one logged last, and its end is logged once, so a printer that stays broken does not fill the log. Cancellation
+   /// is not a failed read and is passed on.
+   /// </summary>
+   private IReadOnlyList<PrinterInfo>? TryReadInventory(AgentStore store, ref string? lastFailure)
+   {
+      try
+      {
+         IReadOnlyList<PrinterInfo> inventory = new ExposedPrinterBackend(new ProfiledPrinterBackend(_printers, store), store.GetExposedPrinterIds).Discover();
+         if(lastFailure is not null)
+         { _log.Write("INFO", "The printers on this computer can be read again; the printer inventory is reported to the server as usual."); }
+         lastFailure = null;
+         return inventory;
+      }
+      catch(Exception exception) when(exception is not OperationCanceledException)
+      {
+         string reason = QqqSessionDiagnostics.Describe(exception);
+         if(!string.Equals(reason, lastFailure, StringComparison.Ordinal))
+         {
+            bool delivered;
+            lock(_stateLock)
+            { delivered = _inventoryReady; }
+            _log.Write("ERROR", "The printers on this computer could not be read, so no printer inventory was sent to the server. "
+               + (delivered ? "Jobs are still claimed and printed on the inventory this connection already delivered. " : "No job is claimed on this connection until the printers can be read. ")
+               + "One printer whose driver does not answer is enough to cause this. Reason: " + reason);
+            _log.Write("DEBUG", "Printer inventory read detail: " + exception);
+         }
+         lastFailure = reason;
+         return null;
       }
    }
 
