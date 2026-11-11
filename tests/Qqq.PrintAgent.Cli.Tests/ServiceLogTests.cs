@@ -408,8 +408,8 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
-   /// A server's name is an operator's text, so it is made safe to stand at the front of a line: surrounding spaces go,
-   /// a line break or other control character becomes a space (it cannot start a forged log entry), and a long name is
+   /// A server's name is an operator's text, so it is made safe to stand at the front of a line: a line break or other
+   /// control character becomes a space (it cannot start a forged log entry), surrounding spaces go, and a long name is
    /// cut at 64 characters. A name with nothing in it is refused.
    /// </summary>
    [Fact]
@@ -425,6 +425,79 @@ public sealed class ServiceLogTests : IDisposable
       Assert.Equal(64, ServiceLog.ServerNameLimit);
       Assert.Throws<ArgumentException>(() => log.ForServer("   "));
       Assert.Throws<ArgumentNullException>(() => log.ForServer(null!));
+   }
+
+
+
+   /// <summary>
+   /// A server's name cannot switch off the redaction of the line it stands in front of. The redaction reads a quoted
+   /// value up to the next quote, so a name ending in an open quote, redacted as one string with the line, pairs with
+   /// the quote in front of the password and leaves the password itself in the log. The name and the line are redacted
+   /// apart: the password is gone from the ring, the host's sink and the file, for an operational line, for debug detail
+   /// and for a failure, and a secret written into the name itself is gone as well.
+   /// </summary>
+   [Theory]
+   [InlineData("A token=\"", "[A token=[REDACTED]] ")]
+   [InlineData("B secret='", "[B secret=[REDACTED]] ")]
+   [InlineData("C password=\"synthetic-name-secret", "[C password=[REDACTED]] ")]
+   public void ForServer_ANameCannotDefeatTheRedactionOfItsLine(string name, string prefix)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create(debug: true);
+      ServiceLog server = log.ForServer(name);
+
+      server.Write("ERROR", "Sign-in failed: password=\"hunter2\" rejected");
+      server.Write("DEBUG", "POST /session password=\"hunter2\" rejected");
+      server.Failure("Sign-in failed", new IOException("token=\"hunter2\" refused"));
+
+      Assert.Equal([prefix + "Sign-in failed: password=[REDACTED] rejected", prefix + "Sign-in failed: IOException: token=[REDACTED] refused"], _sink);
+      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      string written = File.ReadAllText(file.CurrentLogFilePath);
+      Assert.DoesNotContain("hunter2", written, StringComparison.Ordinal);
+      Assert.DoesNotContain("synthetic-name-secret", written, StringComparison.Ordinal);
+      Assert.Contains("POST /session password=[REDACTED] rejected", written, StringComparison.Ordinal);
+      Assert.Equal(4, File.ReadAllLines(file.CurrentLogFilePath).Count(line => line.Contains(" [Service] ", StringComparison.Ordinal)));
+   }
+
+
+
+   /// <summary>
+   /// A character in a server's name that would end the line or change the order it is shown in becomes a space, as a
+   /// control character does: the line and paragraph separators (U+2028, U+2029), the next-line control (U+0085), the
+   /// bidirectional embeddings, overrides and isolates with the characters that end them (U+202A to U+202E, U+2066 to
+   /// U+2069), the directional marks and the zero-width characters. None of them is a control character, so each used
+   /// to pass through, and a name could show a forged line or text in reverse.
+   /// </summary>
+   [Theory]
+   [InlineData(0x0085)]
+   [InlineData(0x2028)]
+   [InlineData(0x2029)]
+   [InlineData(0x202A)]
+   [InlineData(0x202B)]
+   [InlineData(0x202C)]
+   [InlineData(0x202D)]
+   [InlineData(0x202E)]
+   [InlineData(0x2066)]
+   [InlineData(0x2067)]
+   [InlineData(0x2068)]
+   [InlineData(0x2069)]
+   [InlineData(0x200E)]
+   [InlineData(0x200F)]
+   [InlineData(0x061C)]
+   [InlineData(0x200B)]
+   [InlineData(0xFEFF)]
+   public void ForServer_ACharacterThatEndsOrReordersALine_BecomesASpace(int codePoint)
+   {
+      (ServiceLog log, AgentActivityLog file) = Create();
+      char character = (char)codePoint;
+
+      log.ForServer("Ware" + character + "house" + character).Write("INFO", "one");
+      log.ForServer(character + "2026-11-10 12:00:00 [ERROR] forged" + character + character + "entry").Write("INFO", "two");
+
+      Assert.Equal(["[Ware house] one", "[2026-11-10 12:00:00 [ERROR] forged  entry] two"], _sink);
+      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal([" [INFO] [Service] [Ware house] one", " [INFO] [Service] [2026-11-10 12:00:00 [ERROR] forged  entry] two"], Lines(file));
+      Assert.DoesNotContain(character.ToString(), File.ReadAllText(file.CurrentLogFilePath), StringComparison.Ordinal);
+      Assert.Throws<ArgumentException>(() => log.ForServer(new string(character, 3)));
    }
 
 

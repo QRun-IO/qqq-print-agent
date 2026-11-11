@@ -70,7 +70,13 @@ internal sealed class ServiceLog
       bool debug = string.Equals(level, "DEBUG", StringComparison.Ordinal);
       if(debug && !_sinks.ActivityLog.IsDebugEnabled)
       { return; }
-      string sanitized = AgentActivityLog.Redact(_prefix + message);
+      //////////////////////////////////////////////////////////////////////////////////
+      // the name in the prefix was redacted when the view was made, and is joined on //
+      // only here: redacted as one string with the message, a name ending in an open //
+      // quote would pair with the quote in front of a secret in the message, and the //
+      // secret itself would be left outside what is redacted                         //
+      //////////////////////////////////////////////////////////////////////////////////
+      string sanitized = _prefix + AgentActivityLog.Redact(message);
       int cap = debug ? DebugLimit : LineLimit;
       string bounded = sanitized.Length <= cap ? sanitized : sanitized[..cap];
       if(debug)
@@ -124,15 +130,32 @@ internal sealed class ServiceLog
    /// <summary>
    /// A view of this log for one server's connection. Every line it writes starts with the server's name in square
    /// brackets, so lines from several connections can be told apart; redaction, the caps (which then include the name),
-   /// the debug routing, the ring and the file are the same ones. The name is an operator's text: control characters
-   /// become spaces, so it cannot start a new log line, and it is cut at 64 characters.
+   /// the debug routing, the ring and the file are the same ones. The name is an operator's text, so it is made safe
+   /// here, once: a character that would end the line or reorder it becomes a space (see <see cref="StaysInItsLine"/>),
+   /// the name is redacted on its own, and it is cut at 64 characters. It is redacted apart from the lines it will
+   /// stand in front of because the redaction reads a quoted value up to the next quote: a name ending in an open quote,
+   /// redacted together with a line, would pair with the quote in front of a secret in that line and leave the secret
+   /// in the log. A name with nothing left to show is refused.
    /// </summary>
    internal ServiceLog ForServer(string name)
    {
       ArgumentException.ThrowIfNullOrWhiteSpace(name);
-      string shown = new(name.Trim().Select(character => char.IsControl(character) ? ' ' : character).ToArray());
+      string plain = new string(name.Select(character => StaysInItsLine(character) ? character : ' ').ToArray()).Trim();
+      ArgumentException.ThrowIfNullOrWhiteSpace(plain, nameof(name));
+      string shown = AgentActivityLog.Redact(plain);
       return new ServiceLog(_sinks, "[" + (shown.Length <= ServerNameLimit ? shown : shown[..ServerNameLimit]) + "] ");
    }
+
+
+
+   /// <summary>
+   /// True for a character that shows as itself where it stands. False for the ones that let a name forge or disguise a
+   /// log line: control characters, the line and paragraph separators (U+2028, U+2029) that end a line as surely as a
+   /// newline, and the format characters, which include the bidirectional embeddings, overrides and isolates that make
+   /// text display in another order than it was written. It is the rule Core applies to text a server sends.
+   /// </summary>
+   private static bool StaysInItsLine(char character) => char.GetUnicodeCategory(character) is not (UnicodeCategory.Control
+      or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator);
 
 
 
