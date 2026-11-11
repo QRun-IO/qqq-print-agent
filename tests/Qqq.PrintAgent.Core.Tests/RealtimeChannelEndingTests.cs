@@ -181,6 +181,144 @@ public sealed class RealtimeChannelEndingTests
 
 
 
+   /// <summary>
+   /// The caller's cancellation can overtake the reader: the reader has checked the token and is about to ask the socket
+   /// for a frame when the caller cancels and the shutdown aborts the socket, so the reader fails on the aborted socket
+   /// instead of seeing the cancellation. Nothing failed, so the run still returns. The hook holds the reader at exactly
+   /// that point until the socket has been aborted.
+   /// </summary>
+   [Fact]
+   public async Task CallerCancellationThatOvertakesTheReaderStillEndsTheRunNormally()
+   {
+      using var stop = new CancellationTokenSource();
+      using var socket = new ScriptedWebSocket();
+      int receives = 0;
+      socket.Receiving = () =>
+      {
+         if(Interlocked.Increment(ref receives) == 2)
+         {
+            stop.Cancel();
+            Assert.True(SpinWait.SpinUntil(() => socket.Aborts > 0, Patience));
+         }
+      };
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      Task run = channel.RunAsync(_ => { }, stop.Token);
+      socket.Deliver("PONG", "pong-1", new { serverTime = "2026-01-01T00:00:00Z" });
+      await run.WaitAsync(Patience);
+      Assert.True(run.IsCompletedSuccessfully);
+      Assert.Equal(2, Volatile.Read(ref receives));
+      Assert.Equal(1, socket.Aborts);
+   }
+
+
+
+   /// <summary>
+   /// What a loop meets after the shutdown has aborted the socket decides whether the run fails. The writer is held in
+   /// its send until the caller has cancelled and the socket has been aborted, and then fails. A socket that refuses the
+   /// call because it has ended (disposed, or in an invalid state) is the stop itself, so the run returns. Anything
+   /// else is a failure and is reported although it arrived after the cancellation: an input or output error, and a
+   /// connection the server dropped, which the socket reports as closed prematurely.
+   /// </summary>
+   [Theory]
+   [InlineData("disposed", false)]
+   [InlineData("invalid-state", false)]
+   [InlineData("closed-prematurely", true)]
+   [InlineData("io", true)]
+   public async Task FailureMetAfterTheSocketWasAbortedIsReportedUnlessItIsTheSocketRefusingTheCall(string kind, bool reported)
+   {
+      Exception met = kind switch
+      {
+         "disposed" => new ObjectDisposedException("socket"),
+         "invalid-state" => new WebSocketException(WebSocketError.InvalidState),
+         "closed-prematurely" => new WebSocketException(WebSocketError.ConnectionClosedPrematurely),
+         _ => new IOException("Synthetic send failure."),
+      };
+      using var stop = new CancellationTokenSource();
+      using var socket = new ScriptedWebSocket();
+      socket.Sending = _ =>
+      {
+         stop.Cancel();
+         Assert.True(SpinWait.SpinUntil(() => socket.Aborts > 0, Patience));
+         throw met;
+      };
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      Task run = channel.RunAsync(_ => { }, stop.Token);
+      await channel.SendAsync("HEARTBEAT", new { });
+      if(reported)
+      {
+         Assert.Same(met, await Assert.ThrowsAnyAsync<Exception>(() => run.WaitAsync(Patience)));
+      }
+      else
+      {
+         await run.WaitAsync(Patience);
+         Assert.True(run.IsCompletedSuccessfully);
+      }
+   }
+
+
+
+   /// <summary>
+   /// The platform socket aborts itself as soon as the token of a call in flight is cancelled, before this channel's own
+   /// shutdown begins, and from then on refuses a new call as being in an invalid state. A writer that is about to send
+   /// at that moment therefore fails before the shutdown has looked at the loops. The reader is held in its callback
+   /// until the shutdown aborts the socket, which it does only after a loop has ended, so the writer is the loop that
+   /// ended first and had already failed when the shutdown looked. The caller had cancelled, so the refusal is still
+   /// the stop and the run returns.
+   /// </summary>
+   [Fact]
+   public async Task SocketRefusingACallBecauseTheCallerCancelledIsTheStopEvenBeforeTheShutdownBegins()
+   {
+      using var stop = new CancellationTokenSource();
+      using var socket = new ScriptedWebSocket();
+      socket.Sending = _ =>
+      {
+         stop.Cancel();
+         throw new WebSocketException(WebSocketError.InvalidState);
+      };
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      Task run = channel.RunAsync(_ => Assert.True(SpinWait.SpinUntil(() => socket.Aborts > 0, Patience)), stop.Token);
+      socket.Deliver("PONG", "pong-1", new { serverTime = "2026-01-01T00:00:00Z" });
+      await channel.SendAsync("HEARTBEAT", new { });
+      await run.WaitAsync(Patience);
+      Assert.True(run.IsCompletedSuccessfully);
+   }
+
+
+
+   /// <summary>
+   /// Without a cancellation by the caller, a loop is taken to have been stopped by the shutdown only when it had not
+   /// failed before the shutdown began. Nobody cancels here: the callback gives up, as the service's does when a newer
+   /// connection has replaced this one, while the writer is inside a send. The shutdown then aborts the socket, and the
+   /// writer's send fails on it. That refusal came after the shutdown began, so it is the shutdown itself, and the run
+   /// ends as the cancellation the callback raised and not as the socket's refusal.
+   /// </summary>
+   [Fact]
+   public async Task RefusalMetAfterTheShutdownBeganIsNotReportedAlthoughNobodyCancelled()
+   {
+      using var never = new CancellationTokenSource();
+      using var socket = new ScriptedWebSocket();
+      using var sending = new ManualResetEventSlim();
+      socket.Sending = _ =>
+      {
+         sending.Set();
+         Assert.True(SpinWait.SpinUntil(() => socket.Aborts > 0, Patience));
+         return Task.CompletedTask;
+      };
+      using var channel = new PrintingRealtimeChannel(socket, new RealtimeSettings());
+      Task run = channel.RunAsync(_ =>
+      {
+         Assert.True(sending.Wait(Patience));
+         throw new OperationCanceledException("Replaced by a newer connection.");
+      }, never.Token);
+      await channel.SendAsync("HEARTBEAT", new { });
+      socket.Deliver("JOB_AVAILABLE", "wake-1", new { });
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(Patience));
+      Assert.True(run.IsCanceled);
+      Assert.False(never.IsCancellationRequested);
+   }
+
+
+
    /// <summary>A failure is not hidden by a cancellation that arrives with it: when the socket refuses a frame just as the caller cancels, the run still ends with the failure.</summary>
    [Fact]
    public async Task FailureIsReportedEvenWhenTheCallerCancelsAtTheSameMoment()

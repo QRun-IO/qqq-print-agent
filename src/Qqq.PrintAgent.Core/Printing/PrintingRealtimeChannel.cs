@@ -5,6 +5,7 @@
 
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Qqq.PrintAgent.Core.Transport;
@@ -56,6 +57,14 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
    /// cancellation while the caller's token is not cancelled ends the method as that cancellation, because it was not
    /// the caller who asked to stop.
    /// </para>
+   /// <para>
+   /// A socket that is being ended refuses the next call on it, and a loop that is about to use the socket at that
+   /// moment fails on it instead of seeing the cancellation. The socket is ended twice over on a deliberate stop: the
+   /// platform socket aborts itself as soon as the token of a call in flight is cancelled, and this shutdown aborts it
+   /// again. A failure of that kind (the socket is disposed, or in an invalid state) is the stop itself and is not
+   /// reported when the caller had cancelled, or when the loop had not failed before this shutdown began. Any other
+   /// failure is reported whenever it arrives, even beside a cancellation.
+   /// </para>
    /// </summary>
    public async Task RunAsync(Action<RealtimeEnvelope> received, CancellationToken token)
    {
@@ -65,15 +74,27 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       Task ended = await Task.WhenAny(reader, writer).ConfigureAwait(false);
 
       ////////////////////////////////////////////////////////////////////////
-      // read before the teardown below, so a channel that failed first and //
-      // was disposed a moment later still reports its failure              //
+      // read before the teardown below: whether the channel was disposed,  //
+      // so one that failed first and was disposed a moment later still     //
+      // reports its failure; and which loop had already failed while the   //
+      // caller had not cancelled, because only such a failure can be told  //
+      // from the socket refusing a call as it is being ended               //
       ////////////////////////////////////////////////////////////////////////
       bool disposed = Volatile.Read(ref _disposed) != 0;
+      bool callerCancelled = token.IsCancellationRequested;
+      bool readerFailedFirst = reader.IsFaulted && !callerCancelled;
+      bool writerFailedFirst = writer.IsFaulted && !callerCancelled;
       Interlocked.Exchange(ref _closed, 1);
       _outgoing.Writer.TryComplete();
       await lifetime.CancelAsync().ConfigureAwait(false);
       socket.Abort();
-      Exception? cause = ended.Exception?.InnerException;
+
+      ///////////////////////////////////////////////////////////////////////
+      // a send still waiting for its acknowledgement is told why the      //
+      // channel closed. a refusal the run takes to be the caller's stop   //
+      // is not a cause, so the waiting send and the run say the same      //
+      ///////////////////////////////////////////////////////////////////////
+      Exception? cause = FailureOf(ended, !callerCancelled);
       foreach(TaskCompletionSource pending in _pending.Values)
       {
          pending.TrySetException(new RealtimeChannelClosedException("Realtime connection closed before acknowledgement; durable receipts will be replayed.", cause));
@@ -84,11 +105,32 @@ public sealed class PrintingRealtimeChannel(WebSocket socket, RealtimeSettings l
       /////////////////////////////////////////////////////////////////////////
       // ended on purpose: disposed (whatever the loops met on a socket that //
       // was disposed under them is the dispose itself), or cancelled by the //
-      // caller with neither loop having failed. anything else is rethrown:  //
-      // a failure, the reader's first, or a cancellation nobody asked for   //
+      // caller with no failure but the socket refusing a call as it ended.  //
+      // anything else is rethrown: a failure, the reader's first, or a      //
+      // cancellation nobody asked for                                       //
       /////////////////////////////////////////////////////////////////////////
-      if(!disposed && !(both.IsCanceled && token.IsCancellationRequested))
-      { await both.ConfigureAwait(false); }
+      if(disposed)
+      { return; }
+      Exception? failure = FailureOf(reader, readerFailedFirst) ?? FailureOf(writer, writerFailedFirst);
+      if(failure is not null)
+      { ExceptionDispatchInfo.Throw(failure); }
+      if(!token.IsCancellationRequested)
+      { await (reader.IsCanceled ? reader : writer.IsCanceled ? writer : both).ConfigureAwait(false); }
+   }
+
+
+
+   /// <summary>
+   /// What a loop failed with, or null when it did not fail or its failure is only the stop. A socket that has been
+   /// aborted refuses a call in one of two ways: it is disposed, or it is in an invalid state. A loop that met that,
+   /// and is not known to have failed before the stop, was stopped by the abort and not by anything the server or the
+   /// network did. A connection the server dropped fails differently (closed prematurely) and is always reported.
+   /// </summary>
+   private static Exception? FailureOf(Task loop, bool failedBeforeStop)
+   {
+      Exception? failure = loop.Exception?.InnerException;
+      bool refusedByAnEndedSocket = failure is ObjectDisposedException || (failure is WebSocketException { WebSocketErrorCode: WebSocketError.InvalidState });
+      return failure is null || (!failedBeforeStop && refusedByAnEndedSocket) ? null : failure;
    }
 
 
