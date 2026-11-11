@@ -544,7 +544,7 @@ public sealed class ShellPollingTests
 
 
 
-   /// <summary>A shell that was disposed reads nothing, shows nothing of a read that was in flight, and no longer follows the gate.</summary>
+   /// <summary>A shell that was disposed reads nothing, shows nothing of a read that was in flight, and no longer follows the gate. A read after a change that was waiting behind the read in flight when the shell was disposed is not made either.</summary>
    [Fact]
    public async Task Disposed_ReadsNothing_ShowsNothing()
    {
@@ -554,13 +554,16 @@ public sealed class ShellPollingTests
       TaskCompletionSource<ManagementReplyParse> transport = fixture.Pipe.Hold();
       Task refresh = fixture.Shell.RefreshAsync();
       Task meter = fixture.Shell.RefreshTransportAsync();
+      Task afterChange = fixture.Shell.RefreshAfterChangeAsync();
 
       fixture.Shell.Dispose();
       snapshot.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Changed"))));
       transport.SetResult(Replies.Success(Transport(1)));
       await refresh;
       await meter;
+      await afterChange;
 
+      Assert.Equal("snapshot snapshot transport.get", Operations(fixture));
       Assert.Equal("One", fixture.ServerNames);
       Assert.Null(fixture.Shell.TransportOf(Snapshots.Id(1)));
       int sent = fixture.Pipe.Sent.Count;
