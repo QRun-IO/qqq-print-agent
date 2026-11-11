@@ -163,6 +163,33 @@ public sealed class QqqSessionBoundaryTests
 
 
 
+   /// <summary>
+   /// A line that says two addresses differ shows both in the form they were compared in, so it cannot read "X, not
+   /// X". The server here was typed with a name outside ASCII. A request is held to the session origin by the ASCII
+   /// names, so the refused address and the session origin are both shown by that name. A saved session is held to
+   /// the server by the address as written, so a session saved under the "xn--" form is refused for a server typed
+   /// in Unicode, and the line shows each as it was written; a saved address that is not absolute is shown as it is.
+   /// </summary>
+   [Fact]
+   public async Task RefusalForAServerTypedOutsideAsciiShowsBothAddressesInTheFormTheyWereComparedIn()
+   {
+      var info = new List<string>();
+      using var server = new ScriptedServer();
+      using var client = new QqqSessionClient(new Uri("https://b\u00FCcher.example.invalid"), server, diagnostics: new QqqSessionDiagnostics(info.Add));
+
+      await Assert.ThrowsAsync<ArgumentException>(() => client.SendCoreAsync(new Uri("https://b\u00FCcher.example.invalid:8443/qqq/v1/version?token=never-logged"), HttpMethod.Get, null, 1024, null, null, null, CancellationToken.None));
+      Assert.Contains("Refused a request to https://xn--bcher-kva.example.invalid:8443/qqq/v1/version: it is not on the session origin xn--bcher-kva.example.invalid.", info, StringComparer.Ordinal);
+
+      await Assert.ThrowsAsync<ArgumentException>(() => client.RestoreSessionAsync(new QqqSessionCredential(new Uri("https://xn--bcher-kva.example.invalid/?token=never-logged"), "saved-session")));
+      Assert.Contains("Saved session refused: it belongs to https://xn--bcher-kva.example.invalid/, not https://b\u00FCcher.example.invalid/.", info, StringComparer.Ordinal);
+      await Assert.ThrowsAsync<ArgumentException>(() => client.RestoreSessionAsync(new QqqSessionCredential(new Uri("/saved", UriKind.Relative), "saved-session")));
+      Assert.Contains("Saved session refused: it belongs to /saved, not https://b\u00FCcher.example.invalid/.", info, StringComparer.Ordinal);
+      Assert.Empty(server.Requests);
+      Assert.DoesNotContain(info, line => line.Contains("never-logged", StringComparison.Ordinal));
+   }
+
+
+
    /// <summary>A response body that keeps arriving past the bound, without ever announcing its length, is cut off and rejected instead of filling memory.</summary>
    [Fact]
    public async Task UnannouncedOversizedBodyIsRejectedWhileReading()

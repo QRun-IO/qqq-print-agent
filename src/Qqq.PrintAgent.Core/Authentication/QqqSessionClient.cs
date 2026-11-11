@@ -216,7 +216,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       ArgumentNullException.ThrowIfNull(credential);
       if(credential.Origin != Origin)
       {
-         _diagnostics.Info($"Saved session refused: it belongs to {QqqSessionDiagnostics.Describe(credential.Origin)}, not {QqqSessionDiagnostics.Describe(Origin)}.");
+         _diagnostics.Info($"Saved session refused: it belongs to {Written(credential.Origin)}, not {Written(Origin)}.");
          throw new ArgumentException("The session belongs to another server.", nameof(credential));
       }
       await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -546,7 +546,8 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    {
       if(!providerDiscovery && !SameOrigin(uri, Origin))
       {
-         _diagnostics.Info($"Refused a request to {QqqSessionDiagnostics.Describe(uri)}: it is not on the session origin {Origin.Authority}.");
+         // The comparison is made on the ASCII names, so both sides are shown that way.
+         _diagnostics.Info($"Refused a request to {QqqSessionDiagnostics.Describe(uri)}: it is not on the session origin {QqqOrigin.ShownAuthority(Origin)}.");
          throw new ArgumentException("Cross-origin QQQ requests are forbidden.", nameof(uri));
       }
       string route = QqqSessionDiagnostics.Describe(uri);
@@ -1010,6 +1011,16 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       string[] omitted = [.. parts.Where(part => part.Present).Select(part => part.Part)];
       return ShownText(QqqSessionDiagnostics.Describe(address)) + (omitted.Length == 0 ? "" : " (" + string.Join(", ", omitted) + " omitted)");
    }
+
+
+
+   /// <summary>
+   /// An address as it was written, without its query, fragment or user information and made printable, for a line
+   /// that says two addresses differ when they were compared as written. The form every other line uses names a
+   /// host by its ASCII name, and two addresses that differ only in how that name was written would then read as
+   /// the same text on both sides of "not".
+   /// </summary>
+   private static string Written(Uri address) => ShownText(address.IsAbsoluteUri ? address.Scheme + "://" + address.Authority + address.AbsolutePath : address.ToString());
 
 
 
