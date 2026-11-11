@@ -99,6 +99,11 @@ internal sealed class SingleServerHarness : IDisposable
 
 
 
+   /// <summary>Paces one download chunk on the bandwidth schedule every download of the one server shares; it moves to the server's connection with the rest of the claim pipeline.</summary>
+   internal Task ThrottleDownloadAsync(int bytes, CancellationToken token) => _runtime.ThrottleDownloadAsync(bytes, token);
+
+
+
    /// <summary>Evaluates once whether the service may talk to its server, restoring or renewing the saved session as the reconnect loop and the heartbeat do.</summary>
    internal Task<bool> EnsureAuthorizationAsync(CancellationToken token) => _runtime.EnsureAuthorizationAsync(token);
 
