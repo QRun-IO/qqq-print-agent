@@ -352,7 +352,9 @@ public sealed partial class ManagementClient
    /// free at once (its caller has looked at its token just before), and otherwise waits its turn. When its caller's
    /// token is cancelled while it waits, it is not sent, so a change nobody waits for any more is never made later.
    /// That holds at the last moment too: a turn that comes as the token is cancelled is given back, and the request
-   /// is not sent.
+   /// is not sent. The token is looked at once more when the turn has come, and that look is the last: a
+   /// cancellation that arrives after it finds a request that is being sent, and is the wait that ended after
+   /// sending, which is reported as unconfirmed.
    /// </summary>
    private async Task<ServiceResult<TResult>?> TakePlaceAsync<TResult>(ManagementRequest request, bool repeated, CancellationToken cancellationToken)
    {
