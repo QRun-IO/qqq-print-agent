@@ -45,8 +45,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// <summary>
    /// Creates a client bound to one server origin. The origin must be an absolute https URL with no credentials, path,
    /// query or fragment (plain http only when explicitly allowed and loopback). The handler never follows redirects or
-   /// manages cookies, because redirects are refused and the session cookie is attached by hand to each request, and the
-   /// HTTP client has no overall timeout because every request sets its own bound. A certificate Windows does not trust
+   /// manages cookies, because redirects are refused and the cookies this client sends (the session, and a load
+   /// balancer's affinity cookies) are attached by hand to each request, and the HTTP client has no overall timeout
+   /// because every request sets its own bound. A certificate Windows does not trust
    /// is accepted only from the origins the certificate exception names; without one, from nowhere.
    /// </summary>
    public QqqSessionClient(Uri origin, HttpMessageHandler? handler = null, TimeProvider? timeProvider = null, bool allowLoopbackHttp = false, ApplicationTrafficMeter? traffic = null,
@@ -552,7 +553,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       }
       string route = QqqSessionDiagnostics.Describe(uri);
       long started = _timeProvider.GetTimestamp();
-      _diagnostics.Debug(() => $"HTTP {method} {route}: session cookie {(cookie is not null ? "yes" : "no")}, device proof {(device is not null ? "yes" : "no")}, basic credential {(basic is not null ? "yes" : "no")}, body {(content is null ? "none" : content.Headers.ContentType?.MediaType ?? "present")}, limit {(boundedByCaller ? "caller" : "20 s")}, response bound {maximumBytes} bytes.");
+      _diagnostics.Debug(() => $"HTTP {method} {route}: session cookie {(cookie is not null ? "yes" : "no")}, load balancer cookies {(providerDiscovery ? 0 : AffinityCookieCount)}, device proof {(device is not null ? "yes" : "no")}, basic credential {(basic is not null ? "yes" : "no")}, body {(content is null ? "none" : content.Headers.ContentType?.MediaType ?? "present")}, limit {(boundedByCaller ? "caller" : "20 s")}, response bound {maximumBytes} bytes.");
       using var timeout = new Deadline(_timeProvider, boundedByCaller ? Timeout.InfiniteTimeSpan : RequestLimit, cancellationToken);
       using HttpRequestMessage request = BuildRequest(uri, method, content, cookie, device, basic, providerDiscovery);
       HttpResponseMessage response;
@@ -568,6 +569,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          _diagnostics.Debug(() => $"HTTP {method} {route} -> {(int)response.StatusCode} {Shown(response.ReasonPhrase)} in {Elapsed(started)}; content type {ShownOr(response.Content.Headers.ContentType?.MediaType, "(none)")}, length {response.Content.Headers.ContentLength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown"}, Set-Cookie {(response.Headers.Contains("Set-Cookie") ? "present" : "absent")}.");
          if(!providerDiscovery && _traffic is not null)
          { response.Content = new TrafficHttpContent(response.Content, _traffic.RecordDownload); }
+
+         /////////////////////////////////////////////////////////////////////////
+         // every answer from the session origin may rewrite the load           //
+         // balancer's cookies, an error from a node that is stopping included; //
+         // an answer from the sign-in provider is never read for them          //
+         /////////////////////////////////////////////////////////////////////////
+         if(!providerDiscovery && response.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? setCookies))
+         { AdoptAffinity(setCookies); }
          if((int)response.StatusCode is >= 300 and < 400)
          {
             _diagnostics.Info($"HTTP {method} {route} answered {(int)response.StatusCode} (redirect); redirects are refused, so the request failed. Check the server address: it must be the exact HTTPS origin QQQ serves from.");
@@ -591,7 +600,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>Builds the outgoing request: no-store caching, this agent's channel header, and only the cookie, origin, Basic credential and device proof the caller passed.</summary>
+   /// <summary>
+   /// Builds the outgoing request: no-store caching, this agent's channel header, and only the session cookie, origin, Basic
+   /// credential and device proof the caller passed. A request to the session origin also carries the load balancer's
+   /// cookies, with or without a session, so it reaches the node the load balancer last chose; the provider never sees them.
+   /// The Origin header still goes only with a session cookie on an unsafe method, as before.
+   /// </summary>
    private HttpRequestMessage BuildRequest(Uri uri, HttpMethod method, HttpContent? content, string? cookie, QqqDeviceCredential? device, string? basic, bool providerDiscovery)
    {
       var request = new HttpRequestMessage(method, uri)
@@ -601,13 +615,12 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       request.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true };
       if(!providerDiscovery)
       { request.Headers.Add("X-QQQ-Client", ClientChannel); }
-      if(cookie is not null)
+      string? cookies = providerDiscovery ? cookie : WithAffinity(cookie);
+      if(cookies is not null)
+      { request.Headers.Add("Cookie", cookies); }
+      if(cookie is not null && method != HttpMethod.Get && method != HttpMethod.Head && method != HttpMethod.Options)
       {
-         request.Headers.Add("Cookie", cookie);
-         if(method != HttpMethod.Get && method != HttpMethod.Head && method != HttpMethod.Options)
-         {
-            request.Headers.Add("Origin", Origin.GetLeftPart(UriPartial.Authority));
-         }
+         request.Headers.Add("Origin", Origin.GetLeftPart(UriPartial.Authority));
       }
       if(basic is not null)
       { request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic); }
@@ -701,7 +714,9 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
    /// <summary>
    /// Extracts the session token from Set-Cookie headers, strictly. Headers are size-bounded, the cookie must be for this
    /// host with path "/", and repeated session cookies must agree. An expired, empty or deleted session cookie means the
-   /// server ended the session, so the local session is cleared and sign-in is required.
+   /// server ended the session, so the local session is cleared and sign-in is required. Cookies under any other name are
+   /// not the session and are not examined: a load balancer in front of the server adds its own to every answer, and one
+   /// this parser dislikes must not turn a good answer into an invalid one.
    /// </summary>
    private string? ReadSessionCookie(HttpResponseMessage response)
    {
@@ -712,12 +727,14 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       {
          if(header.Length > 8192)
          { throw InvalidResponse(); }
+         string name = header.Split('=', 2)[0].Trim();
+         if(name is not "sessionUUID" and not "sessionId")
+         { continue; }
          var parsed = new CookieContainer();
          try
          { parsed.SetCookies(Origin, header); }
          catch(CookieException) { throw InvalidResponse(); }
-         string name = header.Split('=', 2)[0].Trim();
-         if((name is "sessionUUID" or "sessionId") && parsed.GetAllCookies().Count == 0)
+         if(parsed.GetAllCookies().Count == 0)
          {
             _diagnostics.Info($"The server deleted the {name} cookie; the session has ended and sign-in is required.");
             ClearSession();
@@ -762,7 +779,11 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
 
-   /// <summary>Forgets the token, cookies, device and bound identity and advances the generation, so every request already in flight is refused when it returns.</summary>
+   /// <summary>
+   /// Forgets the token, session cookies, device and bound identity and advances the generation, so every request already in
+   /// flight is refused when it returns. The load balancer's cookies are kept: they say which node to reach, not who is
+   /// asking, and the sign-in that follows should reach the same node.
+   /// </summary>
    private void ClearSession()
    {
       _sessionToken = null;

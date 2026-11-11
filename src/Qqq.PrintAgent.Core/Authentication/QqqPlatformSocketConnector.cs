@@ -49,6 +49,16 @@ internal sealed class QqqPlatformSocketConnector : IQqqSocketConnector
 
 
 
+   /// <summary>Returns the upgrade response's headers as the socket collected them and releases the socket's copy, which it would otherwise hold for as long as it lives.</summary>
+   public IReadOnlyDictionary<string, IEnumerable<string>>? TakeUpgradeHeaders()
+   {
+      IReadOnlyDictionary<string, IEnumerable<string>>? headers = _socket.HttpResponseHeaders;
+      _socket.HttpResponseHeaders = null;
+      return headers;
+   }
+
+
+
    /// <summary>Copies the request onto the socket options and connects through the invoker.</summary>
    public Task ConnectAsync(QqqSocketRequest request, CancellationToken cancellationToken)
    {

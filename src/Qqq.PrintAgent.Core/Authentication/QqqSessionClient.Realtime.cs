@@ -22,7 +22,12 @@ public sealed partial class QqqSessionClient
 
 
 
-   /// <summary>Refreshes standard discovery once per socket establishment, then connects only to that origin with the current session and approved device proof.</summary>
+   /// <summary>
+   /// Refreshes standard discovery once per socket establishment, then connects only to that origin with the current
+   /// session and approved device proof. The answer to the upgrade is read for the load balancer's cookies whatever the
+   /// outcome, an accepted upgrade, a refusal with 401 or 403 and any other failure alike, because a refusal from a
+   /// node that is stopping carries the load balancer's choice of node for the retry.
+   /// </summary>
    public async Task<WebSocket> ConnectPrintingAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken = default)
    {
       IQqqSocketConnector connector = _transport.CreateSocketConnector(TransportPolicy, ValidateSocketCertificate);
@@ -31,7 +36,9 @@ public sealed partial class QqqSessionClient
          (QqqSocketRequest request, long generation) = await PrepareSocketAsync(heartbeatInterval, heartbeatTimeout, cancellationToken).ConfigureAwait(false);
          _diagnostics.Info($"Opening the realtime socket to {QqqSessionDiagnostics.Describe(request.Uri)} with subprotocol {PrintingSubProtocol} (session cookie and device proof attached; heartbeat every {heartbeatInterval.TotalSeconds:0} s, timeout {heartbeatTimeout.TotalSeconds:0} s).");
          long started = _timeProvider.GetTimestamp();
-         await connector.ConnectAsync(request, cancellationToken).ConfigureAwait(false);
+         try
+         { await connector.ConnectAsync(request, cancellationToken).ConfigureAwait(false); }
+         finally { AdoptSocketAffinity(connector); }
          _diagnostics.Info($"Realtime socket upgraded in {Elapsed(started)}; server selected subprotocol {ShownOr(connector.SubProtocol, "(none)")}.");
          await ConfirmSocketAsync(connector.SubProtocol, generation, cancellationToken).ConfigureAwait(false);
          return connector.Release();
@@ -54,8 +61,11 @@ public sealed partial class QqqSessionClient
 
    /// <summary>
    /// Under the client gate: requires a session, refreshes discovery, requires an approved device binding, and builds the
-   /// upgrade request (address, subprotocol, session cookie, origin, client channel, device proof and keep-alive). It
+   /// upgrade request (address, subprotocol, cookies, origin, client channel, device proof and keep-alive). It
    /// returns the request with the session generation it was built under, so a session change during the connect is noticed.
+   /// The upgrade carries the load balancer's cookies beside the session, so the socket opens on the node this client's
+   /// HTTP requests already reach, and that node then serves its claims and downloads too. The discovery made just
+   /// before may itself have rewritten those cookies, and the request is built after it, so it carries the newest.
    /// </summary>
    private async Task<(QqqSocketRequest Request, long Generation)> PrepareSocketAsync(TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken)
    {
@@ -73,7 +83,7 @@ public sealed partial class QqqSessionClient
          var uri = new UriBuilder(new Uri(Origin, PrintingPath + "device/realtime")) { Scheme = string.Equals(Origin.Scheme, "https", StringComparison.Ordinal) ? "wss" : "ws" };
          KeyValuePair<string, string>[] headers =
          [
-            new("Cookie", CookieHeader()),
+            new("Cookie", WithAffinity(CookieHeader())),
             new("Origin", Origin.GetLeftPart(UriPartial.Authority)),
             new("X-QQQ-Client", ClientChannel),
             new("X-QQQ-Device-Id", _device.DeviceId),
