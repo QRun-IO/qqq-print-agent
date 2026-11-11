@@ -315,13 +315,25 @@ public sealed class CompanionSignInBrowserTests
    /// report: the argument error the real inbox gives when the process that sent a callback has already exited, an
    /// overflow, a time-out. Nothing escapes either sign-in. Each ends as "not completed" with a reason that names
    /// the kind of failure in fixed text, keeps its session and is free again, and nothing of the failure's own text
-   /// reaches the log or a property a view binds to.
+   /// reaches the log or a property a view binds to. One failure ends both sign-ins in the same moment, so the test
+   /// runs them on a single-threaded context, as a window does: each continues on that one thread, one after the
+   /// other, and the two never write to the log at the same time.
    /// </summary>
    [Theory]
    [InlineData(nameof(ArgumentException))]
    [InlineData(nameof(OverflowException))]
    [InlineData(nameof(TimeoutException))]
-   public async Task Browser_InboxFailsInAWayNoSignInLists_EveryWaitingSignInReportsItAndNothingEscapes(string kind)
+   public void Browser_InboxFailsInAWayNoSignInLists_EveryWaitingSignInReportsItAndNothingEscapes(string kind)
+   {
+      using PumpContext pump = new();
+
+      pump.Run(() => TwoSignInsLoseTheirInboxAsync(kind));
+   }
+
+
+
+   /// <summary>Two browser sign-ins wait on the one inbox, the inbox fails with a failure of the named kind, and both must end as reported failures.</summary>
+   private static async Task TwoSignInsLoseTheirInboxAsync(string kind)
    {
       SignInWorld world = new();
       using CompanionSignIn first = await world.BrowserReadyAsync();
