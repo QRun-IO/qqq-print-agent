@@ -351,6 +351,7 @@ Taken under the standing instruction while the models of the tree, the footer an
 - "A local change" is a command starting and a command ending under the server's key in the gate, whoever entered it, and anything a caller notes. A snapshot asked for before either is not shown for that server. A snapshot asked for while a command runs is shown, so a server that is busy for minutes (a browser sign-in) keeps refreshing.
 - A change under the computer's key (its details, a reorder) holds back the snapshot's computer part and the order of the list in the same way. A changed server that an older snapshot no longer lists stays until a newer one arrives.
 - The mark is taken when the shell asks the client for the snapshot. The client shares one request among callers and does not say when the request a caller was handed had been sent, so this is exact only while the shell is the one that asks for snapshots; pages and the wizard ask the shell.
+- A page whose command has ended asks the shell for a snapshot that is newer than its change. The shell waits for the read it has in flight, which was sent before the change and whose entry for the changed server is therefore not shown, and then reads again. The client's review round adds a snapshot that is sent after the call and is never skipped; the shell asks for that one, through the one private method that names it, once it stands on that client. Until then the second read is the timer's read and can be skipped at the client's ceiling, in which case the next tick shows the change.
 
 **Messages**
 

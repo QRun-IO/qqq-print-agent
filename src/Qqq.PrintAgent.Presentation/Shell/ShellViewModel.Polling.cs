@@ -58,6 +58,27 @@ public sealed partial class ShellViewModel
 
 
    /// <summary>
+   /// Reads a snapshot that is newer than this call and shows it. A page calls this when a command of its own has
+   /// ended, so the window shows what the service says after the change and not what a read that was already on
+   /// its way says. A read the shell has in flight was sent before the call: it is waited for (what it says about a
+   /// server that changed since it was asked for is not shown), and only then is a new read made. Called while a
+   /// snapshot is being shown, it starts nothing, as <see cref="RefreshAsync"/> does.
+   /// </summary>
+   public async Task RefreshAfterChangeAsync()
+   {
+      while(_refreshing && _refresh is { IsCompleted: false } sentEarlier)
+      {
+         await sentEarlier;
+      }
+      if(!_disposed && !_refreshing)
+      {
+         await (_refresh = ReadSnapshotAsync(newerThanTheCall: true));
+      }
+   }
+
+
+
+   /// <summary>
    /// Reads every server's transport state and traffic meter. After a read that succeeded,
    /// <see cref="TransportOf"/> gives each server's; after one that failed it gives nothing, so a page says that the
    /// meter is unavailable and does not go on showing old figures. A read that was skipped changes nothing. Called
@@ -79,15 +100,16 @@ public sealed partial class ShellViewModel
    /// snapshot is asked for, and goes with the result to where it is shown. The mark is right when this call is what
    /// sends the request, which it is as long as the shell is the only one that asks the client for snapshots: the
    /// client shares one request among everyone who asks while it is in flight, and it does not say when the request
-   /// a caller was handed had been sent.
+   /// a caller was handed had been sent. A read that has to be newer than the call that asks for it goes through
+   /// <see cref="SnapshotSentAfterTheCallAsync"/>.
    /// </summary>
-   private async Task ReadSnapshotAsync()
+   private async Task ReadSnapshotAsync(bool newerThanTheCall = false)
    {
       _refreshing = true;
       try
       {
          long asked = Busy.Mark();
-         ServiceResult<ServiceSnapshot> result = await _client.SnapshotAsync();
+         ServiceResult<ServiceSnapshot> result = await (newerThanTheCall ? SnapshotSentAfterTheCallAsync() : _client.SnapshotAsync());
          if(!_disposed)
          {
             Apply(result, asked);
@@ -98,6 +120,20 @@ public sealed partial class ShellViewModel
          _refreshing = false;
       }
    }
+
+
+
+   /// <summary>
+   /// Asks the client for a snapshot whose request is sent after this call is made, never one that was already in
+   /// flight. The client gets exactly that in the fix round of its review, as
+   /// <c>SnapshotAsync(sentAfterTheCall: true)</c>, which waits its turn and is never skipped. This branch stands on
+   /// the client as it was before that round, so today this is the read the timer makes, and what makes it newer
+   /// than the call is that <see cref="RefreshAfterChangeAsync"/> has first waited for the shell's own read in
+   /// flight to end. Today it can therefore still be skipped when the client has too many requests in flight, and
+   /// the next tick then shows the change. When this branch is rebased onto the client's fix round, the body of
+   /// this method becomes <c>_client.SnapshotAsync(sentAfterTheCall: true)</c> and nothing else changes.
+   /// </summary>
+   private Task<ServiceResult<ServiceSnapshot>> SnapshotSentAfterTheCallAsync() => _client.SnapshotAsync();
 
 
 

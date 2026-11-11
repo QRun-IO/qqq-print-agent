@@ -211,6 +211,74 @@ public sealed class ShellPollingTests
 
 
 
+   /// <summary>
+   /// A page whose command has ended asks for a snapshot that is newer than its change. A read that was already in
+   /// flight was sent before the change: it is waited for, what it says about the changed server is not shown, and
+   /// then a new read is made, whose answer is shown for every server. Nothing is sent a second time while the
+   /// earlier read is still in flight.
+   /// </summary>
+   [Fact]
+   public async Task RefreshAfterChange_WaitsForTheReadInFlight_ThenReadsAgain()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1, "Warehouse"), Snapshots.Server(2, "Bench"));
+      TaskCompletionSource<ManagementReplyParse> sentEarlier = fixture.Pipe.Hold();
+      TaskCompletionSource<ManagementReplyParse> sentAfter = fixture.Pipe.Hold();
+      Task tick = fixture.Shell.RefreshAsync();
+      Assert.True(fixture.Shell.TryBeginCommand(Snapshots.Id(1), "Renaming Warehouse.", out IDisposable? rename));
+      rename.Dispose();
+
+      Task afterChange = fixture.Shell.RefreshAfterChangeAsync();
+
+      Assert.False(afterChange.IsCompleted);
+      Assert.Equal("snapshot snapshot", Operations(fixture));
+      sentEarlier.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse"), Snapshots.Server(2, "Bench east"))));
+      await tick;
+      await fixture.Pipe.Arrived(3);
+      Assert.Equal("Warehouse,Bench east", fixture.ServerNames);
+      Assert.False(afterChange.IsCompleted);
+      Assert.Equal("snapshot snapshot snapshot", Operations(fixture));
+
+      sentAfter.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse east"), Snapshots.Server(2, "Bench east"))));
+      await afterChange;
+
+      Assert.Equal("Warehouse east,Bench east", fixture.ServerNames);
+      Assert.Equal("snapshot snapshot snapshot", Operations(fixture));
+   }
+
+
+
+   /// <summary>With no read in flight the snapshot after a change is asked for at once; while it is in flight a tick starts nothing and is handed it; a shell that was disposed, and a call made while a snapshot is being shown, read nothing.</summary>
+   [Fact]
+   public async Task RefreshAfterChange_WithNoReadInFlight_ReadsAtOnce()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1, "Warehouse"));
+      TaskCompletionSource<ManagementReplyParse> held = fixture.Pipe.Hold();
+
+      Task afterChange = fixture.Shell.RefreshAfterChangeAsync();
+      Task tick = fixture.Shell.RefreshAsync();
+
+      Assert.Equal("snapshot snapshot", Operations(fixture));
+      held.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "Warehouse east"))));
+      await afterChange;
+      await tick;
+      Assert.Equal("Warehouse east", fixture.ServerNames);
+      Assert.Equal("snapshot snapshot", Operations(fixture));
+
+      List<Task> asked = [];
+      fixture.Shell.SnapshotApplied += (_, _) => asked.Add(fixture.Shell.RefreshAfterChangeAsync());
+      await fixture.Tick(Snapshots.Server(1, "Warehouse east"));
+      Assert.True(Assert.Single(asked).IsCompleted);
+      Assert.Equal("snapshot snapshot snapshot", Operations(fixture));
+
+      fixture.Shell.Dispose();
+      await fixture.Shell.RefreshAfterChangeAsync();
+      Assert.Equal("snapshot snapshot snapshot", Operations(fixture));
+   }
+
+
+
    /// <summary>With eight servers a tick of each timer is still one request: one snapshot and one transport read for the whole computer, and none that names a server.</summary>
    [Fact]
    public async Task EightServers_OneSnapshotAndOneTransportRead_PerTick()

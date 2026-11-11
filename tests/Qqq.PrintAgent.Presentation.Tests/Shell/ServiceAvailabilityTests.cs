@@ -294,7 +294,7 @@ public sealed class ServiceAvailabilityTests
       await ended.CancelAsync();
 
       ServiceResult<ServiceSnapshot> skipped = await fixture.Client.SnapshotAsync();
-      ServiceResult<ServiceSnapshot> notStarted = await fixture.Client.SnapshotAsync(ended.Token);
+      ServiceResult<ServiceSnapshot> notStarted = await fixture.Client.SnapshotAsync(cancellationToken: ended.Token);
 
       Assert.Equal((ServiceOutcome.Skipped, ServiceOutcome.Canceled), (skipped.Outcome, notStarted.Outcome));
       Assert.Null(ServiceAvailability.From(skipped, TestData.Time, null));
