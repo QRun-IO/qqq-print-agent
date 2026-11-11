@@ -19,6 +19,11 @@ internal sealed record SampleValues(string ServerId, string SecondServerId, stri
    string Repair, string CallbackAddress, string EnrollmentCode, DeviceProfile ComputerProfile, string PrinterId, PrinterProfile PrinterProfile, string Format, string TestProfile,
    JobQuery Query, string JobId)
 {
+   /// <summary>The result of the check the operator was shown, as far as the client reads it: a check that named this set's sign-in provider.</summary>
+   internal ServerCheckResult Check => new([], [ServerCheckResult.Password, ServerCheckResult.Browser], ProviderOrigin);
+
+
+
    /// <summary>What every text value of <see cref="Marked"/> contains, in upper or lower case.</summary>
    internal const string Mark = "CANARY";
 

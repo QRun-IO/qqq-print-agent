@@ -17,9 +17,11 @@ sees changes. The connection wizard and the server tree are built on it.
 - **An older and a newer service are told apart.** A reply from a service that speaks version 1, and one in a
   later version, each say which side has to be updated, and neither is reported as a request that may have been
   carried out. A reply of this version that cannot be read still is.
-- **The sign-in provider's address has to be stated.** Adding a server and switching a certificate exception on
-  take the provider's address that the check showed the operator, as an argument that cannot be left out; giving
-  none says that the check named none.
+- **The sign-in provider's address comes from the check the operator saw.** Adding a server and switching a
+  certificate exception on take the result of the check the operator was shown, as an argument that cannot be left
+  out, and send the provider's address that check reported, or none when it named none. They take no address as
+  text, which could hold another read of the provider. Switching an exception on without a check is refused
+  before anything is sent; switching it off needs none.
 - **Limits.** The client has at most twelve requests in flight, of the sixteen clients the pipe serves at once.
   Over that, the three reads the window repeats on a timer (the snapshot, the transport read, a page of jobs) are
   skipped and asked again on the next tick, and every other request waits its turn. The snapshot and the

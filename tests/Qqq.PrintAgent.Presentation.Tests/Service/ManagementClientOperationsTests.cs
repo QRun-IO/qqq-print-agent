@@ -25,8 +25,8 @@ public sealed class ManagementClientOperationsTests
 
 
 
-   /// <summary>The name of the argument that states which sign-in provider the check showed.</summary>
-   private const string ShownProvider = "providerOriginTheCheckShowed";
+   /// <summary>The name of the argument that is the check the operator was shown.</summary>
+   private const string ShownCheck = "checkTheOperatorSaw";
 
 
 
@@ -158,10 +158,10 @@ public sealed class ManagementClientOperationsTests
 
 
    /// <summary>
-   /// A value the contract refuses when a request is built (a name that breaks the name rule, text that names no
-   /// origin, text that is not a server's full identifier) is not sent. The result is the refusal the service would
-   /// give for it, <c>invalid_request</c>, with nothing to check; its message is fixed; and the log names the
-   /// operation and nothing that was given.
+   /// A value the contract refuses when a request is built (a name that breaks the name rule, a check whose provider
+   /// is text that names no origin, text that is not a server's full identifier) is not sent. The result is the
+   /// refusal the service would give for it, <c>invalid_request</c>, with nothing to check; its message is fixed;
+   /// and the log names the operation and nothing that was given.
    /// </summary>
    [Fact]
    public async Task ValueTheContractRefuses_IsNotSent_AndIsAnsweredAsTheServiceWould()
@@ -173,11 +173,10 @@ public sealed class ManagementClientOperationsTests
 
       CallResult[] results =
       [
-         CallResult.Of(await client.AddServerAsync(given.Address, "[CANARY]", acceptCertificateException: false, given.ProviderOrigin, given.Credential)),
-         CallResult.Of(await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, "CANARY, no origin", given.Credential)),
+         CallResult.Of(await client.AddServerAsync(given.Address, "[CANARY]", acceptCertificateException: false, given.Check, given.Credential)),
+         CallResult.Of(await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, CheckNaming("CANARY, no origin"), given.Credential)),
          CallResult.Of(await client.RenameServerAsync(Server, "  ")),
-         CallResult.Of(await client.SetTrustAsync(Server, acceptCertificateException: true, "CANARY, no origin")),
-         CallResult.Of(await client.SetTrustAsync(Server, acceptCertificateException: false, "CANARY, no origin")),
+         CallResult.Of(await client.SetTrustAsync(Server, acceptCertificateException: true, CheckNaming("CANARY, no origin"))),
          CallResult.Of(await client.ReconnectAsync("CANARY-not-an-identifier")),
          CallResult.Of(await client.ReconnectAsync(Server.ToUpperInvariant())),
       ];
@@ -191,7 +190,7 @@ public sealed class ManagementClientOperationsTests
       [
          .. Enumerable.Repeat("WARN Management request servers.add was not sent: a value given for it is one the contract refuses.", 2),
          "WARN Management request servers.rename was not sent: a value given for it is one the contract refuses.",
-         .. Enumerable.Repeat("WARN Management request trust.set was not sent: a value given for it is one the contract refuses.", 2),
+         "WARN Management request trust.set was not sent: a value given for it is one the contract refuses.",
          .. Enumerable.Repeat("WARN Management request connection.reconnect was not sent: a value given for it is one the contract refuses.", 2),
       ], log.Entries);
    }
@@ -199,23 +198,28 @@ public sealed class ManagementClientOperationsTests
 
 
    /// <summary>
-   /// The sign-in provider's origin a caller gives is what the request carries, exactly as given and in no other
-   /// spelling, and a caller that gives none (the check named no provider) sends a request without the member, which
-   /// states that. That holds for adding a server and for switching the exception on or off.
+   /// The sign-in provider's origin a request carries is the one in the check the caller gives, exactly as the check
+   /// reported it and in no other spelling, and a check that named no provider sends a request without the member,
+   /// which states that. That holds for adding a server and for switching the exception on. Switching it off accepts
+   /// nothing: the request states no provider, with no check given and with one given all the same.
    /// </summary>
    [Fact]
    public async Task ProviderOrigin_IsSentExactlyAsGiven_AndLeftOutWhenTheCheckNamedNone()
    {
       FakePipe pipe = new FakePipe().Answer(Replies.Failure(ManagementErrorCode.ProviderChanged)).Answer(Replies.Failure(ManagementErrorCode.ProviderChanged))
-         .Answer(Replies.Failure(ManagementErrorCode.ProviderChanged)).Answer(Replies.Failure(ManagementErrorCode.ProviderChanged)).Answer(Replies.Failure(ManagementErrorCode.ProviderChanged));
+         .Answer(Replies.Failure(ManagementErrorCode.ProviderChanged)).Answer(Replies.Failure(ManagementErrorCode.ProviderChanged)).Answer(Replies.Failure(ManagementErrorCode.ProviderChanged))
+         .Answer(Replies.Failure(ManagementErrorCode.ProviderChanged));
       ManagementClient client = new(pipe.SendAsync, new RecordingLog());
       SampleValues given = SampleValues.Golden;
+      ServerCheckResult namedOne = CheckNaming("HTTPS://Sign-In.Example.Test:443/");
+      ServerCheckResult namedNone = CheckNaming(null);
 
-      ServiceResult<ServerAddResult> added = await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: true, "HTTPS://Sign-In.Example.Test:443/", given.Credential);
-      _ = await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: true, providerOriginTheCheckShowed: null, given.Credential);
-      ServiceResult<TrustResult> trusted = await client.SetTrustAsync(Server, acceptCertificateException: true, "HTTPS://Sign-In.Example.Test:443/");
-      _ = await client.SetTrustAsync(Server, acceptCertificateException: true, providerOriginTheCheckShowed: null);
-      _ = await client.SetTrustAsync(Server, acceptCertificateException: false, providerOriginTheCheckShowed: null);
+      ServiceResult<ServerAddResult> added = await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: true, namedOne, given.Credential);
+      _ = await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: true, namedNone, given.Credential);
+      ServiceResult<TrustResult> trusted = await client.SetTrustAsync(Server, acceptCertificateException: true, namedOne);
+      _ = await client.SetTrustAsync(Server, acceptCertificateException: true, namedNone);
+      _ = await client.SetTrustAsync(Server, acceptCertificateException: false, checkTheOperatorSaw: null);
+      _ = await client.SetTrustAsync(Server, acceptCertificateException: false, namedOne);
 
       Assert.Equal((ServiceOutcome.Rejected, ManagementErrorCode.ProviderChanged), (added.Outcome, added.Code));
       Assert.Equal((ServiceOutcome.Rejected, ManagementErrorCode.ProviderChanged), (trusted.Outcome, trusted.Code));
@@ -224,21 +228,53 @@ public sealed class ManagementClientOperationsTests
       Assert.Equal($$$"""{"v":2,"op":"trust.set","server":"{{{Server}}}","args":{"acceptCertificateException":true,"providerOrigin":"HTTPS://Sign-In.Example.Test:443/"}}""", pipe.Wire(2));
       Assert.Equal($$$"""{"v":2,"op":"trust.set","server":"{{{Server}}}","args":{"acceptCertificateException":true}}""", pipe.Wire(3));
       Assert.Equal($$$"""{"v":2,"op":"trust.set","server":"{{{Server}}}","args":{"acceptCertificateException":false}}""", pipe.Wire(4));
+      Assert.Equal(pipe.Wire(4), pipe.Wire(5));
    }
 
 
 
-   /// <summary>The argument that states which provider the check showed has no default on either method, so a call that leaves it out does not compile; null has to be written, and it means that the check named none.</summary>
-   [Theory]
-   [InlineData(nameof(ManagementClient.AddServerAsync))]
-   [InlineData(nameof(ManagementClient.SetTrustAsync))]
-   public void ProviderOrigin_HasNoDefault_SoNoCallerCanLeaveItOut(string method)
+   /// <summary>
+   /// Adding a server, and switching the exception on, without the check the operator saw is refused as an argument
+   /// that is missing, and nothing is sent or logged: without the check there is nothing the operator can have
+   /// accepted, and a request sent all the same would state that the check named no provider.
+   /// </summary>
+   [Fact]
+   public async Task AcceptingWithoutTheCheckTheOperatorSaw_IsRefused_AndNothingIsSent()
    {
-      ParameterInfo shown = Assert.Single(typeof(ManagementClient).GetMethod(method)!.GetParameters(), parameter => string.Equals(parameter.Name, ShownProvider, StringComparison.Ordinal));
+      RecordingLog log = new();
+      FakePipe pipe = new();
+      ManagementClient client = new(pipe.SendAsync, log);
+      SampleValues given = SampleValues.Golden;
 
-      Assert.Equal(typeof(string), shown.ParameterType);
+      ArgumentNullException adding = await Assert.ThrowsAsync<ArgumentNullException>(() => client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, null!, given.Credential));
+      ArgumentNullException switchingOn = await Assert.ThrowsAsync<ArgumentNullException>(() => client.SetTrustAsync(Server, acceptCertificateException: true, checkTheOperatorSaw: null));
+
+      Assert.Equal((ShownCheck, ShownCheck), (adding.ParamName, switchingOn.ParamName));
+      Assert.Empty(pipe.Sent);
+      Assert.Empty(log.Entries);
+   }
+
+
+
+   /// <summary>
+   /// The provider a request states comes from the check the operator saw and from nowhere else: each of the two
+   /// methods takes that check's result, with no default, so a call that leaves it out does not compile, and takes
+   /// no origin as text, which could hold another read of the provider. Adding a server always needs the check;
+   /// switching the exception may be given none, which is for switching it off.
+   /// </summary>
+   [Theory]
+   [InlineData(nameof(ManagementClient.AddServerAsync), NullabilityState.NotNull)]
+   [InlineData(nameof(ManagementClient.SetTrustAsync), NullabilityState.Nullable)]
+   public void ProviderOrigin_HasNoDefault_SoNoCallerCanLeaveItOut(string method, NullabilityState mayBeLeftNull)
+   {
+      ParameterInfo[] parameters = typeof(ManagementClient).GetMethod(method)!.GetParameters();
+      ParameterInfo shown = Assert.Single(parameters, parameter => string.Equals(parameter.Name, ShownCheck, StringComparison.Ordinal));
+
+      Assert.Equal(typeof(ServerCheckResult), shown.ParameterType);
       Assert.False(shown.HasDefaultValue);
       Assert.False(shown.IsOptional);
+      Assert.Equal(mayBeLeftNull, new NullabilityInfoContext().Create(shown).ReadState);
+      Assert.DoesNotContain(parameters, parameter => parameter.Name!.Contains("provider", StringComparison.OrdinalIgnoreCase) || parameter.Name.Contains("origin", StringComparison.OrdinalIgnoreCase));
    }
 
 
@@ -256,7 +292,7 @@ public sealed class ManagementClientOperationsTests
       string credential = """{"origin":"https://qqq.example.test","sessionToken":"CANARY-SESSION-COOKIE-7f3a"}""";
 
       _ = client.CheckServerAsync(given.Address, acceptCertificateException: false);
-      _ = client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, providerOriginTheCheckShowed: null, given.Credential);
+      _ = client.AddServerAsync(given.Address, given.Name, acceptCertificateException: false, CheckNaming(null), given.Credential);
       _ = client.SetLogSettingsAsync(retentionDays: 7, maxFileMegabytes: 20, segmentsPerDay: 3, debugLogging: false);
       _ = client.SignInAsync(Server, given.Credential);
       _ = client.SignOutAsync(Server, postLogoutRedirectUri: null);
@@ -277,6 +313,11 @@ public sealed class ManagementClientOperationsTests
          $$$"""{"v":2,"op":"jobs.retry","server":"{{{Server}}}","args":{"jobId":"job-204","confirmDuplicateRisk":false}}""",
       ], pipe.Sent.Select((_, index) => pipe.Wire(index)), StringComparer.Ordinal);
    }
+
+
+
+   /// <summary>The result of a check that named this sign-in provider, or none, as far as the client reads it.</summary>
+   private static ServerCheckResult CheckNaming(string? provider) => new([], [ServerCheckResult.Password], provider);
 
 
 

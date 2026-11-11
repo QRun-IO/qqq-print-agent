@@ -281,9 +281,13 @@ public sealed partial class ManagementClient
    /// <summary>
    /// The result for a reply whose envelope could not be read. Text that is not JSON, or JSON without a version, is
    /// what a version 1 service answers; another version is what a newer service answers. Neither service speaks this
-   /// version, so neither carried the request out, and the result says which side to update. Every other problem is
-   /// an answer that arrived and could not be read, after which the service may have acted. The entry names the
-   /// problem and never the reply, which this client is never given as text.
+   /// version, so neither carried the request out, and the result says which side to update and is not unconfirmed.
+   /// For the older service that is read from its handler and has not been run against one: the version 1 runtime
+   /// reads a request by its <c>operation</c> member, a version 2 request has none, and a request without one is
+   /// answered with an error before anything is done. For the newer service it is the contract's own rule: the only
+   /// reply a service gives in another version than it was asked in is its refusal of the version. Every other
+   /// problem is an answer that arrived and could not be read, after which the service may have acted. The entry
+   /// names the problem and never the reply, which this client is never given as text.
    /// </summary>
    private ServiceResult<TResult> Unusable<TResult>(ManagementRequest request, ManagementEnvelopeProblem problem)
    {

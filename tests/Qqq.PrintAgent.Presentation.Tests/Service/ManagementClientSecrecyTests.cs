@@ -119,7 +119,7 @@ public sealed class ManagementClientSecrecyTests
       SampleValues given = SampleValues.Marked;
 
       ServiceResult<SignOutResult> signedOut = await client.SignOutAsync(Server, given.CallbackAddress);
-      _ = await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: true, given.ProviderOrigin, given.Credential);
+      _ = await client.AddServerAsync(given.Address, given.Name, acceptCertificateException: true, given.Check, given.Credential);
       _ = await client.EnrollAsync(Server, given.EnrollmentCode);
 
       Assert.Contains("CANARY-ID-TOKEN-HINT-08be", signedOut.Payload!.ProviderLogout!.EndSessionUri.Query, StringComparison.Ordinal);

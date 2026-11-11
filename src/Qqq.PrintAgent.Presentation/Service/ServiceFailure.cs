@@ -35,8 +35,10 @@ public enum ServiceFailure
 
    /// <summary>
    /// A service that speaks version 1 of the management pipe answered a version 2 request: its reply was not JSON, or had no
-   /// version. That service knows none of version 2's operations, so it carried nothing out; the service has to be updated
-   /// to this companion's version.
+   /// version. That service knows none of version 2's operations, so it carried nothing out and the result is not
+   /// unconfirmed; the service has to be updated to this companion's version. That it carried nothing out is read from
+   /// the version 1 handler, which answers a request that has no <c>operation</c> member with an error before it does
+   /// anything; it has not been run against a version 1 service.
    /// </summary>
    OlderService,
 
