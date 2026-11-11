@@ -119,7 +119,7 @@ internal static class ManagementSamples
       ManagementOperations.SessionSignIn => new SessionSignInArgs(SessionCredential, SessionSignInArgs.AssociatePairing),
       ManagementOperations.SessionSignOut => new SessionSignOutArgs("io.qrun.qqq-print-agent:/oauth/callback"),
       ManagementOperations.PairingEnroll => new PairingEnrollArgs(EnrollmentCodeCanary),
-      ManagementOperations.TrustSet => new TrustSetArgs(AcceptCertificateException: true),
+      ManagementOperations.TrustSet => new TrustSetArgs(AcceptCertificateException: true, ProviderOrigin),
       ManagementOperations.PrintersShare => new PrintersShareArgs("printer-a1", Shared: true),
       ManagementOperations.PrintersSetProfile => new PrintersSetProfileArgs("printer-a1", new PrinterProfile("Shipping labels", "Thermal printer", "Dock 2")),
       ManagementOperations.PrintersTestPrint => new PrintersTestPrintArgs("printer-a1", "PDF", "alignment"),

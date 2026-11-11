@@ -128,7 +128,7 @@ public static class ManagementOperations
 
 
 
-   /// <summary>Switches a server's certificate exception on or off.</summary>
+   /// <summary>Switches a server's certificate exception on or off. A request that switches it on after a check carries the sign-in provider's origin the check reported, for comparison with the service's own read; when they differ nothing is changed and the answer is <see cref="ManagementErrorCode.ProviderChanged"/>.</summary>
    public const string TrustSet = "trust.set";
 
 

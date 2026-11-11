@@ -17,9 +17,9 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// But it reads the sign-in description once for the check and again for the add, and a server whose certificate is
 /// not verified could name another provider the second time, which a stored certificate exception would then cover
 /// without the operator having seen it. So the request says which provider the operator was shown, the service
-/// compares it with its own read (<see cref="NamesTheProvider"/>), and when they differ it stores nothing and answers
-/// <see cref="ManagementErrorCode.ProviderChanged"/>. A request that leaves the origin out says that the check reported
-/// no provider, and is refused the same way when the server names one.
+/// compares it with its own read (<see cref="ProviderAgrees"/>), and when they differ it stores nothing and answers
+/// <see cref="ManagementErrorCode.ProviderChanged"/>. The origin is absent when the check named no provider, and it is
+/// compared whenever it is given; a request that carries none is not compared.
 /// </para>
 /// <para>
 /// The name must be one a server may have (<see cref="ServerName"/>): the record cannot be built with another, in code
@@ -67,11 +67,11 @@ public sealed record ServersAddArgs
 
 
    /// <summary>
-   /// True when the sign-in provider the service read from the server is the one this request carries: the same text,
-   /// compared exactly, because the request repeats what the service itself reported; or none on both sides. When it
-   /// is false the service stores nothing and answers <see cref="ManagementErrorCode.ProviderChanged"/>.
+   /// True when this request does not contradict the sign-in provider the service read from the server
+   /// (<see cref="SignInProviderOrigin.Agrees"/>): it carries the same text, or carries no origin. When it is false
+   /// the service stores nothing and answers <see cref="ManagementErrorCode.ProviderChanged"/>.
    /// </summary>
-   public bool NamesTheProvider(string? readByTheService) => string.Equals(ProviderOrigin, readByTheService, StringComparison.Ordinal);
+   public bool ProviderAgrees(string? readByTheService) => SignInProviderOrigin.Agrees(ProviderOrigin, readByTheService);
 
 
 
