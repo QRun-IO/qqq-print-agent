@@ -15,9 +15,9 @@ namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
 /// The real facts behind the pipe client's trust decision, read without the print service: a pipe this test serves
-/// itself, a service name no service has, the status of a built-in Windows service read through a handle that may only
-/// read, the test process and a harmless child program. Nothing here connects to the print service's pipe, names the
-/// print service or changes anything on this computer.
+/// itself under a name of its own, a service name no service has, the status of a built-in Windows service read
+/// through a handle that may only read, the test process and a harmless child program. Nothing here connects to the
+/// print service's pipe, names the print service or changes anything on this computer.
 /// </summary>
 public sealed class WindowsPipePeerFactsTests
 {
@@ -26,8 +26,23 @@ public sealed class WindowsPipePeerFactsTests
 
 
 
+   /// <summary>The right to ask a process for its exit code and nothing more (PROCESS_QUERY_LIMITED_INFORMATION), which any user has for a process of their own.</summary>
+   private const uint QueryLimitedInformation = 0x1000;
+
+
+
+   /// <summary>The exit code Windows reports for a process that has not ended (STILL_ACTIVE).</summary>
+   private const uint StillActive = 259;
+
+
+
    /// <summary>How long a child that is expected to finish may take; generous, because the test machine may be busy.</summary>
    private static readonly TimeSpan Generous = TimeSpan.FromSeconds(60);
+
+
+
+   /// <summary>How long handles that Windows and this test let go of are given to be gone, before the test looks at what is left.</summary>
+   private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(500);
 
 
 
@@ -46,6 +61,33 @@ public sealed class WindowsPipePeerFactsTests
       using CancellationTokenSource patience = new(Generous);
       await Task.WhenAll(server.WaitForConnectionAsync(patience.Token), client.ConnectAsync(patience.Token));
       Assert.Equal(checked((uint)Environment.ProcessId), new WindowsPipePeerFacts().ServerProcessId(client.SafePipeHandle));
+   }
+
+
+
+   /// <summary>
+   /// The process named is the one that serves the pipe, not the one that uses it. This test serves a pipe and a
+   /// harmless child program connects to it, so the two ends are different processes: asked about that connection,
+   /// the answer is the test process and not the child.
+   /// </summary>
+   [Fact]
+   public async Task ServerOfAPipeIsNotTheProcessThatConnectedToIt()
+   {
+      string name = "qqq-peer-facts-" + Guid.NewGuid().ToString("N");
+      await using NamedPipeServerStream server = new(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+      using Process client = Process.Start(new ProcessStartInfo(StandIn, ["--stand-in", "connect", name]) { UseShellExecute = false, CreateNoWindow = true })!;
+      try
+      {
+         using CancellationTokenSource patience = new(Generous);
+         await server.WaitForConnectionAsync(patience.Token);
+         Assert.NotEqual(Environment.ProcessId, client.Id);
+         Assert.False(client.HasExited);
+         Assert.Equal(checked((uint)Environment.ProcessId), new WindowsPipePeerFacts().ServerProcessId(server.SafePipeHandle));
+      }
+      finally
+      {
+         client.Kill();
+      }
    }
 
 
@@ -128,32 +170,37 @@ public sealed class WindowsPipePeerFactsTests
 
 
    /// <summary>
-   /// A process that was opened and has ended since reports its end through the handle that is still held. The
-   /// process is a harmless child program that this test ends itself.
+   /// A process whose account was asked for through the adapter stays held until the adapter lets it go, which is what
+   /// keeps Windows from giving its id to another process during a check. The process is a harmless child program this
+   /// test starts and ends itself, and the test keeps no handle of its own to it, so the adapter's is the only one.
+   /// Once the child has ended, its id still names it for as long as the adapter holds it, and the adapter reports its
+   /// end; once the adapter has let go, the id no longer names it.
    /// </summary>
    [Fact]
-   public async Task ProcessThatEndsWhileHeldReportsItsEnd()
+   public async Task ProcessThatEndsWhileHeldStaysHeldAndReportsItsEnd()
    {
       string root = Path.Combine(Path.GetTempPath(), "qqq-peer-facts-" + Guid.NewGuid().ToString("N"));
       Directory.CreateDirectory(root);
       try
       {
-         using Process child = Process.Start(new ProcessStartInfo(StandIn, ["--stand-in", "wait", Path.Combine(root, "started.txt")]) { UseShellExecute = false, CreateNoWindow = true })!;
+         (int id, DateTime started) = StartChildWithoutKeepingIt(Path.Combine(root, "started.txt"));
          try
          {
-            using IPeerProcess held = new WindowsPipePeerFacts().OpenProcess(checked((uint)child.Id));
-            using var identity = WindowsIdentity.GetCurrent();
-            Assert.Equal(identity.IsSystem, held.RunsAsSystem());
-            Assert.False(held.HasExited);
-            child.Kill();
-            using CancellationTokenSource patience = new(Generous);
-            await child.WaitForExitAsync(patience.Token);
-            Assert.True(held.HasExited);
+            using(IPeerProcess held = new WindowsPipePeerFacts().OpenProcess(checked((uint)id)))
+            {
+               using var identity = WindowsIdentity.GetCurrent();
+               Assert.Equal(identity.IsSystem, held.RunsAsSystem());
+               Assert.False(held.HasExited);
+               End(id, started);
+               await Task.Delay(Settle);
+               Assert.True(NamesAnEndedProcess(id), "The adapter did not keep hold of the process: nothing but its handle could keep the id of the ended child from being released.");
+               Assert.True(held.HasExited);
+            }
+            await MsiUpdateSetup.UntilAsync(() => !NamesAnEndedProcess(id));
          }
          finally
          {
-            if(!child.HasExited)
-            { child.Kill(); }
+            End(id, started);
          }
       }
       finally
@@ -161,6 +208,68 @@ public sealed class WindowsPipePeerFactsTests
          Directory.Delete(root, recursive: true);
       }
    }
+
+
+
+   /// <summary>
+   /// Starts the stand-in so that it waits until it is ended, and lets go of the handle Windows gave for it at once: a
+   /// handle kept here would keep the process, and its id, after it has ended, whatever the adapter under test does.
+   /// The child is known afterwards by its id together with the time it started.
+   /// </summary>
+   private static (int Id, DateTime Started) StartChildWithoutKeepingIt(string announced)
+   {
+      using Process child = Process.Start(new ProcessStartInfo(StandIn, ["--stand-in", "wait", announced]) { UseShellExecute = false, CreateNoWindow = true })!;
+      return (child.Id, child.StartTime);
+   }
+
+
+
+   /// <summary>
+   /// Ends the child this test started and waits until it has ended, through a handle that is let go again. A process
+   /// that has the child's id and did not start when the child did is another process and is left alone, as is an id
+   /// no running process has.
+   /// </summary>
+   private static void End(int id, DateTime started)
+   {
+      try
+      {
+         using var child = Process.GetProcessById(id);
+         if(child.StartTime == started)
+         {
+            child.Kill();
+            Assert.True(child.WaitForExit(Generous), "The child program did not end within a minute of being ended; the machine was too busy for this test.");
+         }
+      }
+      catch(Exception exception) when(exception is ArgumentException or InvalidOperationException or Win32Exception)
+      {
+         // No running process has the id, or the one that has it now cannot be looked at and so is not the child.
+      }
+   }
+
+
+
+   /// <summary>
+   /// Whether the id still names a process that has ended: Windows can open it, and it has an exit code. An id that
+   /// names nothing does not, and neither does one that Windows has meanwhile given to a process that is running.
+   /// </summary>
+   private static bool NamesAnEndedProcess(int id)
+   {
+      using SafeProcessHandle process = OpenProcess(QueryLimitedInformation, inherit: false, id);
+      return !process.IsInvalid && GetExitCodeProcess(process, out uint code) && code != StillActive;
+   }
+
+
+
+   /// <summary>Opens a process by its id with the access asked for; the handle is invalid when no process has the id.</summary>
+   [DllImport("kernel32.dll", SetLastError = true)]
+   private static extern SafeProcessHandle OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, int id);
+
+
+
+   /// <summary>Reads the exit code of a process; 259 while it has not ended.</summary>
+   [DllImport("kernel32.dll", SetLastError = true)]
+   [return: MarshalAs(UnmanagedType.Bool)]
+   private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint code);
 
 
 
