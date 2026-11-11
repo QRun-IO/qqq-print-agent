@@ -97,6 +97,9 @@ public sealed class LoadBalancerAffinityTests
    /// plain value. Any other cookie the server or a proxy sets, and any malformed one, is not stored and is never sent back.
    /// Attribute names are read without regard to letter case, a leading dot on the domain is allowed, and an attribute this
    /// client cannot read (an expiry that is not a date, a lifetime that is not a number) is ignored, not treated as expiry.
+   /// A plain value is printable ASCII without a space, quote, comma or backslash: a tab or any other control character,
+   /// DEL, and a character outside ASCII each refuse the cookie, because the value is written into a Cookie header as it
+   /// is and none of them may reach one.
    /// </summary>
    [Theory]
    [InlineData("AWSALB=value; Path=/", true)]
@@ -122,6 +125,13 @@ public sealed class LoadBalancerAffinityTests
    [InlineData("AWSALB=\"quoted\"; Path=/", false)]
    [InlineData("AWSALB=one,two; Path=/", false)]
    [InlineData("AWSALB=back\\slash; Path=/", false)]
+   [InlineData("AWSALB=one\ttwo; Path=/", false)]
+   [InlineData("AWSALB=one\u0001two; Path=/", false)]
+   [InlineData("AWSALB=one\u001Ftwo; Path=/", false)]
+   [InlineData("AWSALB=one\u007Ftwo; Path=/", false)]
+   [InlineData("AWSALB=n\u00F6de; Path=/", false)]
+   [InlineData("AWSALB=node\u2028two; Path=/", false)]
+   [InlineData("AWSALB=!#$%&'()*+-./:<=>?@[]^_`{|}~; Path=/", true)]
    [InlineData("AWSALB=; Path=/", false)]
    [InlineData("AWSALB=value; Max-Age=0; Path=/", false)]
    [InlineData("AWSALB=value; Max-Age=-1; Path=/", false)]
@@ -174,6 +184,28 @@ public sealed class LoadBalancerAffinityTests
       Assert.StartsWith("AWSALB=moved; AWSALBAPP-0=value; ", server.Requests[4].Cookie, StringComparison.Ordinal);
       Assert.DoesNotContain("AWSALBTG", server.Requests[4].Cookie, StringComparison.Ordinal);
       Assert.Equal(8, server.Requests[4].Cookie!.Split("; ").Length);
+   }
+
+
+
+   /// <summary>
+   /// A header has a bound of its own, 8,192 characters, whatever the length of the value in it: one character more and
+   /// the cookie is not kept although its value is short, and a header of exactly that length is read. (The over-long
+   /// header in the test above also carries an over-long value, so it cannot tell the two bounds apart.)
+   /// </summary>
+   [Theory]
+   [InlineData(8192, 1)]
+   [InlineData(8193, 0)]
+   public async Task AHeaderIsBoundedWhateverTheLengthOfItsValue(int length, int held)
+   {
+      const string Start = "AWSALB=value; Path=/; Comment=";
+      string header = Start + new string('c', length - Start.Length);
+      using var server = new ScriptedServer();
+      Answer(server, ScriptedServer.Discovery, [header]);
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+      await client.DiscoverAsync();
+      Assert.Equal(length, header.Length);
+      Assert.Equal(held, client.AffinityCookieCount);
    }
 
 
