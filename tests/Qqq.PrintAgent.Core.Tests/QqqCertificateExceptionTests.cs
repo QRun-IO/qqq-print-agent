@@ -66,6 +66,31 @@ public sealed class QqqCertificateExceptionTests
 
 
    /// <summary>
+   /// An exception cannot be widened after it was built, by the code that built it or by code it was handed to. The
+   /// array the caller passed is not kept, and the list the origins are read from is read-only in fact: it is not an
+   /// array, and writing through it is refused, so the exception still covers what it was built for and nothing else.
+   /// </summary>
+   [Fact]
+   public void CoveredOriginsCannotBeChangedAfterTheExceptionIsBuilt()
+   {
+      var other = new Uri("https://other.example.invalid/");
+      Uri[] given = [Server, Provider];
+      var exception = QqqCertificateExceptionOrigins.For(given);
+      given[0] = other;
+      Assert.IsNotType<Uri[]>(exception.Origins);
+      IList<Uri> writable = Assert.IsAssignableFrom<IList<Uri>>(exception.Origins);
+      Assert.True(writable.IsReadOnly);
+      Assert.Throws<NotSupportedException>(() => writable[0] = other);
+      Assert.Throws<NotSupportedException>(writable.Clear);
+
+      Assert.Equal(["https://dev.example.invalid:8443/", "https://id.example.invalid/"], exception.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
+      Assert.True(exception.Covers(new Uri("https://dev.example.invalid:8443/qqq/v1/version")));
+      Assert.False(exception.Covers(new Uri("https://other.example.invalid/qqq/v1/version")));
+   }
+
+
+
+   /// <summary>
    /// Only a well-formed HTTPS origin can be named: plain HTTP (which presents no certificate), another scheme, user
    /// information, a path, a query, a fragment, a relative address, a host with no ASCII name (here one that holds a
    /// line separator) and a missing address are each refused, and so is a missing list.

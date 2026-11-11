@@ -19,10 +19,15 @@ public sealed class QqqCertificateExceptionOrigins
 
 
 
-   /// <summary>Keeps the origins, which the factories have already normalized and counted.</summary>
+   /// <summary>
+   /// Keeps the origins, which the factories have already normalized and counted, behind a read-only wrapper. The
+   /// array is one a factory made for this value and hands to nothing else, and a caller that reads
+   /// <see cref="Origins"/> gets a list it can neither write through nor cast back to the array, so the value is
+   /// immutable in fact and not only by convention.
+   /// </summary>
    private QqqCertificateExceptionOrigins(Uri[] origins)
    {
-      Origins = origins;
+      Origins = Array.AsReadOnly(origins);
    }
 
 
@@ -32,7 +37,7 @@ public sealed class QqqCertificateExceptionOrigins
 
 
 
-   /// <summary>The origins the exception covers, each as an HTTPS address of scheme, the host's ASCII name and port with the path "/" (see <see cref="QqqOrigin.Of"/>); none for no exception.</summary>
+   /// <summary>The origins the exception covers, each as an HTTPS address of scheme, the host's ASCII name and port with the path "/" (see <see cref="QqqOrigin.Of"/>); none for no exception. The list is read-only: an attempt to change it throws.</summary>
    public IReadOnlyList<Uri> Origins { get; }
 
 
