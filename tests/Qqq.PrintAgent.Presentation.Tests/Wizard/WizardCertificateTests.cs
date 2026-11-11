@@ -21,7 +21,17 @@ public sealed class WizardCertificateTests
 
    private const string Head = "This is for a development server only. If you accept, the print service and this companion will accept a certificate that Windows does not trust from ";
 
-   private const string LastingFix = " The print service checks certificates under its own account, not yours. The certificate and the reasons are shown. The lasting fix is to install the issuing authority's root certificate in this computer's Trusted Root Certification Authorities store, then choose Check again.";
+   private const string Shown = " The print service checks certificates under its own account, not yours. The certificate and the reasons are shown.";
+
+   private const string UntrustedAuthority = " Windows does not trust the authority that issued this certificate. The lasting fix for that is to install the issuing authority's root certificate in this computer's Trusted Root Certification Authorities store.";
+
+   private const string NameMismatch = " The certificate was issued for a different name or address than the one entered. Enter the address the certificate was issued for, or ask the server's administrator for a certificate issued for this address.";
+
+   private const string CheckAgain = " Then choose Check again.";
+
+   private const string Offered = " For a development server only, you can choose Use the development-only exception instead.";
+
+   private const string NotOffered = " The development-only exception is not offered, because it only covers a certificate from an authority Windows does not trust.";
 
 
 
@@ -54,7 +64,7 @@ public sealed class WizardCertificateTests
       Assert.Null(wizard.PassedCheck);
       Assert.Equal(new WizardAction("Next", false), wizard.NextAction);
       Assert.Equal(new WizardAction("Check again", true), wizard.PrimaryAction);
-      Assert.Equal("Windows refused the certificate presented by https://qqq.example.test." + LastingFix + " For a development server only, you can choose Use the development-only exception instead.", wizard.Result.Text);
+      Assert.Equal("Windows refused the certificate presented by https://qqq.example.test." + Shown + UntrustedAuthority + NameMismatch + CheckAgain + Offered, wizard.Result.Text);
       Assert.Equal(FeedbackSeverity.Error, wizard.ResultSeverity);
       Assert.Equal(FocusTarget.Certificate, wizard.FocusTarget);
       Assert.Contains("WARN Windows refused a certificate while the service checked https://qqq.example.test (presented by https://qqq.example.test); the certificate exception is offered.", fixture.Log.Entries, StringComparer.Ordinal);
@@ -64,7 +74,8 @@ public sealed class WizardCertificateTests
 
    /// <summary>
    /// The exception is offered only when the reasons include an authority Windows does not trust, the one case it is
-   /// for. For any other refusal it is not offered, the step says why, and asking for it does nothing.
+   /// for. For any other refusal, and for a certificate that came with no reason at all, it is not offered, the
+   /// step says why, and asking for it does nothing.
    /// </summary>
    [Theory]
    [InlineData("untrustedAuthority", true)]
@@ -73,19 +84,55 @@ public sealed class WizardCertificateTests
    [InlineData("notPresented", false)]
    [InlineData("somethingNew", false)]
    [InlineData("UntrustedAuthority", false)]
+   [InlineData("", false)]
    public async Task Exception_IsOfferedOnlyForAnAuthorityWindowsDoesNotTrust(string refusals, bool offered)
    {
       using WizardFixture fixture = new();
 
-      await fixture.CheckAsync(WizardFixture.CertificateRefused(null, refusals.Split(',')));
+      await fixture.CheckAsync(RefusedFor(refusals));
       fixture.Wizard.RequestException();
 
       Assert.Equal(ServerStepState.CertificateRefused, fixture.Wizard.ServerState);
+      Assert.Equal(refusals.Length == 0, fixture.Wizard.Certificate!.Refusals.SequenceEqual(["Windows refused the certificate, and the print service did not say why."], StringComparer.Ordinal));
       Assert.Equal(offered, fixture.Wizard.CanRequestException);
       Assert.Equal(offered, fixture.Wizard.ExceptionWarning is not null);
-      Assert.EndsWith(offered ? " For a development server only, you can choose Use the development-only exception instead."
-         : " The development-only exception is not offered, because it only covers a certificate from an authority Windows does not trust.", fixture.Wizard.Result.Text, StringComparison.Ordinal);
+      Assert.EndsWith(CheckAgain + (offered ? Offered : NotOffered), fixture.Wizard.Result.Text, StringComparison.Ordinal);
       Assert.Single(fixture.Pipe.Sent);
+   }
+
+
+
+   /// <summary>
+   /// The step says what each reason means and what can be done about it, and names the root certificate only for
+   /// an authority Windows does not trust: a root cannot end any other refusal, so for a certificate issued for
+   /// another name, for no certificate, for a reason this version does not know and for no reason at all the
+   /// operator is sent to the address or to the server's administrator and never to the computer's trust store.
+   /// With two reasons each gets its own way forward, and the root is said to be the fix "for that" one.
+   /// </summary>
+   [Theory]
+   [InlineData("untrustedAuthority", "Windows refused the certificate presented by https://qqq.example.test." + Shown + UntrustedAuthority + CheckAgain + Offered)]
+   [InlineData("nameMismatch", "Windows refused the certificate presented by https://qqq.example.test." + Shown + NameMismatch + CheckAgain + NotOffered)]
+   [InlineData("notPresented", "Windows refused the secure connection to https://qqq.example.test. The print service checks certificates under its own account, not yours."
+      + " The server presented no certificate. Ask the server's administrator to set up the server's certificate." + CheckAgain + NotOffered)]
+   [InlineData("somethingNew,somethingElse", "Windows refused the certificate presented by https://qqq.example.test." + Shown
+      + " Windows refused the certificate for a reason this version of the companion does not know. Ask the server's administrator what is wrong with the server's certificate." + CheckAgain + NotOffered)]
+   [InlineData("", "Windows refused the certificate presented by https://qqq.example.test." + Shown
+      + " Windows refused the certificate, and the print service did not say why. Ask the server's administrator what is wrong with the server's certificate." + CheckAgain + NotOffered)]
+   [InlineData("nameMismatch,untrustedAuthority,nameMismatch", "Windows refused the certificate presented by https://qqq.example.test." + Shown + NameMismatch + UntrustedAuthority + CheckAgain + Offered)]
+   [InlineData("notPresented,nameMismatch", "Windows refused the certificate presented by https://qqq.example.test." + Shown
+      + " The server presented no certificate. Ask the server's administrator to set up the server's certificate." + NameMismatch + CheckAgain + NotOffered)]
+   public async Task CertificateRefused_SaysWhatEachReasonMeans_AndNamesTheRootOnlyForAnUntrustedAuthority(string refusals, string sentence)
+   {
+      using WizardFixture fixture = new();
+
+      await fixture.CheckAsync(RefusedFor(refusals));
+
+      Assert.Equal(ServerStepState.CertificateRefused, fixture.Wizard.ServerState);
+      Assert.Equal(sentence, fixture.Wizard.Result.Text);
+      Assert.Equal(refusals.Contains("untrustedAuthority", StringComparison.Ordinal), fixture.Wizard.Result.Text.Contains("root certificate", StringComparison.Ordinal));
+      Assert.Equal(refusals.Contains("untrustedAuthority", StringComparison.Ordinal), fixture.Wizard.Result.Text.Contains("Trusted Root", StringComparison.Ordinal));
+      Assert.Equal(refusals.Contains("untrustedAuthority", StringComparison.Ordinal), fixture.Wizard.CanRequestException);
+      Assert.Equal("refusals", Assert.Throws<ArgumentNullException>(() => WizardMessages.CertificateRefused(null, null!, exceptionOffered: false, exceptionDidNotCover: false)).ParamName);
    }
 
 
@@ -154,7 +201,7 @@ public sealed class WizardCertificateTests
       Assert.Equal("The server passed all five checks with the development-only certificate exception. Before you go on, look at what the exception covers."
          + " It accepts a certificate Windows does not trust from two addresses: https://qqq.example.test, the server, and https://sign-in.example.test, the sign-in provider the server names."
          + " It offers sign-in with a user name and password, and sign-in through the browser. Nothing is stored yet: the exception is stored with the server when it is added."
-         + " Choose Next to go on with the exception, or choose Check without the exception to drop it.", wizard.Result.Text);
+         + " Choose Next to go on with the exception, or choose Drop the exception, which removes this result so that the server can be checked without it.", wizard.Result.Text);
       Assert.Equal(FeedbackSeverity.Success, wizard.ResultSeverity);
       Assert.Equal(ServerStepState.ExceptionReview, fixture.Moments[^1].State);
       Assert.Equal(new WizardAction("Next", true), fixture.Moments[^1].Primary);
@@ -276,18 +323,126 @@ public sealed class WizardCertificateTests
 
 
 
-   /// <summary>A provider the failed check reported as text that is no origin is not named: the warning treats the provider as not known yet, and the text is neither shown nor logged.</summary>
-   [Fact]
-   public async Task Exception_ProviderThatIsNoOrigin_IsTreatedAsNotKnownYet()
+   /// <summary>
+   /// A provider the failed check reported as text the contract does not take for an origin is not named: the
+   /// warning treats the provider as not known yet, and the text is neither shown nor logged, whole or in part. That
+   /// holds for an IPv6 literal with a zone too: the form an origin is shown in has no place for the zone, so it
+   /// is not shown with the zone dropped, as an address the operator would then accept for another one.
+   /// </summary>
+   [Theory]
+   [InlineData("NOT-AN-ORIGIN", "NOT-AN-ORIGIN")]
+   [InlineData("https://[fe80::1%25eth0]", "fe80")]
+   [InlineData("https://[fe80::1%eth0]:8443", "fe80")]
+   public async Task Exception_ProviderThatIsNoOrigin_IsTreatedAsNotKnownYet(string reported, string neverShown)
    {
       using WizardFixture fixture = new();
-      await fixture.CheckAsync(WizardFixture.CertificateRefused("NOT-AN-ORIGIN"));
+      await fixture.CheckAsync(WizardFixture.CertificateRefused(reported));
 
       fixture.Wizard.RequestException();
 
-      Assert.Contains("is not known yet", fixture.Wizard.ExceptionWarning!.Message, StringComparison.Ordinal);
-      Assert.DoesNotContain("NOT-AN-ORIGIN", fixture.Wizard.ExceptionWarning.Message, StringComparison.Ordinal);
-      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("NOT-AN-ORIGIN", StringComparison.Ordinal));
+      Assert.False(SignInProviderOrigin.TryRead(reported, out _));
+      Assert.Equal(Head + Server + ". Anyone who can get between this computer and that address" + Risk
+         + " The server's sign-in provider is not known yet: it can only be read once the server's certificate is accepted. If the server names one at another address, the exception covers that address too, and it will be shown after the check, before you go on."
+         + " Nothing is stored until the server is added.", fixture.Wizard.ExceptionWarning!.Message);
+      Assert.DoesNotContain(neverShown, fixture.Wizard.ExceptionWarning.Message, StringComparison.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains(neverShown, StringComparison.Ordinal));
+      Assert.Contains("INFO The certificate warning was opened for https://qqq.example.test; the sign-in provider is not known until the check has run under the exception.", fixture.Log.Entries, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// Whatever a check under the exception names as the sign-in provider, the wizard judges it as the contract
+   /// does, so the operator is never shown, or allowed to accept, a provider that no request can state. Text the
+   /// contract takes for an origin is shown as that origin, and what is shown agrees, by the contract's own
+   /// comparison, with the text the request will state. Text the contract refuses, an IPv6 literal with a zone
+   /// among it, is an answer that cannot be used: nothing passed, nothing is accepted, and the text reaches neither
+   /// the screen nor the log.
+   /// </summary>
+   [Theory]
+   [InlineData("https://sign-in.example.test", "https://sign-in.example.test")]
+   [InlineData("HTTPS://Sign-In.Example.Test:443/path?x=1#f", "https://sign-in.example.test")]
+   [InlineData(" https://sign-in.example.test ", "https://sign-in.example.test")]
+   [InlineData("https://trusted.example.test@evil.example.test", "https://evil.example.test")]
+   [InlineData("https://trusted.example.test:pw@evil.example.test/", "https://evil.example.test")]
+   [InlineData("https://b\u00FCcher.example", "https://xn--bcher-kva.example")]
+   [InlineData("https://\u0430pple.example", "https://xn--pple-43d.example")]
+   [InlineData("http://sign-in.example.test", "http://sign-in.example.test")]
+   [InlineData("wss://sign-in.example.test", "wss://sign-in.example.test")]
+   [InlineData("https://sign-in.example.test.", "https://sign-in.example.test.")]
+   [InlineData("https://127.1", "https://127.0.0.1")]
+   [InlineData("https://[FE80::1]:8443", "https://[fe80::1]:8443")]
+   [InlineData("ftp://sign-in.example.test", null)]
+   [InlineData("https://evil.example\u202Etset.elpmaxe", "https://evil.exampletset.elpmaxe")]
+   [InlineData("https://[fe80::1%25eth0]", null)]
+   [InlineData("https://[fe80::1%25eth0]:8443/", null)]
+   public async Task Exception_Recheck_JudgesTheProviderAsTheContractDoes(string reported, string? shown)
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused());
+      wizard.RequestException();
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: reported)));
+
+      await wizard.AcceptExceptionAsync();
+
+      Assert.Equal(shown is not null, SignInProviderOrigin.TryRead(reported, out Uri? origin));
+      if(shown is null)
+      {
+         Assert.Throws<ArgumentException>(() => new TrustSetArgs(AcceptCertificateException: true, reported));
+         Assert.Equal(ServerStepState.Failed, wizard.ServerState);
+         Assert.Equal(WizardMessages.CheckUnusable, wizard.Result.Text);
+         Assert.Null(wizard.PassedCheck);
+         Assert.False(wizard.ExceptionAccepted);
+         Assert.Empty(wizard.ExceptionOrigins);
+         Assert.False(wizard.NextAction.Enabled);
+         Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("fe80", StringComparison.Ordinal) || entry.Contains("ftp", StringComparison.Ordinal));
+         return;
+      }
+      Assert.Equal(shown, origin!.GetLeftPart(UriPartial.Authority));
+      Assert.Equal(ServerStepState.ExceptionReview, wizard.ServerState);
+      Assert.True(wizard.ExceptionAccepted);
+      Assert.Equal([Server, shown], wizard.ExceptionOrigins);
+      Assert.Contains(", the server, and " + shown + ", the sign-in provider the server names.", wizard.Result.Text, StringComparison.Ordinal);
+      Assert.Equal(reported, wizard.PassedCheck!.ProviderOrigin);
+      Assert.True(new TrustSetArgs(AcceptCertificateException: true, wizard.PassedCheck.ProviderOrigin).ProviderAgrees(shown));
+      Assert.All(wizard.ExceptionOrigins, covered => Assert.True(covered.All(character => character is > ' ' and < '\u007F')));
+   }
+
+
+
+   /// <summary>
+   /// The review is never skipped for a provider the operator was not shown. A failed check that names a provider
+   /// with a zone is told as "not known yet"; when the re-check under the exception then names the same address
+   /// with another zone, it is not taken for the provider the warning named: it is no origin at all for the
+   /// contract, so the answer cannot be used, nothing passed and nothing is accepted.
+   /// </summary>
+   [Fact]
+   public async Task Exception_ZonedProvider_IsNeverTakenForTheOneTheWarningNamed()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      await fixture.CheckAsync(WizardFixture.CertificateRefused("https://[fe80::1%25eth0]"));
+      wizard.RequestException();
+      Assert.Contains("is not known yet", wizard.ExceptionWarning!.Message, StringComparison.Ordinal);
+      Assert.DoesNotContain("fe80", wizard.ExceptionWarning.Message, StringComparison.Ordinal);
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: "https://[fe80::1%25eth1]")));
+
+      await wizard.AcceptExceptionAsync();
+
+      Assert.Equal(ServerStepState.Failed, wizard.ServerState);
+      Assert.Equal(WizardMessages.CheckUnusable, wizard.Result.Text);
+      Assert.False(wizard.NextAction.Enabled);
+      Assert.False(wizard.ExceptionAccepted);
+      Assert.Empty(wizard.ExceptionOrigins);
+      Assert.Null(wizard.PassedCheck);
+
+      fixture.Pipe.Answer(Replies.Success(WizardFixture.Check(provider: "https://[fe80::1]")));
+      await wizard.CheckAsync();
+
+      Assert.False(fixture.Sent(2).AcceptCertificateException);
+      Assert.Equal(ServerStepState.Passed, wizard.ServerState);
+      Assert.False(wizard.ExceptionAccepted);
    }
 
 
@@ -410,7 +565,8 @@ public sealed class WizardCertificateTests
       Assert.False(wizard.ExceptionAccepted);
       Assert.False(wizard.CanRequestException);
       Assert.NotNull(wizard.Certificate);
-      Assert.Equal("The certificate exception does not cover what Windows refused, so it was dropped. Windows refused the certificate presented by https://qqq.example.test." + LastingFix, wizard.Result.Text);
+      Assert.Equal("The certificate exception does not cover what Windows refused, so it was dropped. Windows refused the certificate presented by https://qqq.example.test." + Shown
+         + (refusals.Contains("untrustedAuthority", StringComparison.Ordinal) ? UntrustedAuthority : string.Empty) + NameMismatch + CheckAgain, wizard.Result.Text);
       Assert.Contains("WARN Windows refused a certificate while the service checked https://qqq.example.test (presented by https://qqq.example.test); the certificate exception was accepted and does not cover it.", fixture.Log.Entries, StringComparer.Ordinal);
       wizard.RequestException();
       Assert.Null(wizard.ExceptionWarning);
@@ -554,7 +710,19 @@ public sealed class WizardCertificateTests
       Assert.Equal("https://qqq.example.test:8443", CertificateView.Origin("https://qqq.example.test:8443"));
       Assert.Null(CertificateView.Origin(null));
       Assert.Null(CertificateView.Origin("mailto:someone@example.test"));
+      Assert.Equal("https://[fe80::1]:8443", CertificateView.Origin("https://[FE80::1]:8443/"));
+
+      var zoned = CertificateView.From(new PresentedCertificate([PresentedCertificate.UntrustedAuthority], "https://[fe80::1%25eth0]:8443"), TestData.Time);
+      Assert.Null(zoned.PresentedBy);
+      Assert.Null(CertificateView.Origin("https://[fe80::1%eth0]"));
    }
+
+
+
+   /// <summary>The reply to a check that failed because Windows refused a certificate for these reasons, by the names the contract gives them, separated by commas; no text is no reason at all.</summary>
+   private static ManagementReplyParse RefusedFor(string refusals)
+      => Replies.Failure(ManagementErrorCode.CertificateUntrusted, Replies.Message, WizardFixture.Check(failedStage: 1, certificate: WizardFixture.Certificate(refusals.Length == 0 ? [] : refusals.Split(','))));
+
 
 
 

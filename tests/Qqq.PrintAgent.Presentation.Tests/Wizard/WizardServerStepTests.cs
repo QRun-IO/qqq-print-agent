@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Globalization;
 using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Presentation.SignIn;
 using Qqq.PrintAgent.Presentation.Tests.Fakes;
@@ -685,10 +686,14 @@ public sealed class WizardServerStepTests
 
 
 
-   /// <summary>A service of another version says which side to update, says that nothing was checked, and keeps what was typed.</summary>
+   /// <summary>
+   /// A service of another version says which side to update and that the check could not be made, and keeps what
+   /// was typed. It does not say that nothing was checked: that the service is of another version is read from the
+   /// shape of its reply, and what such a service did with the request is not known.
+   /// </summary>
    [Theory]
-   [InlineData("Error: unknown command", "The print service on this computer is an older version than this companion and does not know this request, so nothing was checked. Finish updating QQQ Print Agent so that both are the same version, then choose Check.")]
-   [InlineData("{\"v\":3,\"ok\":false,\"error\":{\"code\":\"unsupported_version\",\"message\":\"No.\"}}", "The print service on this computer is a newer version than this companion, so nothing was checked. Update the companion to the same version, then start it again.")]
+   [InlineData("Error: unknown command", "The print service on this computer is an older version than this companion and does not know this request, so the check could not be made. Finish updating QQQ Print Agent so that both are the same version, then choose Check.")]
+   [InlineData("{\"v\":3,\"ok\":false,\"error\":{\"code\":\"unsupported_version\",\"message\":\"No.\"}}", "The print service on this computer is a newer version than this companion, so the check could not be made. Update the companion to the same version, then start it again.")]
    public async Task Check_ServiceOfAnotherVersion_SaysWhichSideToUpdate(string reply, string sentence)
    {
       using WizardFixture fixture = new();
@@ -697,6 +702,7 @@ public sealed class WizardServerStepTests
 
       Assert.Equal(ServerStepState.Editing, fixture.Wizard.ServerState);
       Assert.Equal(sentence, fixture.Wizard.Result.Text);
+      Assert.DoesNotContain("nothing was checked", fixture.Wizard.Result.Text, StringComparison.OrdinalIgnoreCase);
       Assert.Equal(FeedbackSeverity.Error, fixture.Wizard.ResultSeverity);
       Assert.Equal(WizardFixture.Address, fixture.Wizard.Address);
    }
@@ -741,6 +747,43 @@ public sealed class WizardServerStepTests
       await first.WaitAsync(WizardFixture.Limit);
 
       Assert.Equal(ServerStepState.Passed, wizard.ServerState);
+      Assert.False(wizard.IsBusy);
+      Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
+      Assert.Single(fixture.Pipe.Sent);
+   }
+
+
+
+   /// <summary>
+   /// A second check that was refused changes nothing about the first: the wizard still waits for it and holds its
+   /// gate, and an edit of the address still ends that wait, so the first check's answer is not shown when it
+   /// arrives.
+   /// </summary>
+   [Fact]
+   public async Task SecondCheckRefused_TheFirstIsStillTheOneTheWizardWaitsFor()
+   {
+      using WizardFixture fixture = new();
+      ConnectionWizard wizard = fixture.Wizard;
+      wizard.Address = WizardFixture.Address;
+      TaskCompletionSource<ManagementReplyParse> held = fixture.Pipe.Hold();
+      Task first = wizard.CheckAsync();
+
+      await wizard.CheckAsync();
+
+      Assert.True(wizard.IsBusy);
+      Assert.True(fixture.Gate.IsBusy(OperationGate.Wizard));
+      Assert.Equal(new WizardAction("Check", false), wizard.CheckAction);
+      fixture.Announced.Clear();
+
+      wizard.Address = "https://other.example.test";
+      await first.WaitAsync(WizardFixture.Limit);
+      held.SetResult(Replies.Success(WizardFixture.Check()));
+      await Task.Yield();
+
+      Assert.Equal(ServerStepState.Editing, wizard.ServerState);
+      Assert.Empty(wizard.Stages);
+      Assert.Null(wizard.PassedCheck);
+      Assert.Empty(fixture.Announced);
       Assert.False(wizard.IsBusy);
       Assert.False(fixture.Gate.IsBusy(OperationGate.Wizard));
       Assert.Single(fixture.Pipe.Sent);
@@ -1127,7 +1170,8 @@ public sealed class WizardServerStepTests
       Assert.Null(wizard.PassedCheck);
       Assert.Null(wizard.SignInMethods);
       Assert.Equal(new WizardAction("Next", false), wizard.NextAction);
-      Assert.Equal(WizardMessages.NoKnownSignInMethod, wizard.Result.Text);
+      Assert.Equal("The server passed the print service's checks, but it offers no sign-in method this version of the companion knows, so you could not sign in. Nothing was stored. Update QQQ Print Agent, or ask the server's administrator which sign-in methods it offers.",
+         wizard.Result.Text);
       Assert.Equal(FeedbackSeverity.Error, wizard.ResultSeverity);
       Assert.Equal(FocusTarget.CheckStages, wizard.FocusTarget);
    }
@@ -1135,15 +1179,21 @@ public sealed class WizardServerStepTests
 
 
    /// <summary>
-   /// An answer that says "passed" and cannot be stood behind is not a pass: a stage that is missing or not reported
-   /// as passed, or a sign-in provider that is text and no origin. No rows are shown, nothing is kept for adding
+   /// An answer that says "passed" and cannot be stood behind is not a pass: a stage that is missing, not reported
+   /// as passed or reported twice (even when both entries say passed), or a sign-in provider the contract does not
+   /// take for an origin, an IPv6 literal with a zone among them. No rows are shown, nothing is kept for adding
    /// the server, and the text that was no origin reaches neither the screen nor the log.
    /// </summary>
    [Theory]
    [InlineData("", "NOT-AN-ORIGIN")]
    [InlineData("", "mailto:someone@example.test")]
+   [InlineData("", "https://[fe80::1%25eth0]")]
+   [InlineData("", "https://[fe80::1%eth0]:8443/")]
    [InlineData("missing", null)]
    [InlineData("unknownStageFailed", null)]
+   [InlineData("twice", null)]
+   [InlineData("twiceTheSecondFailed", null)]
+   [InlineData("unknownStageTwice", null)]
    public async Task Check_AnswerThatCannotBeUsed_IsNotAPass(string stages, string? provider)
    {
       using WizardFixture fixture = new();
@@ -1152,6 +1202,12 @@ public sealed class WizardServerStepTests
       {
          "missing" => check with { Stages = [.. check.Stages.Take(4)] },
          "unknownStageFailed" => check with { Stages = [.. check.Stages, new CompatibilityStageResult("licence", CompatibilityStageResult.Failed, ["a stage a later version checks"])] },
+         "twice" => check with { Stages = [.. check.Stages, new CompatibilityStageResult(CompatibilityStageResult.Security, CompatibilityStageResult.Passed, [])] },
+         "twiceTheSecondFailed" => check with { Stages = [.. check.Stages, new CompatibilityStageResult(CompatibilityStageResult.Security, CompatibilityStageResult.Failed, ["the second entry"])] },
+         "unknownStageTwice" => check with
+         {
+            Stages = [.. check.Stages, new CompatibilityStageResult("licence", CompatibilityStageResult.Passed, []), new CompatibilityStageResult("licence", CompatibilityStageResult.Passed, [])],
+         },
          _ => check,
       };
 
@@ -1164,7 +1220,100 @@ public sealed class WizardServerStepTests
       Assert.Equal(new WizardAction("Next", false), wizard.NextAction);
       Assert.Equal("The print service answered the check, but its answer could not be used. Nothing was stored. Choose Check again. If this repeats, look under Logs.", wizard.Result.Text);
       Assert.Equal(FeedbackSeverity.Error, wizard.ResultSeverity);
-      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("NOT-AN-ORIGIN", StringComparison.Ordinal) || entry.Contains("someone", StringComparison.Ordinal));
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("NOT-AN-ORIGIN", StringComparison.Ordinal) || entry.Contains("someone", StringComparison.Ordinal) || entry.Contains("fe80", StringComparison.Ordinal));
+      Assert.Contains("WARN The service answered the check of https://qqq.example.test as passed, but the answer cannot be used: a stage is not reported as passed or is reported twice, or the sign-in provider it names is not an origin.",
+         fixture.Log.Entries, StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>A stage this version does not know, reported once as passed, does not keep a check from passing: the contract has a client ignore it.</summary>
+   [Fact]
+   public async Task Check_Passes_WithAStageThisVersionDoesNotKnow()
+   {
+      using WizardFixture fixture = new();
+      ServerCheckResult check = WizardFixture.Check();
+
+      await fixture.CheckAsync(Replies.Success(check with { Stages = [.. check.Stages, new CompatibilityStageResult("licence", CompatibilityStageResult.Passed, [])] }));
+
+      Assert.Equal(ServerStepState.Passed, fixture.Wizard.ServerState);
+      Assert.Equal(5, fixture.Wizard.Stages.Count);
+   }
+
+
+
+   /// <summary>
+   /// A stage the service reported twice in a failed check is shown with the worse of the two outcomes and the
+   /// reasons that came with it, wherever the worse entry stands: the rows never read "Passed" for a stage that
+   /// failed, under a sentence that says the check did not pass.
+   /// </summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public async Task Check_AStageReportedTwice_ShowsTheWorseOutcome(bool failedEntryFirst)
+   {
+      using WizardFixture fixture = new();
+      ServerCheckResult passed = WizardFixture.Check(methods: []);
+      CompatibilityStageResult failed = new(CompatibilityStageResult.Security, CompatibilityStageResult.Failed, ["the entry that failed"]);
+
+      await fixture.CheckAsync(Replies.Failure(ManagementErrorCode.ServerIncompatible, Replies.Message, passed with { Stages = failedEntryFirst ? [failed, .. passed.Stages] : [.. passed.Stages, failed] }));
+
+      ConnectionWizard wizard = fixture.Wizard;
+      Assert.Equal(ServerStepState.Failed, wizard.ServerState);
+      Assert.Equal([CheckStageOutcome.Passed, CheckStageOutcome.Failed, CheckStageOutcome.Passed, CheckStageOutcome.Passed, CheckStageOutcome.Passed], wizard.Stages.Select(row => row.Outcome));
+      Assert.Equal(["the entry that failed"], wizard.Stages[1].Problems);
+      Assert.Equal("Trusted secure connection: Failed. the entry that failed", wizard.Stages[1].AccessibleName);
+      Assert.Equal("The server did not pass the check: \"Trusted secure connection\" failed. The reasons are in the list of checks. Nothing was stored. Correct the problem, then choose Check again.", wizard.Result.Text);
+   }
+
+
+
+   /// <summary>Of several entries for one stage the worst is shown: a failure before an outcome that is not known, that before a stage that was not reached, and that before a pass. The reasons of every entry are shown, in the order they came.</summary>
+   [Theory]
+   [InlineData("passed,notReached", CheckStageOutcome.NotReached)]
+   [InlineData("notReached,passed", CheckStageOutcome.NotReached)]
+   [InlineData("notReached,postponed,passed", CheckStageOutcome.Unknown)]
+   [InlineData("postponed,failed,notReached", CheckStageOutcome.Failed)]
+   [InlineData("passed,passed", CheckStageOutcome.Passed)]
+   public void StageRows_OfSeveralEntriesForOneStage_ShowTheWorst(string outcomes, CheckStageOutcome shown)
+   {
+      string[] reported = outcomes.Split(',');
+      ServerCheckResult check = new([.. reported.Select((outcome, index) => new CompatibilityStageResult(CompatibilityStageResult.Server, outcome, ["reason " + index.ToString(CultureInfo.InvariantCulture)]))], []);
+
+      CheckStageRow row = CheckStageRow.From(check)[2];
+
+      Assert.Equal(shown, row.Outcome);
+      Assert.Equal(reported.Select((_, index) => "reason " + index.ToString(CultureInfo.InvariantCulture)), row.Problems, StringComparer.Ordinal);
+      Assert.True(CheckStageRow.ReportsAStageTwice(check));
+      Assert.False(CheckStageRow.ReportsAStageTwice(WizardFixture.Check()));
+   }
+
+
+
+   /// <summary>
+   /// A row shows at most five reasons, however many the service sent, and then says how many more there are: each
+   /// reason is cut at the contract's limit, and without a limit on their number a row, and the one sentence a
+   /// screen reader reads for it, could be as long as the service made it. A reason that shows nothing is not
+   /// counted.
+   /// </summary>
+   [Fact]
+   public async Task StageRow_ShowsAtMostFiveReasons_AndSaysHowManyMore()
+   {
+      using WizardFixture fixture = new();
+      string[] reasons = [.. Enumerable.Range(1, 3000).Select(number => "reason " + number.ToString(CultureInfo.InvariantCulture))];
+
+      await fixture.CheckAsync(Replies.Failure(ManagementErrorCode.ServerIncompatible, Replies.Message, WizardFixture.Check(0, reasons)));
+
+      CheckStageRow row = fixture.Wizard.Stages[0];
+      Assert.Equal(5, CheckStageRow.MaximumProblems);
+      Assert.Equal(["reason 1", "reason 2", "reason 3", "reason 4", "reason 5", "And 2995 more reasons, which are not shown."], row.Problems);
+      Assert.Equal("Reach the address: Failed. reason 1; reason 2; reason 3; reason 4; reason 5; And 2995 more reasons, which are not shown.", row.AccessibleName);
+
+      CheckStageRow six = CheckStageRow.From(WizardFixture.Check(0, ["one", " ", "two", "three", "\u200B", "four", "five", "six"]))[0];
+      Assert.Equal(["one", "two", "three", "four", "five", "And 1 more reason, which is not shown."], six.Problems);
+      CheckStageRow five = CheckStageRow.From(WizardFixture.Check(0, ["one", " ", "two", "three", "four", "five"]))[0];
+      Assert.Equal(["one", "two", "three", "four", "five"], five.Problems);
+      Assert.Equal("Reach the address: Failed. one; two; three; four; five", five.AccessibleName);
    }
 
 

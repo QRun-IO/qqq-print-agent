@@ -26,8 +26,12 @@ public sealed class WizardReactionsTests
       [ManagementErrorCode.InvalidRequest] = (ServerStepState.Editing, WizardMessages.AddressRefusedByService, FeedbackSeverity.Warning, FocusTarget.StepStart, false),
       [ManagementErrorCode.StateNewer] = (ServerStepState.Editing, WizardMessages.StoredDataNotReady, FeedbackSeverity.Error, FocusTarget.PrimaryAction, true),
       [ManagementErrorCode.MigrationIncomplete] = (ServerStepState.Editing, WizardMessages.StoredDataNotReady, FeedbackSeverity.Error, FocusTarget.PrimaryAction, true),
-      [ManagementErrorCode.UpdateInProgress] = (ServerStepState.Editing, WizardMessages.UpdateInProgress, FeedbackSeverity.Warning, FocusTarget.PrimaryAction, false),
-      [ManagementErrorCode.Busy] = (ServerStepState.Editing, WizardMessages.Busy, FeedbackSeverity.Warning, FocusTarget.PrimaryAction, false),
+      [ManagementErrorCode.UpdateInProgress] = (ServerStepState.Editing,
+         "The print service is prepared for an update, so it does not check servers right now. The update may still be running, or it may have stopped. Nothing was checked and what you entered is kept. Choose Check again later. If it is still refused, look under Logs.",
+         FeedbackSeverity.Warning, FocusTarget.PrimaryAction, false),
+      [ManagementErrorCode.Busy] = (ServerStepState.Editing,
+         "The print service is making another change right now, so this check was not started. Nothing was checked and what you entered is kept. Wait a moment, then choose Check.", FeedbackSeverity.Warning,
+         FocusTarget.PrimaryAction, false),
    };
 
 
@@ -280,6 +284,8 @@ public sealed class WizardReactionsTests
       Assert.Equal(["Not known", "Passed", "Failed", "Not checked, because an earlier check failed"], Enum.GetValues<CheckStageOutcome>().Select(WizardMessages.StageOutcome), StringComparer.Ordinal);
       Assert.Equal("Reach the address: Passed.", WizardMessages.StageName("Reach the address", "Passed", []));
       Assert.Equal("problems", Assert.Throws<ArgumentNullException>(() => WizardMessages.StageName("a", "b", null!)).ParamName);
+      Assert.Equal("And 1 more reason, which is not shown.", WizardMessages.MoreReasons(1));
+      Assert.Equal("And 2995 more reasons, which are not shown.", WizardMessages.MoreReasons(2995));
       Assert.Equal("origins", Assert.Throws<ArgumentNullException>(() => WizardMessages.PassedUnderException(new SignInOffer(true, false), null!, review: true)).ParamName);
       Assert.Equal(4, new[] { PresentedCertificate.UntrustedAuthority, PresentedCertificate.NameMismatch, PresentedCertificate.NotPresented, "somethingNew" }.Select(WizardMessages.Refusal).Distinct(StringComparer.Ordinal).Count());
       Assert.Null(WizardMessages.Name(ServerNameProblem.None));
@@ -293,50 +299,184 @@ public sealed class WizardReactionsTests
    /// The sentences are plain text for an operator: each fixed one is a whole sentence or a button label, none
    /// names a control of the old connection dialog, and none says that a server "is reachable" or "works", which a
    /// check that tests five things and stores nothing does not know.
+   /// <para>
+   /// And none says more than the wizard knows at the moment it says it. That a check ran and gave a result is
+   /// said only by the sentences for a result (passed, not passed, passed without a sign-in method this version
+   /// knows). No sentence says that something was stored, saved or added, or that a check stores anything: the
+   /// Server step stores nothing. No sentence says that a check or anything else was stopped or cancelled: the
+   /// wizard stops waiting, never the service. And the only time any sentence names is "up to two minutes", which
+   /// is the limit the service's check runs under.
+   /// </para>
    /// </summary>
    [Fact]
    public void Messages_AreWholeSentences_AndClaimNothingTheWizardDoesNotKnow()
    {
       string[] labels = [WizardMessages.Check, WizardMessages.CheckAgain, WizardMessages.Next, WizardMessages.Back, WizardMessages.Cancel, WizardMessages.OpenServer, WizardMessages.UseException, WizardMessages.DropException,
          WizardMessages.ExceptionAccept];
-      string[] sentences = [.. typeof(WizardMessages).GetFields(BindingFlags.Public | BindingFlags.Static).Where(field => field.IsLiteral).Select(field => (string)field.GetRawConstantValue()!)
-         .Append(WizardMessages.StartServerLimit).Except(labels, StringComparer.Ordinal)];
+      (string Name, string Sentence)[] sentences = [.. typeof(WizardMessages).GetFields(BindingFlags.Public | BindingFlags.Static).Where(field => field.IsLiteral)
+         .Select(field => (field.Name, (string)field.GetRawConstantValue()!)).Append((nameof(WizardMessages.StartServerLimit), WizardMessages.StartServerLimit)).Where(sentence => !labels.Contains(sentence.Item2, StringComparer.Ordinal))];
 
       Assert.True(sentences.Length >= 20);
-      Assert.All(sentences, sentence =>
+      Assert.All(sentences, fixedSentence =>
       {
+         string sentence = fixedSentence.Sentence;
          Assert.True(sentence[^1] is '.' or '?', sentence);
          Assert.True(char.IsUpper(sentence[0]), sentence);
          Assert.Equal(sentence.Trim(), sentence);
          Assert.DoesNotContain("  ", sentence, StringComparison.Ordinal);
-         foreach(string notKnown in new[] { "reachable", "works", "Discover", "dialog", "pairing choice", "ConnectionSettings", "successfully" })
+         foreach(string notKnown in new[] { "reachable", "works", "Discover", "dialog", "pairing choice", "ConnectionSettings", "successfully", "another program", "being installed" })
          {
             Assert.DoesNotContain(notKnown, sentence, StringComparison.OrdinalIgnoreCase);
          }
+         string[] mayClaim = string.Equals(fixedSentence.Name, nameof(WizardMessages.NoKnownSignInMethod), StringComparison.Ordinal) ? ["a check ran"] : [];
+         Assert.True(mayClaim.SequenceEqual(ClaimsOf(sentence), StringComparer.Ordinal), fixedSentence.Name + " claims: " + string.Join(", ", ClaimsOf(sentence)));
       });
       Assert.All(labels, label => Assert.False(label.EndsWith('.')));
+      Assert.Equal("Drop the exception", WizardMessages.DropException);
+      Assert.Equal("Enter the address of the QQQ server, for example https://qqq.example.com, and a name to show for it. Check asks the print service on this computer to test the server. It stores nothing and can take up to two minutes.",
+         WizardMessages.ServerIntro);
+
+      SignInOffer methods = new(true, true);
+      string[] results =
+      [
+         WizardMessages.Passed(methods), WizardMessages.Passed(methods, "Enter a name for this server."), WizardMessages.PassedUnderException(methods, ["https://a.example"], review: true),
+         WizardMessages.PassedUnderException(methods, ["https://a.example", "https://b.example"], review: false, "Enter a name for this server."), WizardMessages.Failed(null), WizardMessages.Failed("QQQ server"),
+         WizardMessages.FailedWithoutDetails(""),
+      ];
+      Assert.All(results, sentence => Assert.Equal(["a check ran"], ClaimsOf(sentence)));
+      string[] noResult =
+      [
+         WizardMessages.ServiceSaid(""), WizardMessages.ExceptionWarning("https://a.example", null, providerKnown: false), WizardMessages.ExceptionWarning("https://a.example", null, providerKnown: true),
+         WizardMessages.ExceptionWarning("https://a.example", "https://b.example", providerKnown: true), WizardMessages.MoreReasons(2),
+         .. new[] { false, true }.SelectMany(didNotCover => new string[][] { [], ["untrustedAuthority"], ["nameMismatch"], ["notPresented"], ["somethingNew"], ["untrustedAuthority", "nameMismatch"] }
+            .Select(refusals => WizardMessages.CertificateRefused("https://a.example", refusals, exceptionOffered: !didNotCover && refusals.Contains("untrustedAuthority", StringComparer.Ordinal), didNotCover))),
+         .. Enum.GetValues<ServerAddressProblem>().Select(WizardMessages.Address), .. Enum.GetValues<ServerNameProblem>().Select(WizardMessages.Name).OfType<string>(),
+      ];
+      Assert.All(noResult, sentence => Assert.Empty(ClaimsOf(sentence)));
+
+      Assert.Equal(["a check ran"], ClaimsOf("The server was checked and what you entered is kept."));
+      Assert.Equal(["something was stopped"], ClaimsOf("The check was stopped and what you entered is kept."));
+      Assert.Equal(["something was stored"], ClaimsOf("You could not sign in. The server was added."));
+      Assert.Equal(["something was stored", "a time"], ClaimsOf("It stores the server and takes a few seconds."));
    }
 
 
 
-   /// <summary>The wizard has no member that could hold a secret: no public property of any type of the wizard is a session credential, and none is named for a password, a code or a credential.</summary>
+   /// <summary>
+   /// What a sentence states as having happened, of the things the wizard knows only in some states: that a check ran
+   /// and gave a result, that something was stopped, that something was stored, and how long something takes. The
+   /// words that say the opposite ("nothing was checked", "stores nothing", "up to two minutes") are set aside first.
+   /// </summary>
+   private static string[] ClaimsOf(string sentence)
+   {
+      string said = sentence;
+      foreach(string notAClaim in new[] { "nothing was checked", "Nothing was checked", "Nothing was stored", "stores nothing", "up to two minutes" })
+      {
+         said = said.Replace(notAClaim, string.Empty, StringComparison.Ordinal);
+      }
+      (string Claim, string[] Words)[] claims =
+      [
+         ("a check ran", ["was checked", "were checked", "been checked", "passed all five checks", "passed the print service's checks", "passed the check", "did not pass the check"]),
+         ("something was stopped", ["was stopped", "were stopped", "been stopped", "was cancelled", "was canceled", "been cancelled", "been canceled", "was ended", "was interrupted", "was aborted"]),
+         ("something was stored", ["was stored", "were stored", "been stored", "was saved", "been saved", "was added", "were added", "been added", "stores ", "saves "]),
+         ("a time", ["second", "minute", "hour"]),
+      ];
+      return [.. claims.Where(claim => claim.Words.Any(words => said.Contains(words, StringComparison.OrdinalIgnoreCase))).Select(claim => claim.Claim)];
+   }
+
+
+
+   /// <summary>
+   /// No member the wizard's code declares is typed as a secret or named for one: no property and no field of any
+   /// type in the wizard's namespace is a session credential or a pipe payload, and none has a name that says
+   /// password, credential, enrollment code or token. That is what this shows. It does not show that no member
+   /// could hold a secret: a secret kept in a member with a harmless type and name would pass. What stands behind
+   /// the stronger statement is the wizard's shape, which a reader checks: a secret is only ever an argument that
+   /// is passed on once.
+   /// <para>
+   /// Members the compiler writes are left out, because their names are not the code's own: an asynchronous method
+   /// with a parameter called cancellationToken gets a type with a field of that name, which says nothing about a
+   /// secret. The two probes hold the check to both sides: a type with such members is reported, and an
+   /// asynchronous method with a cancellation token is not.
+   /// </para>
+   /// </summary>
    [Fact]
-   public void Wizard_ExposesNothingThatCouldHoldASecret()
+   public void Wizard_HasNoMemberTypedAsOrNamedForASecret()
    {
       Type[] types = [.. typeof(ConnectionWizard).Assembly.GetTypes().Where(type => string.Equals(type.Namespace, typeof(ConnectionWizard).Namespace, StringComparison.Ordinal))];
-      PropertyInfo[] properties = [.. types.SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))];
-      FieldInfo[] fields = [.. types.SelectMany(type => type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))];
 
       Assert.Contains(typeof(ConnectionWizard), types);
-      Assert.True(properties.Length > 30);
-      Assert.DoesNotContain(properties, property => property.PropertyType == typeof(QqqSessionCredential) || property.PropertyType == typeof(ManagementPayload));
-      Assert.DoesNotContain(fields, field => field.FieldType == typeof(QqqSessionCredential) || field.FieldType == typeof(ManagementPayload));
-      foreach(string name in properties.Select(property => property.Name).Concat(fields.Select(field => field.Name)))
+      Assert.Contains(types, type => type.IsNested && type.Name.Contains("RunCheckAsync", StringComparison.Ordinal));
+      Assert.True(DeclaredMembers(types).Count > 60);
+      Assert.Empty(MembersForASecret(types));
+
+      Assert.Equal(3, new SecretProbe("synthetic").Length + (int)SecretProbe.Harmless);
+      Assert.Equal(["SecretProbe.EnrollmentCode", "SecretProbe.Password", "SecretProbe.Session", "SecretProbe._refreshToken"], MembersForASecret([typeof(SecretProbe)]).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Type[] asynchronous = [typeof(AsyncProbe), .. typeof(AsyncProbe).GetNestedTypes(BindingFlags.NonPublic)];
+      Assert.Equal(2, asynchronous.Length);
+      Assert.Contains(asynchronous[1].GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance), field => field.Name.Contains("Token", StringComparison.OrdinalIgnoreCase));
+      Assert.Empty(MembersForASecret(asynchronous));
+   }
+
+
+
+   /// <summary>The properties and fields the code of these types declares, as "Type.Member" with the member's type; what the compiler wrote is left out.</summary>
+   private static List<(string Name, Type Type)> DeclaredMembers(IEnumerable<Type> types)
+   {
+      const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+      List<(string Name, Type Type)> members = [];
+      foreach(Type type in types.Where(type => !WrittenByTheCompiler(type)))
       {
-         Assert.DoesNotContain("Password", name, StringComparison.OrdinalIgnoreCase);
-         Assert.DoesNotContain("Credential", name, StringComparison.OrdinalIgnoreCase);
-         Assert.DoesNotContain("EnrollmentCode", name, StringComparison.OrdinalIgnoreCase);
-         Assert.DoesNotContain("Token", name, StringComparison.OrdinalIgnoreCase);
+         members.AddRange(type.GetProperties(All).Where(property => !WrittenByTheCompiler(property)).Select(property => (type.Name + "." + property.Name, property.PropertyType)));
+         members.AddRange(type.GetFields(All).Where(field => !WrittenByTheCompiler(field)).Select(field => (type.Name + "." + field.Name, field.FieldType)));
+      }
+      return members;
+   }
+
+
+
+   /// <summary>True for a type or a member the compiler wrote: it is marked so, or its name is one no code can write.</summary>
+   private static bool WrittenByTheCompiler(MemberInfo member) => member.Name.Contains('<', StringComparison.Ordinal) || member.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), inherit: false);
+
+
+
+   /// <summary>The declared members that are typed as a secret or named for one.</summary>
+   private static IEnumerable<string> MembersForASecret(IEnumerable<Type> types)
+      => DeclaredMembers(types).Where(member => member.Type == typeof(QqqSessionCredential) || member.Type == typeof(ManagementPayload)
+         || new[] { "Password", "Credential", "EnrollmentCode", "Token" }.Any(word => member.Name.Contains(word, StringComparison.OrdinalIgnoreCase))).Select(member => member.Name);
+
+
+
+   /// <summary>A type with members of the kind the wizard must not have, so the check above is known to report them.</summary>
+   private sealed class SecretProbe
+   {
+      private readonly string _refreshToken;
+
+      internal SecretProbe(string value)
+      {
+         _refreshToken = value;
+      }
+
+      internal static long Harmless => -6;
+
+      internal string Password { get; init; } = string.Empty;
+
+      internal string EnrollmentCode { get; init; } = string.Empty;
+
+      internal QqqSessionCredential? Session { get; init; }
+
+      internal int Length => _refreshToken.Length;
+   }
+
+
+
+   /// <summary>An asynchronous method with a cancellation token, as the wizard's later steps have: the compiler gives it a type with a field named after the parameter.</summary>
+   private static class AsyncProbe
+   {
+      internal static async Task WaitAsync(CancellationToken cancellationToken)
+      {
+         await Task.Yield();
+         cancellationToken.ThrowIfCancellationRequested();
       }
    }
 }

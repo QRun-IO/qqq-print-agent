@@ -541,10 +541,10 @@ public sealed partial class ConnectionWizard
    private void ShowPassed(Uri origin, bool underException, ServerCheckResult check, IReadOnlyList<CheckStageRow> rows)
    {
       string? provider = CertificateView.Origin(check.ProviderOrigin);
-      bool passed = check.FailureCode() is null && rows.All(row => row.Outcome == CheckStageOutcome.Passed);
+      bool passed = check.FailureCode() is null && rows.All(row => row.Outcome == CheckStageOutcome.Passed) && !CheckStageRow.ReportsAStageTwice(check);
       if(!passed || (check.ProviderOrigin is not null && provider is null))
       {
-         _log.Warning("The service answered the check of {Server} as passed, but the answer cannot be used: a stage is not reported as passed, or the sign-in provider it names is not an origin.", Shown(origin));
+         _log.Warning("The service answered the check of {Server} as passed, but the answer cannot be used: a stage is not reported as passed or is reported twice, or the sign-in provider it names is not an origin.", Shown(origin));
          Settle(ServerStepState.Failed);
          Say(WizardMessages.CheckUnusable, FeedbackSeverity.Error, FocusTarget.PrimaryAction);
          return;
@@ -580,7 +580,7 @@ public sealed partial class ConnectionWizard
       _log.Warning("Windows refused a certificate while the service checked {Server} (presented by {Presenter}); the certificate exception {Offer}.", Shown(origin), view.PresentedBy ?? "an address the service did not name",
          offered ? "is offered" : underException ? "was accepted and does not cover it" : "is not offered");
       Settle(ServerStepState.CertificateRefused, check, origin, rows, certificate: view, exceptionOffered: offered);
-      Say(WizardMessages.CertificateRefused(view.PresentedBy, offered, exceptionDidNotCover: underException), FeedbackSeverity.Error, FocusTarget.Certificate);
+      Say(WizardMessages.CertificateRefused(view.PresentedBy, certificate.Refusals, offered, exceptionDidNotCover: underException), FeedbackSeverity.Error, FocusTarget.Certificate);
    }
 
 

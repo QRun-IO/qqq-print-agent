@@ -40,8 +40,8 @@ public static class WizardMessages
    /// <summary>The label of the button that asks for the certificate exception.</summary>
    public const string UseException = "Use the development-only exception";
 
-   /// <summary>The label of the button that drops an accepted certificate exception.</summary>
-   public const string DropException = "Check without the exception";
+   /// <summary>The label of the button that drops an accepted certificate exception, and with it the result that was obtained under it. It does not check: the operator chooses Check afterwards.</summary>
+   public const string DropException = "Drop the exception";
 
    /// <summary>The title of the certificate warning.</summary>
    public const string ExceptionTitle = "Accept an untrusted certificate?";
@@ -76,17 +76,17 @@ public static class WizardMessages
    /// <summary>The request left and no usable answer came back.</summary>
    public const string Unanswered = "No answer that could be used came back from the print service, so the result of the check is not known. A check stores nothing, so it is safe to repeat. Choose Check.";
 
-   /// <summary>A service that speaks the earlier version of the pipe answered.</summary>
-   public const string OlderService = "The print service on this computer is an older version than this companion and does not know this request, so nothing was checked. Finish updating QQQ Print Agent so that both are the same version, then choose Check.";
+   /// <summary>A service that speaks the earlier version of the pipe answered. That it is older is read from the shape of its reply, so the sentence says that the check could not be made, which is known, and not what the service did with the request.</summary>
+   public const string OlderService = "The print service on this computer is an older version than this companion and does not know this request, so the check could not be made. Finish updating QQQ Print Agent so that both are the same version, then choose Check.";
 
    /// <summary>A service that speaks a later version of the pipe answered.</summary>
-   public const string NewerService = "The print service on this computer is a newer version than this companion, so nothing was checked. Update the companion to the same version, then start it again.";
+   public const string NewerService = "The print service on this computer is a newer version than this companion, so the check could not be made. Update the companion to the same version, then start it again.";
 
-   /// <summary>The service is prepared for an update.</summary>
-   public const string UpdateInProgress = "An update is being installed, so the print service is not checking servers right now. Nothing was checked and what you entered is kept. When the update has finished, choose Check.";
+   /// <summary>The service is prepared for an update. That is all the refusal says: the update may be running, or it may have stopped, and the service stays prepared either way.</summary>
+   public const string UpdateInProgress = "The print service is prepared for an update, so it does not check servers right now. The update may still be running, or it may have stopped. Nothing was checked and what you entered is kept. Choose Check again later. If it is still refused, look under Logs.";
 
-   /// <summary>The service's gate is held by another client.</summary>
-   public const string Busy = "Another program is making a change through the print service right now. Nothing was checked and what you entered is kept. Wait a moment, then choose Check.";
+   /// <summary>The service is carrying out another change and did not start this request. Who asked for that change is not known: it can be this companion's own command.</summary>
+   public const string Busy = "The print service is making another change right now, so this check was not started. Nothing was checked and what you entered is kept. Wait a moment, then choose Check.";
 
    /// <summary>The service runs no connections; said as the wizard ends on the Computer page.</summary>
    public const string StoredDataNotReady = "The print service is not running connections because this computer's stored data is not ready, so nothing was checked. The Computer page says why and what to do.";
@@ -164,6 +164,12 @@ public static class WizardMessages
 
 
 
+   /// <summary>Stands at the end of a stage's reasons when the service gave more of them than a row shows: how many are not shown.</summary>
+   public static string MoreReasons(int count)
+      => count == 1 ? "And 1 more reason, which is not shown." : string.Create(CultureInfo.InvariantCulture, $"And {count} more reasons, which are not shown.");
+
+
+
    /// <summary>A stage row read as one sentence: what it tests, how it went, and why when it gives reasons.</summary>
    public static string StageName(string title, string outcome, IReadOnlyList<string> problems)
    {
@@ -212,8 +218,13 @@ public static class WizardMessages
 
 
 
-   /// <summary>Every stage passed and no exception is involved.</summary>
-   public static string Passed(SignInOffer methods) => "The server passed all five checks. " + Methods(methods) + " Nothing is stored yet. Choose Next to sign in.";
+   /// <summary>
+   /// Every stage passed and no exception is involved. When the name that is typed breaks the name rule, Next cannot
+   /// be used, so the sentence does not point at it: it ends with what is wrong with the name
+   /// (<paramref name="nameProblem"/>, as <see cref="Name"/> says it).
+   /// </summary>
+   public static string Passed(SignInOffer methods, string? nameProblem = null)
+      => "The server passed all five checks. " + Methods(methods) + " Nothing is stored yet. " + (nameProblem is null ? "Choose Next to sign in." : "Before you can go on, correct the server's name. " + nameProblem);
 
 
 
@@ -221,16 +232,19 @@ public static class WizardMessages
    /// Every stage passed under the certificate exception the operator accepted. The addresses the exception covers are
    /// named: the server's, and the sign-in provider's when the check named one at another address. With
    /// <paramref name="review"/> the operator is seeing the provider's address for the first time and is asked to look
-   /// before going on.
+   /// before going on. When the name that is typed breaks the name rule, Next cannot be used, so the sentence does
+   /// not point at it: it ends with what is wrong with the name (<paramref name="nameProblem"/>).
    /// </summary>
-   public static string PassedUnderException(SignInOffer methods, IReadOnlyList<string> origins, bool review)
+   public static string PassedUnderException(SignInOffer methods, IReadOnlyList<string> origins, bool review, string? nameProblem = null)
    {
       ArgumentNullException.ThrowIfNull(origins);
       string covers = origins.Count > 1
          ? "It accepts a certificate Windows does not trust from two addresses: " + origins[0] + ", the server, and " + origins[1] + ", the sign-in provider the server names."
          : "It accepts a certificate Windows does not trust from " + origins[0] + " only. The check named no sign-in provider at another address.";
       return "The server passed all five checks with the development-only certificate exception." + (review ? " Before you go on, look at what the exception covers. " : " ") + covers + " " + Methods(methods)
-         + " Nothing is stored yet: the exception is stored with the server when it is added. Choose Next to go on with the exception, or choose " + DropException + " to drop it.";
+         + " Nothing is stored yet: the exception is stored with the server when it is added. "
+         + (nameProblem is null ? "Choose Next to go on with the exception, or choose " + DropException + ", which removes this result so that the server can be checked without it."
+            : "Choose " + DropException + " to remove this result and check the server without it. To go on with the exception, correct the server's name first. " + nameProblem);
    }
 
 
@@ -249,17 +263,28 @@ public static class WizardMessages
 
 
    /// <summary>
-   /// Windows refused a certificate. The two ways forward are named: the lasting fix always, and the development-only
-   /// exception when it is offered. When the refusal came back although the exception had just been accepted, the
-   /// sentence says that the exception does not cover it and was dropped.
+   /// Windows refused a certificate. The sentence says what each reason means and what can be done about it, by the
+   /// names the contract gives the reasons (<paramref name="refusals"/>). Installing the issuing authority's root
+   /// certificate is named only for an authority Windows does not trust, which is the one refusal a root certificate
+   /// can end: for a certificate issued for another name, for no certificate at all and for a reason this version
+   /// does not know, the operator is sent to the address or to the server's administrator, never to the computer's
+   /// trust store. The development-only exception is named when it is offered. When the refusal came back although
+   /// the exception had just been accepted, the sentence says that the exception does not cover it and was dropped.
    /// </summary>
-   public static string CertificateRefused(string? presentedBy, bool exceptionOffered, bool exceptionDidNotCover)
-      => (exceptionDidNotCover ? "The certificate exception does not cover what Windows refused, so it was dropped. " : string.Empty)
-         + (presentedBy is null ? "Windows refused the certificate that was presented." : "Windows refused the certificate presented by " + presentedBy + ".")
-         + " The print service checks certificates under its own account, not yours. The certificate and the reasons are shown. The lasting fix is to install the issuing authority's root certificate in this computer's Trusted Root Certification Authorities store, then choose Check again."
+   public static string CertificateRefused(string? presentedBy, IReadOnlyList<string> refusals, bool exceptionOffered, bool exceptionDidNotCover)
+   {
+      ArgumentNullException.ThrowIfNull(refusals);
+      bool nothingPresented = refusals.Count > 0 && refusals.All(refusal => string.Equals(refusal, PresentedCertificate.NotPresented, StringComparison.Ordinal));
+      string refused = nothingPresented ? "Windows refused the secure connection" + (presentedBy is null ? "." : " to " + presentedBy + ".")
+         : presentedBy is null ? "Windows refused the certificate that was presented."
+         : "Windows refused the certificate presented by " + presentedBy + ".";
+      return (exceptionDidNotCover ? "The certificate exception does not cover what Windows refused, so it was dropped. " : string.Empty) + refused
+         + " The print service checks certificates under its own account, not yours." + (nothingPresented ? string.Empty : " The certificate and the reasons are shown.")
+         + WaysForward(refusals) + " Then choose Check again."
          + (exceptionOffered ? " For a development server only, you can choose " + UseException + " instead."
             : exceptionDidNotCover ? string.Empty
             : " The development-only exception is not offered, because it only covers a certificate from an authority Windows does not trust.");
+   }
 
 
 
@@ -290,6 +315,34 @@ public static class WizardMessages
          ? Head + server + ". The check named no sign-in provider at another address. Anyone who can get between this computer and that address" + Risk + Tail
          : Head + "two addresses: " + server + ", the server, and " + provider + ", the sign-in provider the server names. Anyone who can get between this computer and either address" + Risk + Tail;
    }
+
+
+
+   /// <summary>Each reason a certificate was refused for, once, in words, followed by what can be done about that reason. A certificate that came with no reason says that none was given.</summary>
+   private static string WaysForward(IReadOnlyList<string> refusals)
+   {
+      List<string> reasons = [];
+      foreach(string refusal in refusals)
+      {
+         string reason = " " + Refusal(refusal) + " " + WayForward(refusal);
+         if(!reasons.Contains(reason, StringComparer.Ordinal))
+         {
+            reasons.Add(reason);
+         }
+      }
+      return reasons.Count == 0 ? " " + RefusalNotGiven + " " + WayForward(string.Empty) : string.Concat(reasons);
+   }
+
+
+
+   /// <summary>What can be done about one reason a certificate was refused for. Only an authority Windows does not trust is answered with a root certificate.</summary>
+   private static string WayForward(string refusal) => refusal switch
+   {
+      PresentedCertificate.UntrustedAuthority => "The lasting fix for that is to install the issuing authority's root certificate in this computer's Trusted Root Certification Authorities store.",
+      PresentedCertificate.NameMismatch => "Enter the address the certificate was issued for, or ask the server's administrator for a certificate issued for this address.",
+      PresentedCertificate.NotPresented => "Ask the server's administrator to set up the server's certificate.",
+      _ => "Ask the server's administrator what is wrong with the server's certificate.",
+   };
 
 
 

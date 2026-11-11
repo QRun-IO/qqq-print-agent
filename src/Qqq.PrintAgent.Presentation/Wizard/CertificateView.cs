@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Windows.Management;
 
 namespace Qqq.PrintAgent.Presentation.Wizard;
@@ -20,9 +19,9 @@ public sealed record CertificateView(string? PresentedBy, string? Subject, strin
    /// Describes a refused certificate for the screen. The subject, the issuer and the fingerprint are text the server
    /// chose or the service passed on, so each is given the contract's printable form here; the record that carries
    /// them does not do that. The address is shown only in the form every origin is shown in (scheme, the host's
-   /// ASCII name and port), and is left out when the text names no origin. The dates are shown in the user's local
-   /// time. A reason this version does not know is said to be that, once, and a certificate that came with no reason
-   /// says that none was given, so the list is never empty.
+   /// ASCII name and port), and is left out when the contract takes the text for no origin. The dates are shown in
+   /// the user's local time. A reason this version does not know is said to be that, once, and a certificate that
+   /// came with no reason says that none was given, so the list is never empty.
    /// </summary>
    internal static CertificateView From(PresentedCertificate certificate, TimestampFormat timestamps)
    {
@@ -48,10 +47,12 @@ public sealed record CertificateView(string? PresentedBy, string? Subject, strin
    /// <summary>
    /// An origin as it is shown: scheme, the host's ASCII name and the port when it is not the scheme's own, without a
    /// trailing slash. Null when the text is missing or names no origin, so nothing a server wrote is shown as an
-   /// address unless it is one.
+   /// address unless it is one. What names an origin is the contract's judgement and no other
+   /// (<see cref="SignInProviderOrigin.TryRead"/>), because the address shown for a sign-in provider is the one the
+   /// operator accepts and a request then states: an address the contract refuses, such as an IPv6 literal with a
+   /// zone, whose zone the shown form has no place for, is not shown with the zone dropped. It is not shown.
    /// </summary>
-   internal static string? Origin(string? text)
-      => Uri.TryCreate(text, UriKind.Absolute, out Uri? address) && QqqOrigin.Of(address) is { } origin ? origin.GetLeftPart(UriPartial.Authority) : null;
+   internal static string? Origin(string? text) => SignInProviderOrigin.TryRead(text, out Uri? origin) ? origin.GetLeftPart(UriPartial.Authority) : null;
 
 
 

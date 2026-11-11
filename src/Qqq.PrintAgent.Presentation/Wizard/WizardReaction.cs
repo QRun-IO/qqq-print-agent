@@ -20,10 +20,10 @@ internal enum WizardReaction
    /// <summary>The service runs no connections because its stored data is not ready; the wizard ends on the Computer page, which says why.</summary>
    StoredDataNotReady,
 
-   /// <summary>An update is being installed; everything typed is kept and the operator tries again afterwards.</summary>
+   /// <summary>The service is prepared for an update, which may be running or may have stopped; everything typed is kept and the operator tries again later.</summary>
    UpdateInProgress,
 
-   /// <summary>Another program is making a change through the service; everything typed is kept and the operator tries again.</summary>
+   /// <summary>The service is carrying out another change and did not start this request; everything typed is kept and the operator tries again.</summary>
    Busy,
 
    /// <summary>A code the contract does not have this operation answer. The service's message is shown as for <see cref="ShowMessage"/>, and the log says that the code was not expected.</summary>
