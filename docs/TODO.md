@@ -48,6 +48,7 @@ Written on 2026-11-11. Five things wait for the owner; the detail of the second,
     - `resume-after-update` accepted through the peer check.
   - The service controls on the real service: a refresh that really reads again (audit W78), stop, wait and start through real pending states, "Unavailable" without elevation, and the Services console with its elevation prompt.
   - The Windows-layer suite run once elevated and once as SYSTEM or on the hosted runner: the token assertions, the administrator branch of `InstalledProductsStepsAreBoundToThisComputer`, the shell start without a desktop, and `mklink /J`.
+- [ ] Constraint on the service step that builds the version 2 pipe server: it needs a test that no version 2 request is ever answered outside the envelope, on any path: an exception in a handler, the operation's time limit, a refused or unreadable request, a full pipe. The companion's client reads any answer that is not JSON as an older service ([ADR-0005](adr/0005-connection-wizard-and-server-tree.md), "Resolved while reviewing the management client"), so text such as the version 1 loop's `Error: ...` after an operation acted would tell the operator to update the service. The same step supplies the version 2 send function, which has to keep the contract stated on `ManagementClient`'s constructor: which exceptions mean "not sent", which mean "outcome unknown", nothing else for what a pipe can do, and no request or reply text in any exception message.
 
 ## Released: 1.2.1 — 2026-11-06
 
