@@ -11,8 +11,10 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// by itself (and at its next start if it is stopped first), or finished. While it is in progress the server still answers
 /// reads, and every change to it is refused with <see cref="ManagementErrorCode.ServerRemoving"/>, except a repeated
 /// <see cref="ManagementOperations.ServersRemove"/>, which succeeds with <see cref="Removing"/> again so a client that
-/// retried after a timeout is told what is true (<see cref="ManagementOperationInfo.AnsweredWhileRemoving"/>). A client
-/// treats a state it does not know as still removing.
+/// retried after a timeout is told what is true (<see cref="ManagementOperationInfo.AnsweredWhileRemoving"/>). Once
+/// removal has finished the server no longer exists, so a <see cref="ManagementOperations.ServersRemove"/> repeated
+/// after that is answered <see cref="ManagementErrorCode.ServerNotFound"/>, which a client that retried reads as
+/// removed. A client treats a state it does not know as still removing.
 /// </summary>
 public sealed record ServerRemoveResult(string State)
 {

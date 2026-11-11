@@ -454,7 +454,7 @@ public sealed class ServiceLogTests : IDisposable
 
 
 
-   /// <summary>Clearing the ring empties what the companion is shown and nothing else; later lines are kept again.</summary>
+   /// <summary>Clearing the ring empties what the snapshot carries and nothing else; later lines are kept again.</summary>
    [Fact]
    public void ClearingTheRing_EmptiesItAndLaterLinesAreKept()
    {
@@ -488,7 +488,7 @@ public sealed class ServiceLogTests : IDisposable
 
    /// <summary>
    /// While debug logging is on, debug detail goes to the file only, marked as debug, redacted and cut at 4000 characters.
-   /// It never enters the ring or the host's sink, so it cannot displace the operational entries the companion shows.
+   /// It never enters the ring or the host's sink, so it cannot displace the operational entries the snapshot carries.
    /// </summary>
    [Fact]
    public void DebugDetail_GoesToTheFileOnly_RedactedAndCappedAtFourThousand()
@@ -703,7 +703,10 @@ public sealed class ServiceLogTests : IDisposable
    /// ring, so the second writer cannot enter the ring until the first has, and the earlier stamp is the earlier entry.
    /// Stamped before that lock, the second writer would finish during the reading and stand in the ring in front of an
    /// earlier stamp. The wait for the second writer is bounded, and with the stamp inside the lock it always runs out:
-   /// that the second writer could not finish is the thing being shown.
+   /// that the second writer could not finish is the thing being shown. It is a deliberate wait of 200 milliseconds of
+   /// real time for something that must not happen, the one kind of timed wait a test of an absence cannot avoid, and
+   /// it is counted with the other timed waits in the audit (W28). It cannot fail falsely: a slow machine only makes
+   /// the second writer later still.
    /// </summary>
    [Fact]
    public void RingOrder_IsTimestampOrder_WhenASecondWriterArrivesDuringTheFirstStamp()

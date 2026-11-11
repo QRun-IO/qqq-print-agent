@@ -412,7 +412,7 @@ public sealed class ManagementEnvelopeTests
 
 
 
-   /// <summary>Each way a reply's text can be unusable is told apart: text that is not JSON (which is what a version 1 service answers), a root that is not an object, no version, another version, a reply that lacks what its ok promises, and one longer than the limit.</summary>
+   /// <summary>Each way a reply's text can be unusable is told apart: text that is not JSON (which is what a version 1 service answers), a root that is not an object, no version, another version, a reply that lacks what its ok promises, one longer than the limit, and one in which any object has the same member twice (in the envelope, in the result, in the error or in its details, or under a name written with an escape), which is refused whole as a request is.</summary>
    [Theory]
    [InlineData(null, ManagementEnvelopeProblem.NotJson)]
    [InlineData("", ManagementEnvelopeProblem.NotJson)]
@@ -437,6 +437,12 @@ public sealed class ManagementEnvelopeTests
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":7,\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.ReplyIncomplete)]
    [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"message\":null}}", ManagementEnvelopeProblem.ReplyIncomplete)]
+   [InlineData("{\"v\":2,\"ok\":true,\"ok\":true,\"result\":{}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"v\":3,\"ok\":true,\"result\":{}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":true,\"result\":{\"ready\":true,\"jobsInHand\":0,\"jobsInHand\":5,\"claimPending\":false}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"busy\",\"code\":\"internal_error\",\"message\":\"Busy.\"}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"cancel_refused\",\"message\":\"Refused.\",\"details\":{\"reason\":\"documentGone\",\"reason\":\"ownershipMismatch\"}}}", ManagementEnvelopeProblem.RepeatedMember)]
+   [InlineData("{\"v\":2,\"ok\":true,\"\\u006fk\":false,\"result\":{}}", ManagementEnvelopeProblem.RepeatedMember)]
    public void Reply_ThatIsUnusable_IsToldApart(string? text, ManagementEnvelopeProblem problem)
    {
       ManagementReplyParse parse = ManagementJson.ParseReply(text);
@@ -671,6 +677,54 @@ public sealed class ManagementEnvelopeTests
       Assert.True(ManagementJson.TryReadResult(Result("{\"stages\":[{\"stage\":\"connection\",\"outcome\":\"failed\",\"problems\":[],\"addedLater\":[null]}],\"signInMethods\":[]}"), out ServerCheckResult? nested));
       Assert.Empty(Assert.Single(nested.Stages).Problems);
       Assert.False(ManagementJson.TryReadArguments(Request("{\"serverIds\":[],\"addedLater\":[null]}"), out ServersReorderArgs? _));
+   }
+
+
+
+   /// <summary>
+   /// The rule against a null inside a list holds wherever a list can stand in a record, not only directly in a member
+   /// or inside another record: in the values of a dictionary, where a null value is refused as a null item is, and
+   /// inside a value type that may be null. No record of the contract has either today, so the records here are the
+   /// test's own. A dictionary and a value type without a null in them are read, and a value type that is null or
+   /// absent is still allowed where the member may be null.
+   /// </summary>
+   [Fact]
+   public void ListsWithANullItem_AreRefusedInsideADictionaryAndInsideANullableValueType()
+   {
+      Assert.True(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":[\"x\"],\"b\":[]}}"), out DictionaryRecord? lists));
+      Assert.Equal(["x"], lists.Lists["a"]);
+      Assert.False(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":[null]}}"), out DictionaryRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":[\"x\"],\"b\":[\"y\",null]}}"), out DictionaryRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"lists\":{\"a\":null}}"), out DictionaryRecord? _));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"lists\":{\"a\":[null]}}"), out DictionaryRecord? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"maybe\":{\"items\":[\"x\"]}}"), out NullableValueRecord? held));
+      Assert.Equal(["x"], held.Maybe!.Value.Items);
+      Assert.False(ManagementJson.TryReadResult(Result("{\"maybe\":{\"items\":[null]}}"), out NullableValueRecord? _));
+      Assert.False(ManagementJson.TryReadResult(Result("{\"maybe\":{\"items\":[\"x\",null]}}"), out NullableValueRecord? _));
+      Assert.False(ManagementJson.TryReadArguments(Request("{\"maybe\":{\"items\":[null]}}"), out NullableValueRecord? _));
+      Assert.True(ManagementJson.TryReadResult(Result("{\"maybe\":null}"), out NullableValueRecord? none));
+      Assert.Null(none.Maybe);
+      Assert.True(ManagementJson.TryReadResult(Result("{}"), out NullableValueRecord? absent));
+      Assert.Null(absent.Maybe);
+   }
+
+
+
+   /// <summary>
+   /// A payload is a JSON object however it is made. A value that is not written as one (a list, an array, text) is
+   /// refused when a reply or a request is built from it, instead of producing a reply its client reports as
+   /// incomplete; a record is still written.
+   /// </summary>
+   [Fact]
+   public void Payload_BuiltFromAValueThatIsNotAnObject_IsRefused()
+   {
+      Assert.Throws<ArgumentException>(() => ManagementReply.Success(new List<string> { "a" }));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Success(new[] { 1, 2 }));
+      Assert.Throws<ArgumentException>(() => ManagementPayload.From("text"));
+      Assert.Throws<ArgumentException>(() => ManagementRequest.For(ManagementOperations.ServersReorder, null, new[] { Server }));
+      Assert.Throws<ArgumentException>(() => ManagementPayload.From<NoResult>(null!));
+      Assert.True(ManagementPayload.From(new NoResult()).IsEmpty());
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{}}", ManagementJson.Write(ManagementReply.Success(new NoResult())));
    }
 
 
@@ -1068,6 +1122,21 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>A JSON object as the payload an envelope carries. It is parsed the lenient way on purpose, so a test can hand the typed readers something the envelope parser would have refused.</summary>
    private static ManagementPayload Payload(string json) => ManagementPayload.FromElement(JsonDocument.Parse(json).RootElement);
+
+
+
+   /// <summary>A record with a dictionary of lists, which no record of the contract has, for the test of the walk that looks for a null inside a list.</summary>
+   private sealed record DictionaryRecord(IReadOnlyDictionary<string, IReadOnlyList<string>> Lists);
+
+
+
+   /// <summary>A record with a value type that may be null and holds a list, which no record of the contract has, for the same test.</summary>
+   private sealed record NullableValueRecord(Holder? Maybe);
+
+
+
+   /// <summary>The value type inside <see cref="NullableValueRecord"/>.</summary>
+   private readonly record struct Holder(IReadOnlyList<string> Items);
 
 
 

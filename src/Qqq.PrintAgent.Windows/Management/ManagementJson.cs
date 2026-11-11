@@ -389,14 +389,18 @@ public static class ManagementJson
    /// True when a list the type knows, at any depth, has a null among its items. The element is walked beside the
    /// type the serializer will read it into, so only members of the record are looked at: a member this version does
    /// not know is skipped whole, as the serializer skips it, and what a later version puts in it (a list with a null
-   /// included) cannot make today's reader refuse the reply.
+   /// included) cannot make today's reader refuse the reply. The walk goes wherever a list can stand: through a
+   /// record's members, a list's items, the values of a dictionary (which are held to the same rule as a list's
+   /// items) and a value type that may be null. No record of the contract has a dictionary or such a value type
+   /// today; the walk follows them so that one added later is not a way around the rule.
    /// </summary>
    private static bool HasNullInAKnownList(JsonElement element, Type type, JsonSerializerOptions options)
    {
-      JsonTypeInfo known = options.GetTypeInfo(type);
+      JsonTypeInfo known = options.GetTypeInfo(Nullable.GetUnderlyingType(type) ?? type);
       return (known.Kind, element.ValueKind) switch
       {
          (JsonTypeInfoKind.Enumerable, JsonValueKind.Array) => element.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.Null || HasNullInAKnownList(item, known.ElementType!, options)),
+         (JsonTypeInfoKind.Dictionary, JsonValueKind.Object) => element.EnumerateObject().Any(entry => entry.Value.ValueKind == JsonValueKind.Null || HasNullInAKnownList(entry.Value, known.ElementType!, options)),
          (JsonTypeInfoKind.Object, JsonValueKind.Object) => element.EnumerateObject().Any(member => MemberType(known, member.Name) is { } memberType && HasNullInAKnownList(member.Value, memberType, options)),
          _ => false,
       };

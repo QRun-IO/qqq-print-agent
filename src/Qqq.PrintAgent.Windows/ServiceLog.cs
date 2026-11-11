@@ -11,8 +11,10 @@ namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
 /// The service's own log: one place that redacts, bounds and routes every line the service writes. A line goes to the
-/// in-memory ring the companion shows (the newest 100 operational entries), to the shared activity log file with the
-/// "[Service]" marker, and to the host's sink. Debug detail goes to the file only, and only while debug logging is on.
+/// in-memory ring (the newest 100 operational entries), to the shared activity log file with the "[Service]" marker,
+/// and to the host's sink. The ring is what version 1 of the pipe carries in its snapshot, which the command line
+/// prints; the companion does not show it (its Logs page reads the activity log file), and ADR-0004 removes the ring
+/// with version 1. Debug detail goes to the file only, and only while debug logging is on.
 /// It is a type of its own, not part of the runtime, because it belongs to the computer and not to one server
 /// connection: a connection is given a view of it through <see cref="ForServer"/> that puts that server's short
 /// identifier in front of each line and otherwise behaves exactly the same.
@@ -67,7 +69,7 @@ internal sealed class ServiceLog
 
 
    /// <summary>
-   /// Records a service message in the in-memory ring shown to the companion (newest 100) and in the shared activity log.
+   /// Records a service message in the in-memory ring (newest 100) and in the shared activity log.
    /// The text is redacted first and capped at 1000 characters (4000 for debug detail), so credentials and document content
    /// cannot reach either sink. DEBUG entries go only to the file, only while debug logging is on, and never displace the
    /// ring's operational entries. A level other than ERROR, WARN or DEBUG is written to the file as information and kept
@@ -124,12 +126,12 @@ internal sealed class ServiceLog
 
 
 
-   /// <summary>A copy of the ring, oldest entry first, for the snapshot the companion reads.</summary>
+   /// <summary>A copy of the ring, oldest entry first, for the version 1 snapshot.</summary>
    internal AgentLogEntry[] Entries() => _sinks.Entries();
 
 
 
-   /// <summary>Empties the ring, which is what clearing the logs does to the entries the companion shows; the files are cleared by the caller.</summary>
+   /// <summary>Empties the ring, which is what clearing the logs does to the entries the snapshot carries; the files are cleared by the caller.</summary>
    internal void ClearEntries() => _sinks.Forget();
 
 
