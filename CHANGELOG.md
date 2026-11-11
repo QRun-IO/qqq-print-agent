@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+Every control in the companion that an operator acts on now has an automation identifier, and the identifiers are
+recorded (2.0). Nothing an operator sees or hears changes. Fourteen controls that had no identifier were given one:
+the navigation pane (`Navigation`) and the Settings page's support link (`SupportLink`), which get the names Windows
+already reported for them; the empty Printers page's "Connection settings" button (`PrintersConnectionSettings`);
+on the Settings page "Windows Services" (`WindowsServices`), "Get the installer" (`GetInstaller`) and "Exit
+companion" (`ExitCompanion`); a printer row's share checkbox (`SharePrinter`) and its "Windows diagnostics" expander
+(`PrinterDiagnostics`); a job row's event history expander (`JobEventHistory`); the About dialog's "Contact support"
+link (`AboutSupportLink`); and the four controls of the Log settings dialog (`LogRetentionDays`,
+`LogMaxFileMegabytes`, `LogSegmentsPerDay`, `LogDebugLogging`). The 107 identifiers that existed keep their
+spelling. The tray icon's menu has none, because Windows draws it as a native menu.
+
+A new test in the presentation suite, `XamlContractTests`, reads the companion's markup and code-behind as text and
+fails when a control an operator acts on has no identifier; when the identifiers differ from
+`tests/Qqq.PrintAgent.Presentation.Tests/Views/automation-ids.txt`, so that a renamed or removed identifier is a
+changed line in a reviewed file; when a view stops setting an identifier or an element name that the UI tests or
+the layout harness look up (`interactive-test-ids.txt` beside it records the 68 identifiers they use); or when a
+text that reports status loses its live-region declaration. It is the baseline for the tree and the wizard of
+[ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md), which rewrite these views.
+
+No live region was added. The footer's status line, the main window's message bar and the two update texts already
+declare one. The connection dialog's message bar is left as it is: WinUI announces a message bar itself when it
+opens, and this one repeats the main window's message, so a live region on it would say the same result twice.
+Screen readers therefore announce what they announced before.
+
 The connection wizard's frame and its Server step exist in the presentation assembly (2.0;
 [ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md)). The window does not use them yet: it still shows
 the connection dialog, so nothing an operator sees changes. The steps after the first (sign in, pair, printers,
