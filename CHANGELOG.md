@@ -15,22 +15,32 @@ done) are not built; the frame knows them and shows nothing for them.
   proposal for the address until one is typed; a name that breaks the name rule disables Next and says which part
   of the rule it breaks. A check is one request to the service. Its result shows the five stages in order, each
   passed, failed with its reasons, or not reached; the sign-in methods; or that the address is already a server,
-  with a way to open it. A check that was not answered says so and can be repeated; a second check while one
-  runs is refused out loud; Cancel during a check stops waiting. Editing the address removes the result.
+  with a way to open it. A stage shows at most five reasons and then says how many more there are, and a stage
+  the service reported twice shows the worse outcome. A check that was not answered says so and can be repeated;
+  a second check while one runs is refused out loud; Cancel during a check stops waiting. Editing the address
+  removes the result, and a check is only ever sent for the address that is in the box. A check that passes
+  while the typed name breaks the name rule says what is wrong with the name and does not point at Next. Back
+  from the next step says the result again.
 - **A refused certificate.** The certificate is shown with the address that presented it, its subject, issuer,
-  validity, fingerprint and why Windows refused it, and the lasting fix is named. The development-only exception
-  is offered only when the reasons include an authority Windows does not trust. Its warning names the server's
-  address and says that the sign-in provider's address follows after the check, or names both when the provider
-  is already known; the re-check shows every address the exception covers before Next can be used. An acceptance
-  is for one check: a check under it that does not pass, an edit of the address and declining all forget it.
-  Nothing is stored by this step.
+  validity, fingerprint and why Windows refused it. For each reason the step says what can be done: installing
+  the issuing authority's root certificate is named only for an authority Windows does not trust; for a
+  certificate issued for another name, for no certificate and for a reason this version does not know, the
+  operator is sent to the address or to the server's administrator. The development-only exception is offered
+  only when the reasons include an authority Windows does not trust. Its warning names the server's address and
+  says that the sign-in provider's address follows after the check, or names both when the provider is already
+  known; the re-check shows every address the exception covers before Next can be used. An acceptance is for
+  one check: a check under it that does not pass, an edit of the address and declining all forget it, and
+  nothing a warning said is remembered for a later check. A sign-in provider is shown, and can be accepted, only
+  when the contract takes it for an origin: the wizard reads it with the contract's own rule
+  (`SignInProviderOrigin.TryRead`, now public), so an address no request could state, such as an IPv6 literal
+  with a zone, is never shown with part of it dropped. Nothing is stored by this step.
 - **Every refusal has a reaction.** One table says what the wizard does with each code of the contract for a
   check, and a test walks the contract's own list, so a code added later fails the build until the wizard has a
   reaction to it.
 - **Said once.** A result is announced once, after the stages and the buttons are in place. `Announcement` (a
-  text and one event per thing said) and `OperationGate` (one command at a time per server, for the computer and
-  for the wizard; a second command is refused with a sentence, never dropped or queued) were added for this and
-  for the server tree.
+  text and one event per thing said, which carries its sentence) and `OperationGate` (one command at a time per
+  server, for the computer and for the wizard; a second command is refused with a sentence, never dropped or
+  queued) were added for this and for the server tree.
 - **Text from the service.** A stage's reasons and a certificate's subject, issuer and fingerprint are shown in
   the contract's printable form, which the contract now lets a client apply (`ManagementText.Bounded`). The
   wizard holds no password, enrollment code or credential, and its log entries name the server only by the origin
