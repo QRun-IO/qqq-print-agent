@@ -89,7 +89,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
             throw new InvalidOperationException(PreparationNotCompleted(response));
          }
          cancellationToken.ThrowIfCancellationRequested();
-         MsiUpdateInstaller.StartHelper(request);
+         MsiUpdateInstaller.Installed.StartHelper(request);
          handedOff = true;
          log.Info("[Companion] Verified update handed to Windows Installer; closing the companion.");
          exitApplication();
@@ -122,10 +122,10 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
    /// </summary>
    private async Task<string> StageAsync(MsiRelease release, IProgress<int>? progress, CancellationToken token)
    {
-      string staging = Path.Combine(MsiUpdateInstaller.UpdatesDirectory, Guid.NewGuid().ToString("N"));
-      MsiUpdateInstaller.ValidateStagingDirectory(staging);
+      string staging = Path.Combine(MsiUpdateInstaller.Installed.UpdatesDirectory, Guid.NewGuid().ToString("N"));
+      MsiUpdateInstaller.Installed.ValidateStagingDirectory(staging);
       Directory.CreateDirectory(staging);
-      MsiUpdateInstaller.ValidateStagingDirectory(staging);
+      MsiUpdateInstaller.Installed.ValidateStagingDirectory(staging);
       StatusChanged?.Invoke(this, new UpdateStatusEventArgs("Downloading the update…"));
       IProgress<double> downloadProgress = new Progress<double>(value =>
       {
@@ -137,7 +137,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
       {
          string package = await _releases.DownloadVerifiedAsync(release, CurrentVersion ?? "", staging, downloadProgress, token).ConfigureAwait(false);
          StatusChanged?.Invoke(this, new UpdateStatusEventArgs("Update verified. Preparing Windows Installer…"));
-         return await Task.Run(() => MsiUpdateInstaller.PrepareHelper(package, release.Version, Environment.ProcessId), token).ConfigureAwait(false);
+         return await Task.Run(() => MsiUpdateInstaller.Installed.PrepareHelper(package, release.Version, Environment.ProcessId), token).ConfigureAwait(false);
       }
       catch
       {
@@ -157,7 +157,7 @@ public sealed class MsiUpdateService(Action exitApplication, IActivityLog log, s
    {
       try
       {
-         MsiUpdateInstaller.ValidateStagingDirectory(directory);
+         MsiUpdateInstaller.Installed.ValidateStagingDirectory(directory);
          Stack<string> pending = new();
          pending.Push(directory);
          while(pending.TryPop(out string? current))
