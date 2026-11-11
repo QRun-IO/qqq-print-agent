@@ -36,6 +36,11 @@ public sealed class WindowsPipePeerFactsTests
 
 
 
+   /// <summary>The code the harmless child program exits with when it is told to connect to a pipe that is not one of these tests' own.</summary>
+   private const int RefusedPipe = 64;
+
+
+
    /// <summary>How long a child that is expected to finish may take; generous, because the test machine may be busy.</summary>
    private static readonly TimeSpan Generous = TimeSpan.FromSeconds(60);
 
@@ -83,6 +88,37 @@ public sealed class WindowsPipePeerFactsTests
          Assert.NotEqual(Environment.ProcessId, client.Id);
          Assert.False(client.HasExited);
          Assert.Equal(checked((uint)Environment.ProcessId), new WindowsPipePeerFacts().ServerProcessId(server.SafePipeHandle));
+      }
+      finally
+      {
+         client.Kill();
+      }
+   }
+
+
+
+   /// <summary>
+   /// The harmless child program connects only to a pipe of these tests, whose name begins as theirs do and goes on
+   /// with letters and digits. Told any other name it connects to nothing, says why and ends with its refusal code:
+   /// a name that begins otherwise, and a name that begins as the tests' do and then leaves that beginning by a
+   /// separator and two dots, which Windows reads as the name behind them. No pipe has any of these names, and none
+   /// is the print service's; a child that did not refuse would wait a minute for the pipe and fail this test.
+   /// </summary>
+   [Theory]
+   [InlineData("qqq-other-facts-")]
+   [InlineData(@"qqq-peer-facts-x\..\qqq-other-facts-")]
+   [InlineData("qqq-peer-facts-x/../qqq-other-facts-")]
+   public async Task StandInRefusesToConnectToAPipeThatIsNotOneOfTheTests(string beginning)
+   {
+      string name = beginning + Guid.NewGuid().ToString("N");
+      using Process client = Process.Start(new ProcessStartInfo(StandIn, ["--stand-in", "connect", name]) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true })!;
+      try
+      {
+         using CancellationTokenSource patience = new(Generous);
+         string said = await client.StandardError.ReadToEndAsync(patience.Token);
+         await client.WaitForExitAsync(patience.Token);
+         Assert.Equal(RefusedPipe, client.ExitCode);
+         Assert.StartsWith("Refused: ", said, StringComparison.Ordinal);
       }
       finally
       {

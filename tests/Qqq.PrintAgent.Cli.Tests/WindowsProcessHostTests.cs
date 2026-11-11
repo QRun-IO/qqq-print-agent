@@ -199,8 +199,10 @@ public sealed class WindowsProcessHostTests
    /// <summary>
    /// Ends the stand-in a test started through the adapter, if it still runs, so that a test that fails before it has
    /// learned the child's id does not leave the child waiting forever. The adapter's handle does not tell the id, so
-   /// the child is recognized as the process that runs the stand-in's program and started at the very moment the
-   /// handle reports; no other process is touched.
+   /// the child is recognized as the process that started at the very moment the handle reports and runs the
+   /// stand-in's program from the file beside these tests; no other process is touched. A stand-in of the same name
+   /// built in another folder, which another checkout's tests may be running at the same time, is a different file
+   /// and is left alone.
    /// </summary>
    private static void EndStandIn(IRunningProcess? started)
    {
@@ -212,7 +214,7 @@ public sealed class WindowsProcessHostTests
          {
             try
             {
-               if(candidate.StartTime.ToUniversalTime().Ticks == started.StartTicks)
+               if(candidate.StartTime.ToUniversalTime().Ticks == started.StartTicks && string.Equals(candidate.MainModule?.FileName, StandIn, StringComparison.OrdinalIgnoreCase))
                { candidate.Kill(); }
             }
             catch(Exception exception) when(exception is InvalidOperationException or Win32Exception)
