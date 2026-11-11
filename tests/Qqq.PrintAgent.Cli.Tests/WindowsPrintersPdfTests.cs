@@ -120,14 +120,15 @@ public sealed class WindowsPrintersPdfTests
 
    /// <summary>
    /// The rendered bitmap is bounded whatever the document says: at most 150 dpi equivalent, at most 5,000 pixels on the
-   /// long side, and never less than one pixel. The bitmap is drawn with the size the renderer reports, not the size asked.
+   /// long side, and never less than one pixel (the second page here would be 0.78 of a pixel). The bitmap is drawn with
+   /// the size the renderer reports, not the size asked.
    /// </summary>
    [Fact]
    public async Task RenderedBitmapIsBoundedAndDrawnAtItsReportedSize()
    {
       (WindowsPrinters printers, FakeWindowsPrinting windows, FakePdfRenderer pdf, _) = Setup();
       pdf.Pages[0] = (8192, 4096);
-      pdf.Pages.Add((0.1, 0.1));
+      pdf.Pages.Add((0.5, 0.5));
       pdf.ReportedSize = (601, 899);
       using StagedDocument staged = new(Content);
 
@@ -137,8 +138,96 @@ public sealed class WindowsPrintersPdfTests
       Assert.Equal(
       [
          "StretchDIBits(0xd01, 0, 0, 25600, 12800, 0, 0, 601, 899, 4 bytes, 601x-899 planes 1 bits 32, 0, 0xcc0020)",
-         "StretchDIBits(0xd01, 0, 0, 0, 0, 0, 0, 601, 899, 4 bytes, 601x-899 planes 1 bits 32, 0, 0xcc0020)",
+         "StretchDIBits(0xd01, 0, 0, 1, 1, 0, 0, 601, 899, 4 bytes, 601x-899 planes 1 bits 32, 0, 0xcc0020)",
       ], windows.Calls.Where(call => call.StartsWith("StretchDIBits", StringComparison.Ordinal)), StringComparer.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// A page too small to cover one device pixel (a hundredth of an inch square at 300 dpi comes to 0.3 of a pixel) is
+   /// still sent to GDI, with a destination that has no width and no height. The fake answers 0 for such a destination,
+   /// which is what StretchDIBits is documented to return when it copies no row, and the rules take 0 as a failure: the
+   /// job fails with a Windows error, the document that was started is aborted and nothing stays queued. The code of that
+   /// error is whatever StretchDIBits left behind and is not asserted, because the fake arranges none.
+   /// </summary>
+   [Fact]
+   public async Task PageSmallerThanOneDevicePixelFailsTheJobAndAbortsTheDocument()
+   {
+      (WindowsPrinters printers, FakeWindowsPrinting windows, FakePdfRenderer pdf, _) = Setup();
+      pdf.Pages[0] = (0.1, 0.1);
+      using StagedDocument staged = new(Content);
+
+      await Assert.ThrowsAsync<Win32Exception>(() => printers.PrintFileAsync(staged.Job(PrinterId, "PDF"), staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None));
+
+      Assert.Equal(
+      [
+         "StartPage(0xd01)", "SetStretchBltMode(0xd01, 4)", "StretchDIBits(0xd01, 0, 0, 0, 0, 0, 0, 1, 1, 4 bytes, 1x-1 planes 1 bits 32, 0, 0xcc0020)",
+         "DisposePage(0)", "AbortDoc(0xd01)", "DeleteDC(0xd01)",
+      ], windows.Calls.TakeLast(6), StringComparer.Ordinal);
+      FakeGdiDocument document = Assert.Single(windows.GdiDocuments);
+      Assert.Equal((true, false, 1, 0), (document.Aborted, document.Ended, document.PagesStarted, document.PagesEnded));
+      Assert.Empty(document.Drawn);
+      Assert.Equal(0, windows.OpenContexts);
+   }
+
+
+
+   /// <summary>
+   /// A document the renderer loads with no pages in it is not refused. It is started and ended as one document that holds
+   /// no page, once, however many copies were asked for, and the job gets that document's receipt; nothing is drawn and
+   /// nothing is aborted. The service therefore records such a job as spooled.
+   /// </summary>
+   [Fact]
+   public async Task PdfWithoutPagesIsStartedAndEndedAsOneEmptyDocument()
+   {
+      (WindowsPrinters printers, FakeWindowsPrinting windows, FakePdfRenderer pdf, _) = Setup();
+      pdf.Pages.Clear();
+      using StagedDocument staged = new(Content);
+
+      string receipt = await printers.PrintFileAsync(staged.Job(PrinterId, "PDF", new PrintOptions(Copies: 2)), staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None);
+
+      Assert.Equal("7301", receipt);
+      Assert.Equal([.. Discovery, "LoadPdf", $"CreateDC(WINSPOOL, {Queue}, null)", "StartDoc(0xd01, QQQ job-1)", "EndDoc(0xd01)", "DeleteDC(0xd01)"], windows.Calls, StringComparer.Ordinal);
+      FakeGdiDocument document = Assert.Single(windows.GdiDocuments);
+      Assert.Equal((0, 0, true, false), (document.PagesStarted, document.PagesEnded, document.Ended, document.Aborted));
+      Assert.Equal(0, pdf.PagesTaken);
+      Assert.Equal(0, windows.OpenContexts);
+   }
+
+
+
+   /// <summary>
+   /// The renderer is handed the staged file from its first byte. The file has just been read to its end to check its
+   /// SHA-256, so it is put back to the start before it is handed over; the fake renderer reads the stream from where it
+   /// stands when it gets it, and what it reads is the whole file.
+   /// </summary>
+   [Fact]
+   public async Task RendererIsHandedTheStagedFileFromItsFirstByte()
+   {
+      (WindowsPrinters printers, _, FakePdfRenderer pdf, _) = Setup();
+      using StagedDocument staged = new(Content);
+      await printers.PrintFileAsync(staged.Job(PrinterId, "PDF"), staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None);
+      Assert.Equal(Content, pdf.Handed);
+   }
+
+
+
+   /// <summary>
+   /// Each axis of a page is sized with its own resolution. On a context that reports 203 dpi across and 300 dpi down, a
+   /// 4 by 6 inch page is drawn 812 pixels wide and 1,800 pixels high; with the two resolutions the wrong way round it
+   /// would be 1,200 by 1,218.
+   /// </summary>
+   [Fact]
+   public async Task PageIsSizedAcrossWithTheHorizontalResolutionAndDownWithTheVertical()
+   {
+      (WindowsPrinters printers, FakeWindowsPrinting windows, _, FakeQueue queue) = Setup();
+      _ = queue.WithContext(812, 1800, 203, 300);
+      using StagedDocument staged = new(Content);
+
+      await printers.PrintFileAsync(staged.Job(PrinterId, "PDF"), staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None);
+
+      Assert.Equal(Page("0xd01", 0, "600, 900", "0, 0, 812, 1800, 0, 0, 600, 900, 4 bytes, 600x-900 planes 1 bits 32"), windows.Calls.Skip(8).Take(11), StringComparer.Ordinal);
    }
 
 
@@ -272,6 +361,67 @@ public sealed class WindowsPrintersPdfTests
       }
       byte[] used = Assert.IsType<byte[]>(windows.ContextModes[^1]);
       Assert.Equal((256, 254, 1016), (SyntheticDevMode.Short(used, 78), SyntheticDevMode.Short(used, 80), SyntheticDevMode.Short(used, 82)));
+      Assert.Equal(0, windows.OpenContexts);
+   }
+
+
+
+   /// <summary>
+   /// The media check before StartDoc is made per axis. The selection is 4 by 6 inches at 203 dpi across and 300 dpi down,
+   /// taken from settings that state both resolutions, so the context is asked only at this check. A context that reports
+   /// 203 across, 300 down and a physical page of 812 by 1,800 pixels starts the document. A context that reports the same
+   /// two resolutions the other way round (with the page that would match them that way) is a mismatch and starts nothing.
+   /// </summary>
+   [Theory]
+   [InlineData(203, 300, 812, 1800, true)]
+   [InlineData(300, 203, 1200, 1218, false)]
+   public async Task SelectedMediaIsCheckedWithEachAxisAgainstItsOwnResolution(int dpiX, int dpiY, int widthPixels, int heightPixels, bool printed)
+   {
+      byte[] defaults = SyntheticDevMode.Label().WithFields(SyntheticDevMode.Orientation | SyntheticDevMode.PaperDimensions | SyntheticDevMode.Resolution).WithShort(90, 203).WithShort(96, 300);
+      (WindowsPrinters printers, FakeWindowsPrinting windows, _, FakeQueue queue) = Setup(defaults);
+      _ = queue.WithContext(widthPixels, heightPixels, dpiX, dpiY);
+      using StagedDocument staged = new(Content);
+      PrintJob job = staged.Job(PrinterId, "PDF", Selection(defaults, 203, 300));
+
+      if(printed)
+      {
+         Assert.Equal("7301", await printers.PrintFileAsync(job, staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None));
+         Assert.Equal(
+         [
+            $"CreateDC(WINSPOOL, {Queue}, 224 bytes)", "GetDeviceCaps(0xd01, 88)", "GetDeviceCaps(0xd01, 90)", "GetDeviceCaps(0xd01, 110)", "GetDeviceCaps(0xd01, 111)", "StartDoc(0xd01, QQQ job-1)",
+         ], windows.Calls.SkipWhile(call => !call.StartsWith("CreateDC", StringComparison.Ordinal)).Take(6), StringComparer.Ordinal);
+         Assert.Contains("StretchDIBits(0xd01, 0, 0, 812, 1800, 0, 0, 600, 900, 4 bytes, 600x-900 planes 1 bits 32, 0, 0xcc0020)", windows.Calls, StringComparer.Ordinal);
+         Assert.True(Assert.Single(windows.GdiDocuments).Ended);
+      }
+      else
+      {
+         PrinterMediaMismatchException refusal = await Assert.ThrowsAsync<PrinterMediaMismatchException>(() => printers.PrintFileAsync(job, staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None));
+         Assert.Equal("The printer device context does not match the selected media dimensions and resolution.", refusal.Message);
+         Assert.Equal([$"CreateDC(WINSPOOL, {Queue}, 224 bytes)", "GetDeviceCaps(0xd01, 88)", "GetDeviceCaps(0xd01, 90)", "DeleteDC(0xd01)"], windows.Calls.TakeLast(4), StringComparer.Ordinal);
+         Assert.Empty(windows.GdiDocuments);
+      }
+      Assert.Equal(0, windows.OpenContexts);
+   }
+
+
+
+   /// <summary>
+   /// Job paper is checked per axis as well: 101.6 by 25.4 mm on a context that reports 203 dpi across and 300 dpi down
+   /// must be a physical page of 812 by 300 pixels, and the page is then drawn at that size.
+   /// </summary>
+   [Fact]
+   public async Task JobPaperIsCheckedWithEachAxisAgainstItsOwnResolution()
+   {
+      (WindowsPrinters printers, FakeWindowsPrinting windows, FakePdfRenderer pdf, FakeQueue queue) = Setup(SyntheticDevMode.Label());
+      _ = queue.WithContext(812, 300, 203, 300);
+      pdf.Pages[0] = (384, 96);
+      using StagedDocument staged = new(Content);
+
+      string receipt = await printers.PrintFileAsync(staged.Job(PrinterId, "PDF", new PrintOptions(PaperWidthMm: 101.6, PaperHeightMm: 25.4)), staged.Path, Timeout.InfiniteTimeSpan, CancellationToken.None);
+
+      Assert.Equal("7301", receipt);
+      Assert.Contains("StretchDIBits(0xd02, 0, 0, 812, 300, 0, 0, 600, 150, 4 bytes, 600x-150 planes 1 bits 32, 0, 0xcc0020)", windows.Calls, StringComparer.Ordinal);
+      Assert.True(Assert.Single(windows.GdiDocuments).Ended);
       Assert.Equal(0, windows.OpenContexts);
    }
 
@@ -415,10 +565,10 @@ public sealed class WindowsPrintersPdfTests
 
 
 
-   /// <summary>Options that select the profile discovery reports for the test queue with the given machine defaults.</summary>
-   private static PrintOptions Selection(byte[] defaults)
+   /// <summary>Options that select the profile discovery reports for the test queue with the given machine defaults, at 300 dpi both ways unless a test says otherwise.</summary>
+   private static PrintOptions Selection(byte[] defaults, int dpiX = 300, int dpiY = 300)
    {
-      PrinterMediaProfile profile = WindowsPrinters.BuildMediaProfile(PrinterId, Driver, defaults, 101600, 152400, 300, 300)!;
+      PrinterMediaProfile profile = WindowsPrinters.BuildMediaProfile(PrinterId, Driver, defaults, 101600, 152400, dpiX, dpiY)!;
       return new PrintOptions(MediaProfile: new PrinterMediaSelection(profile.Id, profile.Revision));
    }
 

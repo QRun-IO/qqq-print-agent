@@ -9,10 +9,12 @@ using Windows.Storage.Streams;
 namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
-/// A PDF renderer that exists only in memory. It never reads the stream it is given: a "document" is the list of page
-/// sizes a test describes, and a rendered page is four marker bytes with the size that was asked for. Every load, page
-/// taken, render and page release is written to the call list it shares with <see cref="FakeWindowsPrinting"/>, so a test
-/// sees them in order with the Windows calls. Rendering finishes on another thread, as the real renderer does.
+/// A PDF renderer that exists only in memory. It does not interpret the stream it is given, but it reads it, from where
+/// it stood when it was handed over to its end, and keeps those bytes, so a test can see what the renderer was given.
+/// A "document" is the list of page sizes a test describes, and a rendered page is four marker bytes with the size that
+/// was asked for. Every load, page taken, render and page release is written to the call list it shares with
+/// <see cref="FakeWindowsPrinting"/>, so a test sees them in order with the Windows calls. Rendering finishes on another
+/// thread, as the real renderer does.
 /// </summary>
 internal sealed class FakePdfRenderer(List<string> calls) : IPdfRenderer
 {
@@ -51,11 +53,26 @@ internal sealed class FakePdfRenderer(List<string> calls) : IPdfRenderer
 
 
 
-   /// <summary>Hands out the described document without reading the stream, or fails the way a test asked.</summary>
-   public Task<IPdfDocument> LoadAsync(IRandomAccessStream stream, CancellationToken cancellationToken)
+   /// <summary>The bytes of the stream the renderer was last given, from the position it had when it was handed over to its end; null until a load was asked for.</summary>
+   internal byte[]? Handed { get; private set; }
+
+
+
+   /// <summary>
+   /// Reads the stream from where it stands to its end and keeps the bytes, then hands out the described document or fails
+   /// the way a test asked. The stream is left open; it belongs to the caller.
+   /// </summary>
+   public async Task<IPdfDocument> LoadAsync(IRandomAccessStream stream, CancellationToken cancellationToken)
    {
       Calls.Add("LoadPdf");
-      return LoadFailure is null ? Task.FromResult<IPdfDocument>(new Document(this)) : Task.FromException<IPdfDocument>(LoadFailure);
+      using MemoryStream handed = new();
+      await stream.AsStreamForRead().CopyToAsync(handed, cancellationToken);
+      Handed = handed.ToArray();
+      if(LoadFailure is not null)
+      {
+         throw LoadFailure;
+      }
+      return new Document(this);
    }
 
 

@@ -117,7 +117,11 @@ internal sealed partial class FakeWindowsPrinting
 
 
 
-   /// <summary>Keeps the bitmap that was drawn and returns the number of rows, as Windows does.</summary>
+   /// <summary>
+   /// Keeps the bitmap that was drawn and returns the number of rows, as Windows does. A destination with no width or no
+   /// height draws nothing and answers 0, which is how GDI reports that no row was copied; the fake arranges no Windows
+   /// error for that, so the last error is the marker the call began with.
+   /// </summary>
    public int StretchDIBits(IntPtr dc, int x, int y, int width, int height, int sourceX, int sourceY, int sourceWidth, int sourceHeight, byte[] bits, GdiBitmapHeader header, uint usage, uint operation)
    {
       StaleLastError.Leave();
@@ -125,6 +129,10 @@ internal sealed partial class FakeWindowsPrinting
       if(Failing("StretchDIBits", out int result))
       {
          return result;
+      }
+      if(width == 0 || height == 0)
+      {
+         return 0;
       }
       _openGdiDocuments[dc].Drawn.Add(bits.ToArray());
       return Math.Abs(header.Height);

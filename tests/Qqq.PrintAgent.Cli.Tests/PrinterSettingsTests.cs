@@ -52,6 +52,18 @@ public sealed class PrinterSettingsTests
 
 
 
+   /// <summary>The two resolutions a device context reports are kept apart: 203 dpi across and 300 dpi down become the profile's horizontal and vertical resolution, in that order.</summary>
+   [Fact]
+   public void ResolutionFromTheContextKeepsHorizontalAndVerticalApart()
+   {
+      (WindowsPrinters printers, _, FakeQueue queue) = Setup();
+      _ = queue.WithContext(812, 1800, 203, 300);
+      PrinterMediaProfile profile = Assert.IsType<PrinterMediaProfile>(printers.ReadQueueMedia(PrinterId, Queue, Driver, Port)?.Profile);
+      Assert.Equal((203, 300), (profile.DpiX, profile.DpiY));
+   }
+
+
+
    /// <summary>A positive explicit resolution in the settings is used as it is and no device context is created; a symbolic quality value (negative) is not a resolution, so the context is asked.</summary>
    [Fact]
    public void ExplicitResolutionNeedsNoContextButASymbolicQualityDoes()

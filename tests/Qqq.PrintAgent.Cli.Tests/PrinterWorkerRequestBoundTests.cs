@@ -70,7 +70,9 @@ public sealed class PrinterWorkerRequestBoundTests
 
    /// <summary>
    /// The request is the first line, whichever way the line ends (line feed, carriage return and line feed, a bare carriage
-   /// return, or the end of the input), and nothing after it is used: a helper carries out exactly one request.
+   /// return, or the end of the input), and nothing after it is used: a helper carries out exactly one request. The last
+   /// two cases are the ones that show a bare carriage return ends the line: were it only white space inside the line,
+   /// the text after it would be part of the request, which would then not be one JSON value and would be refused.
    /// </summary>
    [Theory]
    [InlineData("\n")]
@@ -79,6 +81,8 @@ public sealed class PrinterWorkerRequestBoundTests
    [InlineData("")]
    [InlineData("\n{\"operation\":\"cancel\"}\n")]
    [InlineData("\nnot a request at all")]
+   [InlineData("\r{\"operation\":\"cancel\"}\n")]
+   [InlineData("\rnot a request at all")]
    public async Task RequestIsTheFirstLineHoweverItEnds(string ending)
    {
       using StringReader input = new("{\"operation\":\"discover\"}" + ending);
