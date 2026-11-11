@@ -37,7 +37,7 @@ internal static class JournalSchema
    /// already at the version is ready. One at a higher version was written by a newer build and is left exactly as it is:
    /// it is not opened for writing, and the caller is told both versions. A negative version is one no build writes; such
    /// a journal is refused, because no step list says how to continue from it. Only a journal behind the version is
-   /// migrated. The step list is a parameter so that a test can add a step of its own.
+   /// opened for writing and migrated. The step list is a parameter so that a test can add a step of its own.
    /// </summary>
    internal static StateStatus Migrate(string directory, IReadOnlyList<Action<JournalMigrationContext>> steps)
    {
@@ -46,21 +46,28 @@ internal static class JournalSchema
       _ = Directory.CreateDirectory(folder);
       lock(JournalDatabase.LockFor(folder))
       {
-         int found = JournalDatabase.ReadVersion(folder);
-         if(found < 0)
-         {
-            throw new InvalidDataException("The print journal carries a schema version no version of this application writes; it was not changed.");
-         }
-         if(found > steps.Count)
-         {
-            return new StateStatus.NewerBuild(found, steps.Count);
-         }
-         if(found < steps.Count)
-         {
-            Apply(folder, steps, found);
-         }
-         return new StateStatus.Ready();
+         return Settled(JournalDatabase.ReadVersion(folder), steps.Count) ?? Apply(folder, steps);
       }
+   }
+
+
+
+   /// <summary>
+   /// What a journal at the version found is to a build that knows the given number of steps, when no step has to run:
+   /// ready at that number, a newer build's above it, and refused below zero. Null means the journal is behind and has
+   /// steps to run. Both readings of the version, the read-only one and the one inside the transaction, are judged here.
+   /// </summary>
+   private static StateStatus? Settled(int found, int supported)
+   {
+      if(found < 0)
+      {
+         throw new InvalidDataException("The print journal carries a schema version no version of this application writes; it was not changed.");
+      }
+      if(found > supported)
+      {
+         return new StateStatus.NewerBuild(found, supported);
+      }
+      return found == supported ? new StateStatus.Ready() : null;
    }
 
 
@@ -103,16 +110,28 @@ internal static class JournalSchema
    /// it was and the next start tries again. The connection is not pooled: it is closed, and the file released, the
    /// moment the migration ends. Write-ahead logging is switched on before the transaction because SQLite cannot change
    /// the journal mode inside one; it is a property of the file, set once here for every later connection.
+   /// <para>
+   /// The transaction takes SQLite's write lock when it begins, and the version is read again under that lock. That
+   /// reading, not the caller's earlier one, decides which steps run. The journal's lock keeps the callers of this
+   /// process apart; a second process does not hold it, and could have migrated the journal between the caller's reading
+   /// and this transaction. The steps it ran are then not run a second time, and when it left a version above this
+   /// build's, the journal is reported as a newer build's and nothing is written to it.
+   /// </para>
    /// </summary>
-   private static void Apply(string folder, IReadOnlyList<Action<JournalMigrationContext>> steps, int found)
+   private static StateStatus Apply(string folder, IReadOnlyList<Action<JournalMigrationContext>> steps)
    {
       using SqliteConnection connection = JournalDatabase.OpenUnpooled(folder);
       using SqliteCommand command = connection.CreateCommand();
       command.CommandText = "PRAGMA journal_mode=WAL";
       _ = command.ExecuteScalar();
-      using SqliteTransaction transaction = connection.BeginTransaction();
+      using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
       command.Transaction = transaction;
       JournalMigrationContext context = new(command, folder);
+      int found = Convert.ToInt32(context.Scalar("PRAGMA user_version"), CultureInfo.InvariantCulture);
+      if(Settled(found, steps.Count) is StateStatus settled)
+      {
+         return settled;
+      }
       for(int step = found; step < steps.Count; step++)
       {
          steps[step](context);
@@ -123,5 +142,6 @@ internal static class JournalSchema
       /////////////////////////////////////////////////////////////////////
       context.Execute("PRAGMA user_version=" + steps.Count.ToString(CultureInfo.InvariantCulture));
       transaction.Commit();
+      return new StateStatus.Ready();
    }
 }

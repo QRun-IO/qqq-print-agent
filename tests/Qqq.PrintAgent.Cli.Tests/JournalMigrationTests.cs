@@ -546,6 +546,55 @@ public sealed class JournalMigrationTests
 
 
    /// <summary>
+   /// The version is read twice: first without opening the journal for writing, and again inside the migration's
+   /// transaction, under SQLite's write lock. The second reading decides which steps run. Inside one process the
+   /// journal's lock makes the two agree; a second process holds no such lock and could migrate the journal between
+   /// them. Here that happens. The list of steps given to the migration acts the first time it is asked for its length,
+   /// which is after the first reading and before the transaction, and what it does is migrate the journal through a
+   /// connection of its own, as that second process would. The migration then finds the journal at the current version
+   /// and runs no step. In the second folder the other process is a newer build, which leaves a table of its own and the
+   /// next version: the migration reports a newer build's journal, runs no step and leaves that version and that table.
+   /// </summary>
+   [Fact]
+   public void Migrate_JournalMigratedByAnotherProcessAfterTheFirstReading_RunsNoStep()
+   {
+      string root = NewFolder();
+      try
+      {
+         string same = new LegacyStateBuilder(Path.Combine(root, "same")).WithJournal(LegacyStateBuilder.JournalOldest).DirectoryPath;
+         string newer = new LegacyStateBuilder(Path.Combine(root, "newer")).WithJournal(LegacyStateBuilder.JournalOldest).DirectoryPath;
+         int runs = 0;
+         Action<JournalMigrationContext> counted = context =>
+         {
+            runs++;
+            TestState.MigrationSteps[0](context);
+         };
+         StepsThatActWhenCounted thisBuild = new([counted], () => Assert.IsType<StateStatus.Ready>(TestState.Migrate(same)));
+         StepsThatActWhenCounted newerBuild = new([counted], () =>
+         {
+            _ = TestState.Migrate(newer);
+            _ = new LegacyStateBuilder(newer).WithJournalSql("CREATE TABLE added_by_the_newer_build(value TEXT); PRAGMA user_version=2");
+         });
+
+         Assert.IsType<StateStatus.Ready>(TestState.Migrate(same, thisBuild));
+         Assert.Equal(new StateStatus.NewerBuild(FoundVersion: 2, SupportedVersion: 1), TestState.Migrate(newer, newerBuild));
+
+         Assert.True(thisBuild.Acted && newerBuild.Acted);
+         Assert.Equal(0, runs);
+         Assert.Equal(1, JournalProbe.Version(same));
+         Assert.Equal(3L, JournalProbe.Scalar(same, "SELECT COUNT(*) FROM local_jobs"));
+         Assert.Equal(2, JournalProbe.Version(newer));
+         Assert.Contains("added_by_the_newer_build", JournalProbe.Tables(newer), StringComparer.Ordinal);
+      }
+      finally
+      {
+         JournalFiles.Delete(root);
+      }
+   }
+
+
+
+   /// <summary>
    /// A journal whose version is below zero was not written by any build, and no list of steps says how to go on from
    /// there. The migration refuses it and leaves it alone, where counting on from a negative number would have run steps
    /// that do not exist.
@@ -661,6 +710,50 @@ public sealed class JournalMigrationTests
          failures[position] = exception;
       }
    });
+
+
+
+   /// <summary>
+   /// A list of migration steps that does something once, the first time it is asked how many steps it has. The migration
+   /// asks that only after it has read the journal's version for the first time, so this is how a test acts between that
+   /// reading and the migration's transaction, on the migrating thread and without waiting for anything.
+   /// </summary>
+   private sealed class StepsThatActWhenCounted(IReadOnlyList<Action<JournalMigrationContext>> steps, Action act) : IReadOnlyList<Action<JournalMigrationContext>>
+   {
+      /// <summary>True once the list has been asked for its length and has acted.</summary>
+      internal bool Acted { get; private set; }
+
+
+
+      /// <summary>The number of steps; the first call acts before it answers.</summary>
+      public int Count
+      {
+         get
+         {
+            if(!Acted)
+            {
+               Acted = true;
+               act();
+            }
+            return steps.Count;
+         }
+      }
+
+
+
+      /// <summary>The step at a position.</summary>
+      public Action<JournalMigrationContext> this[int index] => steps[index];
+
+
+
+      /// <summary>The steps in order.</summary>
+      public IEnumerator<Action<JournalMigrationContext>> GetEnumerator() => steps.GetEnumerator();
+
+
+
+      /// <summary>The steps in order, for a caller that does not name their type.</summary>
+      System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+   }
 
 
 
