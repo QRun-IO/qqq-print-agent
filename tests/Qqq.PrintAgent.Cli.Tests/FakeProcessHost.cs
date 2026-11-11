@@ -14,6 +14,9 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// rules themselves run as and what version each program file carries; every program the rules start is recorded and
 /// nothing is started. It fails the way Windows does where the rules depend on it: an id no process has cannot be
 /// opened, a program file that does not exist cannot be started, and a file that does not exist has no version to read.
+/// Whether a program file exists is read from the disk only for the files a test made in its temporary folders; the
+/// two programs of the Windows system folder the rules start are simply taken to exist, so that no test depends on
+/// what this computer has installed.
 /// </summary>
 internal sealed class FakeProcessHost : IProcessHost
 {
@@ -70,6 +73,19 @@ internal sealed class FakeProcessHost : IProcessHost
 
 
 
+   /// <summary>
+   /// The programs of the Windows system folder that exist on this computer in memory, whatever the real one has:
+   /// Windows Installer and the management console, which are the two the rules start from there. The disk is not
+   /// asked about them.
+   /// </summary>
+   internal HashSet<string> SystemPrograms { get; } = new(StringComparer.OrdinalIgnoreCase)
+   {
+      Path.Combine(Environment.SystemDirectory, "msiexec.exe"),
+      Path.Combine(Environment.SystemDirectory, "mmc.exe"),
+   };
+
+
+
    /// <summary>A process that has already ended with the given code.</summary>
    internal static FakeProcess Ended(string program, int code)
    {
@@ -105,11 +121,11 @@ internal sealed class FakeProcessHost : IProcessHost
 
 
 
-   /// <summary>Records the start and produces what the test chose; a program file that does not exist cannot be started, as on a real disk.</summary>
+   /// <summary>Records the start and produces what the test chose; a program file that does not exist cannot be started, as on a real disk. A system program exists when it is listed in <see cref="SystemPrograms"/>, and any other file when the test made it.</summary>
    public IRunningProcess? Start(ProcessStartInfo start)
    {
       Started.Add(start);
-      if(!File.Exists(start.FileName))
+      if(!SystemPrograms.Contains(start.FileName) && !File.Exists(start.FileName))
       { throw new Win32Exception(2, "Synthetic: the system cannot find the file specified."); }
       FakeProcess? process = OnStart(start);
       Produced.Add(process);

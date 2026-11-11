@@ -72,9 +72,10 @@ public sealed class WindowsProcessHostTests
          var host = new WindowsProcessHost();
          long before = DateTime.UtcNow.Ticks;
          using IRunningProcess started = Assert.IsAssignableFrom<IRunningProcess>(host.Start(Start("wait", announced)));
-         int id = await AnnouncedIdAsync(announced);
+         int id;
          try
          {
+            id = await AnnouncedIdAsync(announced);
             using IRunningProcess found = host.Open(id);
             Assert.False(found.HasExited);
             Assert.Equal(StandIn, found.ProgramPath, ignoreCase: true);
@@ -87,8 +88,7 @@ public sealed class WindowsProcessHostTests
          }
          finally
          {
-            using var process = Process.GetProcessById(id);
-            process.Kill();
+            EndStandIn(started);
          }
          using CancellationTokenSource patience = new(Generous);
          await started.WaitForExitAsync(patience.Token);
@@ -122,11 +122,18 @@ public sealed class WindowsProcessHostTests
             start.ArgumentList.Add(argument);
          }
          using IRunningProcess? started = new WindowsProcessHost().Start(start);
-         using var process = Process.GetProcessById(await AnnouncedIdAsync(announced));
-         process.Kill();
-         using CancellationTokenSource patience = new(Generous);
-         await process.WaitForExitAsync(patience.Token);
-         Assert.True(start.UseShellExecute);
+         try
+         {
+            using var process = Process.GetProcessById(await AnnouncedIdAsync(announced));
+            process.Kill();
+            using CancellationTokenSource patience = new(Generous);
+            await process.WaitForExitAsync(patience.Token);
+            Assert.True(start.UseShellExecute);
+         }
+         finally
+         {
+            EndStandIn(started);
+         }
       }
       finally
       {
@@ -185,6 +192,35 @@ public sealed class WindowsProcessHostTests
          start.ArgumentList.Add(argument);
       }
       return start;
+   }
+
+
+
+   /// <summary>
+   /// Ends the stand-in a test started through the adapter, if it still runs, so that a test that fails before it has
+   /// learned the child's id does not leave the child waiting forever. The adapter's handle does not tell the id, so
+   /// the child is recognized as the process that runs the stand-in's program and started at the very moment the
+   /// handle reports; no other process is touched.
+   /// </summary>
+   private static void EndStandIn(IRunningProcess? started)
+   {
+      if(started is null)
+      { return; }
+      foreach(Process candidate in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(StandIn)))
+      {
+         using(candidate)
+         {
+            try
+            {
+               if(candidate.StartTime.ToUniversalTime().Ticks == started.StartTicks)
+               { candidate.Kill(); }
+            }
+            catch(Exception exception) when(exception is InvalidOperationException or Win32Exception)
+            {
+               // That process ended meanwhile, or may not be looked at, and so is not the child this test is waiting on.
+            }
+         }
+      }
    }
 
 
