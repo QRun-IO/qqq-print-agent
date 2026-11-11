@@ -18,7 +18,8 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// caller's business. A password is passed straight to the session and never kept, and the credential is only ever a
 /// return value, never a property. One operation runs at a time; a second one is refused and logged. Everything it
 /// announces is raised on the thread that called it. Disposing it only cancels: the running operation ends itself,
-/// discards the session on its way out, and from then on nothing is announced.
+/// discards the session on its way out, and from then on nothing is announced, neither that a property changed nor
+/// that one is about to.
 /// </summary>
 public sealed partial class CompanionSignIn : ObservableObject, IDisposable
 {
@@ -323,6 +324,17 @@ public sealed partial class CompanionSignIn : ObservableObject, IDisposable
       if(!_disposed)
       {
          base.OnPropertyChanged(e);
+      }
+   }
+
+
+
+   /// <summary>Announces that a property is about to change, unless the sign-in was disposed, for the same reason: "nothing is announced after disposal" holds for both of the events a view can subscribe to.</summary>
+   protected override void OnPropertyChanging(PropertyChangingEventArgs e)
+   {
+      if(!_disposed)
+      {
+         base.OnPropertyChanging(e);
       }
    }
 

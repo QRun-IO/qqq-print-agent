@@ -220,6 +220,16 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
 
 
 
+   /// <summary>Records the name of every property a sign-in says is about to change from now on, in order: the other event a view can subscribe to.</summary>
+   internal static List<string> WatchChanging(CompanionSignIn signIn)
+   {
+      List<string> changing = [];
+      signIn.PropertyChanging += (_, change) => changing.Add(change.PropertyName!);
+      return changing;
+   }
+
+
+
    /// <summary>
    /// Awaits something that has to end by itself and fails the test, instead of hanging the run, when it does not. The
    /// limit is real time, but it only ever runs out when the code under test is broken; a passing test never waits for it.

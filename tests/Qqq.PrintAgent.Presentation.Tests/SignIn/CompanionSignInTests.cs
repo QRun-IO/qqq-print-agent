@@ -614,7 +614,8 @@ public sealed class CompanionSignInTests
    /// Disposing while the server checks a password only cancels. The session is not discarded under the running
    /// call, which would make the call end with "disposed": it ends with the cancellation, quietly, the session is
    /// discarded then, and from the moment of disposal nothing more is announced: a view that has closed is not
-   /// called back. Only a debug entry records the end.
+   /// called back, neither with a change nor with the notice that one is coming, although the session's offer is
+   /// withdrawn and the state settles as the operation ends. Only a debug entry records the end.
    /// </summary>
    [Fact]
    public async Task Dispose_OnlyCancels_NothingIsAnnouncedAfterwards()
@@ -623,14 +624,19 @@ public sealed class CompanionSignInTests
       CompanionSignIn signIn = await world.PasswordReadyAsync();
       world.Sessions[0].PendingPassword = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       List<string> changes = SignInWorld.Watch(signIn);
+      List<string> changing = SignInWorld.WatchChanging(signIn);
       Task<QqqSessionCredential?> running = signIn.SignInWithPasswordAsync("synthetic-operator", "synthetic-password");
       Assert.Equal(["IsBusy=True", "State=SigningIn"], changes);
+      Assert.Equal([nameof(CompanionSignIn.State)], changing);
 
       signIn.Dispose();
 
       Assert.Null(await SignInWorld.EndsAsync(running));
       Assert.True(world.Sessions[0].Disposed);
       Assert.Equal(["IsBusy=True", "State=SigningIn"], changes);
+      Assert.Equal([nameof(CompanionSignIn.State)], changing);
+      Assert.Null(signIn.Offer);
+      Assert.Equal(CompanionSignInState.NotPrepared, signIn.State);
       Assert.False(signIn.HasSession);
       Assert.False(signIn.IsBusy);
       Assert.Equal(["INFO Password sign-in submitted to print.example.com.", "DEBUG Password sign-in ended early because the sign-in was closed (TaskCanceledException)."], world.Log.Entries);
@@ -648,6 +654,7 @@ public sealed class CompanionSignInTests
       SignInWorld world = new();
       CompanionSignIn signIn = await world.PasswordReadyAsync();
       List<string> changes = SignInWorld.Watch(signIn);
+      List<string> changing = SignInWorld.WatchChanging(signIn);
 
       signIn.Dispose();
       signIn.Dispose();
@@ -655,6 +662,8 @@ public sealed class CompanionSignInTests
       signIn.CancelBrowserSignIn();
 
       Assert.True(world.Sessions[0].Disposed);
+      Assert.Null(signIn.Offer);
+      Assert.Empty(changing);
       Assert.Null(await signIn.PrepareAsync(new Uri(SignInWorld.Server), SignInWorld.PasswordCheck, QqqCertificateExceptionOrigins.None));
       Assert.Null(await signIn.SignInWithPasswordAsync("synthetic-operator", "synthetic-password"));
       Assert.Null(await signIn.SignInWithBrowserAsync());
