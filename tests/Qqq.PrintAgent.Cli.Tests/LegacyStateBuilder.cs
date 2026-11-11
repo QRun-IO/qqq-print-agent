@@ -52,8 +52,44 @@ internal sealed class LegacyStateBuilder
    /// </summary>
    internal LegacyStateBuilder WithJournal(string script)
    {
-      return WithJournalSql(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", script)));
+      return WithJournalSql(Script(script));
    }
+
+
+
+   /// <summary>
+   /// Makes the journal as a service that was killed leaves it: everything the script wrote is in the write-ahead log,
+   /// and the journal file itself holds none of it. The script runs in a folder beside this one, and the journal and its
+   /// log are copied here while the connection that wrote them is still open, which is what is on disk when a process
+   /// never closes them. The index file is not copied: SQLite discards an index that no process has open and builds it
+   /// again from the log. The folder beside this one is removed.
+   /// </summary>
+   internal LegacyStateBuilder WithJournalLeftByAKill(string script)
+   {
+      string live = DirectoryPath + "-live";
+      _ = Directory.CreateDirectory(live);
+      try
+      {
+         using SqliteConnection journal = TestState.OpenJournal(live);
+         using SqliteCommand command = journal.CreateCommand();
+         command.CommandText = Script(script);
+         _ = command.ExecuteNonQuery();
+         foreach(string file in (string[])["journal.db", "journal.db-wal"])
+         {
+            File.WriteAllBytes(Path.Combine(DirectoryPath, file), JournalProbe.ReadShared(Path.Combine(live, file)));
+         }
+      }
+      finally
+      {
+         Directory.Delete(live, recursive: true);
+      }
+      return this;
+   }
+
+
+
+   /// <summary>The text of a fixture script: the statements an earlier release ran, for a test that needs some of them by themselves.</summary>
+   internal static string Script(string script) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", script));
 
 
 
