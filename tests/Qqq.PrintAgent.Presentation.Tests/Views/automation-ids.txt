@@ -1,0 +1,121 @@
+AboutDogfoodingLink | QueryAboutSection | link in Link("Dogfooding at QRun.IO", "https://www.qrun.io/dogfooding")
+AboutHelpMenuItem | MainWindow | <MenuFlyoutItem> "About" in RootGrid
+AboutMenuItem | MainWindow | <Button> AboutButton
+AboutQueryLink | QueryAboutSection | link in Link("Meet Query", "https://www.qrun.io/query")
+AboutQueryMascot | QueryAboutSection | image
+AboutSupportLink | AboutContent | support
+ActivityLogHelpMenuItem | MainWindow | <MenuFlyoutItem> "Activity log" in RootGrid
+ActivityLogMenuItem | MainWindow | <Button> "Open activity log" in LogsPage
+AllowUntrustedCertificate | MainWindow | <CheckBox> AllowUntrustedCertificateBox
+AppMenuBar | MainWindow | <MenuBar> in RootGrid
+AppTheme | MainWindow | ThemeChoice
+CancelJob | JobRowView | button in AddAction("Cancel job")
+CancelQqqSignIn | MainWindow | <Button> CancelBrowserSignInButton
+CheckForUpdates | MainWindow | <Button> CheckUpdatesButton
+CheckUpdatesAtStartup | MainWindow | <ToggleSwitch> UpdateStartupToggle
+CheckUpdatesMenuItem | MainWindow | <MenuFlyoutItem> CheckUpdatesMenuItem
+ClearLogs | MainWindow | <Button> "Clear local logs" in LogsPage
+ClearLogsFromViewer | MainWindow | clear
+CloseWindowMenuItem | MainWindow | <MenuFlyoutItem> "Close window" in RootGrid
+ConnectionFeedback | MainWindow | <InfoBar> ConnectionFeedback
+ConnectionSettings | MainWindow | <Button> ConnectionButton
+DiscoverQqqSignIn | MainWindow | <Button> "Discover sign-in options" in ConnectionDialog
+EditDeviceProfile | MainWindow | <Button> "Edit computer details" in SettingsPage
+EditPrinterProfile | PrinterRowView | _settings
+EnrollDevice | MainWindow | <Button> EnrollButton
+EnrollmentCode | MainWindow | <PasswordBox> EnrollmentBox
+ExitCompanion | MainWindow | <Button> "Exit companion" in SettingsPage
+ExitMenuItem | MainWindow | <MenuFlyoutItem> "Exit companion" in RootGrid
+FileMenu | MainWindow | <MenuBarItem> "File" in RootGrid
+FooterServer | MainWindow | <HyperlinkButton> FooterServer
+FooterStatus | MainWindow | <TextBlock> FooterStatus
+GetInstaller | MainWindow | <HyperlinkButton> "Get the installer" in SettingsPage
+HelpMenu | MainWindow | <MenuBarItem> "Help" in RootGrid
+InstalledVersion | MainWindow | <TextBlock> VersionText
+JobCreatedCell | JobRowView | _cells[4]
+JobDetails | JobRowView | button in AddAction("Full details")
+JobDetailsContent | JobDetailsView | this, unless compact
+JobDocumentCell | JobRowView | _cells[0]
+JobEventHistory | JobDetailsView | events
+JobInlineDetailsContent | JobDetailsView | this, when compact
+JobSearch | MainWindow | <TextBox> JobSearch
+JobStatusFilter | MainWindow | <ComboBox> JobStatusFilter
+JobTableHeader | MainWindow | <Grid> in JobsPage
+JobsSummary | MainWindow | <TextBlock> JobsSummary
+LastUpdateOutcome | MainWindow | <TextBlock> LastUpdateOutcomeText
+LogDebugLogging | MainWindow | debug
+LogMaxFileMegabytes | MainWindow | limit
+LogRetentionDays | MainWindow | retention
+LogSegmentsPerDay | MainWindow | segments
+LogSettings | MainWindow | <Button> "Log settings" in LogsPage
+MetadataDescription | ProfileEditor | DescriptionBox
+MetadataLocation | ProfileEditor | LocationBox
+MetadataName | ProfileEditor | NameBox
+NavigateJobs | MainWindow | <NavigationViewItem> JobsNavigation
+NavigateLogs | MainWindow | <NavigationViewItem> LogsNavigation
+NavigatePrinters | MainWindow | <NavigationViewItem> PrintersNavigation
+NavigateSettings | MainWindow | settingsItem
+Navigation | MainWindow | <NavigationView> Navigation
+NextJobPage | MainWindow | <Button> JobsNext
+PairingChoice | MainWindow | <ComboBox> PairingChoice
+PreviousJobPage | MainWindow | <Button> JobsPrevious
+PrintTest | PrinterRowView | _test
+PrinterDiagnostics | PrinterDetailsView | diagnostics
+PrinterInventory | MainWindow | <ListView> PrintersList
+PrinterServerState | PrinterRowView | _server
+PrinterTableHeader | MainWindow | <Grid> in PrintersPage
+PrintersConnectionSettings | MainWindow | <Button> "Connection settings" in PrintersEmpty
+ProjectLink | MainWindow | <HyperlinkButton> "Project on GitHub" in SettingsPage
+ProjectMenuItem | MainWindow | <MenuFlyoutItem> "Project on GitHub" in RootGrid
+QqqAuthenticationStatus | MainWindow | <TextBlock> AuthenticationText
+QqqBrowserSignIn | MainWindow | <Button> BrowserSignInButton
+QqqPassword | MainWindow | <PasswordBox> QqqPasswordBox
+QqqPasswordSignIn | MainWindow | <Button> "Sign in" in PasswordSignInPanel
+QqqSignOut | MainWindow | <Button> "Sign out" in SettingsPage
+QqqUsername | MainWindow | <TextBox> UsernameBox
+RecentJobs | MainWindow | <ListView> JobsList
+ReconnectDevice | MainWindow | <Button> ReconnectButton
+RefreshJobDetails | JobRowView | button in AddAction("Refresh details")
+RefreshStatus | MainWindow | <Button> RefreshButton
+ReleaseNotes | MainWindow | <HyperlinkButton> "Release notes and downloads" in SettingsPage
+ReleaseNotesMenuItem | MainWindow | <MenuFlyoutItem> "Release notes and downloads" in RootGrid
+ReportIssue | MainWindow | <HyperlinkButton> "Report an issue" in SettingsPage
+RestartService | MainWindow | <Button> RestartServiceButton
+RetryJob | JobRowView | button in AddAction("Print again")
+ReviewJob | JobRowView | button in AddAction("Mark reviewed")
+ServerAddress | MainWindow | <TextBox> ServerBox
+ServiceStatus | MainWindow | <TextBlock> StatusText
+SettingsClearLogs | MainWindow | <Button> "Clear local logs" in SettingsPage
+SettingsLogSettings | MainWindow | <Button> "Log settings" in SettingsPage
+SettingsMenuItem | MainWindow | <MenuFlyoutItem> "Settings" in RootGrid
+SharePrinter | PrinterRowView | Exposure
+SortJobCreated | MainWindow | <Button> JobCreatedHeader
+SortJobFormat | MainWindow | <Button> JobFormatHeader
+SortJobPrinter | MainWindow | <Button> JobPrinterHeader
+SortJobStatus | MainWindow | <Button> JobStatusHeader
+SortJobTitle | MainWindow | <Button> JobTitleHeader
+SortPrinterFormats | MainWindow | <Button> PrinterFormatsHeader
+SortPrinterLocation | MainWindow | <Button> PrinterLocationHeader
+SortPrinterName | MainWindow | <Button> PrinterNameHeader
+SortPrinterServer | MainWindow | <Button> PrinterServerHeader
+SortPrinterShared | MainWindow | <Button> PrinterSharedHeader
+SortPrinterStatus | MainWindow | <Button> PrinterStatusHeader
+SplashAtStartup | MainWindow | <ToggleSwitch> SplashToggle
+SplashDuration | MainWindow | <NumberBox> SplashDuration
+StartService | MainWindow | <Button> StartServiceButton
+StartupAtSignIn | MainWindow | <ToggleSwitch> StartupToggle
+SupportLink | MainWindow | <HyperlinkButton> SupportLink
+SupportMenuItem | MainWindow | <MenuFlyoutItem> "Contact support" in RootGrid
+TestPrintFormat | TestPrintEditor | _format
+TestPrintMedia | TestPrintEditor | _profile
+ThemeDark | MainWindow | <ComboBoxItem> "Dark" in ThemeChoice
+ToggleJobDetails | JobRowView | _disclosure
+TogglePrinterDetails | PrinterRowView | _disclosure
+TransportState | MainWindow | <TextBlock> TransportStateText
+TransportTraffic | MainWindow | <TextBlock> TransportTrafficText
+UpdateChannel | MainWindow | <TextBlock> UpdateChannelText
+UserGuide | MainWindow | <HyperlinkButton> "User guide" in SettingsPage
+UserGuideMenuItem | MainWindow | <MenuFlyoutItem> "User guide" in RootGrid
+ViewServiceLogs | MainWindow | <Button> "View logs" in RootGrid
+WindowsPrinterSettings | MainWindow | <Button> "Windows printer settings" in PrintersPage
+WindowsServices | MainWindow | <Button> "Windows Services" in SettingsPage

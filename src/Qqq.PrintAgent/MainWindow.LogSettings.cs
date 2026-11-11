@@ -37,6 +37,10 @@ public sealed partial class MainWindow
       NumberBox limit = new() { Header = "File size limit before rollover (MiB)", Minimum = 1, Maximum = 1024, Value = settings.MaxFileMegabytes, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
       NumberBox segments = new() { Header = "Rolled-over segments kept per day", Minimum = 1, Maximum = 100, Value = settings.SegmentsPerDay, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
       ToggleSwitch debug = new() { Header = "Debug logging", OnContent = "On: every request, response and frame is logged", OffContent = "Off: steps, warnings and errors only", IsOn = settings.DebugLogging };
+      AutomationProperties.SetAutomationId(retention, "LogRetentionDays");
+      AutomationProperties.SetAutomationId(limit, "LogMaxFileMegabytes");
+      AutomationProperties.SetAutomationId(segments, "LogSegmentsPerDay");
+      AutomationProperties.SetAutomationId(debug, "LogDebugLogging");
       StackPanel content = new() { Spacing = 12 };
       content.Children.Add(new TextBlock { Text = "Logs start a new file each local day and roll over to a numbered segment when a file reaches the size limit; logging never stops because of size. These settings apply to both service and companion logs.", TextWrapping = TextWrapping.Wrap });
       content.Children.Add(retention);

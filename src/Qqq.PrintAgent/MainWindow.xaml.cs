@@ -67,6 +67,8 @@ public sealed partial class MainWindow : Window, IDisposable
       Navigation.Loaded += Navigation_Loaded;
       _initializing = false;
       SplashOverlay.ShowOver(RootGrid, AppIdentity.Info, _settings);
+      // H.NotifyIcon draws the tray menu as a native Windows menu built from these items, so they are never
+      // elements on screen and carry no automation identifier (the one counted exception in XamlContractTests).
       _trayStatus = new MenuFlyoutItem { Text = "Red — service not connected", Command = new RelayCommand(ShowDetails) };
       MenuFlyout trayMenu = new();
       trayMenu.Items.Add(_trayStatus);

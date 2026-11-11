@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+Every control an operator acts on in the companion's own views now has an automation identifier, and the
+identifiers are recorded with the control each is on (2.0). Nothing an operator sees or hears changes. Fourteen
+controls that had no identifier were given one: the navigation pane (`Navigation`) and the Settings page's support
+link (`SupportLink`), which get the names Windows already reported for them; the empty Printers page's "Connection
+settings" button (`PrintersConnectionSettings`); on the Settings page "Windows Services" (`WindowsServices`), "Get
+the installer" (`GetInstaller`) and "Exit companion" (`ExitCompanion`); a printer row's share checkbox
+(`SharePrinter`) and its "Windows diagnostics" expander (`PrinterDiagnostics`); a job row's event history expander
+(`JobEventHistory`); the About dialog's "Contact support" link (`AboutSupportLink`); and the four controls of the
+Log settings dialog (`LogRetentionDays`, `LogMaxFileMegabytes`, `LogSegmentsPerDay`, `LogDebugLogging`). The 107
+identifiers that existed keep their spelling and their controls. What is covered is every element of the
+companion's markup and every control its code creates. Four things are not, and have no identifier of the
+companion's: the choices inside a combo box (one of the fifteen in the markup has an identifier), which are found
+through their box; the buttons of a dialog, which are the platform's and carry its names; the views of AppKit (the
+About dialog's frame, the splash, the log viewer), which are AppKit's to identify: it sets two identifiers,
+`AboutVersionText` on the About dialog's version line and `AppKitSplash` on the splash, and none in the log viewer,
+whose toolbar the UI tests find by name (one button in that toolbar is the companion's and has an identifier: the
+companion inserts "Clear logs" there, `ClearLogsFromViewer`); and the tray icon's menu, which Windows draws as a
+native menu.
+
+A new test in the presentation suite, `XamlContractTests`, reads the companion's markup and code-behind as text. It
+fails when a control an operator acts on has no identifier, in markup or created in code (a button, a list, a menu
+item and the like, or any other element that is given a handler for a press or a key); when a kind of element or a
+type created in code is one the test has no list for; when the identifiers, or the control any of them is on, differ
+from `tests/Qqq.PrintAgent.Presentation.Tests/Views/automation-ids.txt`, so that a renamed, removed or moved
+identifier is a changed line in a reviewed file; when an identifier is not written out, other than the positional
+forms ADR-0005 gives the tree and the rows (`Server.<n>`, `Printer.<n>`, `Job.<n>`), which nothing produces yet;
+when an identifier would reach an automation client without being written on its control (a style that sets one, or
+a name that code gives an element from a value, which Windows reports as the identifier);
+when a view stops setting an identifier or an element name that the UI tests or the layout harness look up
+(`interactive-test-ids.txt` beside it records the 68 identifiers they use), or a suite looks one up in a form the
+test cannot read; when a named text is not listed as a status text, as changing without being announced, or as never
+changing, or a status text loses its live-region declaration; or when the window stops raising the one announcement
+it makes, for the footer's status line. It does not see a control that comes from another assembly's factory, a text
+that code creates (a row's cells), or what a screen reader actually says; those are for the interactive run. It is
+the baseline for the tree and the wizard of [ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md), which
+rewrite these views.
+
+No live region was added. The footer's status line, the main window's message bar and the two update texts already
+declare one. The connection dialog's message bar is left as it is and goes with the dialog. Screen readers therefore
+announce what they announced before, which leaves three results unannounced: the Jobs page's summary line, the text
+under the sign-in startup switch, and a new result in the connection dialog once its bar has been opened (audit
+U28, to be decided where the views are rewritten).
+
 The connection wizard's frame and its Server step exist in the presentation assembly (2.0;
 [ADR-0005](docs/adr/0005-connection-wizard-and-server-tree.md)). The window does not use them yet: it still shows
 the connection dialog, so nothing an operator sees changes. The steps after the first (sign in, pair, printers,
