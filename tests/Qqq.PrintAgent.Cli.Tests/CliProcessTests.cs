@@ -121,9 +121,11 @@ public sealed class CliProcessTests
 
    /// <summary>
    /// Starts the executable with the given arguments and waits for it to end, returning its exit code and exactly what it
-   /// wrote, line ends included. Standard input carries the given line, if any, and is then closed. The enrollment code
-   /// variable is removed from the child's environment, so the result does not depend on the machine running the test. A
-   /// process that has not finished within a minute is killed, so a hang fails the test instead of blocking the run.
+   /// wrote, line ends included. Standard input carries the given line, if any, and is then closed. A program that ends
+   /// without reading its input closes the pipe, and when it does so before the line is written the write fails; that is
+   /// the program not reading, which is what such a test is showing, so it is not a failure of the test. The enrollment
+   /// code variable is removed from the child's environment, so the result does not depend on the machine running the
+   /// test. A process that has not finished within a minute is killed, so a hang fails the test instead of blocking the run.
    /// </summary>
    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(string? input, params string[] args)
    {
@@ -146,11 +148,18 @@ public sealed class CliProcessTests
       {
          Task<string> output = process.StandardOutput.ReadToEndAsync(limit.Token);
          Task<string> error = process.StandardError.ReadToEndAsync(limit.Token);
-         if(input is not null)
+         try
          {
-            await process.StandardInput.WriteLineAsync(input.AsMemory(), limit.Token);
+            if(input is not null)
+            {
+               await process.StandardInput.WriteLineAsync(input.AsMemory(), limit.Token);
+            }
+            process.StandardInput.Close();
          }
-         process.StandardInput.Close();
+         catch(IOException)
+         {
+            // The program closed its end of the pipe without reading: it had already decided what to do with these arguments.
+         }
          await process.WaitForExitAsync(limit.Token);
          return (process.ExitCode, await output, await error);
       }
