@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -14,7 +14,20 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>One native printer operation in a disposable process. A document reaches it only as the path of a verified staged file, never as content.</summary>
 public static class PrinterWorkerHost
 {
+   /// <summary>
+   /// The environment variable in which the service hands a helper the service's own process id. The helper refuses to run
+   /// without it and has that process watched, so that it ends when the service is gone.
+   /// </summary>
    internal const string ParentEnvironmentVariable = "QQQ_PRINT_WORKER_PARENT";
+
+
+
+   /// <summary>
+   /// The most characters a request may have. A request is one small JSON object (an operation, a job's description and the
+   /// path of its staged file), a few kilobytes at most, because documents travel as files; 1 MiB is the bound the service
+   /// puts on the helper's answer, so the two directions match.
+   /// </summary>
+   internal const int MaximumRequestCharacters = 1_048_576;
 
 
 
@@ -28,93 +41,118 @@ public static class PrinterWorkerHost
 
 
 
-   /// <summary>Runs one operation against the Windows printers. The service's executable calls this, before it hosts anything, when the service started it with --printer-worker as its print helper.</summary>
-   public static Task<int> RunAsync() => RunAsync(new WindowsPrinters());
+   /// <summary>
+   /// Runs one operation against the Windows printers and spooler, reading the request from standard input and the parent's
+   /// process id from the environment. The service's executable calls this, before it hosts anything, when the service
+   /// started it with --printer-worker as its print helper. The Windows adapters are built here, not held in fields, so
+   /// nothing exists until a helper is actually run.
+   /// </summary>
+   public static Task<int> RunAsync()
+      => RunAsync(new WindowsPrinters(), new WindowsSpoolerJobQueue(), new ParentProcessWatch(), Environment.GetEnvironmentVariable(ParentEnvironmentVariable), Console.In, Console.Out);
 
 
 
    /// <summary>
-   /// Runs exactly one operation read from standard input and writes one JSON answer to standard output, with exit code 0 for
-   /// success and 1 for failure. It refuses to start without a parent process id, ends itself if that parent exits, bounds the
-   /// request size, and redacts error text before it leaves the process. A backend is injected so tests can run it without a printer.
+   /// Runs exactly one operation read from the input and writes one JSON answer to the output, with exit code 0 for
+   /// success and 1 for failure. It refuses to start without a parent process id, has that parent watched from before the
+   /// request is read until the operation is done, bounds the request size, and redacts error text before it leaves the
+   /// process. The printers, the spooler's job calls, the watch and the two streams are given, so tests run it without a
+   /// printer, a second process or the console.
    /// </summary>
-   internal static async Task<int> RunAsync(IPrinterBackend printers)
+   internal static async Task<int> RunAsync(IPrinterBackend printers, ISpoolerJobs spoolerJobs, IParentWatch parentWatch, string? parent, TextReader input, TextWriter output)
    {
       using CancellationTokenSource lifetime = new();
-      Task? parentWatch = null;
+      Task? watch = null;
       try
       {
-         if(!int.TryParse(Environment.GetEnvironmentVariable(ParentEnvironmentVariable), NumberStyles.None, CultureInfo.InvariantCulture, out int parentId))
+         if(!int.TryParse(parent, NumberStyles.None, CultureInfo.InvariantCulture, out int parentId))
          {
             throw new InvalidOperationException("Printer workers must be launched by the print connector.");
          }
-         parentWatch = WatchParentAsync(parentId, lifetime.Token);
-         string? input = await Console.In.ReadLineAsync().ConfigureAwait(false);
-         if(input is null || input.Length > 30_000_000)
-         {
-            throw new InvalidDataException("Invalid printer worker request size.");
-         }
-         Request request = JsonSerializer.Deserialize<Request>(input, PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Missing printer worker request.");
-         Response response;
-         switch(request.Operation)
-         {
-            case "discover":
-               response = new Response(true, printers.Discover());
-               break;
-            case "cancel":
-               WindowsSpoolerJobs.Cancel(request.PrinterName ?? "", request.JobId ?? "", request.SpoolerJobId ?? "");
-               response = new Response(true);
-               break;
-            case "print-file":
-               if(request.Job is null || request.ContentPath is null)
-               {
-                  throw new InvalidDataException("The print worker requires a verified document file.");
-               }
-               ////////////////////////////////////////////////////////////////////////
-               // no limit is passed on: the service that started this process holds //
-               // the submission limit and ends the process when it passes           //
-               ////////////////////////////////////////////////////////////////////////
-               response = new Response(true, SpoolerJobId: await printers.PrintFileAsync(request.Job, request.ContentPath, Timeout.InfiniteTimeSpan, lifetime.Token).ConfigureAwait(false));
-               break;
-            default:
-               throw new InvalidDataException("Unknown printer worker operation.");
-         }
-         await Console.Out.WriteLineAsync(JsonSerializer.Serialize(response, PrintApiClient.JsonOptions)).ConfigureAwait(false);
+         watch = parentWatch.WatchAsync(parentId, lifetime.Token);
+         Request request = JsonSerializer.Deserialize<Request>(await ReadRequestAsync(input).ConfigureAwait(false), PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Missing printer worker request.");
+         Response response = await ExecuteAsync(request, printers, spoolerJobs, lifetime.Token).ConfigureAwait(false);
+         await output.WriteLineAsync(JsonSerializer.Serialize(response, PrintApiClient.JsonOptions)).ConfigureAwait(false);
          return 0;
       }
       catch(Exception exception)
       {
-         await Console.Out.WriteLineAsync(JsonSerializer.Serialize(new Response(false, Error: AgentActivityLog.Redact(exception.Message), ErrorCode: exception is PrinterMediaMismatchException ? "MEDIA_PROFILE_MISMATCH" : (exception as SpoolCancellationException)?.Outcome), PrintApiClient.JsonOptions)).ConfigureAwait(false);
+         await output.WriteLineAsync(JsonSerializer.Serialize(new Response(false, Error: AgentActivityLog.Redact(exception.Message), ErrorCode: exception is PrinterMediaMismatchException ? "MEDIA_PROFILE_MISMATCH" : (exception as SpoolCancellationException)?.Outcome), PrintApiClient.JsonOptions)).ConfigureAwait(false);
          return 1;
       }
       finally
       {
          await lifetime.CancelAsync().ConfigureAwait(false);
-         if(parentWatch is not null)
+         if(watch is not null)
          {
-            await parentWatch.ConfigureAwait(false);
+            await watch.ConfigureAwait(false);
          }
       }
    }
 
 
 
-   /// <summary>Waits for the parent service to exit and then terminates this helper immediately, so a blocked driver call can never leave an orphan process running after the service is gone.</summary>
-   private static async Task WatchParentAsync(int parentId, CancellationToken token)
+   /// <summary>
+   /// Reads the one request line a piece at a time and stops with an error as soon as more characters than a request may
+   /// have arrived without a line end, so an oversized request is refused while it is read and never held in memory whole.
+   /// Input that ends before any character arrives is refused the same way. A line ends at a carriage return or a line
+   /// feed; nothing after it is used, because a helper carries out exactly one request.
+   /// </summary>
+   private static async Task<string> ReadRequestAsync(TextReader input)
    {
-      try
+      StringBuilder line = new();
+      char[] piece = new char[4096];
+      bool any = false;
+      while(true)
       {
-         using var parent = Process.GetProcessById(parentId);
-         await parent.WaitForExitAsync(token).ConfigureAwait(false);
-         Environment.Exit(2);
+         int read = await input.ReadAsync(piece, 0, piece.Length).ConfigureAwait(false);
+         if(read == 0)
+         {
+            return any ? line.ToString() : throw new InvalidDataException("Invalid printer worker request size.");
+         }
+         any = true;
+         int end = piece.AsSpan(0, read).IndexOfAny('\r', '\n');
+         int count = end < 0 ? read : end;
+         if(line.Length + count > MaximumRequestCharacters)
+         {
+            throw new InvalidDataException("Invalid printer worker request size.");
+         }
+         line.Append(piece, 0, count);
+         if(end >= 0)
+         {
+            return line.ToString();
+         }
       }
-      catch(OperationCanceledException) when(token.IsCancellationRequested)
+   }
+
+
+
+   /// <summary>
+   /// Carries out the one operation a request names and builds its answer: the inventory for discover, nothing but success
+   /// for cancel (which reads the job back and proves it is ours before deleting it), and the spooler receipt for
+   /// print-file, which needs both a job and the path of its verified file. Any other operation is refused.
+   /// </summary>
+   private static async Task<Response> ExecuteAsync(Request request, IPrinterBackend printers, ISpoolerJobs spoolerJobs, CancellationToken token)
+   {
+      switch(request.Operation)
       {
-         // The requested operation completed normally.
-      }
-      catch(ArgumentException)
-      {
-         Environment.Exit(2);
+         case "discover":
+            return new Response(true, printers.Discover());
+         case "cancel":
+            WindowsSpoolerJobs.Cancel(spoolerJobs, request.PrinterName ?? "", request.JobId ?? "", request.SpoolerJobId ?? "");
+            return new Response(true);
+         case "print-file":
+            if(request.Job is null || request.ContentPath is null)
+            {
+               throw new InvalidDataException("The print worker requires a verified document file.");
+            }
+            ////////////////////////////////////////////////////////////////////////
+            // no limit is passed on: the service that started this process holds //
+            // the submission limit and ends the process when it passes           //
+            ////////////////////////////////////////////////////////////////////////
+            return new Response(true, SpoolerJobId: await printers.PrintFileAsync(request.Job, request.ContentPath, Timeout.InfiniteTimeSpan, token).ConfigureAwait(false));
+         default:
+            throw new InvalidDataException("Unknown printer worker operation.");
       }
    }
 }
