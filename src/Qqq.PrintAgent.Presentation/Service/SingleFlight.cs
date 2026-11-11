@@ -35,12 +35,12 @@ internal sealed class SingleFlight<TOutcome>
 
 
 
-   /// <summary>Says how many flights have been started so far and gives the one that is in the air, if one is. A flight that starts after this call has a higher number than the one returned.</summary>
-   internal long Started(out Task? inTheAir)
+   /// <summary>Says how many flights have been started so far and gives the last of them, in the air or landed, or null when there has been none. A flight that starts after this call has a higher number than the one returned.</summary>
+   internal long Started(out Task? last)
    {
       lock(_gate)
       {
-         inTheAir = _last is { IsCompleted: false } ? _last : null;
+         last = _last;
          return _started;
       }
    }

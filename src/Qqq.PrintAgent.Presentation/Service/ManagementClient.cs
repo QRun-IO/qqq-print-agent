@@ -229,10 +229,10 @@ public sealed partial class ManagementClient
    /// </para>
    /// <para>
    /// A caller that needs an answer <paramref name="sentAfterTheCall"/> is never given one that was sent earlier. It
-   /// waits out the flight that is in the air, then shares a flight that started after it asked, if there is one,
-   /// and otherwise starts one; at the ceiling it waits its turn and is not skipped. While it waits, for the flight
-   /// in the air or for its turn, nothing has been sent for it, and a token cancelled then ends the call with
-   /// nothing sent.
+   /// notes how many flights have started and waits out the last of them, which is over at once unless it is still
+   /// in the air. Then it shares a flight that started after it asked, if there is one, and otherwise starts one;
+   /// at the ceiling it waits its turn and is not skipped. While it waits, for the flight in the air or for its
+   /// turn, nothing has been sent for it, and a token cancelled then ends the call with nothing sent.
    /// </para>
    /// <para>
    /// A flight is started only by a caller that holds a place under the ceiling, and the flight keeps that place
@@ -250,8 +250,8 @@ public sealed partial class ManagementClient
       long? startedAfter = null;
       if(sentAfterTheCall)
       {
-         startedAfter = flight.Started(out Task? inTheAir);
-         await (inTheAir ?? Task.CompletedTask).WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+         startedAfter = flight.Started(out Task? last);
+         await (last ?? Task.CompletedTask).WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
          if(cancellationToken.IsCancellationRequested)
          {
             return NotStarted<TResult>(operation, server: null);

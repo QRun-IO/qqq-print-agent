@@ -431,6 +431,34 @@ public sealed class ManagementClientLimitsTests
 
 
    /// <summary>
+   /// A snapshot asked for as "sent after the call" whose caller leaves at the moment the one in flight lands has
+   /// sent nothing, and its result says so, even when another caller has by then sent the next snapshot: that one was
+   /// sent for the other caller. Here the cancellation itself lands the flight (a token runs its callbacks newest
+   /// first, so the callback registered here runs before the waiting call is told), and the caller that stays asked
+   /// first, so it goes on first and has sent the next snapshot when the one that leaves goes on.
+   /// </summary>
+   [Fact]
+   public async Task SnapshotSentAfterTheCall_WhoseCallerLeavesAsTheOneInFlightLands_HasSentNothing()
+   {
+      FakePipe pipe = new FakePipe().HoldEverything();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      using CancellationTokenSource leaving = new();
+      _ = client.SnapshotAsync();
+      Task<ServiceResult<ServiceSnapshot>> stays = client.SnapshotAsync(sentAfterTheCall: true);
+      Task<ServiceResult<ServiceSnapshot>> leaves = client.SnapshotAsync(sentAfterTheCall: true, leaving.Token);
+      using CancellationTokenRegistration lands = leaving.Token.Register(() => pipe.Held[0].SetResult(Replies.Golden("snapshot.reply.json")));
+
+      await leaving.CancelAsync();
+      ServiceResult<ServiceSnapshot> left = await leaves.WaitAsync(s_guard);
+
+      Assert.Equal((ServiceOutcome.Canceled, false), (left.Outcome, left.Unconfirmed));
+      Assert.Equal(2, pipe.Sent.Count);
+      Assert.False(stays.IsCompleted);
+   }
+
+
+
+   /// <summary>
    /// Two snapshots asked for as "sent after the call" that both wait their turn at the ceiling cost one request and
    /// one place. The first to get a turn sends the snapshot. The second, when its turn comes, finds a snapshot that
    /// was sent after it asked, shares it, and gives its place back, so the place is not lost: once the snapshot is
