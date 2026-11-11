@@ -324,7 +324,7 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void Request_AndItsSecretArguments_NeverShowTheSecretAsText()
    {
-      ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", AcceptCertificateException: false, ManagementSamples.SessionCredential);
+      ServersAddArgs add = new(ManagementSamples.Address, "Warehouse", acceptCertificateException: false, ManagementSamples.SessionCredential);
       SessionSignInArgs signIn = new(ManagementSamples.SessionCredential);
       PairingEnrollArgs enroll = new(ManagementSamples.EnrollmentCodeCanary);
       var addRequest = ManagementRequest.For(ManagementOperations.ServersAdd, null, add);
@@ -558,7 +558,7 @@ public sealed class ManagementEnvelopeTests
    [Fact]
    public void ServersAdd_ReadsItsCredentialThroughCoresValidation()
    {
-      var request = ManagementRequest.For(ManagementOperations.ServersAdd, null, new ServersAddArgs(ManagementSamples.Address, "Warehouse", AcceptCertificateException: true, ManagementSamples.SessionCredential));
+      var request = ManagementRequest.For(ManagementOperations.ServersAdd, null, new ServersAddArgs(ManagementSamples.Address, "Warehouse", acceptCertificateException: true, ManagementSamples.SessionCredential));
 
       Assert.True(ManagementJson.TryReadArguments(request, out ServersAddArgs? arguments));
 

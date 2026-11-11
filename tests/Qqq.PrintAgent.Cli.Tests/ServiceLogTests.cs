@@ -12,13 +12,23 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// <summary>
 /// The service's log as a type of its own. It must write exactly what the runtime's own log method wrote before it was
 /// moved here (the same redaction, caps, routing of debug detail, ring and file lines), and a view of it for one server
-/// must add that server's name and change nothing else.
+/// must add that server's short identifier and change nothing else.
 /// </summary>
 public sealed class ServiceLogTests : IDisposable
 {
    private readonly string _directory = Path.Combine(Path.GetTempPath(), "qqq-service-log-tests", Guid.NewGuid().ToString("N"));
    private readonly string _referenceDirectory = Path.Combine(Path.GetTempPath(), "qqq-service-log-tests", Guid.NewGuid().ToString("N"));
    private readonly List<string> _sink = [];
+
+
+
+   /// <summary>The identifier of the first server a view is made for; its lines start with "[3f2b8c1e] ".</summary>
+   private const string Production = "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f";
+
+
+
+   /// <summary>The identifier of the second server a view is made for; its lines start with "[9a1c0e2d] ".</summary>
+   private const string Staging = "9a1c0e2d-77b3-4c58-8f10-5e6d7c8b9a01";
 
 
 
@@ -444,28 +454,28 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
-   /// A view for one server writes the same lines with that server's name in front, in the ring, the sink and the file.
-   /// It shares the ring and the file with the log it came from, so lines from the service and from each server appear
-   /// together in the order they were written.
+   /// A view for one server writes the same lines with that server's short identifier in front (the first eight
+   /// characters of its identifier), in the ring, the sink and the file. It shares the ring and the file with the log
+   /// it came from, so lines from the service and from each server appear together in the order they were written.
    /// </summary>
    [Fact]
-   public void ForServer_PrefixesTheServerNameAndSharesTheRingAndTheFile()
+   public void ForServer_PrefixesTheShortIdentifierAndSharesTheRingAndTheFile()
    {
       (ServiceLog log, AgentActivityLog file) = Create();
-      ServiceLog production = log.ForServer("Production");
-      ServiceLog staging = log.ForServer("Staging");
+      ServiceLog production = log.ForServer(Production);
+      ServiceLog staging = log.ForServer(Staging);
 
       log.Write("INFO", "Print service started.");
       production.Write("WARN", "Printing blocked.");
       staging.Write("ERROR", "Local command failed.");
       production.Write("INFO", "Signed in.");
 
-      string[] expected = ["Print service started.", "[Production] Printing blocked.", "[Staging] Local command failed.", "[Production] Signed in."];
+      string[] expected = ["Print service started.", "[3f2b8c1e] Printing blocked.", "[9a1c0e2d] Local command failed.", "[3f2b8c1e] Signed in."];
       Assert.Equal(expected, _sink, StringComparer.Ordinal);
       Assert.Equal(expected, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       Assert.Equal(expected, staging.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       Assert.Equal(["INFO", "WARN", "ERROR", "INFO"], production.Entries().Select(entry => entry.Level), StringComparer.Ordinal);
-      Assert.Equal([" [INFO] [Service] Print service started.", " [WARN] [Service] [Production] Printing blocked.", " [ERROR] [Service] [Staging] Local command failed.", " [INFO] [Service] [Production] Signed in."], Lines(file));
+      Assert.Equal([" [INFO] [Service] Print service started.", " [WARN] [Service] [3f2b8c1e] Printing blocked.", " [ERROR] [Service] [9a1c0e2d] Local command failed.", " [INFO] [Service] [3f2b8c1e] Signed in."], Lines(file));
       staging.ClearEntries();
       Assert.Empty(log.Entries());
    }
@@ -473,9 +483,9 @@ public sealed class ServiceLogTests : IDisposable
 
 
    /// <summary>
-   /// A server's view redacts exactly as the log does, and the caps do not grow by the name: the line is still at most
-   /// 1000 characters (4000 for debug detail) with the name counted in. Debug detail is still dropped while it is off
-   /// and goes to the file only while it is on, and a failure and the session client's progress carry the name too.
+   /// A server's view redacts exactly as the log does, and the caps do not grow by the prefix: the line is still at most
+   /// 1000 characters (4000 for debug detail) with the prefix counted in. Debug detail is still dropped while it is off
+   /// and goes to the file only while it is on, and a failure and the session client's progress carry the prefix too.
    /// </summary>
    [Theory]
    [InlineData(false)]
@@ -483,9 +493,9 @@ public sealed class ServiceLogTests : IDisposable
    public void ForServer_KeepsRedactionCapsAndDebugRouting(bool debug)
    {
       (ServiceLog log, AgentActivityLog file) = Create(debug);
-      ServiceLog server = log.ForServer("Production");
+      ServiceLog server = log.ForServer(Production);
 
-      server.Write("ERROR", "Authorization: Bearer synthetic-server-bearer enrollmentCode=synthetic-server-code");
+      server.Write("ERROR", "Sent Bearer synthetic-server-bearer enrollmentCode=synthetic-server-code");
       server.Write("INFO", new string('p', 1500));
       server.Write("DEBUG", new string('q', 4500));
       server.Failure("Sign-in failed", new IOException("password=synthetic-server-password"));
@@ -494,111 +504,92 @@ public sealed class ServiceLogTests : IDisposable
       Assert.Equal(debug, server.IsDebugEnabled);
       Assert.Equal(
       [
-         "[Production] Authorization: Bearer [REDACTED] enrollmentCode=[REDACTED]",
-         "[Production] " + new string('p', 1000 - "[Production] ".Length),
-         "[Production] Sign-in failed: IOException: password=[REDACTED]",
-         "[Production] [Session] Discovery started.",
+         "[3f2b8c1e] Sent Bearer [REDACTED] enrollmentCode=[REDACTED]",
+         "[3f2b8c1e] " + new string('p', 1000 - "[3f2b8c1e] ".Length),
+         "[3f2b8c1e] Sign-in failed: IOException: password=[REDACTED]",
+         "[3f2b8c1e] [Session] Discovery started.",
       ], _sink);
       Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       List<string> lines = Lines(file);
       Assert.Equal(debug ? 6 : 4, lines.Count(line => line.StartsWith(" [", StringComparison.Ordinal)));
-      Assert.Equal(debug, lines.Contains(" [INFO] [DEBUG] [Service] [Production] " + new string('q', 4000 - "[Production] ".Length), StringComparer.Ordinal));
+      Assert.Equal(debug, lines.Contains(" [INFO] [DEBUG] [Service] [3f2b8c1e] " + new string('q', 4000 - "[3f2b8c1e] ".Length), StringComparer.Ordinal));
       Assert.DoesNotContain(lines, line => line.Contains("synthetic-server", StringComparison.Ordinal));
    }
 
 
 
    /// <summary>
-   /// A server's name is an operator's text, so it is made safe to stand at the front of a line: a line break or other
-   /// control character becomes a space (it cannot start a forged log entry), surrounding spaces go, and a long name is
-   /// cut at 64 characters. A name with nothing in it is refused.
+   /// A view is named by a server's full identifier and by nothing else. A server's name is refused, whatever it holds:
+   /// a credential keyword that would make the file's second redaction hide the server's lines, square brackets that
+   /// would forge structure inside a line, a line break that would start a forged entry. So are an identifier's
+   /// beginning, an identifier in another spelling, and nothing at all. The refusal does not repeat what was given, and
+   /// nothing is written.
    /// </summary>
-   [Fact]
-   public void ForServer_MakesTheNameSafeToPrefix()
+   [Theory]
+   [InlineData("Production")]
+   [InlineData("Cookie:")]
+   [InlineData("Test Cookie: staging")]
+   [InlineData("Lab token:")]
+   [InlineData("password=")]
+   [InlineData("A token=\"")]
+   [InlineData("a] [ERROR] forged [b")]
+   [InlineData("Warehouse\r\n2026-11-10 12:00:00 [ERROR] forged")]
+   [InlineData("3f2b8c1e")]
+   [InlineData("3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5")]
+   [InlineData("3F2B8C1E-5D4A-4F6B-9A7C-0E1D2C3B4A5F")]
+   [InlineData("{3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f}")]
+   [InlineData(" 3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f")]
+   [InlineData("3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f\n")]
+   [InlineData("")]
+   [InlineData("   ")]
+   [InlineData(null)]
+   public void ForServer_TakesAFullIdentifierAndNothingElse(string? value)
    {
       (ServiceLog log, AgentActivityLog file) = Create();
 
-      log.ForServer("  Warehouse\r\n2026-11-10 12:00:00 [ERROR] forged\t ").Write("INFO", "one");
-      log.ForServer(new string('n', 80)).Write("INFO", "two");
+      ArgumentException refusal = Assert.Throws<ArgumentException>(() => log.ForServer(value!));
 
-      Assert.Equal(["[Warehouse  2026-11-10 12:00:00 [ERROR] forged] one", "[" + new string('n', 64) + "] two"], _sink);
-      Assert.Equal(2, File.ReadAllLines(file.CurrentLogFilePath).Length);
-      Assert.Equal(64, ServiceLog.ServerNameLimit);
-      Assert.Throws<ArgumentException>(() => log.ForServer("   "));
-      Assert.Throws<ArgumentNullException>(() => log.ForServer(null!));
+      Assert.True(string.IsNullOrWhiteSpace(value) || !refusal.Message.Contains(value, StringComparison.Ordinal));
+      Assert.Empty(_sink);
+      Assert.Empty(log.Entries());
+      Assert.False(File.Exists(file.CurrentLogFilePath));
    }
 
 
 
    /// <summary>
-   /// A server's name cannot switch off the redaction of the line it stands in front of. The redaction reads a quoted
-   /// value up to the next quote, so a name ending in an open quote, redacted as one string with the line, pairs with
-   /// the quote in front of the password and leaves the password itself in the log. The name and the line are redacted
-   /// apart: the password is gone from the ring, the host's sink and the file, for an operational line, for debug detail
-   /// and for a failure, and a secret written into the name itself is gone as well.
+   /// The prefix of a server's view changes nothing about the line behind it, in the ring, the host's sink or the file.
+   /// Each message is written once through the log and once through a view: the view's line is the log's own line with
+   /// the short identifier in front, for a plain line, for lines that hold a secret in each quoting, and for a line
+   /// that ends in an open quote. In the file, which redacts every joined line a second time, the server's line keeps
+   /// its marker, its prefix and its text: a prefix made of an operator's name could lose all three there.
    /// </summary>
    [Theory]
-   [InlineData("A token=\"", "[A token=[REDACTED]] ")]
-   [InlineData("B secret='", "[B secret=[REDACTED]] ")]
-   [InlineData("C password=\"synthetic-name-secret", "[C password=[REDACTED]] ")]
-   public void ForServer_ANameCannotDefeatTheRedactionOfItsLine(string name, string prefix)
+   [InlineData("Print lane stopped: The printer is offline (job job-204).")]
+   [InlineData("Sign-in failed: password=\"synthetic-quoted\" rejected")]
+   [InlineData("Sign-in failed: token='synthetic-quoted' refused")]
+   [InlineData("Cookie: sessionUUID=synthetic-cookie; theme=dark")]
+   [InlineData("returned to io.qrun.qqq-print-agent:/oauth/callback?code=synthetic-code&state=synthetic-state")]
+   [InlineData("The server sent secret=\"")]
+   public void ForServer_ThePrefixChangesNothingAboutTheLineBehindIt(string message)
    {
       (ServiceLog log, AgentActivityLog file) = Create(debug: true);
-      ServiceLog server = log.ForServer(name);
+      ServiceLog server = log.ForServer(Production);
 
-      server.Write("ERROR", "Sign-in failed: password=\"hunter2\" rejected");
-      server.Write("DEBUG", "POST /session password=\"hunter2\" rejected");
-      server.Failure("Sign-in failed", new IOException("token=\"hunter2\" refused"));
+      log.Write("WARN", message);
+      server.Write("WARN", message);
+      log.Write("DEBUG", message);
+      server.Write("DEBUG", message);
 
-      Assert.Equal([prefix + "Sign-in failed: password=[REDACTED] rejected", prefix + "Sign-in failed: IOException: token=[REDACTED] refused"], _sink);
+      List<string> lines = Lines(file);
+      Assert.Equal([AgentActivityLog.Redact(message), "[3f2b8c1e] " + AgentActivityLog.Redact(message)], _sink);
       Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
-      string written = File.ReadAllText(file.CurrentLogFilePath);
-      Assert.DoesNotContain("hunter2", written, StringComparison.Ordinal);
-      Assert.DoesNotContain("synthetic-name-secret", written, StringComparison.Ordinal);
-      Assert.Contains("POST /session password=[REDACTED] rejected", written, StringComparison.Ordinal);
-      Assert.Equal(4, File.ReadAllLines(file.CurrentLogFilePath).Count(line => line.Contains(" [Service] ", StringComparison.Ordinal)));
-   }
-
-
-
-   /// <summary>
-   /// A character in a server's name that would end the line or change the order it is shown in becomes a space, as a
-   /// control character does: the line and paragraph separators (U+2028, U+2029), the next-line control (U+0085), the
-   /// bidirectional embeddings, overrides and isolates with the characters that end them (U+202A to U+202E, U+2066 to
-   /// U+2069), the directional marks and the zero-width characters. None of them is a control character, so each used
-   /// to pass through, and a name could show a forged line or text in reverse.
-   /// </summary>
-   [Theory]
-   [InlineData(0x0085)]
-   [InlineData(0x2028)]
-   [InlineData(0x2029)]
-   [InlineData(0x202A)]
-   [InlineData(0x202B)]
-   [InlineData(0x202C)]
-   [InlineData(0x202D)]
-   [InlineData(0x202E)]
-   [InlineData(0x2066)]
-   [InlineData(0x2067)]
-   [InlineData(0x2068)]
-   [InlineData(0x2069)]
-   [InlineData(0x200E)]
-   [InlineData(0x200F)]
-   [InlineData(0x061C)]
-   [InlineData(0x200B)]
-   [InlineData(0xFEFF)]
-   public void ForServer_ACharacterThatEndsOrReordersALine_BecomesASpace(int codePoint)
-   {
-      (ServiceLog log, AgentActivityLog file) = Create();
-      char character = (char)codePoint;
-
-      log.ForServer("Ware" + character + "house" + character).Write("INFO", "one");
-      log.ForServer(character + "2026-11-10 12:00:00 [ERROR] forged" + character + character + "entry").Write("INFO", "two");
-
-      Assert.Equal(["[Ware house] one", "[2026-11-10 12:00:00 [ERROR] forged  entry] two"], _sink);
-      Assert.Equal(_sink, log.Entries().Select(entry => entry.Message), StringComparer.Ordinal);
-      Assert.Equal([" [INFO] [Service] [Ware house] one", " [INFO] [Service] [2026-11-10 12:00:00 [ERROR] forged  entry] two"], Lines(file));
-      Assert.DoesNotContain(character.ToString(), File.ReadAllText(file.CurrentLogFilePath), StringComparison.Ordinal);
-      Assert.Throws<ArgumentException>(() => log.ForServer(new string(character, 3)));
+      Assert.Equal(4, lines.Count);
+      Assert.Equal(lines[0].Replace(" [Service] ", " [Service] [3f2b8c1e] ", StringComparison.Ordinal), lines[1]);
+      Assert.Equal(lines[2].Replace(" [Service] ", " [Service] [3f2b8c1e] ", StringComparison.Ordinal), lines[3]);
+      Assert.StartsWith(" [WARN] [Service] [3f2b8c1e] ", lines[1], StringComparison.Ordinal);
+      Assert.StartsWith(" [INFO] [DEBUG] [Service] [3f2b8c1e] ", lines[3], StringComparison.Ordinal);
+      Assert.DoesNotContain(lines, line => line.Contains("synthetic-", StringComparison.Ordinal));
    }
 
 
@@ -662,7 +653,7 @@ public sealed class ServiceLogTests : IDisposable
       {
          for(int index = 0; index < 25; index++)
          {
-            (writer % 2 == 0 ? shared : shared.ForServer("Production")).Write("INFO", $"writer {writer} line {index}");
+            (writer % 2 == 0 ? shared : shared.ForServer(Production)).Write("INFO", $"writer {writer} line {index}");
          }
       })));
 
@@ -672,7 +663,7 @@ public sealed class ServiceLogTests : IDisposable
       Assert.Equal(100, ring.Length);
       Assert.Equal(100, ring.Distinct(StringComparer.Ordinal).Count());
       Assert.All(ring, line => Assert.Contains(line, received, StringComparer.Ordinal));
-      Assert.Equal(ring, shared.ForServer("Production").Entries().Select(entry => entry.Message), StringComparer.Ordinal);
+      Assert.Equal(ring, shared.ForServer(Production).Entries().Select(entry => entry.Message), StringComparer.Ordinal);
       Assert.Equal(Enumerable.Range(101, 100).Select(reading => SteppingClock.Reading(reading)), shared.Entries().Select(entry => entry.Timestamp), StringComparer.Ordinal);
       Assert.Equal(200, Lines(file).Count);
    }

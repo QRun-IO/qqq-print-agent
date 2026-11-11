@@ -111,7 +111,7 @@ internal static class ManagementSamples
    internal static object? Arguments(string operation) => operation switch
    {
       ManagementOperations.ServersCheck => new ServersCheckArgs(Address, AcceptCertificateException: true),
-      ManagementOperations.ServersAdd => new ServersAddArgs(Address, "Warehouse", AcceptCertificateException: true, SessionCredential),
+      ManagementOperations.ServersAdd => new ServersAddArgs(Address, "Warehouse", acceptCertificateException: true, SessionCredential),
       ManagementOperations.ServersReorder => new ServersReorderArgs([SecondServerId, ServerId]),
       ManagementOperations.ComputerSetProfile => new ComputerSetProfileArgs(Computer.Profile),
       ManagementOperations.LogsSetSettings => new LogsSetSettingsArgs(RetentionDays: 14, MaxFileMegabytes: 50, SegmentsPerDay: 5, DebugLogging: true),
