@@ -296,6 +296,43 @@ public sealed class JournalMigrationTests
 
 
    /// <summary>
+   /// The steps and the version stamp are one transaction. Were the version stamped in a second one, a service that died
+   /// between the two would leave a journal with every step done and the old version on it, and the next start would run
+   /// the steps again. The write-ahead log shows how many transactions the migration made: SQLite marks the end of each
+   /// one there, and migrating the oldest journal, which makes every change step 1 has, leaves one mark. A second
+   /// connection stays open on the journal throughout. Without it the migration's connection would be the last to
+   /// close, and SQLite would fold the log into the journal and delete it before the test could read it.
+   /// </summary>
+   [Fact]
+   public void Migrate_StepsAndVersion_AreOneTransactionInTheLog()
+   {
+      string directory = NewFolder();
+      try
+      {
+         _ = new LegacyStateBuilder(directory).WithJournal(LegacyStateBuilder.JournalOldest);
+         using SqliteConnection keepsTheLog = TestState.OpenJournal(directory);
+         using SqliteCommand command = keepsTheLog.CreateCommand();
+         command.CommandText = "SELECT COUNT(*) FROM events";
+         Assert.Equal(6L, command.ExecuteScalar());
+         Assert.Equal(0, JournalProbe.CommitsInLog(directory));
+
+         Assert.IsType<StateStatus.Ready>(TestState.Migrate(directory));
+
+         Assert.Equal(1, JournalProbe.CommitsInLog(directory));
+         command.CommandText = "PRAGMA user_version";
+         Assert.Equal(1L, command.ExecuteScalar());
+         command.CommandText = "SELECT COUNT(*) FROM local_jobs";
+         Assert.Equal(3L, command.ExecuteScalar());
+      }
+      finally
+      {
+         JournalFiles.Delete(directory);
+      }
+   }
+
+
+
+   /// <summary>
    /// A journal at a higher version than this build knows belongs to a newer build. The migration says so, with both
    /// versions, and touches nothing: every file in the folder (the journal, the pairing, a session file, a staged
    /// document in a folder beneath) has the same bytes and the same last-write time afterwards, and no file has appeared.

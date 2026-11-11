@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -75,6 +76,37 @@ internal static class JournalProbe
          hashes[Path.GetRelativePath(directory, file)] = Convert.ToHexString(SHA256.HashData(ReadShared(file)));
       }
       return hashes;
+   }
+
+
+
+   /// <summary>
+   /// How many transactions the journal's write-ahead log holds. SQLite writes a transaction to the log as a run of
+   /// frames, one for each page it changed, and marks the last frame as the commit by recording the size of the database
+   /// there; every other frame has zero in that place. A frame counts only while it carries the salt in the log's
+   /// header, which is how SQLite tells the frames of the current log from what an earlier one left in the file. A
+   /// folder with no log, or an empty one, holds none. The log is read with full sharing, while SQLite has it open.
+   /// </summary>
+   internal static int CommitsInLog(string directory)
+   {
+      const int HeaderBytes = 32;
+      const int FrameHeaderBytes = 24;
+      string path = Path.Combine(directory, "journal.db-wal");
+      byte[] log = File.Exists(path) ? ReadShared(path) : [];
+      if(log.Length < HeaderBytes)
+      {
+         return 0;
+      }
+      int frameBytes = FrameHeaderBytes + (int)BinaryPrimitives.ReadUInt32BigEndian(log.AsSpan(8, 4));
+      int commits = 0;
+      for(int frame = HeaderBytes; frame + frameBytes <= log.Length && log.AsSpan(frame + 8, 8).SequenceEqual(log.AsSpan(16, 8)); frame += frameBytes)
+      {
+         if(BinaryPrimitives.ReadUInt32BigEndian(log.AsSpan(frame + 4, 4)) != 0)
+         {
+            commits++;
+         }
+      }
+      return commits;
    }
 
 
