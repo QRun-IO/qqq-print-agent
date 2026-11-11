@@ -124,7 +124,7 @@ public sealed class ServerTree
 
 
 
-   /// <summary>Shows on a node that a command runs under a gate's key: a server's identifier, the computer's key or the wizard's.</summary>
+   /// <summary>Shows on a node that a command runs under a gate's key: a server's identifier, the computer's key or the wizard's. It is called on the window's thread only; every reconcile reads the same from the gate again, for every node.</summary>
    internal void SetBusy(string key, bool busy)
    {
       TreeNode? node = key switch
@@ -144,7 +144,8 @@ public sealed class ServerTree
    /// <summary>
    /// Takes a snapshot's servers. <paramref name="current"/> is false when the service has stopped answering since
    /// the snapshot was read, and every server's health is then shown as unknown. <paramref name="busy"/> says whether
-   /// a command runs on a server now. When the selected server is gone and it has no neighbour, the selection moves
+   /// a command runs under a gate's key now; it is asked for every server, for the wizard and for the computer, so
+   /// a change of the gate that could not be shown when it happened is shown here. When the selected server is gone and it has no neighbour, the selection moves
    /// to <paramref name="whenNoServerIsLeft"/>. The node of the selected server that went is returned, so the caller
    /// can say that it went; null when the selection did not have to move.
    /// </summary>
@@ -173,6 +174,8 @@ public sealed class ServerTree
          _byId.Remove(gone.ServerId);
       }
       _servers = after;
+      AddServer.IsBusy = busy(OperationGate.Wizard);
+      Computer.IsBusy = busy(OperationGate.Computer);
       Arrange([.. after, AddServer, Computer, Logs, Settings]);
       Place();
       return MoveSelectionFromAServerThatWent(before, whenNoServerIsLeft);

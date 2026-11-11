@@ -97,6 +97,63 @@ public sealed class ServerBusyTests
 
 
 
+   /// <summary>
+   /// The gate can change on another thread than the window's: a command's hold may be released there, and a
+   /// command may enter there. The tree is not touched on that thread, so no node tells its bindings anything
+   /// there. The gate itself is right at once. The log is told once, with the key and without the holder's
+   /// sentence. The next read shows on every node what the gate says: the server's, the Computer node and the Add
+   /// server node.
+   /// </summary>
+   [Fact]
+   public async Task Busy_ChangedOnAnotherThread_IsNotShownThere_TheNextReadShowsIt()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1));
+      int here = Environment.CurrentManagedThreadId;
+      List<int> raisedOn = [];
+      foreach(TreeNode node in fixture.Shell.Tree.Nodes)
+      {
+         node.PropertyChanged += (_, _) =>
+         {
+            lock(raisedOn)
+            {
+               raisedOn.Add(Environment.CurrentManagedThreadId);
+            }
+         };
+      }
+      Assert.True(fixture.Shell.TryBeginCommand(Snapshots.Id(1), "Signing in to Server 1. Wait for it to finish.", out IDisposable? server));
+      Assert.True(fixture.Shell.TryBeginCommand(OperationGate.Computer, "Saving the computer's details.", out IDisposable? computer));
+      Assert.True(fixture.Shell.Tree.Servers[0].IsBusy);
+      Assert.True(fixture.Shell.Tree.Computer.IsBusy);
+      Assert.Equal([here, here], raisedOn);
+
+      OnAPoolThread(() =>
+      {
+         server.Dispose();
+         computer.Dispose();
+         Assert.True(fixture.Gate.TryEnter(OperationGate.Wizard, "Checking the server.", out _, out _));
+      });
+
+      Assert.Equal([here, here], raisedOn);
+      Assert.True(fixture.Shell.Tree.Servers[0].IsBusy);
+      Assert.True(fixture.Shell.Tree.Computer.IsBusy);
+      Assert.False(fixture.Shell.Tree.AddServer.IsBusy);
+      Assert.False(fixture.Shell.Busy.IsBusy(Snapshots.Id(1)));
+      Assert.Equal([$"INFO A command's hold on {Snapshots.Id(1)} changed on another thread than the window's. The tree shows that after the next read. This is said once."],
+         fixture.Log.Entries.Where(entry => entry.Contains("another thread", StringComparison.Ordinal)), StringComparer.Ordinal);
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("Signing in", StringComparison.Ordinal));
+
+      await fixture.Tick(Snapshots.Server(1));
+
+      Assert.False(fixture.Shell.Tree.Servers[0].IsBusy);
+      Assert.False(fixture.Shell.Tree.Computer.IsBusy);
+      Assert.True(fixture.Shell.Tree.AddServer.IsBusy);
+      Assert.All(raisedOn, thread => Assert.Equal(here, thread));
+      Assert.Equal(5, raisedOn.Count);
+   }
+
+
+
    /// <summary>A server that is busy when a snapshot first lists it is shown as busy from the start.</summary>
    [Fact]
    public async Task Busy_AServerThatAppearsWhileACommandRunsOnIt_IsShownBusy()
@@ -170,5 +227,25 @@ public sealed class ServerBusyTests
       Assert.Equal("gate", Assert.Throws<ArgumentNullException>(() => new ServerBusy(null!)).ParamName);
       Assert.Throws<ArgumentException>(() => busy.ChangedSince(" ", start));
       Assert.Throws<ArgumentException>(() => busy.NoteChange(""));
+   }
+
+
+
+   /// <summary>Runs something on a thread of the pool and comes back when it has ended, without leaving the thread the test is on.</summary>
+   private static void OnAPoolThread(Action action)
+   {
+      using ManualResetEventSlim ended = new();
+      ThreadPool.QueueUserWorkItem(_ =>
+      {
+         try
+         {
+            action();
+         }
+         finally
+         {
+            ended.Set();
+         }
+      });
+      ended.Wait();
    }
 }

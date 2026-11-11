@@ -31,8 +31,11 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// (<see cref="WizardEnded"/>). A start that is refused is refused out loud, as a message on the page on screen.
 /// </para>
 /// <para>
-/// It is used from one thread, the window's, and tells its bindings about every change on that thread: it awaits
-/// the client without leaving the thread it was called on. It never sees a credential.
+/// It is used from one thread, the window's, which is the thread it was built on, and tells its bindings about
+/// every change on that thread: it awaits the client without leaving the thread it was called on. The one thing
+/// that can reach it from another thread is the gate, when a command's hold is released there. The tree is not
+/// touched then; the log is told once, and the next read shows on every node what the gate says. It never sees a
+/// credential.
 /// </para>
 /// </summary>
 public sealed partial class ShellViewModel : ObservableObject, IDisposable
@@ -87,6 +90,12 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
    /// <summary>True once the shell was disposed; nothing is read or shown after that.</summary>
    private bool _disposed;
+
+   /// <summary>The thread the shell was built on, which is the window's. The tree is changed on this thread only.</summary>
+   private readonly int _thread = Environment.CurrentManagedThreadId;
+
+   /// <summary>1 once the log was told that the gate changed on another thread than the window's; 0 until then.</summary>
+   private int _otherThreadNoted;
 
    /// <summary>The servers the tree had when a snapshot whose stored data is ready was last shown: a server of these that such a snapshot no longer lists has gone.</summary>
    private IReadOnlyList<ServerNode> _listedWhenReady = [];
@@ -460,6 +469,22 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>A command started or ended under a key: the node it belongs to shows it.</summary>
-   private void OnGateChanged(object? sender, OperationGateChangedEventArgs e) => Tree.SetBusy(e.Key, e.Busy);
+   /// <summary>
+   /// A command started or ended under a key: the node it belongs to shows it. The gate raises this on whatever
+   /// thread entered or released the key. On the window's thread the node follows at once. On any other thread the
+   /// tree is left alone, because its nodes tell their bindings on the thread that changes them and a reconcile may
+   /// be running on the window's; the log is told once, without the holder's sentence, and the next read shows on
+   /// every node what the gate says then.
+   /// </summary>
+   private void OnGateChanged(object? sender, OperationGateChangedEventArgs e)
+   {
+      if(Environment.CurrentManagedThreadId == _thread)
+      {
+         Tree.SetBusy(e.Key, e.Busy);
+      }
+      else if(Interlocked.Exchange(ref _otherThreadNoted, 1) == 0)
+      {
+         _log.Info("A command's hold on {Key} changed on another thread than the window's. The tree shows that after the next read. This is said once.", e.Key);
+      }
+   }
 }
