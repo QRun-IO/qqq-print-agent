@@ -47,6 +47,7 @@ internal sealed class WorkerHarness : IAsyncDisposable
          EventGate = EventGate,
          ClaimGate = ClaimGate,
          ThrottleDownloadAsync = Unpaced,
+         IsInHand = _ => false,
          CanClaim = () => true,
          ReserveDocumentAsync = (_, _) => Task.FromResult<IAsyncDisposable>(new FreeLease()),
          AcquireSubmissionAsync = (_, _) => Task.FromResult<IAsyncDisposable>(new FreeLease()),

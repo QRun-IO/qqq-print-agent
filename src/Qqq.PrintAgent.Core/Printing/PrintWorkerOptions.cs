@@ -48,6 +48,11 @@ public sealed record PrintWorkerOptions
 
 
 
+   /// <summary>Says whether a lane of this computer holds the job with the given identifier: from the moment it was claimed until the lane lets go of it when its pass for that job ends, normally after the job's final state was recorded and delivered. A claim of such a job is a replay, and the worker leaves the job to the lane that holds it.</summary>
+   public required Func<string, bool> IsInHand { get; init; }
+
+
+
    /// <summary>Says whether this lane may still claim; false once another lane found the queue empty.</summary>
    public required Func<bool> CanClaim { get; init; }
 

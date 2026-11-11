@@ -158,6 +158,11 @@ public sealed partial class AgentRuntime
          EventGate = _eventDeliveryGate,
          ClaimGate = _claimGate,
          ThrottleDownloadAsync = ThrottleDownloadAsync,
+         IsInHand = jobId =>
+         {
+            lock(_stateLock)
+            { return _jobTickets.ContainsKey(jobId); }
+         },
          CanClaim = () => !wave.Drained,
          ReserveDocumentAsync = ReserveDocumentAsync,
          AcquireSubmissionAsync = AcquireSubmissionAsync,

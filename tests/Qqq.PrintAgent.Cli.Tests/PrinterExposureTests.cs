@@ -52,7 +52,7 @@ public sealed class PrinterExposureTests
       selected.Clear();
       Assert.Empty(backend.Discover());
       PrintJob job = new("j1", "p1", "Test", "PDF", "", 1, new PrintOptions(), "", "CLAIMED");
-      await Assert.ThrowsAsync<InvalidOperationException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-exposure.document"), TimeSpan.FromSeconds(1), CancellationToken.None));
+      await Assert.ThrowsAsync<PrinterNotExposedException>(() => backend.PrintFileAsync(job, Path.Combine(Path.GetTempPath(), "unused-exposure.document"), TimeSpan.FromSeconds(1), CancellationToken.None));
       Assert.False(printer.Printed);
    }
 

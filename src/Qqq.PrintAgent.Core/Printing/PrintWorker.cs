@@ -21,8 +21,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// stay invisible. Only when nothing is pending, the connection is synchronized and dispatch is allowed does it
    /// discover printers and claim at most one job. Returns true whenever a claimed job was processed, whatever its
    /// outcome, and when a malformed job was refused and reported, so the lane keeps draining; false when idle,
-   /// paused, blocked, or the claimed job was one the journal already holds as final or as submitting, which ends the
-   /// lane's pass because the server would only offer that job again.
+   /// paused, blocked, or the claimed job was one a lane of this computer already holds, or one the journal already
+   /// holds as final or as submitting, which ends the lane's pass because the server would only offer that job again.
    /// </summary>
    public async Task<bool> RunOnceAsync(CancellationToken token)
    {
@@ -61,10 +61,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// <summary>
    /// Claims one job under the shared claim gate and registers it locally before anything else can happen to it. The
    /// server keeps replaying CLAIMED until RECEIVED commits, so admission is serialized through that acknowledgement; if
-   /// it is interrupted the job is recorded FAILED with no bytes submitted. A job the journal already holds in a final
-   /// state, or as submitting, is dropped here so a replayed claim can never print twice; the pass then ends, because
-   /// the server would only offer that job again. A claimed job that breaks the contract but names itself is refused
-   /// and reported instead of returned.
+   /// it is interrupted the job is recorded FAILED with no bytes submitted. A job this computer is already working on,
+   /// or that the journal holds in a final state or as submitting, is dropped here so a replayed claim can never print
+   /// twice; the pass then ends, because the server would only offer that job again. A claimed job that breaks the
+   /// contract but names itself is refused and reported instead of returned.
    /// </summary>
    private async Task<Claim> ClaimAndRegisterAsync(IReadOnlyList<PrinterInfo> inventory, CancellationToken token)
    {
@@ -78,22 +78,8 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          { job = await api.ClaimAsync(token).ConfigureAwait(false); }
          catch(PrintingProtocolException violation) when(violation.RejectedJob is not null)
          { return new Claim(null, await RefuseAsync(violation.RejectedJob, violation.Message, inventory, token).ConfigureAwait(false)); }
-         if(job is null)
+         if(job is null || IsReplay(job, inventory))
          { return default; }
-         Track(job, inventory);
-         if(journal.GetState(job.JobId) is { } state && (PrintJobState.IsFinal(state) || string.Equals(state, PrintJobState.Submitting, StringComparison.Ordinal)))
-         {
-            ////////////////////////////////////////////////////////////////////////
-            // a job recorded as submitting was handed to a printer once already  //
-            // and has not concluded: another lane is submitting it now, or a run //
-            // stopped part-way and the runtime's recovery reports it as unknown. //
-            // claiming it again must never print it a second time, and it must   //
-            // not pass silently, because the server should not be offering it    //
-            ////////////////////////////////////////////////////////////////////////
-            if(!PrintJobState.IsFinal(state))
-            { log($"{job.JobId}: offered again while recorded as {state}, so its submission has started and not concluded; it is not submitted a second time and this pass claims nothing more."); }
-            return default;
-         }
          options.ActiveJobChanged(job);
          try
          {
@@ -103,13 +89,50 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          }
          catch
          {
-            Record(job, PrintJobState.Failed, "Receipt acknowledgement was interrupted before document submission; no bytes were submitted.");
-            options.ActiveJobChanged(null);
+            // The lane lets go of the job whatever the recording does: a ticket left behind would make every later offer of the job read as one a lane still holds.
+            try
+            { Record(job, PrintJobState.Failed, "Receipt acknowledgement was interrupted before document submission; no bytes were submitted."); }
+            finally { options.ActiveJobChanged(null); }
             throw;
          }
          return new Claim(job, false);
       }
       finally { options.ClaimGate.Release(); }
+   }
+
+
+
+   /// <summary>
+   /// Says whether a claimed job is one this computer must not start on, because it already has, and says so in the
+   /// log when the server should not have offered it. A job that is in hand, held by a lane of this computer right
+   /// now, is left entirely to that lane: nothing is recorded for it here, not even its display facts. The lane lets
+   /// go of a job when its pass for that job ends. Normally that is after the job's final state was recorded and
+   /// delivered; delivery is skipped when the pass is cancelled, and it can fail, and the lane lets go all the same.
+   /// So a job in hand may be one that has just finished, and the log line says "still holds" for that reason and
+   /// does not claim work is under way. A job the journal holds as submitting was handed to a printer once already
+   /// and has not concluded, and one it holds in a final state has; neither is ever submitted a second time.
+   /// </summary>
+   private bool IsReplay(PrintJob job, IReadOnlyList<PrinterInfo> inventory)
+   {
+      if(options.IsInHand(job.JobId))
+      {
+         log($"{job.JobId}: offered again while a lane of this computer still holds it, working on it or just finished with it; it is left to that lane, nothing is recorded for it and this pass claims nothing more.");
+         return true;
+      }
+      Track(job, inventory);
+      if(journal.GetState(job.JobId) is not { } state || !(PrintJobState.IsFinal(state) || string.Equals(state, PrintJobState.Submitting, StringComparison.Ordinal)))
+      { return false; }
+
+      ////////////////////////////////////////////////////////////////////////
+      // a job recorded as submitting was handed to a printer once already  //
+      // and has not concluded: another lane is submitting it now, or a run //
+      // stopped part-way and the runtime's recovery reports it as unknown. //
+      // claiming it again must never print it a second time, and it must   //
+      // not pass silently, because the server should not be offering it    //
+      ////////////////////////////////////////////////////////////////////////
+      if(!PrintJobState.IsFinal(state))
+      { log($"{job.JobId}: offered again while recorded as {state}, so its submission has started and not concluded; it is not submitted a second time and this pass claims nothing more."); }
+      return true;
    }
 
 
@@ -158,7 +181,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// disposal scope stays inside this method's try block, which keeps every failure, including one raised while
    /// releasing a reservation, inside the same decision: FAILED when Windows was never asked, OUTCOME_UNKNOWN when
    /// submission had begun, and nothing at all when the job is already recorded as SPOOLED, because a release that
-   /// fails after Windows accepted the document says nothing about the print and must not be written over it. One
+   /// fails after Windows accepted the document says nothing about the print and must not be written over it. Two
+   /// refusals that arrive after submission began are still FAILED, because each is known to have been made before
+   /// any bytes were sent: the native layer's media mismatch, and the exposure filter's refusal of a printer that is
+   /// no longer shared, which only the filter can raise and raises before it calls the backend behind it. One
    /// timing line per job is logged afterwards so a slow print can be attributed to a phase from the service's own log
    /// without any extra request, payload or printer access. Returns true when the job was processed, whatever its
    /// outcome; false only when something else had already recorded a final state for it, so nothing was done.
@@ -179,7 +205,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          if(attempt.Spooled)
          { log($"{job.JobId}: spooled, and stays recorded as spooled; releasing what the job held failed afterwards: {exception.Message}"); }
          else
-         { Record(job, attempt.Submitting && exception is not PrinterMediaMismatchException ? PrintJobState.OutcomeUnknown : PrintJobState.Failed, exception.Message); }
+         { Record(job, attempt.Submitting && exception is not (PrinterMediaMismatchException or PrinterNotExposedException) ? PrintJobState.OutcomeUnknown : PrintJobState.Failed, exception.Message); }
       }
       log(attempt.TimingMessage(job.JobId));
       if(!token.IsCancellationRequested)
@@ -195,7 +221,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// caller can tell a refusal before any bytes from an uncertain submission. Between recording SUBMITTING and calling
    /// Windows nothing has been sent, so the two things that can stop the job there (delivery of the receipt not being
    /// confirmed, and cancellation) say in their own words that no bytes were submitted. Handing the verified staged
-   /// file to the backend is the only step after which an outcome is uncertain.
+   /// file to the backend is the only step after which an outcome is uncertain. The printer is discovered again once,
+   /// after the download, and not a second time when its turn is held: that would start the print helper once more
+   /// for every job, while the job holds the printer's turn and a print slot. What changes during the wait for the
+   /// turn is refused later by whoever can tell that nothing was sent: the exposure filter for a printer that is no
+   /// longer shared, and the native layer for media that changed.
    /// </summary>
    private async Task SubmitJobAsync(PrintJob job, JobAttempt attempt, CancellationToken token)
    {
@@ -245,9 +275,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
    /// <summary>
-   /// Discovers the printers again after the download and requires the assigned queue to still offer the job's format and
-   /// the selected media profile, so a queue or driver default that changed while the document streamed is refused before
-   /// any submission instead of printing on the wrong stock.
+   /// Discovers the printers again after the download and requires the assigned queue to still be shared, to still
+   /// offer the job's format and to still have the selected media profile, so a printer withdrawn, or a queue or driver
+   /// default changed, while the document streamed is refused before SUBMITTING is recorded, with Windows never asked,
+   /// instead of printing on the wrong stock.
    /// </summary>
    private void RequireCurrentPrinter(PrintJob job)
    {

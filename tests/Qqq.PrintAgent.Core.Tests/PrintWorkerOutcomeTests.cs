@@ -113,6 +113,199 @@ public sealed class PrintWorkerOutcomeTests
 
 
    /// <summary>
+   /// A replay of a job another lane of this computer holds is left entirely to that lane, whatever it has recorded so
+   /// far. A lane lets go of a job only after its final state was recorded and delivered, so the job in hand may be
+   /// one that has just finished (the SPOOLED row); the log line is worded to be true then as well. Nothing is
+   /// recorded or reported for the replay, its title and printer are not rewritten, the runtime is not told a job
+   /// became active, and it is neither downloaded nor printed. The log says so once, in plain words, and the pass
+   /// ends, because the server would only offer the same job again.
+   /// </summary>
+   [Theory]
+   [InlineData("RECEIVED")]
+   [InlineData("RECEIVED,SUBMITTING")]
+   [InlineData("RECEIVED,SUBMITTING,SPOOLED")]
+   public async Task ClaimOfAJobInHandEndsThePassRecordsNothingAndLogsOneLine(string recordedSoFar)
+   {
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      server.Offer(FakePrintServer.Job(Document) with { Title = "Replayed title" }, Document);
+      journal.TrackJob(FakePrintServer.Job(Document) with { Title = "Original title" }, "Original printer");
+      foreach(string state in recordedSoFar.Split(','))
+      {
+         journal.Record("job-1", new PrintEvent(state + "-by-the-other-lane", state));
+         journal.Acknowledge(state + "-by-the-other-lane");
+      }
+      string[] recordedByTheOtherLane = journal.StatesOf("job-1");
+      var asked = new List<string>();
+      var active = new List<string?>();
+      harness.Options = harness.Options with
+      {
+         IsInHand = jobId =>
+         {
+            asked.Add(jobId);
+            return true;
+         },
+         ActiveJobChanged = job => active.Add(job?.JobId),
+      };
+
+      Assert.False(await harness.RunOnceAsync());
+      Assert.Equal(new[] { "job-1" }, asked, StringComparer.Ordinal);
+      Assert.Equal(1, server.Claims);
+      Assert.Equal(recordedByTheOtherLane, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Empty(journal.Pending());
+      Assert.Empty(server.Events);
+      Assert.Empty(active);
+      Assert.Equal("Original title", journal.Jobs["job-1"].Job.Title);
+      Assert.Equal("Original printer", journal.Jobs["job-1"].PrinterName);
+      Assert.Equal(0, server.Downloads);
+      Assert.Equal(0, printer.Submissions);
+      Assert.Equal("job-1: offered again while a lane of this computer still holds it, working on it or just finished with it; it is left to that lane, nothing is recorded for it and this pass claims nothing more.", Assert.Single(harness.Log));
+   }
+
+
+
+   /// <summary>
+   /// Jobs can wait a long time for a printer's turn, and the worker does not discover the printers again when the
+   /// turn is held: that would start the print helper once more for every job, while the job holds the turn and a
+   /// print slot. What happened to the printer during the wait is therefore settled after SUBMITTING is recorded, by
+   /// whoever can tell whether anything was sent. A printer the operator stopped sharing is refused by the exposure
+   /// filter before the backend is called, and a selected media default that changed is refused by the native layer
+   /// before it prints: both are FAILED. A queue that is gone is found by the native layer as well, but its failure
+   /// carries no type the worker can rely on, so the job is OUTCOME_UNKNOWN like any other failure after the staged
+   /// file was handed over. The fake backend plays the native layer here: it finds the queue, then matches the job's
+   /// selected media against the queue's current default, and only then would print. In every case the printer is
+   /// discovered twice and no more (the inventory and the check after the download), the turn is released, nothing
+   /// stays in the staging folder, and the job is neither downloaded nor printed when the server offers it again.
+   /// </summary>
+   [Theory]
+   [InlineData("unshared", "FAILED", "The printer is not exposed to QQQ on this computer; no bytes were submitted.", 0)]
+   [InlineData("media-changed", "FAILED", "The selected printer media profile changed or is unavailable. Refresh the printer and select its current default.", 1)]
+   [InlineData("queue-gone", "OUTCOME_UNKNOWN", "The assigned queue was not found.", 1)]
+   public async Task ChangeToThePrinterWhileWaitingForItsTurnIsSettledAfterSubmittingByWhoeverCanTell(string change, string outcome, string reason, int submissions)
+   {
+      PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
+      PrintJob job = FakePrintServer.Job(Document, options: new PrintOptions(MediaProfile: new(profile.Id, profile.Revision)));
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile] };
+      printer.Printing = (submitted, _, _) =>
+      {
+         PrinterInfo queue = printer.Printers.FirstOrDefault(item => string.Equals(item.PrinterId, submitted.PrinterId, StringComparison.Ordinal)) ?? throw new InvalidOperationException("The assigned queue was not found.");
+         PrinterMediaProfile.RequireMatch(submitted.Options, queue.MediaProfiles);
+         return Task.FromResult("spool-1");
+      };
+      server.Offer(job, Document).Offer(job, Document);
+      var steps = new List<string>();
+      harness.Options = harness.Options with
+      {
+         AcquireSubmissionAsync = (_, _) =>
+         {
+            //////////////////////////////////////////////////////////////////////
+            // the wait for the turn ends here; the change happened while the   //
+            // job waited, after the check that follows the download had passed //
+            //////////////////////////////////////////////////////////////////////
+            switch(change)
+            {
+               case "unshared":
+                  harness.Exposed.Clear();
+                  break;
+               case "queue-gone":
+                  printer.Printers.Clear();
+                  break;
+               default:
+                  printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile with { Revision = new string('b', 64) }] };
+                  break;
+            }
+            return Lease.TakeAsync(steps, "printer turn");
+         },
+      };
+
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", outcome }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal(reason, journal.Last("job-1").Message);
+      Assert.Null(journal.Last("job-1").SpoolerJobId);
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", outcome }, server.States, StringComparer.Ordinal);
+      Assert.Equal(submissions, printer.Submissions);
+      Assert.Equal(2, printer.Discoveries);
+      Assert.Equal(new[] { "take printer turn", "release printer turn" }, steps, StringComparer.Ordinal);
+      Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
+
+      Assert.False(await harness.RunOnceAsync());
+      Assert.Equal(2, server.Claims);
+      Assert.Equal(1, server.Downloads);
+      Assert.Equal(submissions, printer.Submissions);
+      Assert.Equal(outcome, journal.GetState("job-1"));
+   }
+
+
+
+   /// <summary>A printer withdrawn before the document has been downloaded is caught by the check that follows the download: the job is FAILED with nothing submitted and never asks for the printer's turn.</summary>
+   [Fact]
+   public async Task PrinterWithdrawnBeforeTheDownloadIsStillFailedAndNeverTakesTheTurn()
+   {
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      server.Offer(FakePrintServer.Job(Document), Document);
+      var steps = new List<string>();
+      harness.Options = harness.Options with
+      {
+         ReserveDocumentAsync = (_, _) =>
+         {
+            harness.Exposed.Clear();
+            return Lease.TakeAsync(steps, "reservation");
+         },
+         AcquireSubmissionAsync = (_, _) => Lease.TakeAsync(steps, "printer turn"),
+      };
+
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal("Assigned printer or document format is unavailable.", journal.Last("job-1").Message);
+      Assert.Equal(new[] { "RECEIVED", "FAILED" }, server.States, StringComparer.Ordinal);
+      Assert.Equal(1, server.Downloads);
+      Assert.Equal(0, printer.Submissions);
+      Assert.Equal(new[] { "take reservation", "release reservation" }, steps, StringComparer.Ordinal);
+      Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
+   }
+
+
+
+   /// <summary>
+   /// The exposure filter is the check on sharing at the moment of submission, however late sharing changed: here in
+   /// the instant after SUBMITTING was recorded. The filter refuses before the backend behind it is called, with a
+   /// refusal only the filter can raise. The worker therefore knows nothing was sent: the job is FAILED, not unknown,
+   /// its reason says that no bytes were submitted, the backend was never called, and the job is not printed when the
+   /// server offers it again.
+   /// </summary>
+   [Fact]
+   public async Task PrinterWithdrawnAfterTheSubmittingReceiptIsRefusedByTheFilterAndFailedWithNothingSent()
+   {
+      PrintJob job = FakePrintServer.Job(Document);
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      server.Offer(job, Document).Offer(job, Document);
+      journal.Recorded = (_, printEvent) =>
+      {
+         if(string.Equals(printEvent.Status, "SUBMITTING", StringComparison.Ordinal))
+         { harness.Exposed.Clear(); }
+      };
+
+      Assert.True(await harness.RunOnceAsync());
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal("The printer is not exposed to QQQ on this computer; no bytes were submitted.", journal.Last("job-1").Message);
+      Assert.Null(journal.Last("job-1").SpoolerJobId);
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", "FAILED" }, server.States, StringComparer.Ordinal);
+      Assert.Equal(0, printer.Submissions);
+      Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
+
+      Assert.False(await harness.RunOnceAsync());
+      Assert.Equal(1, server.Downloads);
+      Assert.Equal(0, printer.Submissions);
+      Assert.Equal("FAILED", journal.GetState("job-1"));
+   }
+
+
+
+   /// <summary>
    /// Every refusal the worker makes before native submission is a plain FAILED with its reason, never the uncertain
    /// state, and the printer is never called: copies over the policy (before any download), a policy tightened while the
    /// job waited, a printer that disappeared during the download, and a pause that arrives before or just after the
@@ -234,6 +427,37 @@ public sealed class PrintWorkerOutcomeTests
       await Assert.ThrowsAsync<HttpRequestException>(() => harness.RunOnceAsync());
       Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Equal("Receipt acknowledgement was interrupted before document submission; no bytes were submitted.", journal.Last("job-1").Message);
+      Assert.Equal(new[] { "job-1", null }, active, StringComparer.Ordinal);
+      Assert.Equal(0, server.Downloads);
+      Assert.Equal(0, printer.Submissions);
+      Assert.Equal(1, harness.EventGate.CurrentCount);
+      Assert.Equal(1, harness.ClaimGate.CurrentCount);
+   }
+
+
+
+   /// <summary>
+   /// The lane lets go of a job whose receipt was interrupted even when the journal then fails to record FAILED for
+   /// it. The runtime is still told the job is no longer active, so no ticket is left behind to make a later offer of
+   /// the job read as one a lane still holds. The journal's failure is what reaches the caller, nothing was
+   /// downloaded or submitted, and both gates are released.
+   /// </summary>
+   [Fact]
+   public async Task InterruptedReceiptLetsGoOfTheJobEvenWhenRecordingItsFailureFails()
+   {
+      await using var harness = new WorkerHarness();
+      (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
+      server.Arriving = (kind, _) => string.Equals(kind, "events", StringComparison.Ordinal) ? throw new HttpRequestException("Synthetic refusal.") : Task.CompletedTask;
+      journal.Recorded = (_, recorded) =>
+      {
+         if(string.Equals(recorded.Status, "FAILED", StringComparison.Ordinal))
+         { throw new IOException("Synthetic journal failure."); }
+      };
+      server.Offer(FakePrintServer.Job(Document), Document);
+      var active = new List<string?>();
+      harness.Options = harness.Options with { ActiveJobChanged = job => active.Add(job?.JobId) };
+      IOException failure = await Assert.ThrowsAsync<IOException>(() => harness.RunOnceAsync());
+      Assert.Equal("Synthetic journal failure.", failure.Message);
       Assert.Equal(new[] { "job-1", null }, active, StringComparer.Ordinal);
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
