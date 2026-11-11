@@ -36,7 +36,8 @@ internal static partial class CodeBehind
    /// <c>Target</c> is the variable, field or property it is assigned to, null when it is created inside another
    /// expression. <c>Member</c> is true when the target is a field or a property of the class (declared with an access
    /// modifier in the file) and false for a local, including a local that is declared where it is created and has the
-   /// name of a member.
+   /// name of a member. A member is one control wherever the file names it; a local is one within the braces around
+   /// its creation (<c>CSharpText.BlockAround</c>).
    /// </summary>
    internal sealed record Creation(string Where, int Index, string? Kind, string? Target, bool Member);
 
@@ -165,9 +166,7 @@ internal static partial class CodeBehind
       if(target is not null)
       {
          // Two declarations of the name with different types (a field and a local of another method) leave the type unnamed.
-         string name = target.Split('[')[0];
-         string[] types = [.. Declaration().Matches(file.Bare).Where(match => string.Equals(match.Groups["name"].Value, name, StringComparison.Ordinal) && IsAType(match.Groups["type"].Value))
-            .Select(match => match.Groups["type"].Value.TrimEnd('?')).Distinct(StringComparer.Ordinal)];
+         string[] types = DeclaredTypes(file, target.Split('[')[0]);
          return types.Length == 1 ? Typed(where, index, types[0], target) : new Creation(where, index, Kind: null, target, Member: false);
       }
       CSharpText.Method? method = CSharpText.Enclosing(methods, index);
@@ -181,6 +180,13 @@ internal static partial class CodeBehind
       }
       return new Creation(where, index, Kind: null, Target: null, Member: false);
    }
+
+
+
+   /// <summary>The types the file declares a name with, as a field, a property, a local or a parameter, each once and without its question mark.</summary>
+   private static string[] DeclaredTypes(SourceFile file, string name)
+      => [.. Declaration().Matches(file.Bare).Where(match => string.Equals(match.Groups["name"].Value, name, StringComparison.Ordinal) && IsAType(match.Groups["type"].Value))
+         .Select(match => match.Groups["type"].Value.TrimEnd('?')).Distinct(StringComparer.Ordinal)];
 
 
 

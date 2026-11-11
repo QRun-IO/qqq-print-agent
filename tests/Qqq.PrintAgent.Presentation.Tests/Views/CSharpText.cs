@@ -16,13 +16,24 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// <para>
 /// What that covers, and what it does not. The readers built on this report every form they know of and cannot
 /// read: an identifier that is not written out, a <c>new(</c> whose type is written somewhere else, a mention of an
-/// automation identifier outside the one call that sets it, a lookup in a form the suites' reader does not know. They
-/// do not see what has no word of its own to look for: a control that is made without <c>new</c> in the companion
-/// (by a factory of another assembly, or by reflection), and code inside the holes of an interpolated string, which
-/// is blanked with the string. A declaration is
-/// found by its shape (a name, a bracketed list of typed names, a body), so a method's extent is "up to the next
-/// declaration"; a local function therefore ends the method it is in, which makes a rule about "the same method"
-/// stricter, never looser.
+/// automation identifier outside the one call that sets it, a lookup in a form the suites' reader does not know, an
+/// identifier that a style's setter gives, and a name that code gives an element from a value (WinUI reports an
+/// element's name as its identifier when it has no other). They do not see what has no word of its own to look for:
+/// a control that is made without <c>new</c> in the companion (by a factory of another assembly, or by reflection);
+/// an identifier or a name that a template or a style of another assembly gives; a name that code gives an element
+/// as a plain literal, which is held as an <c>x:Name</c> is but is not compared with the recorded identifiers; a
+/// string that a call returns straight into one of FlaUI's own lookups; and code inside the holes of an
+/// interpolated string, which is blanked with the string. A binding's mode is read with or without spaces around
+/// its equals sign.
+/// </para>
+/// <para>
+/// Where a piece of code begins and ends is read from its brackets, not guessed. A declaration is found by its shape
+/// (a name, a bracketed list of typed names, a body) and reaches to the brace that closes its body, or to the
+/// semicolon that ends an expression body; a local function lies inside the method it is in. What stands between
+/// declarations (a property's accessor, a field's initializer) is in no method: nothing there is a parameter of the
+/// method before it. A local is matched within the innermost pair of braces around it, which is the block that
+/// declares it, so the two branches of an <c>if</c> are two places and an accessor's body is its own. Both rest on
+/// the braces of the file being balanced; code that a preprocessor directive leaves out is read as if it were there.
 /// </para>
 /// </summary>
 internal static partial class CSharpText
@@ -35,8 +46,8 @@ internal static partial class CSharpText
 
 
 
-   /// <summary>A method (or constructor, or local function) declaration: its name, its parameter names in order, where its name starts, and where the bracket of its parameters closes.</summary>
-   internal sealed record Method(string Name, IReadOnlyList<string> Parameters, int Index, int Close);
+   /// <summary>A method (or constructor, or local function) declaration: its name, its parameter names in order, where its name starts, where the bracket of its parameters closes, and where its body ends (the position after its last character).</summary>
+   internal sealed record Method(string Name, IReadOnlyList<string> Parameters, int Index, int Close, int End);
 
 
 
@@ -183,7 +194,7 @@ internal static partial class CSharpText
          Match[] names = [.. parameters.Select(parameter => ParameterName().Match(parameter))];
          if(names.All(parameter => parameter.Success) && StartsABody(code, close + 1))
          {
-            methods.Add(new Method(name, [.. names.Select(parameter => parameter.Groups["name"].Value)], match.Index, close));
+            methods.Add(new Method(name, [.. names.Select(parameter => parameter.Groups["name"].Value)], match.Index, close, EndOfBody(code, close + 1)));
          }
       }
       return methods;
@@ -191,8 +202,8 @@ internal static partial class CSharpText
 
 
 
-   /// <summary>The declaration a position is in: the last one that starts before it, or null before the first.</summary>
-   internal static Method? Enclosing(IReadOnlyList<Method> methods, int index) => methods.LastOrDefault(method => method.Index < index);
+   /// <summary>The declaration a position is in: the innermost one whose name stands before it and whose body ends after it, or null when it is in none (a field's initializer, a property's accessor).</summary>
+   internal static Method? Enclosing(IReadOnlyList<Method> methods, int index) => methods.LastOrDefault(method => method.Index < index && index < method.End);
 
 
 
@@ -210,17 +221,35 @@ internal static partial class CSharpText
 
 
 
-   /// <summary>The stretch of the file a declaration covers: from its name to the name of the next declaration, or to the end.</summary>
-   internal static string BodyOf(string code, IReadOnlyList<Method> methods, Method method)
+   /// <summary>The stretch of the file a declaration covers: from its name to the end of its body.</summary>
+   internal static string BodyOf(string code, Method method) => code[method.Index..method.End];
+
+
+
+   /// <summary>
+   /// The innermost pair of braces around a position: where the opening brace is and where the closing one is. Before
+   /// the first brace it is the whole text (-1 and the length). Give it text without comments and without the inside
+   /// of literals, so that a brace in a string is not one. For a local this is the block that declares it; for
+   /// anything else it is the nearest braces, which may be an initializer's.
+   /// </summary>
+   internal static (int Open, int Close) BlockAround(string bare, int index)
    {
-      Method? next = methods.FirstOrDefault(other => other.Index > method.Index);
-      return code[method.Index..(next?.Index ?? code.Length)];
+      int depth = 0;
+      int open = Math.Min(index, bare.Length) - 1;
+      while(open >= 0 && (bare[open] != '{' || depth > 0))
+      {
+         depth += bare[open] == '}' ? 1 : bare[open] == '{' ? -1 : 0;
+         open--;
+      }
+      depth = 0;
+      int close = Math.Max(index, 0);
+      while(close < bare.Length && (bare[close] != '}' || depth > 0))
+      {
+         depth += bare[close] == '{' ? 1 : bare[close] == '}' ? -1 : 0;
+         close++;
+      }
+      return (open, close);
    }
-
-
-
-   /// <summary>True when two positions are in the same declaration, or both before the first.</summary>
-   internal static bool InTheSameMethod(IReadOnlyList<Method> methods, int first, int second) => Enclosing(methods, first)?.Index == Enclosing(methods, second)?.Index;
 
 
 
@@ -297,6 +326,49 @@ internal static partial class CSharpText
          index += source[index] == '"' ? 2 : 1;
       }
       return Math.Min(index + 1, source.Length);
+   }
+
+
+
+   /// <summary>
+   /// Returns the position just after the body that begins at or after a position: after the brace that closes a block
+   /// body, or after the semicolon that ends an expression body. What stands before the body (a generic constraint, a
+   /// constructor's call to <c>this</c> or <c>base</c>) is passed over, and a closing bracket that was never opened
+   /// ends the body before it.
+   /// </summary>
+   private static int EndOfBody(string code, int from)
+   {
+      int depth = 0;
+      bool expression = false;
+      int index = from;
+      while(index < code.Length)
+      {
+         char current = code[index];
+         if(current is '"' or '\'')
+         {
+            index = EndOfLiteral(code, index);
+            continue;
+         }
+         if(current is '(' or '[' or '{')
+         {
+            depth++;
+         }
+         else if(current is ')' or ']' or '}')
+         {
+            depth--;
+            if(depth < 0 || (depth == 0 && current == '}' && !expression))
+            {
+               return depth < 0 ? index : index + 1;
+            }
+         }
+         else if(depth == 0 && current == ';')
+         {
+            return index + 1;
+         }
+         expression |= depth == 0 && current == '=' && index + 1 < code.Length && code[index + 1] == '>';
+         index++;
+      }
+      return code.Length;
    }
 
 

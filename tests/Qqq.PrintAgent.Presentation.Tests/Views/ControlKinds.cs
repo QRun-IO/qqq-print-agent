@@ -42,10 +42,7 @@ internal sealed class ControlKinds
             // A partial class is declared in several files and names its base in one of them.
             _declared[name] = parent ?? _declared.GetValueOrDefault(name);
          }
-         if(CodeBehind.Named(file).Any(named => string.Equals(named.Target, "this", StringComparison.Ordinal)))
-         {
-            _nameThemselves.UnionWith(types.Select(type => type.Name));
-         }
+         _nameThemselves.UnionWith(CodeBehind.Named(file).Where(named => string.Equals(named.Target, "this", StringComparison.Ordinal)).Select(named => CodeBehind.OwnerOf(file, named.Index)));
       }
    }
 
@@ -77,7 +74,7 @@ internal sealed class ControlKinds
 
 
 
-   /// <summary>True for a class of the companion whose own file sets an identifier on <c>this</c>: every instance then carries that identifier, wherever it is created.</summary>
+   /// <summary>True for a class of the companion that sets an identifier on <c>this</c> in its own body: every instance then carries that identifier, wherever it is created. Another class in the same file does not.</summary>
    internal bool NamesItself(string kind) => _nameThemselves.Contains(kind);
 
 

@@ -85,8 +85,9 @@ public sealed partial class XamlContractTests
    /// <summary>
    /// Every element of an interactive kind in a view has an identifier, written in the markup or set on its
    /// <c>x:Name</c> in the view's code-behind, and so has an element of any other kind that takes input. Every control
-   /// of an interactive kind that code creates is named in a <c>SetAutomationId</c>: of the same method for a local,
-   /// of the same file for a field or a property. The only exception is an item added to a menu that Windows draws.
+   /// of an interactive kind that code creates is named in a <c>SetAutomationId</c>: of the block that creates it for
+   /// a local, of the same file for a field or a property; and one block, or one field, holds one such control, so
+   /// that a call names one. The only exception is an item added to a menu that Windows draws.
    /// A kind that is in none of the lists fails here as well, in markup and in code, and so does a <c>new(</c> whose
    /// type the reader cannot name, so a control cannot arrive unclassified and therefore unidentified. What code
    /// gives a handler for a press or a key is held as markup is: it is named in a <c>SetAutomationId</c> of the file,
@@ -95,8 +96,8 @@ public sealed partial class XamlContractTests
    [Fact]
    public void EveryInteractiveControl_HasAnIdentifier()
    {
-      List<string> problems = [.. _reading.Unreadable];
-      ControlKinds kinds = new(s_interactive, s_texts, s_passive, s_notElements, _markup, _code);
+      List<string> problems = [.. Unreadable()];
+      ControlKinds kinds = Kinds();
       foreach(SourceFile file in _markup)
       {
          var namedInCode = CompanionSources.CodeBehindOf(file, _code).SelectMany(CodeBehind.Named).Select(named => named.Target).ToHashSet(StringComparer.Ordinal);
@@ -115,6 +116,11 @@ public sealed partial class XamlContractTests
 
       Assert.True(problems.Count == 0, Report(problems));
    }
+
+
+
+   /// <summary>What a kind is, by the four lists and the companion's own classes.</summary>
+   private ControlKinds Kinds() => new(s_interactive, s_texts, s_passive, s_notElements, _markup, _code);
 
 
 
@@ -139,12 +145,13 @@ public sealed partial class XamlContractTests
 
 
 
-   /// <summary>Reports, for one file, each <c>new(</c> whose type cannot be named, each created kind the contract does not know, and each control of an interactive kind created without an identifier, apart from the items of the native menus, which are noted in <paramref name="excused"/>.</summary>
-   private static IEnumerable<string> CreatedWithoutAnIdentifier(ControlKinds kinds, SourceFile file, HashSet<(string File, string Menu)> excused)
+   /// <summary>Reports, for one file, each <c>new(</c> whose type cannot be named, each created kind the contract does not know, each name that two controls of an interactive kind share in one place, and each such control created without an identifier, apart from the items of the native menus, which are noted in <paramref name="excused"/>.</summary>
+   internal static IEnumerable<string> CreatedWithoutAnIdentifier(ControlKinds kinds, SourceFile file, HashSet<(string File, string Menu)> excused)
    {
-      IReadOnlyList<CSharpText.Method> methods = CSharpText.Methods(file.Code);
       IReadOnlyList<(string Target, int Index)> named = CodeBehind.Named(file);
-      foreach(CodeBehind.Creation creation in CodeBehind.Creations(file))
+      IReadOnlyList<CodeBehind.Creation> creations = CodeBehind.Creations(file);
+      CodeBehind.Creation[] controls = [.. creations.Where(creation => creation.Kind is not null && kinds.Of(creation.Kind) == ControlKinds.Sort.Interactive && !kinds.NamesItself(creation.Kind))];
+      foreach(CodeBehind.Creation creation in creations)
       {
          ControlKinds.Sort sort = creation.Kind is null ? ControlKinds.Sort.Unknown : kinds.Of(creation.Kind);
          if(creation.Kind is null)
@@ -155,37 +162,84 @@ public sealed partial class XamlContractTests
          {
             yield return $"{creation.Where}: code creates a {creation.Kind}, and the contract does not know the kind. Add it to the interactive kinds if an operator acts on it (it then needs an identifier), to the text kinds if it shows words the window changes, to the passive kinds if it is another element of a view, and to s_notElements if it is no element at all (a value, a command, a service).";
          }
-         else if(sort == ControlKinds.Sort.Interactive && !kinds.NamesItself(creation.Kind) && !Identified(methods, named, creation))
+         else if(controls.Contains(creation))
          {
-            string? menu = CodeBehind.AddedTo(file, creation);
-            if(menu is not null && s_nativeMenus.Any(native => string.Equals(native.File, file.Name, StringComparison.Ordinal) && string.Equals(native.Menu, menu, StringComparison.Ordinal)))
+            string? problem = SharingAName(file, controls, creation) ?? (Identified(file, named, creation) || Excused(file, creation, excused) ? null : WithoutAnIdentifier(file, named, creation));
+            if(problem is not null)
             {
-               excused.Add((file.Name, menu));
-               continue;
+               yield return problem;
             }
-            yield return WithoutAnIdentifier(creation);
          }
       }
    }
 
 
 
-   /// <summary>True when a <c>SetAutomationId</c> names what the creation is assigned to: anywhere in the file for a field or a property, in the same method for a local.</summary>
-   private static bool Identified(IReadOnlyList<CSharpText.Method> methods, IReadOnlyList<(string Target, int Index)> named, CodeBehind.Creation creation)
-      => creation.Target is not null && named.Any(call => string.Equals(call.Target, creation.Target, StringComparison.Ordinal) && (creation.Member || CSharpText.InTheSameMethod(methods, call.Index, creation.Index)));
+   /// <summary>
+   /// The stretch of a file in which a control created in code is one control: the whole file for a field or a
+   /// property, and for a local the innermost braces around its creation, which is the block that declares it. A
+   /// local of the same name in another block (the other branch of an <c>if</c>, another method, an accessor) is
+   /// another control, and a <c>SetAutomationId</c> there does not name this one.
+   /// </summary>
+   private static (int Open, int Close) PlaceOf(SourceFile file, CodeBehind.Creation creation) => creation.Member ? (-1, file.Bare.Length) : CSharpText.BlockAround(file.Bare, creation.Index);
 
 
 
-   /// <summary>Says what to write for a control created without an identifier, by where it is created.</summary>
-   private static string WithoutAnIdentifier(CodeBehind.Creation creation)
+   /// <summary>True when a <c>SetAutomationId</c> names what the creation is assigned to, in the place the creation is one control in.</summary>
+   private static bool Identified(SourceFile file, IReadOnlyList<(string Target, int Index)> named, CodeBehind.Creation creation)
+   {
+      (int open, int close) = PlaceOf(file, creation);
+      return creation.Target is not null && named.Any(call => string.Equals(call.Target, creation.Target, StringComparison.Ordinal) && call.Index > open && call.Index < close);
+   }
+
+
+
+   /// <summary>
+   /// Reports a creation that shares the name it is assigned to with another control of an interactive kind in the
+   /// place it is one control in; null when it is alone there. A <c>SetAutomationId</c> names a variable, so with two
+   /// controls behind one name the contract could not say which of them a call identifies, and the recorded list,
+   /// which describes a control by its class and that name, could not tell them apart either. The message is the same
+   /// from either of the two, so it is reported once.
+   /// </summary>
+   private static string? SharingAName(SourceFile file, CodeBehind.Creation[] controls, CodeBehind.Creation creation)
+   {
+      (int open, int close) = PlaceOf(file, creation);
+      CodeBehind.Creation[] same = [.. controls.Where(other => creation.Target is not null && string.Equals(other.Target, creation.Target, StringComparison.Ordinal) && other.Member == creation.Member && other.Index > open && other.Index < close)];
+      return same.Length < 2 ? null
+         : $"{same[0].Where}: {same.Length} controls are assigned to {creation.Target} in one {(creation.Member ? "file, where it is a field or a property" : "block")} ({string.Join(" and ", same.Select(other => other.Where))}). A SetAutomationId names a variable, so the contract cannot tell which of them a call identifies, and Views/{RecordedIdentifiers} could not tell them apart either. If they are different controls, give each a variable or a field of its own and its own AutomationProperties.SetAutomationId, and record each identifier. If it is one control, create it in one place.";
+   }
+
+
+
+   /// <summary>True for an item added to a menu that Windows draws, which needs no identifier; the menu is noted in <paramref name="excused"/>.</summary>
+   private static bool Excused(SourceFile file, CodeBehind.Creation creation, HashSet<(string File, string Menu)> excused)
+   {
+      string? menu = CodeBehind.AddedTo(file, creation);
+      if(menu is null || !s_nativeMenus.Any(native => string.Equals(native.File, file.Name, StringComparison.Ordinal) && string.Equals(native.Menu, menu, StringComparison.Ordinal)))
+      {
+         return false;
+      }
+      excused.Add((file.Name, menu));
+      return true;
+   }
+
+
+
+   /// <summary>Says what to write for a control created without an identifier, by where it is created, and names a <c>SetAutomationId</c> that names the same variable from outside the block, since that is the call a reader would take for this control's.</summary>
+   private static string WithoutAnIdentifier(SourceFile file, IReadOnlyList<(string Target, int Index)> named, CodeBehind.Creation creation)
    {
       if(creation.Target is null)
       {
-         return $"{creation.Where}: this {creation.Kind} is created inside another expression, so nothing can give it an identifier. Give it a variable, call AutomationProperties.SetAutomationId(variable, \"Identifier\") in the same method, and record the identifier in Views/{RecordedIdentifiers}.";
+         return $"{creation.Where}: this {creation.Kind} is created inside another expression, so nothing can give it an identifier. Give it a variable, call AutomationProperties.SetAutomationId(variable, \"Identifier\") in the same block, and record the identifier in Views/{RecordedIdentifiers}.";
       }
-      return creation.Member
-         ? $"{creation.Where}: this {creation.Kind} is created in code, and no SetAutomationId in this file names {creation.Target}. Add AutomationProperties.SetAutomationId({creation.Target}, \"Identifier\") in this file, named like the others in Views/{RecordedIdentifiers}, and record it there. The contract reads one file at a time: an identifier set in another file of a partial class is not seen, so set it in the file that creates the control."
-         : $"{creation.Where}: this {creation.Kind} is created in code, and no SetAutomationId in the same method names {creation.Target}. Add AutomationProperties.SetAutomationId({creation.Target}, \"Identifier\") in the method that creates it, named like the others in Views/{RecordedIdentifiers}, and record it there. A local of the same name in another method is another control.";
+      if(creation.Member)
+      {
+         return $"{creation.Where}: this {creation.Kind} is created in code, and no SetAutomationId in this file names {creation.Target}. Add AutomationProperties.SetAutomationId({creation.Target}, \"Identifier\") in this file, named like the others in Views/{RecordedIdentifiers}, and record it there. The contract reads one file at a time: an identifier set in another file of a partial class is not seen, so set it in the file that creates the control.";
+      }
+      string[] elsewhere = [.. named.Where(call => string.Equals(call.Target, creation.Target, StringComparison.Ordinal)).Select(call => file.At(call.Index))];
+      return elsewhere.Length == 0
+         ? $"{creation.Where}: this {creation.Kind} is created in code, and no SetAutomationId names {creation.Target}. Add AutomationProperties.SetAutomationId({creation.Target}, \"Identifier\") in the block that creates it (the braces around this line), named like the others in Views/{RecordedIdentifiers}, and record it there."
+         : $"{creation.Where}: this {creation.Kind} is created in code, and no SetAutomationId in the block that creates it (the braces around this line) names {creation.Target}. What names {creation.Target} at {string.Join(" and ", elsewhere)} is outside that block, in another branch, another method or an accessor, and so names another control. Add AutomationProperties.SetAutomationId({creation.Target}, \"Identifier\") in the block that creates this one, named like the others in Views/{RecordedIdentifiers}, and record it there. If it is one control that is created in a branch and identified after the branch, create it in one place instead (Kind name = new(...)) and identify it there.";
    }
 
 

@@ -36,7 +36,7 @@ public sealed partial class XamlContractTests
    /// </summary>
    private static readonly Dictionary<string, string> s_notAnnounced = new(StringComparer.Ordinal)
    {
-      ["ConnectionFeedback"] = ToBeDecided + "It is the connection dialog's InfoBar and declares no live region. WinUI announces an InfoBar when it opens and says nothing when an open one changes (InfoBar guidance, \"Updating the InfoBar\"). This one cannot be closed (IsClosable=\"False\", MainWindow.xaml:140) and the window never closes it (Feedback only opens it, MainWindow.xaml.cs:414), so after its first opening a new result in it is announced by nothing. It goes with the connection dialog (ADR-0005).",
+      ["ConnectionFeedback"] = ToBeDecided + "It is the connection dialog's InfoBar and declares no live region. WinUI announces an InfoBar when it opens and says nothing when an open one changes (InfoBar guidance, \"Updating the InfoBar\"). This one cannot be closed (IsClosable=\"False\" on it in MainWindow.xaml) and the window never closes it (MainWindow.Feedback only opens it), so after its first opening a new result in it is announced by nothing. It goes with the connection dialog (ADR-0005).",
       ["StatusText"] = FooterSaysIt,
       ["ConnectionText"] = FooterSaysIt,
       ["AuthenticationText"] = FooterSaysIt,
@@ -45,10 +45,10 @@ public sealed partial class XamlContractTests
       ["TransportTrafficText"] = NeverQuiet,
       ["ServiceStateText"] = MessageBarSaysIt,
       ["ServiceGuidanceText"] = MessageBarSaysIt,
-      ["StartupGuidanceText"] = ToBeDecided + "It is the only place the result of the sign-in startup switch is written (MainWindow.Actions.cs:229). The message bar is used only when the change throws (:233), and the switch is then put back to the saved state (:237), so this text is the only explanation of a switch that moved back.",
+      ["StartupGuidanceText"] = ToBeDecided + "It is the only place the result of the sign-in startup switch is written (MainWindow.Startup_Toggled). The message bar is used only when the change throws (that method's catch), and the switch is then put back to the saved state (its finally), so this text is the only explanation of a switch that moved back.",
       ["PrintersSummary"] = DescribesAList,
       ["PrintersEmptyText"] = DescribesAList,
-      ["JobsSummary"] = ToBeDecided + "It is the search's result count, and it is where \"History unavailable; check the service and refresh\" and the note that the rows shown may be stale are written (MainWindow.Jobs.cs:100 and :114). When the service cannot be reached nothing else reports it.",
+      ["JobsSummary"] = ToBeDecided + "It is the search's result count, and it is where \"History unavailable; check the service and refresh\" and the note that the rows shown may be stale are written (both by MainWindow.ApplyJobPage, from JobPageSummary.Failure). When the service cannot be reached nothing else reports it.",
       ["JobsEmptyTitle"] = DescribesAList,
       ["JobsEmptyMessage"] = DescribesAList,
       ["JobsNotice"] = DescribesAList,

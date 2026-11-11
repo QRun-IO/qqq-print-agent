@@ -16,12 +16,16 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// a choice between two literals; or a parameter of the method the call is in, and then every call of that method, in
 /// any file of the companion, passes a literal there. Any other value is an identifier that is not written out. It is
 /// returned as such with its place, and the contract allows it only at a place its table of generated forms names.
+/// A call of such a method that passes something else than a literal is reported at the call, because the calls are
+/// found by the method's name alone: it is either an identifier that is not written out, or a call of another method
+/// of the same name, and the report says what to do in each case.
 /// </para>
 /// <para>
 /// A mention of an automation identifier outside such a call (<c>AutomationIdProperty</c> with <c>SetValue</c>, the
-/// method handed over as a delegate) and markup loaded from a string (<c>XamlReader</c>) are reported with what to
-/// write instead: either could set an identifier, or make a control, that nothing here reads. A call of
-/// <c>GetAutomationId</c> reads an identifier and sets none, and is left alone.
+/// method handed over as a delegate), an element's name set through <c>NameProperty</c>, and markup loaded from a
+/// string (<c>XamlReader</c>) are reported with what to write instead: each could set an identifier, or make a
+/// control, that nothing here reads. A call of <c>GetAutomationId</c> reads an identifier and sets none, and is left
+/// alone.
 /// </para>
 /// </summary>
 internal static partial class CodeBehind
@@ -35,7 +39,7 @@ internal static partial class CodeBehind
    /// One identifier and the place it is written. <c>Target</c> is the first argument of the call that sets it: a field,
    /// a local, a property, or <c>this</c>. <c>Owner</c> and <c>Control</c> say which control that is without a file
    /// name or a line number, so that it can be recorded and a renamed file changes nothing: the owner is the class the
-   /// file declares, and the control is the target; the target and the side of a choice; or the target and the call
+   /// line is in, and the control is the target; the target and the side of a choice; or the target and the call
    /// that forwarded the identifier, with the other literals of that call.
    /// </summary>
    internal sealed record Identifier(string Where, string Owner, string Target, string Value, string Control);
@@ -69,10 +73,10 @@ internal static partial class CodeBehind
                unreadable.Add($"{file.At(call.Index)}: SetAutomationId({Flat(string.Join(", ", call.Arguments))}) does not take a control and an identifier, so the identifier cannot be read. Write AutomationProperties.SetAutomationId(control, \"Identifier\").");
                continue;
             }
-            List<Identifier>? read = ReadOne(files, methods, index, call);
+            List<Identifier>? read = ReadOne(files, methods, index, call, unreadable);
             if(read is null)
             {
-               notWrittenOut.Add((file.At(call.Index), $"{OwnerOf(file)} | {TargetOf(call)} | {Flat(call.Arguments[1])}"));
+               notWrittenOut.Add((file.At(call.Index), $"{OwnerOf(file, call.Index)} | {TargetOf(call)} | {Flat(call.Arguments[1])}"));
                continue;
             }
             identifiers.AddRange(read);
@@ -90,15 +94,16 @@ internal static partial class CodeBehind
 
 
 
-   /// <summary>Reads the identifier, or identifiers, one call sets; null when the value is none of the three forms the class comment names.</summary>
-   private static List<Identifier>? ReadOne(IReadOnlyList<SourceFile> files, IReadOnlyList<CSharpText.Method>[] methods, int index, CSharpText.Call call)
+   /// <summary>Reads the identifier, or identifiers, one call sets; null when the value is none of the three forms the class comment names. A call of a forwarding helper that passes no literal is added to <paramref name="unreadable"/>.</summary>
+   private static List<Identifier>? ReadOne(IReadOnlyList<SourceFile> files, IReadOnlyList<CSharpText.Method>[] methods, int index, CSharpText.Call call, List<string> unreadable)
    {
       SourceFile file = files[index];
       string target = TargetOf(call);
       string value = call.Arguments[1];
+      string owner = OwnerOf(file, call.Index);
       if(CSharpText.TryReadLiteral(value, out string literal))
       {
-         return [new Identifier(file.At(call.Index), OwnerOf(file), target, literal, target)];
+         return [new Identifier(file.At(call.Index), owner, target, literal, target)];
       }
       Match choice = ChoiceOfTwoLiterals().Match(value);
       if(choice.Success)
@@ -106,43 +111,48 @@ internal static partial class CodeBehind
          string condition = Flat(choice.Groups["condition"].Value);
          return
          [
-            new Identifier(file.At(call.Index), OwnerOf(file), target, choice.Groups["first"].Value, $"{target}, when {condition}"),
-            new Identifier(file.At(call.Index), OwnerOf(file), target, choice.Groups["second"].Value, $"{target}, unless {condition}"),
+            new Identifier(file.At(call.Index), owner, target, choice.Groups["first"].Value, $"{target}, when {condition}"),
+            new Identifier(file.At(call.Index), owner, target, choice.Groups["second"].Value, $"{target}, unless {condition}"),
          ];
       }
       CSharpText.Method? method = CSharpText.Enclosing(methods[index], call.Index);
       int position = method is null ? -1 : method.Parameters.ToList().IndexOf(value);
-      return method is null || position < 0 ? null : Forwarded(files, methods, method.Name, position, target);
+      return method is null || position < 0 ? null : Forwarded(files, methods, (method.Name, position, file.At(call.Index)), target, unreadable);
    }
 
 
 
    /// <summary>
    /// Reads the identifiers passed to a helper that forwards its parameter to <c>SetAutomationId</c>: one from each call
-   /// of that name in any file. Null when there is no call, or when one passes something else than a literal. A call
-   /// is found by the helper's name alone, so a helper named like another method is reported rather than half read.
+   /// of that name in any file. Null when nothing calls it. A call is found by the helper's name alone, so a call that
+   /// passes no literal at the helper's position may be a call of another method of that name. It is added to
+   /// <paramref name="unreadable"/> with its own place and both ways out, and the calls that do pass a literal are
+   /// still read, so that the one cause is reported once and not a second time as identifiers that are no longer set.
    /// </summary>
-   private static List<Identifier>? Forwarded(IReadOnlyList<SourceFile> files, IReadOnlyList<CSharpText.Method>[] methods, string helper, int position, string target)
+   private static List<Identifier>? Forwarded(IReadOnlyList<SourceFile> files, IReadOnlyList<CSharpText.Method>[] methods, (string Name, int Position, string SetAt) helper, string target, List<string> unreadable)
    {
       List<Identifier> passed = [];
+      bool called = false;
       for(int index = 0; index < files.Count; index++)
       {
-         foreach(CSharpText.Call caller in CSharpText.CallsOnly(files[index].Code, helper, methods[index]))
+         foreach(CSharpText.Call caller in CSharpText.CallsOnly(files[index].Code, helper.Name, methods[index]))
          {
-            if(caller.Arguments.Count <= position || !CSharpText.TryReadLiteral(caller.Arguments[position], out string argument))
+            called = true;
+            if(caller.Arguments.Count <= helper.Position || !CSharpText.TryReadLiteral(caller.Arguments[helper.Position], out string argument))
             {
-               return null;
+               unreadable.Add($"{files[index].At(caller.Index)}: {Flat($"{helper.Name}({string.Join(", ", caller.Arguments)})")} does not pass a string literal as argument {helper.Position + 1}, and a method called {helper.Name} forwards that argument to SetAutomationId at {helper.SetAt}. The contract finds the calls of such a helper by its name alone, in every file of the companion. If this is a call of that helper, write the identifier here as a string literal. If it is a call of another method that is also called {helper.Name}, rename one of the two: a helper that forwards an identifier needs a name no other method in the companion has.");
+               continue;
             }
-            IEnumerable<string> others = caller.Arguments.Where((other, at) => at != position && CSharpText.TryReadLiteral(other, out _));
-            passed.Add(new Identifier(files[index].At(caller.Index), OwnerOf(files[index]), target, argument, $"{target} in {helper}({string.Join(", ", others)})"));
+            IEnumerable<string> others = caller.Arguments.Where((other, at) => at != helper.Position && CSharpText.TryReadLiteral(other, out _));
+            passed.Add(new Identifier(files[index].At(caller.Index), OwnerOf(files[index], caller.Index), target, argument, $"{target} in {helper.Name}({string.Join(", ", others)})"));
          }
       }
-      return passed.Count == 0 ? null : passed;
+      return called ? passed : null;
    }
 
 
 
-   /// <summary>Reports each mention of an automation identifier that is not a <c>SetAutomationId</c> or <c>GetAutomationId</c> call or inside one, and each use of <c>XamlReader</c>, with what to write instead.</summary>
+   /// <summary>Reports each mention of an automation identifier that is not a <c>SetAutomationId</c> or <c>GetAutomationId</c> call or inside one, and each use of <c>XamlReader</c> or <c>NameProperty</c>, with what to write instead.</summary>
    private static IEnumerable<string> Mentions(SourceFile file, IReadOnlyList<CSharpText.Call> calls)
    {
       foreach(Match match in WhatTheReaderCannotFollow().Matches(file.Bare))
@@ -155,6 +165,10 @@ internal static partial class CodeBehind
          if(string.Equals(word, "XamlReader", StringComparison.Ordinal))
          {
             yield return $"{file.At(match.Index)}: XamlReader builds controls from markup in a string, and the contract does not read that markup. Put the markup in a view's .xaml file, or create the control in code with new Kind, so that its identifier can be held.";
+         }
+         else if(string.Equals(word, "NameProperty", StringComparison.Ordinal))
+         {
+            yield return $"{file.At(match.Index)}: an element's name set through NameProperty cannot be read by the contract, and WinUI reports an element's name as its automation identifier when it has no other. Name the element with x:Name in markup, or give it an identifier with AutomationProperties.SetAutomationId(control, \"Identifier\").";
          }
          else if(word.Contains("AutomationIdProperty", StringComparison.Ordinal))
          {
@@ -169,8 +183,24 @@ internal static partial class CodeBehind
 
 
 
-   /// <summary>The class a file's controls belong to: the first type the file declares, which for a file of a partial class is that class; the file's name when it declares none.</summary>
-   internal static string OwnerOf(SourceFile file) => Types(file).Select(type => type.Name).FirstOrDefault() ?? file.Name;
+   /// <summary>
+   /// The class the control at a position belongs to: the innermost type whose body encloses the position, so that a
+   /// record declared above a class, or a class nested in it, owns only its own lines. Where no type's body encloses
+   /// it (a file of statements), it is the first type the file declares, and the file's name when it declares none.
+   /// </summary>
+   internal static string OwnerOf(SourceFile file, int index)
+   {
+      string? owner = null;
+      foreach(Match type in TypeDeclaration().Matches(file.Bare).Where(type => type.Index < index))
+      {
+         int body = file.Bare.IndexOfAny(['{', ';'], type.Index + type.Length);
+         if(body >= 0 && file.Bare[body] == '{' && index < CSharpText.BlockAround(file.Bare, body + 1).Close)
+         {
+            owner = type.Groups["name"].Value;
+         }
+      }
+      return owner ?? Types(file).Select(type => type.Name).FirstOrDefault() ?? file.Name;
+   }
 
 
 
@@ -194,8 +224,8 @@ internal static partial class CodeBehind
 
 
 
-   /// <summary>A name that carries an automation identifier, or the reader of markup from a string.</summary>
-   [GeneratedRegex("""AutomationId|\bXamlReader\b""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   /// <summary>A name that carries an automation identifier, the reader of markup from a string, or the property an element's name is set through.</summary>
+   [GeneratedRegex("""AutomationId|\bXamlReader\b|\bNameProperty\b""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex WhatTheReaderCannotFollow();
 
 

@@ -77,7 +77,7 @@ public sealed class ViewContractReaderTests
       Assert.Equal(["_one", "this", "this", "button", "button", "button"], reading.Identifiers.Select(identifier => identifier.Target), StringComparer.Ordinal);
       Assert.Equal(["Sample.cs:5", "Sample.cs:6", "Sample.cs:6", "Other.cs:3", "Sample.cs:7", "Sample.cs:8"], reading.Identifiers.Select(identifier => identifier.Where), StringComparer.Ordinal);
       Assert.Equal(["Sample", "Sample", "Sample", "Other", "Sample", "Sample"], reading.Identifiers.Select(identifier => identifier.Owner), StringComparer.Ordinal);
-      Assert.Equal("Loose.cs", CodeBehind.OwnerOf(new SourceFile("Loose.cs", "namespace Sample;")));
+      Assert.Equal("Loose.cs", CodeBehind.OwnerOf(new SourceFile("Loose.cs", "namespace Sample;"), 0));
       Assert.Equal(
          ["_one", "this, when compact", "this, unless compact", "button in Add(\"From another file\")", "button in Add(\"A label, with a comma\")", "button in Add(\"Other\")"],
          reading.Identifiers.Select(identifier => identifier.Control), StringComparer.Ordinal);
@@ -87,16 +87,14 @@ public sealed class ViewContractReaderTests
 
 
    /// <summary>
-   /// An identifier that is a variable, is put together, comes from a caller that passes something else than a literal,
-   /// or belongs to a helper nothing calls is not guessed: it is returned as not written out, with the place a table
-   /// of generated forms would have to name.
+   /// An identifier that is a variable, is put together, or belongs to a helper nothing calls is not guessed: it is
+   /// returned as not written out, with the place a table of generated forms would have to name.
    /// </summary>
    [Theory]
    [InlineData("void Build(string name) { string id = name; SetAutomationId(box, id); }", "Sample.cs | box | id")]
    [InlineData("void Build() { SetAutomationId(box, \"Row\" + index); }", "Sample.cs | box | \"Row\" + index")]
    [InlineData("void Build() { SetAutomationId(this, $\"Row{index}\"); }", "Sample.cs | this | $\"Row{index}\"")]
    [InlineData("void Build() { SetAutomationId(this,\n row.AutomationId); }", "Sample.cs | this | row.AutomationId")]
-   [InlineData("void Build(string name) { Add(name); } void Add(string id) { SetAutomationId(box, id); }", "Sample.cs | box | id")]
    [InlineData("void Add(string id) { SetAutomationId(box, id); }", "Sample.cs | box | id")]
    public void Identifier_ThatIsNotWrittenOut_IsReturnedWithItsPlace(string source, string place)
    {
@@ -110,9 +108,91 @@ public sealed class ViewContractReaderTests
 
 
    /// <summary>
+   /// A call of a forwarding helper that passes no literal is reported at the call, with the place the helper sets
+   /// the identifier and both ways out, because the call may be of another method of the same name; and the calls
+   /// that do pass a literal are still read, so that the one cause is one message and not also a list of identifiers
+   /// that are no longer set.
+   /// </summary>
+   [Fact]
+   public void ForwardingHelper_CalledWithoutALiteral_IsReportedAtTheCall_AndItsOtherCallsAreRead()
+   {
+      SourceFile rows = new("JobRow.cs", """
+         internal sealed class JobRow : Grid
+         {
+            internal JobRow()
+            {
+               AddAction(actions, "Print again", "RetryJob");
+               AddAction(actions, "Cancel job", "CancelJob");
+            }
+
+            private Button AddAction(Panel actions, string label, string id)
+            {
+               Button button = new() { Content = label };
+               AutomationProperties.SetAutomationId(button, id);
+               return button;
+            }
+         }
+         """);
+      SourceFile other = new("PrinterRow.cs", """
+         internal sealed class PrinterRow : Grid
+         {
+            internal PrinterRow() => AddAction(actions, _settings);
+
+            private static void AddAction(Panel actions, UIElement element) => actions.Children.Add(element);
+         }
+         """);
+
+      CodeBehind.Reading reading = CodeBehind.Read([rows, other]);
+      CodeBehind.Reading passedOn = CodeBehind.Read([new SourceFile("Sample.cs", "void Build(string name) { Add(name); } void Add(string id) { SetAutomationId(box, id); }")]);
+
+      Assert.Equal(["RetryJob", "CancelJob"], reading.Identifiers.Select(identifier => identifier.Value), StringComparer.Ordinal);
+      Assert.Empty(reading.NotWrittenOut);
+      Assert.Equal(
+         "PrinterRow.cs:3: AddAction(actions, _settings) does not pass a string literal as argument 3, and a method called AddAction forwards that argument to SetAutomationId at JobRow.cs:12. "
+         + "The contract finds the calls of such a helper by its name alone, in every file of the companion. If this is a call of that helper, write the identifier here as a string literal. "
+         + "If it is a call of another method that is also called AddAction, rename one of the two: a helper that forwards an identifier needs a name no other method in the companion has.",
+         Assert.Single(reading.Unreadable));
+      Assert.Empty(passedOn.Identifiers);
+      Assert.Empty(passedOn.NotWrittenOut);
+      Assert.StartsWith("Sample.cs:1: Add(name) does not pass a string literal as argument 1, and a method called Add forwards that argument to SetAutomationId at Sample.cs:1.", Assert.Single(passedOn.Unreadable), StringComparison.Ordinal);
+   }
+
+
+
+   /// <summary>
+   /// The owner of a line is the type whose body encloses it, not the first type of the file: a record declared above
+   /// a class owns none of the class's lines, and a nested class owns its own. Before any body it is the first type.
+   /// </summary>
+   [Fact]
+   public void TheOwnerOfALine_IsTheTypeThatEnclosesIt()
+   {
+      SourceFile file = new("JobRowView.cs", """
+         internal sealed record JobRowState(bool Expanded);
+
+         internal sealed class JobRowView : Grid
+         {
+            internal JobRowView() { AutomationProperties.SetAutomationId(_toggle, "ToggleJobDetails"); }
+
+            private sealed class Cell : Button
+            {
+               internal Cell() { AutomationProperties.SetAutomationId(this, "JobCell"); }
+            }
+
+            private void Later() { AutomationProperties.SetAutomationId(_refresh, "RefreshJobDetails"); }
+         }
+         """);
+
+      Assert.Equal(["JobRowView", "Cell", "JobRowView"], CodeBehind.Read([file]).Identifiers.Select(identifier => identifier.Owner), StringComparer.Ordinal);
+      Assert.Equal("JobRowState", CodeBehind.OwnerOf(file, 0));
+   }
+
+
+
+   /// <summary>
    /// What could set an identifier without the reader seeing it is reported with what to write instead: a call without
-   /// its two arguments, <c>AutomationIdProperty</c>, the method handed over as a delegate, and markup loaded from a
-   /// string. A mention inside the call's own arguments is the call's business.
+   /// its two arguments, <c>AutomationIdProperty</c>, the method handed over as a delegate, a name set through
+   /// <c>NameProperty</c>, and markup loaded from a string. A mention inside the call's own arguments is the call's
+   /// business.
    /// </summary>
    [Theory]
    [InlineData("void Build() { SetAutomationId(box); }", "Sample.cs:1: SetAutomationId(box) does not take a control and an identifier")]
@@ -120,6 +200,7 @@ public sealed class ViewContractReaderTests
    [InlineData("void Build() { Action<DependencyObject, string> set = AutomationProperties.SetAutomationId; }", "Sample.cs:1: SetAutomationId is mentioned outside a call of SetAutomationId")]
    [InlineData("void Build() { Func<DependencyObject, string> get = AutomationProperties.GetAutomationId; }", "Sample.cs:1: GetAutomationId is mentioned outside a call of SetAutomationId")]
    [InlineData("void Build() { Children.Add((UIElement)XamlReader.Load(\"<Button />\")); }", "Sample.cs:1: XamlReader builds controls from markup in a string")]
+   [InlineData("void Build() { row.SetValue(FrameworkElement.NameProperty, name); }", "Sample.cs:1: an element's name set through NameProperty cannot be read by the contract")]
    public void WhatCouldSetAnIdentifierUnseen_IsReported(string source, string message)
    {
       CodeBehind.Reading reading = CodeBehind.Read([new SourceFile("Sample.cs", source)]);
@@ -176,7 +257,7 @@ public sealed class ViewContractReaderTests
 
 
 
-   /// <summary>A local that is declared where it is created is a local even when the class has a member of that name, so it is matched within its method only.</summary>
+   /// <summary>A local that is declared where it is created is a local even when the class has a member of that name, so it is matched within its block only.</summary>
    [Fact]
    public void Creation_OfALocalNamedLikeAMember_IsALocal()
    {
@@ -234,31 +315,129 @@ public sealed class ViewContractReaderTests
 
 
 
-   /// <summary>Two positions are in the same method when no declaration starts between them, so a local of one method is not matched to a call that names a local of the same name in another.</summary>
+   /// <summary>
+   /// A declaration reaches to the end of its body, a block or an expression, whatever stands before the body; a local
+   /// function lies inside its method, which goes on after it; and what stands between declarations (a property's
+   /// accessor, a field's initializer) is in none, so nothing there is read as a parameter of the method before it.
+   /// </summary>
    [Fact]
-   public void TheSameMethod_IsUpToTheNextDeclaration()
+   public void ADeclaration_ReachesToTheEndOfItsBody_AndAnAccessorIsInNone()
    {
       SourceFile file = new("Sample.cs", """
-         private Button First()
+         private Button First<T>(string id) where T : class, new()
          {
-            Button button = new();
-            AutomationProperties.SetAutomationId(button, "First");
+            Button button = new() { Content = "}" };
+            int Twice(int value) => value * 2;
+            AutomationProperties.SetAutomationId(button, id);
             return button;
          }
-         private Button Second()
+         internal Button Extra
          {
-            Button button = new();
-            return button;
+            get
+            {
+               Button button = new() { Content = "getter" };
+               AutomationProperties.SetAutomationId(button, id);
+               return button;
+            }
          }
+         private readonly Func<Button> _make = () => { Button button = new() { Content = "lambda" }; return button; };
+         private static string Text(int count) => $"{count} rows";
+         private Sample(string id) : this()
+         {
+            _id = id;
+         }
+         private readonly string _after = "after";
+         private Button Made() => First<Grid>("FromACall");
          """);
       IReadOnlyList<CSharpText.Method> methods = CSharpText.Methods(file.Code);
-      IReadOnlyList<CodeBehind.Creation> creations = CodeBehind.Creations(file);
-      int named = Assert.Single(CodeBehind.Named(file)).Index;
+      string? In(string text) => CSharpText.Enclosing(methods, file.Code.IndexOf(text, StringComparison.Ordinal))?.Name;
 
-      Assert.Equal(["First", "Second"], methods.Select(method => method.Name), StringComparer.Ordinal);
-      Assert.True(CSharpText.InTheSameMethod(methods, creations[0].Index, named));
-      Assert.False(CSharpText.InTheSameMethod(methods, creations[1].Index, named));
-      Assert.True(CSharpText.InTheSameMethod(methods, 0, 1));
+      Assert.Equal(["First", "Twice", "Text", "Sample", "Made"], methods.Select(method => method.Name), StringComparer.Ordinal);
+      Assert.Equal(["First", "Twice", "First", null, null, "Text", "Sample", null], new[] { "Button button = new() { Content = \"}\"", "value * 2", "return button;", "\"getter\"", "\"lambda\"", "rows", "_id = id", "\"after\"" }.Select(In), StringComparer.Ordinal);
+      Assert.Equal("Text(int count) => $\"{count} rows\";", CSharpText.BodyOf(file.Code, methods[2]));
+      Assert.Equal("Twice(int value) => value * 2;", CSharpText.BodyOf(file.Code, methods[1]));
+      Assert.Equal("FromACall", Assert.Single(CodeBehind.Read([file]).Identifiers).Value);
+      Assert.Equal(("Sample.cs:13", "Sample.cs | button | id"), Assert.Single(CodeBehind.Read([file]).NotWrittenOut));
+   }
+
+
+
+   /// <summary>
+   /// The innermost braces around a position are the block a local is declared in: the two branches of an
+   /// <c>if</c> are two blocks, the braces of an initializer are passed over from outside it, a brace in a string or
+   /// in a comment is none, and before the first brace it is the whole text.
+   /// </summary>
+   [Fact]
+   public void TheBlockAroundAPosition_IsTheInnermostBraces()
+   {
+      SourceFile file = new("Sample.cs", """
+         void Build()
+         {
+            string text = "{";
+            if(flag)
+            {
+               Button open = new() { Content = "first" }; // }
+            }
+            else
+            {
+               Button open = new() { Content = "second" };
+            }
+         }
+         """);
+      (int Open, int Close) Lines(string text)
+      {
+         (int open, int close) = CSharpText.BlockAround(file.Bare, file.Text.IndexOf(text, StringComparison.Ordinal));
+         return (CSharpText.LineOf(file.Text, open), CSharpText.LineOf(file.Text, close));
+      }
+
+      Assert.Equal([(5, 7), (9, 11), (2, 12), (6, 6)], new[] { "Button open = new() { Content = \"first\"", "Button open = new() { Content = \"second\"", "string text", "Content = \"first\"" }.Select(Lines));
+      Assert.Equal((-1, file.Bare.Length), CSharpText.BlockAround(file.Bare, 0));
+   }
+
+
+
+   /// <summary>
+   /// A name code gives at run time is read with what it names: the class the line is in, a field or a parameter by
+   /// its declared type, a local by what it was created as, the object an initializer belongs to. A literal, a
+   /// comparison, the declaration of something called Name, an anonymous object and a <c>with</c> expression are not
+   /// names given to an element at run time.
+   /// </summary>
+   [Fact]
+   public void NamesGivenAtRunTime_AreReadWithWhatTheyName()
+   {
+      SourceFile file = new("Sample.cs", """
+         internal sealed class Row : Grid
+         {
+            private readonly Button _late;
+            internal Row(Job job, Profile profile)
+            {
+               Name = $"JobRow{job.JobId}";
+               this.Name = job.Title;
+               Name = "Fixed";
+               _late.Name = job.Title;
+               profile.Name = job.Title;
+               job.Owner.Name = job.Title;
+               var cell = new TextBlock { Text = "x", Name = job.Title };
+               cell.Name = job.Title;
+               Border border = new() { Name = job.Title };
+               var shape = new { Name = job.Title };
+               Profile copy = profile with { Name = job.Title };
+               Tip tip = new(job) { Header = { Name = job.Title } };
+               string Name = job.Title;
+               Children.Add(new Button { Name = "Literal", Content = job.Title });
+               bool same = Name == job.Title;
+               Func<string> later = () => Name = job.Title;
+            }
+         }
+         """);
+
+      IReadOnlyList<CodeBehind.RunTimeName> names = CodeBehind.NamesGivenAtRunTime(file);
+
+      Assert.Equal(
+         ["Sample.cs:6 this Row", "Sample.cs:7 this Row", "Sample.cs:9 _late Button", "Sample.cs:10 profile Profile", "Sample.cs:11 an expression ", "Sample.cs:12 a new TextBlock TextBlock", "Sample.cs:13 cell TextBlock",
+            "Sample.cs:14 a new object Border", "Sample.cs:17 the member an initializer fills ", "Sample.cs:21 this Row"],
+         names.Select(name => $"{name.Where} {name.On} {name.Kind}"), StringComparer.Ordinal);
+      Assert.Equal("$\"JobRow{job.JobId}\"", names[0].Value);
    }
 
 

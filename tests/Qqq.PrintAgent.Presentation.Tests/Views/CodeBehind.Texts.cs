@@ -31,7 +31,7 @@ internal static partial class CodeBehind
          IReadOnlyList<CSharpText.Method> methods = CSharpText.Methods(file.Code);
          foreach(CSharpText.Method method in methods)
          {
-            var assigned = TextAssignment().Matches(CSharpText.BodyOf(file.Bare, methods, method)).Select(match => match.Groups["name"].Value).ToHashSet(StringComparer.Ordinal);
+            var assigned = TextAssignment().Matches(CSharpText.BodyOf(file.Bare, method)).Select(match => match.Groups["name"].Value).ToHashSet(StringComparer.Ordinal);
             writers.AddRange(method.Parameters.Select((parameter, position) => (parameter, position)).Where(parameter => assigned.Contains(parameter.parameter)).Select(parameter => (method.Name, parameter.position)));
          }
       }

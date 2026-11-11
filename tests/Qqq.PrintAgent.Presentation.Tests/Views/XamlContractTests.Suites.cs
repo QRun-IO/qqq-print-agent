@@ -93,7 +93,9 @@ public sealed partial class XamlContractTests
    /// An identifier that is not written out (a binding in markup, an expression in code) is set only at the place the
    /// table of generated forms names for one of its forms, so the forms ADR-0005 allows are the only identifiers made
    /// at run time. A form marked as not produced yet is not produced: the companion writes no identifier that starts
-   /// with its stem, and no suite looks one up.
+   /// with its stem, and no suite looks one up. A <c>Name</c> that code gives an element from a value that is not
+   /// written out is such an identifier too, because WinUI reports an element's name as its identifier when it has no
+   /// other, and it fails here wherever the contract cannot tell that what is named is no element.
    /// </summary>
    [Fact]
    public void GeneratedIdentifiers_AreMadeOnlyWhereTheTableSays()
@@ -104,7 +106,26 @@ public sealed partial class XamlContractTests
       notWrittenOut.AddRange(_reading.NotWrittenOut);
 
       List<string> problems = GeneratedForm.Problems(s_generatedForms, notWrittenOut, _markup.Concat(_code), InteractiveSuites.IdentifiersLookedUp(_suites, []));
+      problems.AddRange(NamesGivenToElementsAtRunTime(Kinds(), _code));
 
       Assert.True(problems.Count == 0, Report(problems));
+   }
+
+
+
+   /// <summary>Reports each name that code gives at run time to what is, or may be, an element, with what to do. What the contract knows to be no element (a model, a record of the companion) is left alone.</summary>
+   internal static IEnumerable<string> NamesGivenToElementsAtRunTime(ControlKinds kinds, IEnumerable<SourceFile> code)
+      => code.SelectMany(CodeBehind.NamesGivenAtRunTime).Where(name => name.Kind is null || kinds.Of(name.Kind) != ControlKinds.Sort.NotAnElement).Select(name => NamedAtRunTime(name, kinds));
+
+
+
+   /// <summary>Says what to do about a name that code gives at run time to what is, or may be, an element.</summary>
+   private static string NamedAtRunTime(CodeBehind.RunTimeName name, ControlKinds kinds)
+   {
+      string what = name.Kind is null ? $"{name.On}, whose type the contract cannot read here" : string.Equals(name.On, "this", StringComparison.Ordinal) ? $"this {name.Kind}" : $"{name.On} ({name.Kind})";
+      string otherwise = name.Kind is null
+         ? " If what is named is no element of a view, let the contract read what it is: create it with new Type { ... }, or declare the variable in this file with its type, and list that type in s_notElements in XamlContractTests.Kinds.cs if it is in no list."
+         : kinds.Of(name.Kind) == ControlKinds.Sort.Unknown ? $" If {name.Kind} is no element of a view, add it to s_notElements in XamlContractTests.Kinds.cs." : string.Empty;
+      return $"{name.Where}: Name is given a value that is not written out ({name.Value}) on {what}. WinUI reports an element's Name as its automation identifier when it has no other, so this makes an identifier while the companion runs. Only the generated forms ({string.Join(", ", s_generatedForms.Select(form => form.Form))}) may be made so, and they are set with AutomationProperties.SetAutomationId at the place the table of generated forms names. Do not name an element from a value at run time.{otherwise}";
    }
 }

@@ -29,6 +29,15 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// XamlContractTests.Kinds.cs, the texts in XamlContractTests.Texts.cs, the suites and the generated forms in
 /// XamlContractTests.Suites.cs.
 /// </para>
+/// <para>
+/// Three ways an identifier reaches an automation client without being written on its control fail here, so that
+/// they are not taken for covered: a <c>Style</c> whose <c>Setter</c> sets the identifier; a <c>Name</c> that code
+/// gives an element from a value that is not written out, which WinUI reports as the identifier; and a name set
+/// through <c>NameProperty</c>. What the readers still do not see: a name code gives an element as a plain literal,
+/// which is held as an <c>x:Name</c> is and, unlike one in markup, is not compared with the recorded identifiers; an
+/// identifier or a name that a template or a style of another assembly gives; a control made without <c>new</c> in
+/// the companion; and code in the holes of an interpolated string (see CSharpText).
+/// </para>
 /// </summary>
 public sealed partial class XamlContractTests
 {
@@ -164,9 +173,19 @@ public sealed partial class XamlContractTests
          .Where(element => !string.IsNullOrWhiteSpace(element.AutomationId) && !element.AutomationId.StartsWith('{'))
          .Select(element => new Place(element.AutomationId!, ViewMarkup.OwnerOf(file), element.Control, element.Where)))];
       places.AddRange(_reading.Identifiers.Select(identifier => new Place(identifier.Value, identifier.Owner, identifier.Control, identifier.Where)));
-      unreadable.AddRange(_reading.Unreadable);
+      unreadable.AddRange(Unreadable());
       return places;
    }
+
+
+
+   /// <summary>
+   /// What sets an identifier, or could, where the contract cannot read which control it is on: what the code readers
+   /// reported, and each style in markup that sets one. Every test that depends on the identifiers being read in full
+   /// fails on these, with the one message each has.
+   /// </summary>
+   private IEnumerable<string> Unreadable()
+      => _reading.Unreadable.Concat(_markup.SelectMany(ViewMarkup.IdentifiersSetByAStyle).Select(where => $"{where}: a Style sets AutomationProperties.AutomationId here, which gives that identifier to every element the style reaches, and the contract reads an identifier only on the element that carries it. Remove the Setter. Write AutomationProperties.AutomationId on each element instead, or set it in code with AutomationProperties.SetAutomationId; a row's own identifier is one of the generated forms and is set at the place the table of generated forms names."));
 
 
 

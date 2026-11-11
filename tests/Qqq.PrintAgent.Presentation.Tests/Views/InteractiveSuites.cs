@@ -18,6 +18,20 @@ namespace Qqq.PrintAgent.Presentation.Tests.Views;
 /// helper the call is in, which must then be a lookup itself at that position, so that its callers are read in turn.
 /// </para>
 /// <para>
+/// FlaUI's own <c>FindFirstDescendant</c> and <c>FindFirstChild</c> find by automation identifier when their one
+/// argument is a string. FlaUI.Core 5.0.0 documents those two overloads so, and no other <c>Find</c> method of it
+/// takes an identifier as a string. <c>FindAllDescendants</c> and <c>FindAllChildren</c> have no such overload in
+/// that version and are read in the same way, so that a later FlaUI, or an extension method of that name, is not
+/// skipped. Whether the argument is a string is read from how it is written. A string literal is the identifier.
+/// Anything else that starts with a quote, and a name the method declares as a <c>string</c>, is an identifier too
+/// and is read as any other lookup's argument is (a loop's variable, a forwarding helper's parameter), or reported.
+/// A lambda, a call (<c>cf.ByName("...")</c>, a <c>new</c>) and a name the method declares with another type are
+/// conditions, and are left to the lookups inside them. What is none of these (a name the method does not declare,
+/// or declares with <c>var</c>; a member of something; an element of an array; a sum; a cast) cannot be told apart
+/// and is reported, and so is a call that is known to give a string (<c>nameof</c>, <c>ToString()</c>, a method of
+/// <c>string</c>). So the only string these four are given unseen is one that some other call returns.
+/// </para>
+/// <para>
 /// Every other place where a suite's source says <c>AutomationId</c> is reported: an XPath, a comparison of an
 /// element's <c>AutomationId</c> property, an identifier compared with <c>==</c>, a lookup handed over as a delegate.
 /// The only exception is a parameter of the method the word is in. So an identifier looked up in a form this reader
@@ -40,6 +54,14 @@ internal static partial class InteractiveSuites
       ["Navigate"] = 1,
    };
 
+   /// <summary>FlaUI's own lookups that take an automation identifier when their one argument is a string.</summary>
+   private static readonly string[] s_byIdentifierWhenGivenAString = ["FindFirstDescendant", "FindFirstChild", "FindAllDescendants", "FindAllChildren"];
+
+   private static readonly HashSet<string> s_notTypes = new(StringComparer.Ordinal)
+   {
+      "return", "await", "throw", "yield", "new", "out", "in", "ref", "is", "as", "case", "else", "not", "and", "or", "when", "params", "scoped", "this",
+   };
+
    private static readonly Dictionary<string, int> s_nameLookups = new(StringComparer.Ordinal)
    {
       ["FindName"] = 0,
@@ -60,7 +82,9 @@ internal static partial class InteractiveSuites
             List<string>? read = Read(file, methods, index, argument);
             if(read is null)
             {
-               unreadable.Add($"{file.At(index)}: the identifier looked up here ({argument}) cannot be read. Write it as a string literal, or add the helper that forwards it to the lookups in InteractiveSuites.");
+               string lookup = CSharpText.WordAt(file.Code, index);
+               string flaUi = s_byIdentifierWhenGivenAString.Contains(lookup, StringComparer.Ordinal) ? $" FlaUI's {lookup} finds by automation identifier when it is given a string. If this is a condition and no string, write it as a lambda (cf => ...), or declare it in this method with its type, so that the contract can tell." : string.Empty;
+               unreadable.Add($"{file.At(index)}: the identifier looked up here ({argument}) cannot be read. Write it as a string literal, or add the helper that forwards it to the lookups in InteractiveSuites.{flaUi}");
                continue;
             }
             identifiers.UnionWith(read);
@@ -106,7 +130,7 @@ internal static partial class InteractiveSuites
 
 
 
-   /// <summary>The places an identifier is looked up in one file, each with the argument that carries it. A helper's own declaration is not a lookup.</summary>
+   /// <summary>The places an identifier is looked up in one file, each with the argument that carries it. A helper's own declaration is not a lookup, and neither is a call of FlaUI's own lookups with a condition.</summary>
    private static IEnumerable<(int Index, string Argument)> Lookups(SourceFile file, IReadOnlyList<CSharpText.Method> methods)
    {
       foreach((string name, int position) in s_lookups)
@@ -114,6 +138,13 @@ internal static partial class InteractiveSuites
          foreach(CSharpText.Call call in CSharpText.CallsOnly(file.Code, name, methods))
          {
             yield return (call.Index, call.Arguments.Count > position ? call.Arguments[position] : string.Empty);
+         }
+      }
+      foreach(CSharpText.Call call in s_byIdentifierWhenGivenAString.SelectMany(name => CSharpText.CallsOnly(file.Code, name, methods)))
+      {
+         if(call.Arguments.Count == 1 && !IsACondition(file, methods, call))
+         {
+            yield return (call.Index, call.Arguments[0]);
          }
       }
       foreach(Match match in ComparedIdentifier().Matches(file.Code))
@@ -141,6 +172,32 @@ internal static partial class InteractiveSuites
             yield return mention.Index;
          }
       }
+   }
+
+
+
+   /// <summary>
+   /// True when the one argument of a FlaUI lookup is written as a condition: a lambda, a call, or a name the method
+   /// it is in declares with a type that is not <c>string</c>. False for everything else, which is then read as an
+   /// identifier or reported: what starts as a string does, and what cannot be told from one (a bracketed expression
+   /// or a cast among them).
+   /// </summary>
+   private static bool IsACondition(SourceFile file, IReadOnlyList<CSharpText.Method> methods, CSharpText.Call call)
+   {
+      string argument = call.Arguments[0];
+      if(StartsAString().IsMatch(argument) || argument.StartsWith('(') || GivesAString().IsMatch(argument))
+      {
+         return argument.StartsWith('(') && argument.Contains("=>", StringComparison.Ordinal);
+      }
+      if(argument.Contains("=>", StringComparison.Ordinal) || argument.Contains('(', StringComparison.Ordinal))
+      {
+         return true;
+      }
+      CSharpText.Method? method = CSharpText.Enclosing(methods, call.Index);
+      string[] types = method is null ? [] : [.. DeclaredName().Matches(file.Code[method.Index..call.Index])
+         .Where(match => string.Equals(match.Groups["name"].Value, argument, StringComparison.Ordinal) && !s_notTypes.Contains(match.Groups["type"].Value))
+         .Select(match => match.Groups["type"].Value.TrimEnd('?'))];
+      return types.Length > 0 && !types.Any(type => type is "string" or "String" or "System.String" or "var");
    }
 
 
@@ -197,6 +254,24 @@ internal static partial class InteractiveSuites
    /// <summary><c>GetAutomationId(element), value</c>: an identifier read from an element and compared with a value.</summary>
    [GeneratedRegex("""\bGetAutomationId\s*\(\s*[A-Za-z_]\w*\s*\)\s*,\s*(?<value>"[^"\\]*"|[A-Za-z_]\w*)""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
    private static partial Regex ComparedIdentifier();
+
+
+
+   /// <summary>The start of a string: a quote, with the marks of an interpolated or a verbatim string in front when it has them.</summary>
+   [GeneratedRegex("^[$@]{0,2}\"", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex StartsAString();
+
+
+
+   /// <summary>A call that gives a string whatever it is given: <c>nameof(...)</c>, a method of <c>string</c>, and anything that ends in <c>ToString()</c>.</summary>
+   [GeneratedRegex("""^nameof\s*\(|^(string|String)\s*\.|\.\s*ToString\s*\(\s*\)$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex GivesAString();
+
+
+
+   /// <summary>A name with the type in front of it, where a parameter, a local or a loop's variable is declared.</summary>
+   [GeneratedRegex("""(?<![\w.])(?<type>[A-Za-z_][\w.]*(<[^;=(){}]*>)?(\[[,\s]*\])?\??)\s+(?<name>[A-Za-z_]\w*)\b\s*(?=[,;=)]|in\b)""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, 1000)]
+   private static partial Regex DeclaredName();
 
 
 
