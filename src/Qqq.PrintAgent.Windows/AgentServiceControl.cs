@@ -3,99 +3,46 @@
  * SPDX-License-Identifier: MIT
  */
 
-using System.ComponentModel;
-using System.Diagnostics;
-using System.ServiceProcess;
-
+using System.Diagnostics.CodeAnalysis;
 
 namespace Qqq.PrintAgent.Windows;
 
-/// <summary>Explicit local administrator actions for the fixed installed print service.</summary>
+/// <summary>
+/// Explicit local administrator actions for the fixed installed print service. This class is the entry point for the
+/// installed product: it applies the actions in <see cref="AgentServiceActions"/> to the real service control manager,
+/// the real processes, the system clock and the installed service's name, and holds no rule of its own.
+/// </summary>
 public static class AgentServiceControl
 {
+   /// <summary>The name the MSI registers the print service under.</summary>
    private const string ServiceName = "QqqPrintAgent";
 
 
 
+   /// <summary>The actions bound to the real service control manager, the real processes, the system clock and the installed service's name.</summary>
+   internal static AgentServiceActions Installed { get; } = new(new WindowsServiceManager(), new WindowsProcessHost(), TimeProvider.System, ServiceName);
+
+
+
    /// <summary>Read service state even when the print management pipe is unavailable.</summary>
-   public static AgentServiceStatus GetStatus()
-   {
-      try
-      {
-         using ServiceController service = new(ServiceName);
-         ServiceControllerStatus state = service.Status;
-         return new AgentServiceStatus(true, state.ToString(), state == ServiceControllerStatus.Stopped,
-            state == ServiceControllerStatus.Running && service.CanStop,
-            state == ServiceControllerStatus.Stopped ? "Start the service to connect and print." : "The Windows service runs independently of this companion.");
-      }
-      catch(InvalidOperationException exception) when(exception.InnerException is Win32Exception { NativeErrorCode: 1060 })
-      {
-         return new AgentServiceStatus(false, "Not installed", false, false, "Install the QQQ Print Agent MSI from the project releases, then reopen this app. Windows Services can confirm the installation.");
-      }
-      catch(Exception exception) when(exception is InvalidOperationException or Win32Exception)
-      {
-         return new AgentServiceStatus(false, "Unavailable", false, false, "Windows could not read the service state. Use an administrator account and check Windows Services.");
-      }
-   }
+   [ExcludeFromCodeCoverage(Justification = "Reads the state of the print service installed on this computer, which differs from one computer to the next and which a test must not depend on. It only passes the call on; how a state reads is tested in AgentServiceActions with a fake of IServiceManager, the real adapter in WindowsServiceManagerTests against a built-in service, and the service name bound here in AgentServiceActionsTests.")]
+   public static AgentServiceStatus GetStatus() => Installed.GetStatus();
 
 
 
    /// <summary>Start an installed stopped service and wait at most 30 seconds.</summary>
-   public static async Task<AgentServiceStatus> StartAsync()
-   {
-      using ServiceController service = new(ServiceName);
-      if(service.Status == ServiceControllerStatus.Stopped)
-      {
-         service.Start();
-      }
-      await WaitAsync(service, ServiceControllerStatus.Running).ConfigureAwait(false);
-      return GetStatus();
-   }
+   [ExcludeFromCodeCoverage(Justification = "Starts the print service installed on this computer, which a test must never do. It only passes the call on; when the service is started and how long it is waited for is tested in AgentServiceActions with a fake of IServiceManager and a manual clock, and the service name bound here in AgentServiceActionsTests.")]
+   public static Task<AgentServiceStatus> StartAsync() => Installed.StartAsync();
 
 
 
    /// <summary>Restart only after an explicit administrator action; callers must warn about active submissions.</summary>
-   public static async Task<AgentServiceStatus> RestartAsync()
-   {
-      using ServiceController service = new(ServiceName);
-      if(service.Status != ServiceControllerStatus.Stopped)
-      {
-         service.Stop();
-         await WaitAsync(service, ServiceControllerStatus.Stopped).ConfigureAwait(false);
-      }
-      service.Start();
-      await WaitAsync(service, ServiceControllerStatus.Running).ConfigureAwait(false);
-      return GetStatus();
-   }
+   [ExcludeFromCodeCoverage(Justification = "Stops and starts the print service installed on this computer, which a test must never do. It only passes the call on; the order of the stop and the start and how long each is waited for is tested in AgentServiceActions with a fake of IServiceManager and a manual clock, and the service name bound here in AgentServiceActionsTests.")]
+   public static Task<AgentServiceStatus> RestartAsync() => Installed.RestartAsync();
 
 
 
    /// <summary>Open the native Services console on explicit user request.</summary>
-   public static void OpenServices()
-   {
-      ProcessStartInfo start = new(Path.Combine(Environment.SystemDirectory, "mmc.exe")) { UseShellExecute = true };
-      start.ArgumentList.Add(Path.Combine(Environment.SystemDirectory, "services.msc"));
-      using var process = Process.Start(start);
-   }
-
-
-
-   /// <summary>Polls the service every 250 ms until it reaches the wanted state, giving up with a clear message after 30 seconds, so a stuck service stops the action instead of hanging the window.</summary>
-   private static async Task WaitAsync(ServiceController service, ServiceControllerStatus desired)
-   {
-      long started = Stopwatch.GetTimestamp();
-      while(true)
-      {
-         service.Refresh();
-         if(service.Status == desired)
-         {
-            return;
-         }
-         if(Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(30))
-         {
-            throw new System.TimeoutException("The service did not reach " + desired + " within 30 seconds. Check Windows Services and the activity log.");
-         }
-         await Task.Delay(250).ConfigureAwait(false);
-      }
-   }
+   [ExcludeFromCodeCoverage(Justification = "Opens the Services console on the desktop of this computer, which asks for elevation and stays open; a test must not. It only passes the call on; which program is started with which argument is tested in AgentServiceActions with a fake of IProcessHost, and starting a program in WindowsProcessHostTests with a harmless child program.")]
+   public static void OpenServices() => Installed.OpenServices();
 }

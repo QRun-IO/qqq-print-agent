@@ -11,7 +11,7 @@ namespace Qqq.PrintAgent.Windows;
 /// The real Windows behind <see cref="IProcessHost"/>. It reads the identity of the current process, finds a process
 /// by id, starts the program it is given and reads a file's version resource; it decides nothing. Nothing here is
 /// excluded from coverage: the program to start is a parameter, so the tests start a harmless child program in place
-/// of Windows Installer and the companion, and the other members only read.
+/// of Windows Installer, the companion and the Services console, and the other members only read.
 /// </summary>
 internal sealed class WindowsProcessHost : IProcessHost
 {

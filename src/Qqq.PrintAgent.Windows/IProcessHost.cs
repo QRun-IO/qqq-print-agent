@@ -8,10 +8,11 @@ using System.Diagnostics;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>
-/// The processes of this computer as the update rules need them: which program is running the rules, a process found
-/// by its id, a program started, and the version a program file carries. An implementation only asks Windows and
-/// reports what it said; which program may be started, with what arguments, whose identity is accepted and what an
-/// exit code means is decided by the caller (<see cref="MsiUpdateSteps"/>).
+/// The processes of this computer as the update and service-control rules need them: which program is running the
+/// rules, a process found by its id, a program started, and the version a program file carries. An implementation only
+/// asks Windows and reports what it said; which program may be started, with what arguments, whose identity is
+/// accepted and what an exit code means is decided by the callers (<see cref="MsiUpdateSteps"/> and
+/// <see cref="AgentServiceActions"/>).
 /// </summary>
 internal interface IProcessHost
 {
