@@ -46,11 +46,19 @@ internal sealed class SingleServerHarness : IDisposable
    /// <summary>How long update preparation waits for claimed work before it answers that the service is not ready.</summary>
    internal static TimeSpan UpdatePreparationLimit => AgentRuntime.UpdatePreparationLimit;
 
+
+
+   /// <summary>The name of the installed service's management pipe, which no harness may listen on: a test that did would collide with that service, or answer in its place on a computer that has none.</summary>
+   private const string InstalledPipeName = "QqqPrintAgent";
+
+
+
+   /// <summary>The runtime every member passes through to. Nothing else in the test project holds one.</summary>
    private readonly AgentRuntime _runtime;
 
 
 
-   /// <summary>The private name of this runtime's management pipe. It is never the installed service's, and it is unique unless the caller passes a name to keep across a restart.</summary>
+   /// <summary>The private name of this runtime's management pipe. It is never the installed service's (the constructor refuses that name), and it is unique unless the caller passes a name to keep across a restart.</summary>
    internal string PipeName { get; }
 
 
@@ -60,10 +68,13 @@ internal sealed class SingleServerHarness : IDisposable
    /// management pipe itself, one instance for the current user on a private name, so no test decides how the service listens;
    /// a buffer size is given only by the test that needs a reply to outgrow the pipe's buffer. The last argument runs on the
    /// runtime's command thread just before it saves a command's result, while that thread holds the control state's lock.
+   /// The installed service's pipe name is refused, in any letter case, before anything is built.
    /// </summary>
    internal SingleServerHarness(string directory, Action<string> log, IPrinterBackend printerBackend, Func<Uri, IQqqSessionClient>? sessionFactory = null,
       TimeProvider? timeProvider = null, string? pipeName = null, int pipeBufferSize = 0, Action? controlResultSaving = null)
    {
+      if(string.Equals(pipeName, InstalledPipeName, StringComparison.OrdinalIgnoreCase))
+      { throw new ArgumentException("A test must not listen on the installed service's management pipe.", nameof(pipeName)); }
       string pipe = PipeName = pipeName ?? "qqq-single-server-" + Guid.NewGuid().ToString("N");
       _runtime = new AgentRuntime(directory, log, printerBackend, pipeName: pipe,
          pipeFactory: () => new NamedPipeServerStream(pipe, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, pipeBufferSize, pipeBufferSize),
