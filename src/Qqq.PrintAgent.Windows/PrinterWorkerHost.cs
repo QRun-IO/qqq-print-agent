@@ -4,6 +4,7 @@
  */
 
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Qqq.PrintAgent.Core.Printing;
 
@@ -14,6 +15,13 @@ namespace Qqq.PrintAgent.Windows;
 public static class PrinterWorkerHost
 {
    internal const string ParentEnvironmentVariable = "QQQ_PRINT_WORKER_PARENT";
+
+   /// <summary>
+   /// The most characters a request may have. A request is one small JSON object (an operation, a job's description and the
+   /// path of its staged file), a few kilobytes at most, because documents travel as files; 1 MiB is the bound the service
+   /// puts on the helper's answer, so the two directions match.
+   /// </summary>
+   internal const int MaximumRequestCharacters = 1_048_576;
 
 
 
@@ -56,12 +64,7 @@ public static class PrinterWorkerHost
             throw new InvalidOperationException("Printer workers must be launched by the print connector.");
          }
          watch = parentWatch.WatchAsync(parentId, lifetime.Token);
-         string? line = await input.ReadLineAsync().ConfigureAwait(false);
-         if(line is null || line.Length > 30_000_000)
-         {
-            throw new InvalidDataException("Invalid printer worker request size.");
-         }
-         Request request = JsonSerializer.Deserialize<Request>(line, PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Missing printer worker request.");
+         Request request = JsonSerializer.Deserialize<Request>(await ReadRequestAsync(input).ConfigureAwait(false), PrintApiClient.JsonOptions) ?? throw new InvalidDataException("Missing printer worker request.");
          Response response = await ExecuteAsync(request, printers, spoolerJobs, lifetime.Token).ConfigureAwait(false);
          await output.WriteLineAsync(JsonSerializer.Serialize(response, PrintApiClient.JsonOptions)).ConfigureAwait(false);
          return 0;
@@ -77,6 +80,41 @@ public static class PrinterWorkerHost
          if(watch is not null)
          {
             await watch.ConfigureAwait(false);
+         }
+      }
+   }
+
+
+
+   /// <summary>
+   /// Reads the one request line a piece at a time and stops with an error as soon as more characters than a request may
+   /// have arrived without a line end, so an oversized request is refused while it is read and never held in memory whole.
+   /// Input that ends before any character arrives is refused the same way. A line ends at a carriage return or a line
+   /// feed; nothing after it is used, because a helper carries out exactly one request.
+   /// </summary>
+   private static async Task<string> ReadRequestAsync(TextReader input)
+   {
+      StringBuilder line = new();
+      char[] piece = new char[4096];
+      bool any = false;
+      while(true)
+      {
+         int read = await input.ReadAsync(piece, 0, piece.Length).ConfigureAwait(false);
+         if(read == 0)
+         {
+            return any ? line.ToString() : throw new InvalidDataException("Invalid printer worker request size.");
+         }
+         any = true;
+         int end = piece.AsSpan(0, read).IndexOfAny('\r', '\n');
+         int count = end < 0 ? read : end;
+         if(line.Length + count > MaximumRequestCharacters)
+         {
+            throw new InvalidDataException("Invalid printer worker request size.");
+         }
+         line.Append(piece, 0, count);
+         if(end >= 0)
+         {
+            return line.ToString();
          }
       }
    }
