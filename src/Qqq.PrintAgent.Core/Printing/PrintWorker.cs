@@ -103,7 +103,9 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// <summary>
    /// Says whether a claimed job is one this computer must not start on, because it already has, and says so in the
    /// log when the server should not have offered it. A job that is in hand, held by a lane of this computer right
-   /// now, is left entirely to that lane: nothing is recorded for it here, not even its display facts. A job the
+   /// now, is left entirely to that lane: nothing is recorded for it here, not even its display facts. The lane lets
+   /// go of a job only after its final state was recorded and delivered, so a job in hand may be one that has just
+   /// finished, and the log line says "still holds" for that reason and does not claim work is under way. A job the
    /// journal holds as submitting was handed to a printer once already and has not concluded, and one it holds in a
    /// final state has; neither is ever submitted a second time.
    /// </summary>
@@ -111,7 +113,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    {
       if(options.IsInHand(job.JobId))
       {
-         log($"{job.JobId}: offered again while this computer is already working on it; it is left to the lane that holds it, nothing is recorded for it and this pass claims nothing more.");
+         log($"{job.JobId}: offered again while a lane of this computer still holds it, working on it or just finished with it; it is left to that lane, nothing is recorded for it and this pass claims nothing more.");
          return true;
       }
       Track(job, inventory);
@@ -216,10 +218,11 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
    /// caller can tell a refusal before any bytes from an uncertain submission. Between recording SUBMITTING and calling
    /// Windows nothing has been sent, so the two things that can stop the job there (delivery of the receipt not being
    /// confirmed, and cancellation) say in their own words that no bytes were submitted. Handing the verified staged
-   /// file to the backend is the only step after which an outcome is uncertain. The printer is checked twice before
-   /// that: after the download, and again once the printer's turn is held, because jobs can wait a long time behind a
-   /// print and the operator may stop sharing the printer, or its media may change, while they wait. The timing line
-   /// reports both checks together as the revalidation, and the wait for the turn with the receipt as the gate.
+   /// file to the backend is the only step after which an outcome is uncertain. The printer is discovered again once,
+   /// after the download, and not a second time when its turn is held: that would start the print helper once more
+   /// for every job, while the job holds the printer's turn and a print slot. What changes during the wait for the
+   /// turn is refused later by whoever can tell that nothing was sent: the exposure filter for a printer that is no
+   /// longer shared, and the native layer for media that changed.
    /// </summary>
    private async Task SubmitJobAsync(PrintJob job, JobAttempt attempt, CancellationToken token)
    {
@@ -235,9 +238,6 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
       await using IAsyncDisposable submission = await options.AcquireSubmissionAsync(job, token).ConfigureAwait(false);
       RequireSubmitAllowed("Dispatch is paused before native submission.");
-      attempt.Gate = attempt.Lap();
-      RequireCurrentPrinter(job);
-      attempt.Revalidate += attempt.Lap();
       Record(job, PrintJobState.Submitting);
       try
       { await FlushAsync(token).ConfigureAwait(false); }
@@ -254,7 +254,7 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
          ///////////////////////////////////////////////////////////////////////////
          throw new IOException("Delivery of the submitting receipt could not be confirmed, so the document was not sent to the printer; no bytes were submitted.", exception);
       }
-      attempt.Gate += attempt.Lap();
+      attempt.Gate = attempt.Lap();
       RequireSubmitAllowed("Dispatch stopped before native submission; no bytes were submitted.");
       RealtimeSettings submissionSettings = EffectiveSettings;
       if(job.Options.Copies > submissionSettings.MaxCopies || job.ContentLength > submissionSettings.MaximumDocumentBytes(job.Format))
@@ -272,11 +272,10 @@ public sealed class PrintWorker(PrintApiClient api, IPrinterBackend printers, IJ
 
 
    /// <summary>
-   /// Discovers the printers again and requires the assigned queue to still be shared, to still offer the job's format
-   /// and to still have the selected media profile. It runs after the download and again when the printer's turn is
-   /// held, so a printer withdrawn, or a queue or driver default changed, while the document streamed or while the job
-   /// waited is refused before SUBMITTING is recorded, with Windows never asked, instead of printing on the wrong
-   /// stock or being refused when the outcome can no longer be called certain.
+   /// Discovers the printers again after the download and requires the assigned queue to still be shared, to still
+   /// offer the job's format and to still have the selected media profile, so a printer withdrawn, or a queue or driver
+   /// default changed, while the document streamed is refused before SUBMITTING is recorded, with Windows never asked,
+   /// instead of printing on the wrong stock.
    /// </summary>
    private void RequireCurrentPrinter(PrintJob job)
    {

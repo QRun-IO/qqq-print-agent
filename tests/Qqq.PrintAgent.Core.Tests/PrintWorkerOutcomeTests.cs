@@ -113,26 +113,27 @@ public sealed class PrintWorkerOutcomeTests
 
 
    /// <summary>
-   /// A replay of a job this computer is already working on in another lane is left entirely to the lane that holds
-   /// it, whatever that lane has recorded so far. Nothing is recorded or reported for it, its title and printer are not
-   /// rewritten, the runtime is not told a job became active, and it is neither downloaded nor printed. The log says so
-   /// once, in plain words, and the pass ends, because the server would only offer the same job again.
+   /// A replay of a job another lane of this computer holds is left entirely to that lane, whatever it has recorded so
+   /// far. A lane lets go of a job only after its final state was recorded and delivered, so the job in hand may be
+   /// one that has just finished (the SPOOLED row); the log line is worded to be true then as well. Nothing is
+   /// recorded or reported for the replay, its title and printer are not rewritten, the runtime is not told a job
+   /// became active, and it is neither downloaded nor printed. The log says so once, in plain words, and the pass
+   /// ends, because the server would only offer the same job again.
    /// </summary>
    [Theory]
    [InlineData("RECEIVED")]
-   [InlineData("SUBMITTING")]
-   public async Task ClaimOfAJobInHandEndsThePassRecordsNothingAndLogsOneLine(string heldAt)
+   [InlineData("RECEIVED,SUBMITTING")]
+   [InlineData("RECEIVED,SUBMITTING,SPOOLED")]
+   public async Task ClaimOfAJobInHandEndsThePassRecordsNothingAndLogsOneLine(string recordedSoFar)
    {
       await using var harness = new WorkerHarness();
       (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       server.Offer(FakePrintServer.Job(Document) with { Title = "Replayed title" }, Document);
       journal.TrackJob(FakePrintServer.Job(Document) with { Title = "Original title" }, "Original printer");
-      journal.Record("job-1", new PrintEvent("received-by-the-other-lane", "RECEIVED"));
-      journal.Acknowledge("received-by-the-other-lane");
-      if(string.Equals(heldAt, "SUBMITTING", StringComparison.Ordinal))
+      foreach(string state in recordedSoFar.Split(','))
       {
-         journal.Record("job-1", new PrintEvent("submitting-by-the-other-lane", "SUBMITTING"));
-         journal.Acknowledge("submitting-by-the-other-lane");
+         journal.Record("job-1", new PrintEvent(state + "-by-the-other-lane", state));
+         journal.Acknowledge(state + "-by-the-other-lane");
       }
       string[] recordedByTheOtherLane = journal.StatesOf("job-1");
       var asked = new List<string>();
@@ -158,30 +159,41 @@ public sealed class PrintWorkerOutcomeTests
       Assert.Equal("Original printer", journal.Jobs["job-1"].PrinterName);
       Assert.Equal(0, server.Downloads);
       Assert.Equal(0, printer.Submissions);
-      Assert.Equal("job-1: offered again while this computer is already working on it; it is left to the lane that holds it, nothing is recorded for it and this pass claims nothing more.", Assert.Single(harness.Log));
+      Assert.Equal("job-1: offered again while a lane of this computer still holds it, working on it or just finished with it; it is left to that lane, nothing is recorded for it and this pass claims nothing more.", Assert.Single(harness.Log));
    }
 
 
 
    /// <summary>
-   /// Jobs can wait a long time for a printer's turn. What happened to the printer during the wait is found when the
-   /// turn is held, before SUBMITTING is recorded: a printer the operator stopped sharing, a queue that is gone, or a
-   /// selected media default that changed is FAILED with its reason and Windows is never asked. The receipts are
-   /// RECEIVED then FAILED, the backend is never called, the turn is released, nothing stays in the staging folder,
-   /// and the job is neither downloaded nor printed when the server offers it again. Without this check the first of
-   /// these was refused only by the exposure filter, after SUBMITTING, and recorded as an unknown outcome.
+   /// Jobs can wait a long time for a printer's turn, and the worker does not discover the printers again when the
+   /// turn is held: that would start the print helper once more for every job, while the job holds the turn and a
+   /// print slot. What happened to the printer during the wait is therefore settled after SUBMITTING is recorded, by
+   /// whoever can tell whether anything was sent. A printer the operator stopped sharing is refused by the exposure
+   /// filter before the backend is called, and a selected media default that changed is refused by the native layer
+   /// before it prints: both are FAILED. A queue that is gone is found by the native layer as well, but its failure
+   /// carries no type the worker can rely on, so the job is OUTCOME_UNKNOWN like any other failure after the staged
+   /// file was handed over. The fake backend plays the native layer here: it finds the queue, then matches the job's
+   /// selected media against the queue's current default, and only then would print. In every case the printer is
+   /// discovered twice and no more (the inventory and the check after the download), the turn is released, nothing
+   /// stays in the staging folder, and the job is neither downloaded nor printed when the server offers it again.
    /// </summary>
    [Theory]
-   [InlineData("unshared", "Assigned printer or document format is unavailable.")]
-   [InlineData("queue-gone", "Assigned printer or document format is unavailable.")]
-   [InlineData("media-changed", "The selected printer media profile changed or is unavailable. Refresh the printer and select its current default.")]
-   public async Task PrinterWithdrawnWhileWaitingForItsTurnIsFailedAndTheBackendIsNeverCalled(string change, string reason)
+   [InlineData("unshared", "FAILED", "The printer is not exposed to QQQ on this computer; no bytes were submitted.", 0)]
+   [InlineData("media-changed", "FAILED", "The selected printer media profile changed or is unavailable. Refresh the printer and select its current default.", 1)]
+   [InlineData("queue-gone", "OUTCOME_UNKNOWN", "The assigned queue was not found.", 1)]
+   public async Task ChangeToThePrinterWhileWaitingForItsTurnIsSettledAfterSubmittingByWhoeverCanTell(string change, string outcome, string reason, int submissions)
    {
       PrinterMediaProfile profile = new("default-id", new string('a', 64), "Default", 101600, 152400, 300, 300);
       PrintJob job = FakePrintServer.Job(Document, options: new PrintOptions(MediaProfile: new(profile.Id, profile.Revision)));
       await using var harness = new WorkerHarness();
       (FakePrintServer server, RecordingJournal journal, FakePrinterBackend printer) = (harness.Server, harness.Journal, harness.Printer);
       printer.Printers[0] = printer.Printers[0] with { MediaProfiles = [profile] };
+      printer.Printing = (submitted, _, _) =>
+      {
+         PrinterInfo queue = printer.Printers.FirstOrDefault(item => string.Equals(item.PrinterId, submitted.PrinterId, StringComparison.Ordinal)) ?? throw new InvalidOperationException("The assigned queue was not found.");
+         PrinterMediaProfile.RequireMatch(submitted.Options, queue.MediaProfiles);
+         return Task.FromResult("spool-1");
+      };
       server.Offer(job, Document).Offer(job, Document);
       var steps = new List<string>();
       harness.Options = harness.Options with
@@ -209,23 +221,25 @@ public sealed class PrintWorkerOutcomeTests
       };
 
       Assert.True(await harness.RunOnceAsync());
-      Assert.Equal(new[] { "RECEIVED", "FAILED" }, journal.StatesOf("job-1"), StringComparer.Ordinal);
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", outcome }, journal.StatesOf("job-1"), StringComparer.Ordinal);
       Assert.Equal(reason, journal.Last("job-1").Message);
-      Assert.Equal(new[] { "RECEIVED", "FAILED" }, server.States, StringComparer.Ordinal);
-      Assert.Equal(0, printer.Submissions);
+      Assert.Null(journal.Last("job-1").SpoolerJobId);
+      Assert.Equal(new[] { "RECEIVED", "SUBMITTING", outcome }, server.States, StringComparer.Ordinal);
+      Assert.Equal(submissions, printer.Submissions);
+      Assert.Equal(2, printer.Discoveries);
       Assert.Equal(new[] { "take printer turn", "release printer turn" }, steps, StringComparer.Ordinal);
       Assert.Empty(Directory.EnumerateFileSystemEntries(harness.Staging.Path));
 
       Assert.False(await harness.RunOnceAsync());
       Assert.Equal(2, server.Claims);
       Assert.Equal(1, server.Downloads);
-      Assert.Equal(0, printer.Submissions);
-      Assert.Equal("FAILED", journal.GetState("job-1"));
+      Assert.Equal(submissions, printer.Submissions);
+      Assert.Equal(outcome, journal.GetState("job-1"));
    }
 
 
 
-   /// <summary>A printer withdrawn earlier, before the document is downloaded, is still caught by the check that follows the download: the job is FAILED with nothing submitted and never asks for the printer's turn.</summary>
+   /// <summary>A printer withdrawn before the document has been downloaded is caught by the check that follows the download: the job is FAILED with nothing submitted and never asks for the printer's turn.</summary>
    [Fact]
    public async Task PrinterWithdrawnBeforeTheDownloadIsStillFailedAndNeverTakesTheTurn()
    {
@@ -256,11 +270,11 @@ public sealed class PrintWorkerOutcomeTests
 
 
    /// <summary>
-   /// The exposure filter stays the last line of defense, because sharing can still change in the instant between the
-   /// worker's check and the call. A printer withdrawn after SUBMITTING was recorded is refused by the filter before
-   /// the backend behind it is called, with a refusal only the filter can raise. The worker therefore knows nothing
-   /// was sent: the job is FAILED, not unknown, its reason says that no bytes were submitted, the backend was never
-   /// called, and the job is not printed when the server offers it again.
+   /// The exposure filter is the check on sharing at the moment of submission, however late sharing changed: here in
+   /// the instant after SUBMITTING was recorded. The filter refuses before the backend behind it is called, with a
+   /// refusal only the filter can raise. The worker therefore knows nothing was sent: the job is FAILED, not unknown,
+   /// its reason says that no bytes were submitted, the backend was never called, and the job is not printed when the
+   /// server offers it again.
    /// </summary>
    [Fact]
    public async Task PrinterWithdrawnAfterTheSubmittingReceiptIsRefusedByTheFilterAndFailedWithNothingSent()
