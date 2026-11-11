@@ -874,6 +874,37 @@ public sealed class AgentBrandingShortcutsTests
 
 
 
+   /// <summary>
+   /// At the look taken just before a replacement or a delete, the file is judged first and its read-only mark is
+   /// touched only if it is ours. Here another program replaces our shortcut with a read-only file of its own while
+   /// the new shortcut is being written, under the wanted name, where it refuses the run, or under the earlier
+   /// brand's name, where it is left alone and forgotten: the file keeps its mark and its content.
+   /// </summary>
+   [Theory]
+   [InlineData(true)]
+   [InlineData(false)]
+   public void ReadOnlyFileThatReplacedOursBeforeTheSecondLookKeepsItsMark(bool underTheWantedName)
+   {
+      using var setup = new BrandingSetup();
+      string path = setup.PlantShortcut(underTheWantedName ? Acme : Old, setup.OurLink);
+      setup.Record.Name = underTheWantedName ? Acme : Old;
+      var theirs = new ShortcutLink(Path.Combine(setup.Root, "other.exe"), "", "Somebody's shortcut");
+      setup.Shell.BeforeWrite = () =>
+      {
+         FakeShortcutShell.Plant(path, theirs);
+         File.SetAttributes(path, FileAttributes.ReadOnly);
+      };
+      if(underTheWantedName)
+      { Assert.Equal("A different shortcut already uses the requested brand name.", Assert.Throws<InvalidOperationException>(setup.Rules.ApplyInstalledBranding).Message); }
+      else
+      { setup.Rules.ApplyInstalledBranding(); }
+      Assert.True(File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly));
+      Assert.Equal(theirs, new FakeShortcutShell().Read(path));
+      Assert.Equal(new[] { path, path }, setup.Shell.Reads, StringComparer.Ordinal);
+   }
+
+
+
    /// <summary>A note that cannot be written (the log refuses, or its disk fails) never fails a run that has done its work.</summary>
    [Theory]
    [InlineData(true)]

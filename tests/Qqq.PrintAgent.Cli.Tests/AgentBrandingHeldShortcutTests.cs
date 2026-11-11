@@ -333,6 +333,36 @@ public sealed class AgentBrandingHeldShortcutTests
 
 
    /// <summary>
+   /// A shortcut is on record also when only the other names name it, which is the state a run leaves that was
+   /// killed after it wrote the new shortcut and before it made it current. Held, it is left as it is like the
+   /// current one, the run finishes, and the record is exactly as it was found.
+   /// </summary>
+   [Fact]
+   public void InstallWhileAShortcutNamedOnlyAmongTheOtherNamesIsHeldLeavesItAsItIsAndFinishes()
+   {
+      using var setup = new BrandingSetup();
+      string wanted = setup.PlantShortcut(Acme, setup.OurLink);
+      string earlier = setup.PlantShortcut(Old, setup.OurLink);
+      setup.Record.Name = Old;
+      setup.Record.Pending.AddRange([Old, Acme]);
+      using(Hold(wanted, "nothing-shared"))
+      {
+         setup.Rules.ApplyInstalledBranding();
+      }
+      Assert.Equal(new[] { wanted, earlier }, Directory.GetFiles(setup.Rules.ShortcutDirectory).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Empty(setup.Record.Changes);
+      Assert.Equal(Old, setup.Record.Name);
+      Assert.Equal(new[] { Old, Acme }, setup.Record.Pending, StringComparer.Ordinal);
+      _ = Assert.Single(setup.Notes);
+      setup.Rules.ApplyInstalledBranding();
+      Assert.Equal(new[] { wanted }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Empty(setup.Record.Pending);
+   }
+
+
+
+   /// <summary>
    /// The recorded shortcut of the wanted name that another program lets go of while the run is still trying is
    /// replaced like any other: the new shortcut is in place with what this run was to write, the earlier brand's
    /// shortcut is removed, and nothing is noted.
@@ -449,6 +479,33 @@ public sealed class AgentBrandingHeldShortcutTests
       setup.Rules.ApplyInstalledBranding();
       Assert.Equal(new[] { current }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
       Assert.Equal(Path.Combine(setup.State, "brand.ico") + ",0", Assert.IsType<ShortcutLink>(new FakeShortcutShell().Read(current)).IconLocation);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
+   /// <summary>
+   /// A run goes on without the new shortcut only while a shortcut is still under the name. Here our shortcut is
+   /// removed while the new one is being written and a folder takes its name, so the new shortcut cannot be moved
+   /// into place and nothing of ours is there: the run fails, as it does for a first install, instead of finishing
+   /// with a note about a shortcut that does not exist. No temporary file stays behind.
+   /// </summary>
+   [Fact]
+   public void RunFailsWhenTheNewShortcutCannotBePutInPlaceAndOursIsGone()
+   {
+      using var setup = new BrandingSetup();
+      string current = setup.PlantShortcut(Acme, setup.OurLink);
+      setup.Record.Name = Acme;
+      setup.Shell.BeforeWrite = () =>
+      {
+         File.Delete(current);
+         Directory.CreateDirectory(current);
+      };
+      Exception failed = Assert.ThrowsAny<Exception>(setup.Rules.ApplyInstalledBranding);
+      Assert.True(failed is IOException or UnauthorizedAccessException);
+      Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
+      Assert.True(Directory.Exists(current));
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Empty(setup.Notes);
    }
