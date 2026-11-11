@@ -284,38 +284,74 @@ public sealed class SignInFlowDiscoveryTests
    /// read on a session that accepts an untrusted certificate from the server only; that session is then discarded and
    /// the attempt continues on a second one whose exception covers the server and the provider it named, and nothing
    /// else, so the browser sign-in can read the provider's discovery document. The log names both origins, and the
-   /// operator sees one result.
+   /// operator sees one result. The provider is taken from the first read only. Here the second read, on the second
+   /// session, names a different provider: the exception is not extended to it, no third session is made, and the
+   /// warning is written once and names the first provider.
    /// </summary>
    [Fact]
    public async Task CertificateException_AlsoCoversTheSeparateProviderItsServerNames()
    {
-      SignInFixture fixture = new() { ConfigureSession = session => session.Metadata = OffersThrough("https://login.example.com:9443/realms/dev") };
+      int reads = 0;
+      SignInFixture fixture = new()
+      {
+         ConfigureSession = session => session.Metadata = OffersThrough(reads++ == 0 ? "https://login.example.com:9443/realms/dev" : "https://other-login.example.com/realms/dev"),
+      };
       Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com:8443/"));
       fixture.Shown.Clear();
 
       await fixture.Flow.DiscoverAsync("https://dev.example.com:8443");
 
+      Assert.Equal(2, reads);
       Assert.Equal(2, fixture.Sessions.Count);
       Assert.Equal(["https://dev.example.com:8443/"], fixture.Sessions[0].CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
       Assert.True(fixture.Sessions[0].Disposed);
+      Assert.Equal("https://other-login.example.com/", fixture.Sessions[1].Metadata.ProviderOrigin?.AbsoluteUri);
       Assert.Equal(["https://dev.example.com:8443/", "https://login.example.com:9443/"], fixture.Sessions[1].CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
       Assert.False(fixture.Sessions[1].Disposed);
       Assert.True(fixture.Flow.HasSession);
       Assert.True(fixture.Flow.BrowserOffered);
       Assert.Equal(SignInStage.Ready, fixture.Flow.Stage);
       Assert.Equal("Sign-in options ready", Assert.Single(fixture.Shown).Title);
-      Assert.Contains("WARN The certificate exception saved for dev.example.com:8443 is also applied to the sign-in provider this server names, login.example.com:9443: an untrusted certificate is accepted from https://dev.example.com:8443, https://login.example.com:9443 and from no other host.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal("WARN The certificate exception saved for dev.example.com:8443 is also applied to the sign-in provider this server names, login.example.com:9443: an untrusted certificate is accepted from https://dev.example.com:8443, https://login.example.com:9443 and from no other host.",
+         Assert.Single(fixture.Log.Entries, entry => entry.Contains("is also applied to the sign-in provider", StringComparison.Ordinal)));
+      Assert.DoesNotContain(fixture.Log.Entries, entry => entry.Contains("other-login", StringComparison.Ordinal));
+   }
+
+
+
+   /// <summary>
+   /// The server writes the provider's address, and the warning is what an operator reads before trusting it, so the
+   /// provider is shown and compared by its host's ASCII name. A look-alike letter (a Cyrillic "o" in "login") appears
+   /// as the "xn--" name the connection would really go to, and a zero-width space is not in the name at all. Nothing
+   /// outside printable ASCII reaches the log, and the second session's exception holds the same ASCII origin.
+   /// </summary>
+   [Theory]
+   [InlineData("https://l\u043Egin.example.com:9443/realms/dev", "xn--lgin-55d.example.com:9443")]
+   [InlineData("https://log\u200Bin.example.com:9443/realms/dev", "login.example.com:9443")]
+   public async Task CertificateException_ShowsTheProviderByItsAsciiName(string issuer, string shown)
+   {
+      SignInFixture fixture = new() { ConfigureSession = session => session.Metadata = OffersThrough(issuer) };
+      Assert.True(await fixture.Flow.SetTrustAsync(allow: true, "https://dev.example.com:8443/"));
+
+      await fixture.Flow.DiscoverAsync("https://dev.example.com:8443");
+
+      Assert.Equal(2, fixture.Sessions.Count);
+      Assert.Equal(["https://dev.example.com:8443/", "https://" + shown + "/"], fixture.Sessions[1].CertificateException.Origins.Select(origin => origin.AbsoluteUri), StringComparer.Ordinal);
+      Assert.Contains("WARN The certificate exception saved for dev.example.com:8443 is also applied to the sign-in provider this server names, " + shown + ": an untrusted certificate is accepted from https://dev.example.com:8443, https://" + shown + " and from no other host.", fixture.Log.Entries, StringComparer.Ordinal);
+      Assert.All(fixture.Log.Entries, entry => Assert.All(entry, character => Assert.InRange(character, ' ', '~')));
    }
 
 
 
    /// <summary>
    /// The second session is created only when it would cover more. A provider on the server's own origin is already
-   /// covered, so the attempt stays on the first session; and a server without a saved exception gets no exception at
-   /// all, whatever provider it names.
+   /// covered, so the attempt stays on the first session; a provider whose host has no ASCII name (here it holds a
+   /// line separator) is no origin, so nothing is added for it and nothing of it is shown; and a server without a
+   /// saved exception gets no exception at all, whatever provider it names.
    /// </summary>
    [Theory]
    [InlineData(true, "https://dev.example.com:8443/realms/dev", "https://dev.example.com:8443/")]
+   [InlineData(true, "https://log\u2028in.example.com:9443/realms/dev", "https://dev.example.com:8443/")]
    [InlineData(false, "https://login.example.com:9443/realms/dev", null)]
    public async Task CertificateException_IsNotWidenedWithoutNeedOrWithoutBeingSaved(bool saved, string issuer, string? covered)
    {

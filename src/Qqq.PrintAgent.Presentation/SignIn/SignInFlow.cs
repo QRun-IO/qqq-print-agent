@@ -182,7 +182,10 @@ public sealed partial class SignInFlow : ObservableObject, IDisposable
    /// names a sign-in provider on another origin, that session is discarded and the attempt continues on a second one
    /// whose exception also covers the provider, because the browser sign-in has to read the provider's own discovery
    /// document; the description is read again on it, and the log names both origins. Until the service records the
-   /// provider's origin with the server, this is where the second origin comes from.
+   /// provider's origin with the server, this is where the second origin comes from. The provider's origin is taken
+   /// from the first read only, and it arrives with its host as an ASCII name (see
+   /// <see cref="QqqAuthenticationMetadata.ProviderOrigin"/>), so the warning shows the name the connection would
+   /// really be made to and nothing the server wrote into the name can look like another host or break the line.
    /// </summary>
    private async Task<QqqAuthenticationMetadata> OpenSessionAsync(Uri origin, CancellationToken token)
    {
