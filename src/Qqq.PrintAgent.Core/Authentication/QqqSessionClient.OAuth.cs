@@ -320,9 +320,16 @@ public sealed partial class QqqSessionClient
 
 
 
-   /// <summary>Parses an address and accepts it only when it is an absolute HTTPS address with a host that also passes the configuration-address safety checks.</summary>
+   /// <summary>
+   /// Parses an address and accepts it only when it is an absolute HTTPS address that has an origin (see
+   /// <see cref="QqqOrigin.Of"/>) and also passes the configuration-address safety checks. Every address that comes
+   /// through here is text a server supplied, and each is later compared with another, shown, or connected to. A
+   /// host the platform cannot name in ASCII (one that holds a line separator) has no origin, and the platform
+   /// throws when asked to connect to it, so such an address is refused here, where the caller reports a refusal,
+   /// and never reaches a request.
+   /// </summary>
    private static bool TryHttps(string? value, out Uri? uri) => Uri.TryCreate(value, UriKind.Absolute, out uri)
-      && string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && uri.Host.Length != 0 && SafeConfigurationUri(uri);
+      && string.Equals(uri.Scheme, "https", StringComparison.Ordinal) && QqqOrigin.Of(uri) is not null && SafeConfigurationUri(uri);
 
 
 

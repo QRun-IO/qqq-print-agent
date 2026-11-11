@@ -79,13 +79,16 @@ public sealed class QqqOriginTests
    /// <summary>
    /// The session client holds a sign-in provider's endpoints to its issuer's origin, and every address in that
    /// comparison is text a server supplied. An address with no nameable origin is not the same origin as anything, so
-   /// each of the four places it can appear is a refusal the caller can report (a configuration problem, or an
+   /// each of the five places it can appear is a refusal the caller can report (a configuration problem, or an
    /// invalid answer for the server's own sign-out data) and never the platform's exception for a host it cannot
-   /// name: the issuer the server advertises, the provider's authorization endpoint, the end-session endpoint the
-   /// server returns at sign-out, and the one in the provider's own discovery.
+   /// name: the issuer the server advertises, the address of the provider's discovery document, the provider's
+   /// authorization endpoint, the end-session endpoint the server returns at sign-out, and the one in the provider's
+   /// own discovery. The discovery address is the one the client connects to, and the platform throws when asked to
+   /// connect to such a host, so it is refused with the grant, before any request for it is made.
    /// </summary>
    [Theory]
    [InlineData("issuer", QqqSessionException.FailureKind.ConfigurationRequired)]
+   [InlineData("discovery-address", QqqSessionException.FailureKind.ConfigurationRequired)]
    [InlineData("authorization-endpoint", QqqSessionException.FailureKind.ConfigurationRequired)]
    [InlineData("logout-endpoint", QqqSessionException.FailureKind.InvalidResponse)]
    [InlineData("provider-end-session", QqqSessionException.FailureKind.ConfigurationRequired)]
@@ -94,19 +97,25 @@ public sealed class QqqOriginTests
       const string Named = "https://id.example.invalid";
       string unnameable = "https://id" + (char)0x2028 + ".example.invalid";
       var callback = new Uri(ScriptedServer.Callback);
-      bool issuer = string.Equals(where, "issuer", StringComparison.Ordinal);
       string provider = where switch
       {
          "issuer" => ScriptedServer.Provider.Replace("\"issuer\":\"" + Named, "\"issuer\":\"" + unnameable, StringComparison.Ordinal),
          "authorization-endpoint" => ScriptedServer.Provider.Replace(Named + "/authorize", unnameable + "/authorize", StringComparison.Ordinal),
          _ => ScriptedServer.Provider,
       };
+      string description = where switch
+      {
+         "issuer" => ScriptedServer.OAuth.Replace("\"issuer\":\"" + Named, "\"issuer\":\"" + unnameable, StringComparison.Ordinal),
+         "discovery-address" => ScriptedServer.OAuth.Replace("\"discoveryUrl\":\"" + Named, "\"discoveryUrl\":\"" + unnameable, StringComparison.Ordinal),
+         _ => ScriptedServer.OAuth,
+      };
       using var server = new ScriptedServer();
-      server.Add(ScriptedServer.Discovery).Add(issuer ? ScriptedServer.OAuth.Replace("\"issuer\":\"" + Named, "\"issuer\":\"" + unnameable, StringComparison.Ordinal) : ScriptedServer.OAuth).Add(provider);
+      server.Add(ScriptedServer.Discovery).Add(description).Add(provider);
       using var client = new QqqSessionClient(ScriptedServer.Origin, server);
-      if(where is "issuer" or "authorization-endpoint")
+      if(where is "issuer" or "discovery-address" or "authorization-endpoint")
       {
          Assert.Equal(failure, (await Assert.ThrowsAsync<QqqSessionException>(() => client.BeginBrowserLoginAsync(callback))).Failure);
+         Assert.Equal(string.Equals(where, "authorization-endpoint", StringComparison.Ordinal) ? 3 : 2, server.Requests.Count);
          return;
       }
 

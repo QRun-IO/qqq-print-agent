@@ -173,7 +173,8 @@ public sealed class QqqServerCompatibilityTests
    /// server names no provider, a description that could not be read names nothing, and an issuer that is not a plain
    /// HTTPS address is not an origin a certificate could come from. The server writes the issuer, so the origin is
    /// reported with the host's ASCII name: a look-alike letter shows as the "xn--" name it is, a zero-width space is
-   /// not there, and an issuer whose host holds a line separator has no ASCII name and is reported as no origin.
+   /// not there, and an issuer whose host holds a line separator has no ASCII name and is reported as no origin. Such
+   /// an issuer is also not one a browser sign-in can use, so the server is not compatible.
    /// </summary>
    [Theory]
    [InlineData("usable", "https://id.example.invalid/")]
@@ -205,8 +206,38 @@ public sealed class QqqServerCompatibilityTests
       QqqServerCompatibility result = await client.CheckCompatibilityAsync(redirect);
 
       Assert.Equal(provider, result.ProviderOrigin?.AbsoluteUri);
-      Assert.Equal(description is not ("callback-not-listed" or "unreadable" or "issuer-not-https" or "issuer-with-user"), result.IsCompatible);
+      Assert.Equal(description is not ("callback-not-listed" or "unreadable" or "issuer-not-https" or "issuer-with-user" or "issuer-line-separator"), result.IsCompatible);
       Assert.NotNull(result.Discovery);
+   }
+
+
+
+   /// <summary>
+   /// A sign-in provider cannot be used when the issuer or the address of its discovery document has a host with no
+   /// ASCII name: the platform throws when asked to connect to such a host. The check therefore offers no browser
+   /// sign-in for it, names the unusable address in printable form (the line separator shows as a space), and never
+   /// asks for the provider's document. A wizard that offered the browser button here would start a sign-in that
+   /// ends in the platform's exception instead of a refusal. With a nameable issuer the provider's origin is still
+   /// reported, as for any other description that was read.
+   /// </summary>
+   [Theory]
+   [InlineData("issuer", "issuer 'https://id .example.invalid/application/' is not a plain HTTPS address", null)]
+   [InlineData("discoveryUrl", "discovery address 'https://id .example.invalid/application/.well-known/openid-configuration' is not a plain HTTPS address", "https://id.example.invalid/")]
+   public async Task ProviderAddressWithoutANameableHostOffersNoBrowserSignIn(string member, string detail, string? provider)
+   {
+      using var server = new ScriptedServer();
+      server.Add(ScriptedServer.Discovery).Add(ScriptedServer.OAuth.Replace("\"" + member + "\":\"https://id.", "\"" + member + "\":\"https://id\u2028.", StringComparison.Ordinal));
+      using var client = new QqqSessionClient(ScriptedServer.Origin, server);
+
+      QqqServerCompatibility result = await client.CheckCompatibilityAsync(Redirect);
+
+      Assert.False(result.IsCompatible);
+      Assert.Equal(QqqSignInMethods.None, result.SignInMethods);
+      QqqCompatibilityProblem problem = Assert.Single(result.Problems);
+      Assert.Equal(QqqCompatibilityIssue.SignInUnavailable, problem.Issue);
+      Assert.Equal(detail, problem.Detail);
+      Assert.Equal(provider, result.ProviderOrigin?.AbsoluteUri);
+      Assert.Equal(new[] { "/qqq/v1/version", "/qqq/v1/metaData/authentication" }, server.Requests.Select(request => request.Uri.AbsolutePath), StringComparer.Ordinal);
    }
 
 

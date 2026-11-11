@@ -26,7 +26,8 @@ The development-only certificate exception now covers two origins at most (2.0, 
   from the server from one from its sign-in provider. The management contract's certificate description takes both
   from that record and no longer accepts them from its caller.
 - A server that puts a host the platform cannot name (one holding a line separator) into its sign-in provider's
-  issuer or endpoints is refused as a configuration problem. Before, sign-in or sign-out stopped with an internal
+  issuer, discovery address or endpoints is refused as a configuration problem, and a server check offers no
+  browser sign-in for such an issuer or discovery address. Before, sign-in or sign-out stopped with an internal
   address-format error.
 - The service's log no longer says "The server session could not be ended" when a sign-out with a sign-in provider
   failed after the server session was ended; it says that one of the two steps failed and points to the session
