@@ -197,14 +197,4 @@ public sealed class WindowsSpoolerJobsTests
       Assert.IsNotType<SpoolCancellationException>(refusal);
       Assert.Empty(spooler.Calls);
    }
-
-
-
-   /// <summary>The entry point that uses the real spooler applies the same receipt rule first, so an invalid receipt is refused without any Windows call; this is the only path of it a test may run.</summary>
-   [Fact]
-   public void RealSpoolerEntryPoint_RefusesAnInvalidReceiptWithoutCallingWindows()
-   {
-      InvalidOperationException refusal = Assert.Throws<InvalidOperationException>(() => WindowsSpoolerJobs.Cancel(Queue, JobId, "not-a-number"));
-      Assert.Equal("This job has no valid Windows spooler receipt.", refusal.Message);
-   }
 }

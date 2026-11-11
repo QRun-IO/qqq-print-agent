@@ -10,19 +10,10 @@ using System.Runtime.InteropServices;
 namespace Qqq.PrintAgent.Windows;
 
 /// <summary>Cancel only the exact QQQ document identified by the durable receipt.</summary>
-public static class WindowsSpoolerJobs
+internal static class WindowsSpoolerJobs
 {
    /// <summary>The spooler command that deletes a job (JOB_CONTROL_DELETE).</summary>
    private const uint JobControlDelete = 5;
-
-
-
-   /// <summary>
-   /// Cancels one spooler job by its number in the real Windows spooler, under the rules of
-   /// <see cref="Cancel(ISpoolerJobs, string, string, string)"/>. The spooler is built here, not held in a field, so
-   /// nothing is created until a cancellation is asked for.
-   /// </summary>
-   public static void Cancel(string printerName, string jobId, string spoolerJobId) => Cancel(new WindowsSpoolerJobQueue(), printerName, jobId, spoolerJobId);
 
 
 
