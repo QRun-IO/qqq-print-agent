@@ -57,6 +57,11 @@ internal sealed class FakeShortcutShell : IShortcutShell
 
 
 
+   /// <summary>Something that happens just after a failing write left its broken file behind, given that file's path: a test uses it to take hold of the file as another program would.</summary>
+   internal Action<string>? AfterAbandoning { get; set; }
+
+
+
    /// <summary>Something that happens just after the shell read a shortcut: a test uses it to change a file between two looks at it.</summary>
    internal Action? AfterRead { get; set; }
 
@@ -102,6 +107,7 @@ internal sealed class FakeShortcutShell : IShortcutShell
             string whole = JsonSerializer.Serialize(link);
             File.WriteAllText(path, whole[..(whole.Length / 2)]);
             Abandoned.Add(path);
+            AfterAbandoning?.Invoke(path);
          }
          throw WriteFailure;
       }

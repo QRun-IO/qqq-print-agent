@@ -37,8 +37,11 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
    /// longer ours is left alone and forgotten. The new shortcut's name then joins the record, next to the earlier
    /// shortcuts that are to be removed, before its file is written, so the shortcut is never on the Start menu
    /// unrecorded; the file is written and the name recorded as the current shortcut; and only then are the earlier
-   /// ones removed. When writing fails, the record is put back as it was found, unless a shortcut of ours was already
-   /// under the new name: then the name stays on record, because that shortcut is still there.
+   /// ones removed. When writing fails, the record is put back as it was found, with two exceptions that keep the new
+   /// name on record: a shortcut of ours was already under the new name and is still there, or the temporary file of
+   /// the failed write could not be removed, in which case the record must not become empty while that file exists,
+   /// so that an uninstall still comes here and removes it.
+   /// Temporary files an earlier run left behind are removed once the run is clear to go, before anything is written.
    /// </summary>
    internal void ApplyInstalledBranding()
    {
@@ -66,6 +69,7 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
       }
       List<string> notes = [];
       List<string> leaving = StillOurs(Names(last, pending).Where(name => !SameName(name, filename)), notes);
+      RemoveLeftovers(notes);
       RecordPending(SameName(last, filename) ? leaving : [.. leaving, filename]);
       try
       {
@@ -73,7 +77,7 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
       }
       catch
       {
-         if(!replacingOurs)
+         if(!replacingOurs && TemporaryFiles().Count == 0)
          {
             RecordPending(pending);
          }
@@ -93,7 +97,8 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
    /// recorded shortcut readable. A recorded file that has become someone else's, or a recorded name that is not a
    /// shortcut file name in the folder, is left alone with a note and forgotten, because a file that is not ours is no
    /// reason to fail an uninstall. A shortcut of ours that cannot be deleted does fail it, with the record kept, so
-   /// the uninstall can be run again and nothing of ours is left behind unrecorded.
+   /// the uninstall can be run again and nothing of ours is left behind unrecorded; the same holds for a temporary
+   /// shortcut file an earlier run left behind, which is removed here too.
    /// </summary>
    internal void RemoveInstalledShortcut()
    {
@@ -108,7 +113,12 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
       if(Directory.Exists(ShortcutDirectory))
       {
          ValidateShortcutDirectory(ShortcutDirectory);
-         foreach(string name in StillOurs(recorded, notes))
+         List<string> owned = StillOurs(recorded, notes);
+         foreach(string leftover in TemporaryFiles())
+         {
+            File.Delete(leftover);
+         }
+         foreach(string name in owned)
          {
             RemoveIfStillOurs(name, notes);
          }
@@ -226,6 +236,27 @@ internal sealed partial class AgentBrandingShortcuts(IShortcutShell shell, IPath
       }
       ClearReadOnly(path);
       File.Delete(path);
+   }
+
+
+
+   /// <summary>
+   /// Removes the temporary shortcut files an earlier run left behind. A branding run does not fail over one it cannot
+   /// remove: it is noted with the reason and the next run tries again.
+   /// </summary>
+   private void RemoveLeftovers(List<string> notes)
+   {
+      foreach(string leftover in TemporaryFiles())
+      {
+         try
+         {
+            File.Delete(leftover);
+         }
+         catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+         {
+            notes.Add($"A temporary shortcut file an earlier run left behind (\"{Path.GetFileName(leftover)}\") could not be removed ({exception.GetType().Name}: {exception.Message}). The next branding run or the uninstall will try again.");
+         }
+      }
    }
 
 

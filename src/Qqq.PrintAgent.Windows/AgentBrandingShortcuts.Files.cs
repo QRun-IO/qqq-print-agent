@@ -7,6 +7,7 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Qqq.PrintAgent.Windows;
 
@@ -56,6 +57,7 @@ internal sealed partial class AgentBrandingShortcuts
    private void WriteShortcut(string path, string? icon, bool replacingOurs)
    {
       string temporary = Path.Combine(ShortcutDirectory, ".qqq-" + Guid.NewGuid().ToString("N") + ".lnk");
+      // The name must match TemporaryName, which is how a later run recognises a temporary file that was left behind.
       try
       {
          shell.Write(temporary, new ShortcutLink(places.InstalledExecutable, "", OwnershipDescription, Path.GetDirectoryName(places.InstalledExecutable)!, (icon ?? places.InstalledExecutable) + ",0"));
@@ -80,6 +82,23 @@ internal sealed partial class AgentBrandingShortcuts
          }
       }
    }
+
+
+
+   /// <summary>
+   /// The temporary shortcut files an earlier run left in the shortcut folder: a run that was killed between writing
+   /// its shortcut and moving it into place, or whose temporary file could not be deleted. Only a file whose name is
+   /// exactly the one a temporary file is given counts; nothing else in the folder is ever touched on this account,
+   /// and a temporary name is never recorded.
+   /// </summary>
+   private List<string> TemporaryFiles()
+      => [.. Directory.GetFiles(ShortcutDirectory, ".qqq-*.lnk").Where(path => TemporaryName().IsMatch(Path.GetFileName(path)))];
+
+
+
+   /// <summary>Matches exactly the name a temporary shortcut file is given: ".qqq-", the 32 lowercase hexadecimal digits of a new identifier, ".lnk". The match has a one second limit.</summary>
+   [GeneratedRegex("""^\.qqq-[0-9a-f]{32}\.lnk$""", RegexOptions.CultureInvariant, 1000)]
+   private static partial Regex TemporaryName();
 
 
 
