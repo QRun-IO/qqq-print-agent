@@ -9,16 +9,25 @@ models, and on the connection wizard, in a later change.
 - **The tree.** One node for every server, in the service's order, each with Printers, Jobs and Connection; then
   Add server, Computer, Logs and Settings. A server keeps its node from one snapshot to the next, so what is
   selected and what is expanded stay put. When the server on screen is removed, its neighbour is shown and a
-  message says which server went. A server that is being removed stays in the tree, says so and offers no command.
-  Add server is disabled, with the reason, at eight servers and while the service is not available.
+  message says which server went. That is said only when a server was removed: when the servers are not listed
+  because the service's stored data is not ready, the Computer page says why and nothing says that one was
+  removed. A server that is being removed stays in the tree, says so and offers no command. Add server is
+  disabled, with the reason, at eight servers and while the service is not available; signing in again and
+  pairing a server that exists are not held to that limit.
 - **Health in words.** Every server shows its health as a glyph and words as well as a colour. A health this
   version does not know is shown as unknown, never as healthy, and so is every server while the local service is
   not answering.
 - **The footer.** The worst health across the servers, how many servers are in each state, and a link to the first
-  one that needs attention. With one server it is that server's own sentence, which is the sentence the 1.x footer
-  shows. With no server it is red and says to add one. It is announced to a screen reader once per change.
-- **The tray.** The tooltip stays within the 127 characters Windows shows: the count in each state, as many
-  servers as fit, and how many were left out. The menu lists every server.
+  one that needs attention. With one server it is that server's own sentence. For a paired server in the states
+  1.x had, that is the sentence the 1.x footer shows; before the first answer, while the local service is not
+  answering and in states 1.x did not have it reads differently, and ADR-0005 lists how. A paired server nobody
+  is signed in to says "Sign in required" beside its name. While printing is paused for an update the footer says
+  so and is not green. With no server it is red and says to add one. It is announced to a screen reader once per
+  change.
+- **The tray.** The tooltip stays within the 127 characters Windows shows: the count in each state, then as many
+  servers as fit, the ones that need attention first, and how many were left out. When no server fits it is the
+  counts alone. It says what the footer says, where the 1.x tooltip carried the health's own sentence. The menu
+  lists every server.
 - **The local service.** Not reached, an older or a newer service, an upgrade from 1.x that did not finish (with
   the file it stopped at), data written by a newer build (with both versions) and an update's pause each have
   their own sentence and guidance, on the Computer page. The wizard is shown only when the service answered and
@@ -26,7 +35,11 @@ models, and on the connection wizard, in a later change.
 - **One command at a time per server.** A second command on a server that is busy is refused with a message that
   says what is still running; a command on another server is not affected, and refreshing never stops. A
   snapshot that is older than a change made from the window is not shown for the server that changed.
-- **Messages.** A message is shown on the page that caused it and is gone when that page is left.
+- **Messages.** A message is shown on the page that caused it. One that has not been on screen is never replaced:
+  the results of commands that ended while the operator was elsewhere wait under their page, in order, and are
+  shown one after the other when the page is opened. Leaving a page drops only the message that was on screen. A
+  failure about a server that has since been removed is shown on the page that took its place, and says which
+  server it was about.
 
 Every control an operator acts on in the companion's own views now has an automation identifier, and the
 identifiers are recorded with the control each is on (2.0). Nothing an operator sees or hears changes. Fourteen
