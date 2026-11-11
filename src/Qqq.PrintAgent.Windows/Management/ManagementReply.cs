@@ -24,16 +24,17 @@ public sealed record ManagementReply(int V, bool Ok, ManagementPayload? Result =
    /// <summary>
    /// Builds the reply to an operation that failed with a code that carries no details. The message may repeat what a
    /// server said (the reason of <see cref="ManagementErrorCode.ServerRefused"/>, for one); <see cref="ManagementError"/>
-   /// makes it printable and cuts it, here as for an error built any other way.
+   /// makes it printable and cuts it, here as for an error built any other way, and refuses a code that is not in the
+   /// table or that carries details.
    /// </summary>
    public static ManagementReply Failure(string code, string message) => Failure(new ManagementError(code, message));
 
 
 
-   /// <summary>Builds the reply to an operation that failed with one of the codes that carry details, writing the details record the way the wire carries it.</summary>
+   /// <summary>Builds the reply to an operation that failed with one of the codes that carry details, writing the details record the way the wire carries it. The record must be the one the table names for the code (<see cref="ManagementError.WithDetails"/>).</summary>
    public static ManagementReply Failure<TDetails>(string code, string message, TDetails details)
       where TDetails : class
-      => Failure(new ManagementError(code, message, ManagementPayload.From(details)));
+      => Failure(ManagementError.WithDetails(code, message, details));
 
 
 

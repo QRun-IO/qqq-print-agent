@@ -134,12 +134,11 @@ public sealed class ManagementGoldenTests
       Assert.False(parse.Reply.Ok);
       Assert.Null(parse.Reply.Result);
       Assert.Equal(code, parse.Reply.Error!.Code);
-      Assert.Equal("Synthetic message for people.", parse.Reply.Error.Message);
+      Assert.Equal(ManagementSamples.FailureMessage, parse.Reply.Error.Message);
       object details = ReadTyped(nameof(ManagementJson.TryReadDetails), detailsType, parse.Reply.Error);
-      ManagementError rewritten = new(parse.Reply.Error.Code, parse.Reply.Error.Message, Payload(details, detailsType));
-      Assert.Equal(golden, ManagementJson.Write(parse.Reply with { Error = rewritten }));
+      Assert.Equal(golden, ManagementJson.Write(ManagementSamples.FailureWith(code, details)));
       Assert.Equal(detailsType, ManagementSamples.Details(code)!.GetType());
-      Assert.Equal(golden, ManagementJson.Write(FailureOf(code, ManagementSamples.Details(code)!)));
+      Assert.Equal(golden, ManagementJson.Write(ManagementSamples.Failure(code)));
    }
 
 
@@ -192,13 +191,4 @@ public sealed class ManagementGoldenTests
    /// <summary>Builds a successful reply with <see cref="ManagementReply.Success"/> for a result whose type is known only at run time.</summary>
    private static ManagementReply SuccessOf(object result)
       => (ManagementReply)typeof(ManagementReply).GetMethod(nameof(ManagementReply.Success))!.MakeGenericMethod(result.GetType()).Invoke(null, [result])!;
-
-
-
-   /// <summary>Builds a failed reply with details through the contract's own factory, for details whose type is known only at run time.</summary>
-   private static ManagementReply FailureOf(string code, object details)
-   {
-      MethodInfo factory = typeof(ManagementReply).GetMethods().Single(method => method is { Name: nameof(ManagementReply.Failure), IsGenericMethodDefinition: true });
-      return (ManagementReply)factory.MakeGenericMethod(details.GetType()).Invoke(null, [code, "Synthetic message for people.", details])!;
-   }
 }

@@ -4,6 +4,7 @@
  */
 
 using System.Net.Security;
+using System.Reflection;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Core.Printing;
 using Qqq.PrintAgent.Windows;
@@ -175,6 +176,25 @@ internal static class ManagementSamples
       ManagementErrorCode.CancelRefused => new CancelRefusedDetails(CancelRefusedDetails.OwnershipMismatch),
       _ => null,
    };
+
+
+
+   /// <summary>The message every example failure carries.</summary>
+   internal const string FailureMessage = "Synthetic message for people.";
+
+
+
+   /// <summary>The example failure of a code, built by the factory the service will use for it: the one that takes details for a code that carries them, with the example details, and the other for a code that carries none.</summary>
+   internal static ManagementReply Failure(string code) => Details(code) is { } details ? FailureWith(code, details) : ManagementReply.Failure(code, FailureMessage);
+
+
+
+   /// <summary>A failed reply built through the contract's own factory for details whose type is known only at run time. A refusal by the factory is thrown as itself, not wrapped by the reflection call.</summary>
+   internal static ManagementReply FailureWith(string code, object details)
+   {
+      MethodInfo factory = typeof(ManagementReply).GetMethods().Single(method => method is { Name: nameof(ManagementReply.Failure), IsGenericMethodDefinition: true });
+      return (ManagementReply)factory.MakeGenericMethod(details.GetType()).Invoke(null, BindingFlags.DoNotWrapExceptions, null, [code, FailureMessage, details], null)!;
+   }
 
 
 

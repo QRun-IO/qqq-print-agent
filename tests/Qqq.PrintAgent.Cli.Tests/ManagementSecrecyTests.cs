@@ -106,9 +106,7 @@ public sealed class ManagementSecrecyTests
       }
       foreach(string code in ManagementErrorCode.All)
       {
-         object? details = ManagementSamples.Details(code);
-         written.Add(ManagementJson.Write(new ManagementReply(ManagementProtocol.Version, false, Error: new ManagementError(code, "Synthetic message for people.",
-            details is null ? null : Payload(details, details.GetType())))));
+         written.Add(ManagementJson.Write(ManagementSamples.Failure(code)));
       }
       foreach(ServiceSnapshot further in ManagementSamples.FurtherSnapshots.Values)
       {

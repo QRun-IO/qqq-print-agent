@@ -519,7 +519,7 @@ public sealed class ManagementEnvelopeTests
    {
       ManagementReply wrongShape = new(2, true, Payload("{\"ready\":\"soon\"}"));
       var failure = ManagementReply.Failure(ManagementErrorCode.Busy, "Busy.");
-      ManagementError wrongDetails = new(ManagementErrorCode.EnrollmentUnconfirmed, "Unknown.", Payload("{\"stage\":5}"));
+      ManagementError wrongDetails = ErrorRead(ManagementErrorCode.EnrollmentUnconfirmed, "{\"stage\":5}");
 
       Assert.False(ManagementJson.TryReadResult(wrongShape, out UpdatePrepareResult? _));
       Assert.False(ManagementJson.TryReadResult(failure, out UpdatePrepareResult? _));
@@ -642,10 +642,10 @@ public sealed class ManagementEnvelopeTests
       Assert.False(ManagementJson.TryReadResult(Result("{}"), out ServerListResult? _));
       Assert.False(ManagementJson.TryReadResult(Result("{\"servers\":null}"), out ServerListResult? _));
       Assert.False(ManagementJson.TryReadResult(Result("{\"server\":{\"serverId\":\"" + Server + "\",\"name\":null,\"address\":\"https://qqq.example.test\",\"position\":0,\"health\":\"GREEN\",\"status\":\"Connected.\"}}"), out ServerListResult? _));
-      Assert.False(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.CancelRefused, "Refused.", Payload("{}")), out CancelRefusedDetails? _));
+      Assert.False(ManagementJson.TryReadDetails(ErrorRead(ManagementErrorCode.CancelRefused, "{}"), out CancelRefusedDetails? _));
       Assert.True(ManagementJson.TryReadResult(Result("{\"paused\":false,\"addedLater\":1}"), out UpdateState? state));
       Assert.Equal(new UpdateState(Paused: false), state);
-      Assert.True(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.CancelRefused, "Refused.", Payload("{\"reason\":\"reasonAddedLater\"}")), out CancelRefusedDetails? unknownReason));
+      Assert.True(ManagementJson.TryReadDetails(ErrorRead(ManagementErrorCode.CancelRefused, "{\"reason\":\"reasonAddedLater\"}"), out CancelRefusedDetails? unknownReason));
       Assert.Equal("reasonAddedLater", unknownReason.Reason);
    }
 
@@ -709,7 +709,8 @@ public sealed class ManagementEnvelopeTests
       ManagementPayload payload = Payload("{\"printerId\":\"printer-a1\",\"shared\":true}");
 
       Assert.Equal("{\"printerId\":\"printer-a1\",\"shared\":true}", JsonSerializer.Serialize(payload, ManagementJson.Options));
-      Assert.Equal("{\"code\":\"busy\",\"message\":\"Busy.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}", JsonSerializer.Serialize(new ManagementError(ManagementErrorCode.Busy, "Busy.", payload), ManagementJson.Options));
+      Assert.Equal("{\"code\":\"code_added_later\",\"message\":\"Synthetic message.\",\"details\":{\"printerId\":\"printer-a1\",\"shared\":true}}",
+         JsonSerializer.Serialize(ErrorRead("code_added_later", "{\"printerId\":\"printer-a1\",\"shared\":true}"), ManagementJson.Options));
       Assert.False(payload.IsEmpty());
       Assert.True(Payload("{}").IsEmpty());
       NotSupportedException refusal = Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize<ManagementPayload>("{}", ManagementJson.Options));
@@ -852,6 +853,44 @@ public sealed class ManagementEnvelopeTests
 
 
 
+   /// <summary>
+   /// A failure the service builds carries a code from the table and exactly the details the table names for it. Text
+   /// that is not a code is refused, with or without details, and the refusal does not repeat it. A code that carries no
+   /// details cannot be given any; a code that carries details cannot be sent without them, with another code's record,
+   /// or with an object that merely has the right members, which would skip what the record's own construction
+   /// enforces (the unbounded principal here would otherwise be written whole). Every code in the table is accepted
+   /// with its own details, or with none when it carries none.
+   /// </summary>
+   [Fact]
+   public void Failure_TiesTheDetailsToTheCode_AndRefusesACodeThatIsNotInTheTable()
+   {
+      CancelRefusedDetails cancel = new(CancelRefusedDetails.DocumentGone);
+      var lookalike = new { approvedPrincipalId = new string('p', 2028), approvedTenantId = "tenant\u202E2" };
+
+      ArgumentException notACode = Assert.Throws<ArgumentException>(() => ManagementReply.Failure("Synthetic Text\n", "Synthetic message."));
+      Assert.DoesNotContain("Synthetic Text", notACode.Message, StringComparison.Ordinal);
+      Assert.Throws<ArgumentException>(() => new ManagementError("code_added_later", "Synthetic message."));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure("code_added_later", "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure("", "Synthetic message."));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure(null!, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.Busy, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.IdentityChanged, "Synthetic message.", lookalike));
+      Assert.Throws<ArgumentException>(() => ManagementError.WithDetails<object>(ManagementErrorCode.CancelRefused, "Synthetic message.", cancel));
+      Assert.Throws<ArgumentException>(() => ManagementReply.Failure(ManagementErrorCode.CancelRefused, "Synthetic message."));
+      Assert.Throws<ArgumentException>(() => new ManagementError(ManagementErrorCode.IdentityChanged, "Synthetic message."));
+      Assert.Throws<ArgumentNullException>(() => ManagementReply.Failure<CancelRefusedDetails>(ManagementErrorCode.CancelRefused, "Synthetic message.", null!));
+      Assert.All(ManagementErrorCode.All, code =>
+      {
+         ManagementError error = ManagementSamples.Failure(code).Error!;
+         Assert.Equal((code, ManagementErrorCode.DetailsType(code) is not null), (error.Code, error.Details is not null));
+      });
+      Assert.Equal("{\"code\":\"cancel_refused\",\"message\":\"Synthetic message.\",\"details\":{\"reason\":\"documentGone\"}}",
+         JsonSerializer.Serialize(ManagementError.WithDetails(ManagementErrorCode.CancelRefused, "Synthetic message.", cancel), ManagementJson.Options));
+   }
+
+
+
    /// <summary>Requires a request's text to be refused with one problem and one code, and no request to come back.</summary>
    private static void AssertRefused(string? text, ManagementEnvelopeProblem problem, string code)
    {
@@ -873,6 +912,12 @@ public sealed class ManagementEnvelopeTests
 
    /// <summary>A successful reply with the given result object.</summary>
    private static ManagementReply Result(string result) => new(2, true, Payload(result));
+
+
+
+   /// <summary>An error as a client reads it from the wire, with the given code and details object. The service cannot build an error whose details do not belong to its code, so a test that needs one reads it, as a client would from a service that sent it.</summary>
+   private static ManagementError ErrorRead(string code, string details)
+      => ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"" + code + "\",\"message\":\"Synthetic message.\",\"details\":" + details + "}}").Reply!.Error!;
 
 
 

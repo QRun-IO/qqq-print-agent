@@ -350,7 +350,7 @@ public static class ManagementJson
          return null;
       }
       ManagementPayload? details = error.TryGetProperty("details", out JsonElement found) && found.ValueKind == JsonValueKind.Object ? ManagementPayload.FromElement(found) : null;
-      return new ManagementError(code.ToString(), message.ToString(), details);
+      return ManagementError.FromWire(code.ToString(), message.ToString(), details);
    }
 
 

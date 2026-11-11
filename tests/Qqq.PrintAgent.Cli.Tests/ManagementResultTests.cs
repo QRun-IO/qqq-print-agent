@@ -201,7 +201,7 @@ public sealed class ManagementResultTests
       Assert.All(typeof(IdentityChangedDetails).GetProperties(), member => Assert.Null(member.SetMethod));
       Assert.True(ManagementJson.TryReadDetails(reply.Error!, out IdentityChangedDetails? read));
       Assert.Equal(hostile, read);
-      Assert.False(ManagementJson.TryReadDetails(new ManagementError(ManagementErrorCode.IdentityChanged, "Changed.", ManagementPayload.From(new NoResult())), out IdentityChangedDetails? _));
+      Assert.False(ManagementJson.TryReadDetails(ManagementJson.ParseReply("{\"v\":2,\"ok\":false,\"error\":{\"code\":\"identity_changed\",\"message\":\"Changed.\",\"details\":{}}}").Reply!.Error!, out IdentityChangedDetails? _));
    }
 
 
