@@ -8,6 +8,7 @@ namespace Qqq.PrintAgent.Windows;
 /// <summary>
 /// The last attempt to read the server's printer catalog: when it was made, whether the server reported approvals
 /// (REPORTED), could not (NOT_REPORTED, with the reason) or has not been asked (NOT_CHECKED), and which server answered.
+/// The time is carried as the text the service recorded, ISO 8601; it is not converted on the way to a client.
 /// </summary>
 public sealed record PrinterServerSync(string Outcome, string? CheckedAt = null, string? Detail = null, string? Server = null, string? Source = null)
 {

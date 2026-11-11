@@ -1,0 +1,8 @@
+{
+   "v": 2,
+   "op": "servers.check",
+   "args": {
+      "address": "https://qqq.example.test",
+      "acceptCertificateException": true
+   }
+}

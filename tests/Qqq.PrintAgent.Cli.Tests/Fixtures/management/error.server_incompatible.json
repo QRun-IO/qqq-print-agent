@@ -1,0 +1,40 @@
+{
+   "v": 2,
+   "ok": false,
+   "error": {
+      "code": "server_incompatible",
+      "message": "Synthetic message for people.",
+      "details": {
+         "stages": [
+            {
+               "stage": "connection",
+               "outcome": "passed",
+               "problems": []
+            },
+            {
+               "stage": "security",
+               "outcome": "passed",
+               "problems": []
+            },
+            {
+               "stage": "server",
+               "outcome": "passed",
+               "problems": []
+            },
+            {
+               "stage": "printing",
+               "outcome": "failed",
+               "problems": [
+                  "the printing extension is version 1.4 and realtime printing needs 2.3"
+               ]
+            },
+            {
+               "stage": "signIn",
+               "outcome": "notReached",
+               "problems": []
+            }
+         ],
+         "signInMethods": []
+      }
+   }
+}

@@ -1,0 +1,13 @@
+{
+   "v": 2,
+   "op": "servers.add",
+   "args": {
+      "address": "https://qqq.example.test",
+      "name": "Warehouse",
+      "acceptCertificateException": true,
+      "sessionCredential": {
+         "origin": "https://qqq.example.test",
+         "sessionToken": "CANARY-SESSION-COOKIE-7f3a"
+      }
+   }
+}

@@ -1,0 +1,57 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "computer": {
+         "printers": [
+            {
+               "printerId": "printer-a1",
+               "name": "ZDesigner ZT411",
+               "driverName": "ZDesigner ZT411-203dpi ZPL",
+               "portName": "USB001",
+               "status": "READY",
+               "formats": [
+                  "PDF",
+                  "ZPL"
+               ],
+               "mediaProfiles": [
+                  {
+                     "id": "label-4x6",
+                     "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                     "name": "4 x 6 in",
+                     "widthMicrons": 101600,
+                     "heightMicrons": 152400,
+                     "dpiX": 203,
+                     "dpiY": 203,
+                     "source": "WINDOWS_QUEUE_DEFAULT",
+                     "applyMode": "DRIVER_DEFAULT"
+                  }
+               ]
+            }
+         ],
+         "printersDiscoveredAt": "2026-11-10T15:03:10.0000000Z",
+         "service": {
+            "version": "2.0.0-rc.2",
+            "startedAt": "2026-11-10T14:59:05.0000000Z"
+         },
+         "update": {
+            "paused": false
+         },
+         "logSettings": {
+            "retentionDays": 30,
+            "maxFileMegabytes": 100,
+            "segmentsPerDay": 10,
+            "debugLogging": false,
+            "currentFileBytes": 0,
+            "segmentsToday": 0
+         },
+         "state": {
+            "status": "newerBuild",
+            "foundVersion": 4,
+            "supportedVersion": 3
+         },
+         "profile": {}
+      },
+      "servers": []
+   }
+}

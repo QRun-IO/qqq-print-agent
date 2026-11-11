@@ -1,0 +1,127 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "computer": {
+         "printers": [
+            {
+               "printerId": "printer-a1",
+               "name": "ZDesigner ZT411",
+               "driverName": "ZDesigner ZT411-203dpi ZPL",
+               "portName": "USB001",
+               "status": "READY",
+               "formats": [
+                  "PDF",
+                  "ZPL"
+               ],
+               "mediaProfiles": [
+                  {
+                     "id": "label-4x6",
+                     "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                     "name": "4 x 6 in",
+                     "widthMicrons": 101600,
+                     "heightMicrons": 152400,
+                     "dpiX": 203,
+                     "dpiY": 203,
+                     "source": "WINDOWS_QUEUE_DEFAULT",
+                     "applyMode": "DRIVER_DEFAULT"
+                  }
+               ]
+            }
+         ],
+         "printersDiscoveredAt": "2026-11-10T15:03:25.0000000Z",
+         "service": {
+            "version": "2.0.0-dev\u002Babc1234",
+            "startedAt": "2026-11-10T12:04:05.0000000Z"
+         },
+         "update": {
+            "paused": true,
+            "pausedUntil": "2026-11-10T15:14:05.0000000Z"
+         },
+         "logSettings": {
+            "retentionDays": 30,
+            "maxFileMegabytes": 100,
+            "segmentsPerDay": 10,
+            "debugLogging": true,
+            "currentFileBytes": 20480,
+            "segmentsToday": 2
+         },
+         "state": {
+            "status": "upgradeIncomplete",
+            "file": "connection.dpapi",
+            "foundVersion": 3,
+            "supportedVersion": 2
+         },
+         "profile": {
+            "name": "Packing station 7",
+            "description": "Label printing for outbound orders",
+            "location": "West warehouse"
+         }
+      },
+      "servers": [
+         {
+            "serverId": "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f",
+            "name": "Warehouse",
+            "address": "https://qqq.example.test",
+            "position": 0,
+            "health": "ORANGE",
+            "status": "Dispatch paused by the administrator.",
+            "attentionCount": 3,
+            "authentication": {
+               "signedIn": true,
+               "principalId": "principal-4",
+               "tenantId": "tenant-2",
+               "message": "Signed in. Printing is enabled.",
+               "authorized": true
+            },
+            "paired": true,
+            "deviceId": "device-17",
+            "transport": {
+               "protocol": "qqq-printing.v1",
+               "state": "CONNECTED",
+               "uploadedBytes": 1048576,
+               "downloadedBytes": 73400320,
+               "uploadBytesPerSecond": 512.5,
+               "downloadBytesPerSecond": 20480.25,
+               "totalsSinceUtc": "2026-11-10T12:04:05.0000000Z"
+            },
+            "lastContact": "2026-11-10T15:04:01.0000000Z",
+            "control": {
+               "support": "SUPPORTED",
+               "desiredState": {
+                  "revision": 12,
+                  "dispatchPaused": true,
+                  "connectionState": "CONNECTED"
+               },
+               "lastContact": "2026-11-10T15:04:00.0000000Z",
+               "lastCommand": "REFRESH_INVENTORY",
+               "lastOutcome": "INVENTORY_REFRESHED",
+               "lastCommandAt": "2026-11-10T14:58:00.0000000Z"
+            },
+            "printers": [
+               {
+                  "printerId": "printer-a1",
+                  "serverState": "APPROVED",
+                  "displayName": "Shipping labels",
+                  "description": "Thermal printer",
+                  "location": "Dock 2"
+               }
+            ],
+            "printerSync": {
+               "outcome": "REPORTED",
+               "checkedAt": "2026-11-10T15:03:00.0000000Z",
+               "detail": "2 printers approved",
+               "server": "https://qqq.example.test",
+               "source": "REALTIME"
+            },
+            "certificateException": {
+               "enabled": true,
+               "serverOrigin": "https://qqq.example.test",
+               "providerOrigin": "https://sign-in.example.test"
+            },
+            "stateUnreadable": true,
+            "removing": true
+         }
+      ]
+   }
+}

@@ -64,7 +64,7 @@ public sealed record QqqCompatibilityProblem(QqqCompatibilityIssue Issue, string
    /// length costs the same. A missing value is shown as such. The session client's log lines use it as well as the
    /// problem details, because a log is read by an operator too.
    /// </summary>
-   internal static string Printable(string? value, int limit = ValueLimit)
+   public static string Printable(string? value, int limit = ValueLimit)
    {
       if(string.IsNullOrEmpty(value))
       { return "(missing)"; }

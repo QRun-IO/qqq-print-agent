@@ -1,0 +1,10 @@
+{
+   "v": 2,
+   "op": "logs.setSettings",
+   "args": {
+      "retentionDays": 14,
+      "maxFileMegabytes": 50,
+      "segmentsPerDay": 5,
+      "debugLogging": true
+   }
+}

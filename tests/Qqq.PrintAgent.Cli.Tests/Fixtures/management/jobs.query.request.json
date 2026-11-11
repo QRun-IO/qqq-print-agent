@@ -1,0 +1,17 @@
+{
+   "v": 2,
+   "op": "jobs.query",
+   "server": "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f",
+   "args": {
+      "query": {
+         "search": "inv",
+         "status": "FAILED",
+         "printerId": "printer-a1",
+         "needsAttentionOnly": true,
+         "offset": 50,
+         "pageSize": 25,
+         "sortBy": "updatedAt",
+         "descending": false
+      }
+   }
+}

@@ -1,0 +1,161 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "computer": {
+         "printers": [
+            {
+               "printerId": "printer-a1",
+               "name": "ZDesigner ZT411",
+               "driverName": "ZDesigner ZT411-203dpi ZPL",
+               "portName": "USB001",
+               "status": "READY",
+               "formats": [
+                  "PDF",
+                  "ZPL"
+               ],
+               "mediaProfiles": [
+                  {
+                     "id": "label-4x6",
+                     "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                     "name": "4 x 6 in",
+                     "widthMicrons": 101600,
+                     "heightMicrons": 152400,
+                     "dpiX": 203,
+                     "dpiY": 203,
+                     "source": "WINDOWS_QUEUE_DEFAULT",
+                     "applyMode": "DRIVER_DEFAULT"
+                  }
+               ]
+            }
+         ],
+         "printersDiscoveredAt": "2026-11-10T15:03:40.0000000Z",
+         "service": {
+            "version": "2.0.0",
+            "startedAt": "2026-11-08T15:04:05.0000000Z"
+         },
+         "update": {
+            "paused": false
+         },
+         "logSettings": {
+            "retentionDays": 30,
+            "maxFileMegabytes": 100,
+            "segmentsPerDay": 10,
+            "debugLogging": false,
+            "currentFileBytes": 0,
+            "segmentsToday": 0
+         },
+         "state": {
+            "status": "ready"
+         },
+         "profile": {
+            "name": "Packing station 7",
+            "description": "",
+            "location": "West warehouse"
+         }
+      },
+      "servers": [
+         {
+            "serverId": "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f",
+            "name": "Warehouse",
+            "address": "https://qqq.example.test",
+            "position": 0,
+            "health": "GREEN",
+            "status": "Connected. Waiting for print jobs.",
+            "attentionCount": 0,
+            "authentication": {
+               "signedIn": true,
+               "principalId": "principal-4",
+               "tenantId": "tenant-2",
+               "message": "Signed in. Printing is enabled.",
+               "authorized": true
+            },
+            "paired": true,
+            "deviceId": "device-17",
+            "transport": {
+               "protocol": "qqq-printing.v1",
+               "state": "CONNECTED",
+               "uploadedBytes": 20480,
+               "downloadedBytes": 5242880,
+               "uploadBytesPerSecond": 0,
+               "downloadBytesPerSecond": 0,
+               "totalsSinceUtc": "2026-11-08T15:04:05.0000000Z"
+            },
+            "lastContact": "2026-11-10T15:03:53.0000000Z",
+            "control": {
+               "support": "SUPPORTED",
+               "desiredState": {
+                  "revision": 3,
+                  "dispatchPaused": false,
+                  "connectionState": "CONNECTED"
+               },
+               "lastContact": "2026-11-10T15:03:53.0000000Z"
+            },
+            "printers": [
+               {
+                  "printerId": "printer-a1",
+                  "serverState": "APPROVED",
+                  "displayName": "Shipping labels"
+               }
+            ],
+            "printerSync": {
+               "outcome": "REPORTED",
+               "checkedAt": "2026-11-10T15:03:00.0000000Z",
+               "server": "https://qqq.example.test",
+               "source": "REALTIME"
+            },
+            "certificateException": {
+               "enabled": false,
+               "serverOrigin": "https://qqq.example.test"
+            },
+            "stateUnreadable": false,
+            "removing": false
+         },
+         {
+            "serverId": "3f2b8c1e-0000-4f6b-9a7c-0e1d2c3b4a60",
+            "name": "Test bench",
+            "address": "https://bench.example.test",
+            "position": 1,
+            "health": "ORANGE",
+            "status": "Signed in. Pair this computer to enable printing.",
+            "attentionCount": 0,
+            "authentication": {
+               "signedIn": true,
+               "principalId": "principal-9",
+               "tenantId": "tenant-2",
+               "message": "Signed in. Pair this computer to enable printing.",
+               "authorized": false
+            },
+            "paired": false,
+            "transport": {
+               "protocol": "qqq-printing.v1",
+               "state": "STOPPED",
+               "uploadedBytes": 0,
+               "downloadedBytes": 0,
+               "uploadBytesPerSecond": 0,
+               "downloadBytesPerSecond": 0,
+               "totalsSinceUtc": "2026-11-10T12:04:05.0000000Z"
+            },
+            "control": {
+               "support": "UNKNOWN",
+               "desiredState": {
+                  "revision": 0,
+                  "dispatchPaused": false,
+                  "connectionState": "CONNECTED"
+               }
+            },
+            "printers": [],
+            "printerSync": {
+               "outcome": "NOT_CHECKED"
+            },
+            "certificateException": {
+               "enabled": true,
+               "serverOrigin": "https://bench.example.test",
+               "providerOrigin": "https://bench.example.test"
+            },
+            "stateUnreadable": false,
+            "removing": false
+         }
+      ]
+   }
+}

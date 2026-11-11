@@ -1,0 +1,33 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "servers": [
+         {
+            "serverId": "3f2b8c1e-5d4a-4f6b-9a7c-0e1d2c3b4a5f",
+            "transport": {
+               "protocol": "qqq-printing.v1",
+               "state": "CONNECTED",
+               "uploadedBytes": 1048576,
+               "downloadedBytes": 73400320,
+               "uploadBytesPerSecond": 512.5,
+               "downloadBytesPerSecond": 20480.25,
+               "totalsSinceUtc": "2026-11-10T12:04:05.0000000Z"
+            },
+            "lastContact": "2026-11-10T15:04:01.0000000Z"
+         },
+         {
+            "serverId": "3f2b8c1e-0000-4f6b-9a7c-0e1d2c3b4a60",
+            "transport": {
+               "protocol": "qqq-printing.v1",
+               "state": "STOPPED",
+               "uploadedBytes": 0,
+               "downloadedBytes": 0,
+               "uploadBytesPerSecond": 0,
+               "downloadBytesPerSecond": 0,
+               "totalsSinceUtc": "2026-11-10T12:04:05.0000000Z"
+            }
+         }
+      ]
+   }
+}

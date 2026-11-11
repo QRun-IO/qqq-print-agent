@@ -1,0 +1,13 @@
+{
+   "v": 2,
+   "ok": false,
+   "error": {
+      "code": "enrollment_unconfirmed",
+      "message": "Synthetic message for people.",
+      "details": {
+         "stage": "deviceBound",
+         "printingBlocked": true,
+         "deviceId": "device-17"
+      }
+   }
+}

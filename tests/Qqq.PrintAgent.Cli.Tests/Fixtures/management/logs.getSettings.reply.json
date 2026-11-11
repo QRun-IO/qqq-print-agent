@@ -1,0 +1,12 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "retentionDays": 30,
+      "maxFileMegabytes": 100,
+      "segmentsPerDay": 10,
+      "debugLogging": true,
+      "currentFileBytes": 20480,
+      "segmentsToday": 2
+   }
+}

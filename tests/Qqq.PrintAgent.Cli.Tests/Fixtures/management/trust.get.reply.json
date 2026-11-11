@@ -1,0 +1,23 @@
+{
+   "v": 2,
+   "ok": true,
+   "result": {
+      "certificateException": {
+         "enabled": true,
+         "serverOrigin": "https://qqq.example.test",
+         "providerOrigin": "https://sign-in.example.test"
+      },
+      "certificate": {
+         "refusals": [
+            "untrustedAuthority"
+         ],
+         "origin": "https://sign-in.example.test",
+         "observedAt": "2026-11-10T14:44:05.0000000Z",
+         "subject": "CN=sign-in.example.test",
+         "issuer": "CN=Example Development Root",
+         "notBefore": "2026-01-01T00:00:00.0000000Z",
+         "notAfter": "2027-01-01T00:00:00.0000000Z",
+         "fingerprint": "A1B2C3D4E5F60718293A4B5C6D7E8F9001122334"
+      }
+   }
+}
