@@ -15,7 +15,8 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// with this sign-out's own state, through the one <see cref="BrowserCallbackDispatcher"/>, so it can run while a
 /// sign-in to another server waits for its callback. Ending the session in the service is the caller's part. The
 /// sign-out request carries the provider's ID token hint: it goes to the browser and nowhere else, and neither it
-/// nor its state is logged or kept.
+/// nor its state is logged or kept. The result says how it ended (<see cref="ProviderSignOutResult"/>), so the page
+/// that shows it can tell a page that was never opened from a provider that did not confirm.
 /// </summary>
 public sealed class ProviderSignOut
 {
@@ -43,36 +44,47 @@ public sealed class ProviderSignOut
    /// <summary>
    /// Opens the provider's end-session page in the default browser and waits up to two minutes for the browser to
    /// return to this application's registered callback with this sign-out's own state. The state is registered
-   /// first, which opens the inbox, so a fast redirect is not lost. It returns whether the provider confirmed: false
-   /// when it did not come back in time, when the callback with this state is not on the registered address, when
-   /// the browser or the inbox failed, and when the caller's token ended the wait. Only the provider's host is
-   /// logged. A failure is logged as a warning with its kind and text; the caller's own cancellation is a
-   /// deliberate stop, and is logged as information in fixed words.
+   /// first, which opens the inbox, so a fast redirect is not lost, and no page is opened for a caller whose token
+   /// has already ended. It says how the sign-out ended. Confirmed: the browser came back, on the registered
+   /// address, with this state. Not opened: the inbox or the browser could not be opened, so the operator saw no
+   /// page. Not confirmed: the page was opened, and the provider did not come back in time, came back with this
+   /// state on another address, or the inbox failed meanwhile. Cancelled: the caller's token ended the sign-out.
+   /// Only the provider's host is logged. A failure is logged as a warning with its kind and text; running out of
+   /// time is logged as a warning in fixed words; the caller's own cancellation is a deliberate stop, and is logged
+   /// as information in fixed words.
    /// </summary>
-   public async Task<bool> CompleteAsync(QqqProviderLogout logout, CancellationToken cancellationToken = default)
+   public async Task<ProviderSignOutResult> CompleteAsync(QqqProviderLogout logout, CancellationToken cancellationToken = default)
    {
       ArgumentNullException.ThrowIfNull(logout);
+      bool opened = false;
+      using CancellationTokenSource limit = new(Limit, _time);
+      using var wait = CancellationTokenSource.CreateLinkedTokenSource(limit.Token, cancellationToken);
       try
       {
+         cancellationToken.ThrowIfCancellationRequested();
          using BrowserCallbackTicket ticket = _dispatcher.Register(logout.State);
-         using CancellationTokenSource limit = new(Limit, _time);
-         using var wait = CancellationTokenSource.CreateLinkedTokenSource(limit.Token, cancellationToken);
          _log.Info("Opening the identity provider's sign-out page in the default browser ({Provider}).", QqqOrigin.ShownAuthority(logout.EndSessionUri));
          BrowserLaunch.Open(_browser, logout.EndSessionUri);
+         opened = true;
          Uri callback = await ticket.Callback.WaitAsync(wait.Token);
          bool matched = logout.Matches(callback);
          _log.Info(matched ? "Identity provider sign-out callback matched." : "Identity provider sign-out callback did not match this sign-out.");
-         return matched;
+         return matched ? ProviderSignOutResult.Confirmed : ProviderSignOutResult.NotConfirmed;
       }
       catch(OperationCanceledException) when(cancellationToken.IsCancellationRequested)
       {
          _log.Info("Identity provider sign-out was stopped by its caller before the provider confirmed.");
-         return false;
+         return ProviderSignOutResult.Cancelled;
+      }
+      catch(OperationCanceledException) when(limit.IsCancellationRequested)
+      {
+         _log.Warning("Identity provider sign-out was not confirmed: the provider did not return within the two minute limit.");
+         return ProviderSignOutResult.NotConfirmed;
       }
       catch(Exception exception) when(exception is OperationCanceledException or IOException or InvalidDataException or UnauthorizedAccessException or Win32Exception or InvalidOperationException or ArgumentException)
       {
-         _log.Warning("Identity provider sign-out was not confirmed: {Failure}", QqqSessionDiagnostics.Describe(exception));
-         return false;
+         _log.Warning(opened ? "Identity provider sign-out was not confirmed: {Failure}" : "The identity provider's sign-out page was not opened: {Failure}", QqqSessionDiagnostics.Describe(exception));
+         return opened ? ProviderSignOutResult.NotConfirmed : ProviderSignOutResult.NotOpened;
       }
    }
 }

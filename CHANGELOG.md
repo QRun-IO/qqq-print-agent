@@ -43,7 +43,9 @@ this build: the connection dialog still runs on the existing flow, whose only ch
   waits ends as a failure it reports: a failure of a kind they do not expect (the inbox gives an argument error when
   the process that sent a callback has already exited) reaches them as one that names only its kind.
 - `ProviderSignOut` is the identity provider's half of a sign-out: it opens the provider's sign-out page and waits
-  up to two minutes for the browser to return with that sign-out's own state.
+  up to two minutes for the browser to return with that sign-out's own state. Its result says how it ended:
+  confirmed, not opened (the browser or the callback inbox could not be opened, so the operator saw no page), not
+  confirmed (the page was opened and the provider did not confirm), or cancelled by its caller.
 - When Windows cannot start the browser, its failure text names what it could not start, which is the whole sign-in
   or sign-out address. The new types report only the kind of failure, so no state and no token hint can reach the
   log or the screen that way.
