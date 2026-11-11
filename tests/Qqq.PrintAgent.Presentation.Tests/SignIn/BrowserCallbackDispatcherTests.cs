@@ -389,24 +389,6 @@ public sealed class BrowserCallbackDispatcherTests
 
 
 
-   /// <summary>Removes the test runner's synchronization context from the calling thread until it is disposed. With a context present, .NET never continues an awaiting method inside the call that completes what it awaits; without one it does, which is what happens on the thread-pool threads the dispatcher works on.</summary>
-   private sealed class NoContext : IDisposable
-   {
-      private readonly SynchronizationContext? _before = SynchronizationContext.Current;
-
-
-
-      /// <summary>Removes the context.</summary>
-      internal NoContext() => SynchronizationContext.SetSynchronizationContext(null);
-
-
-
-      /// <summary>Puts the context back.</summary>
-      public void Dispose() => SynchronizationContext.SetSynchronizationContext(_before);
-   }
-
-
-
    /// <summary>A callback source whose inboxes do not notice being closed and answer when the test says so, on the test's own thread.</summary>
    private sealed class LateInboxes : IBrowserCallbackSource
    {

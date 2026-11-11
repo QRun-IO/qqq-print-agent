@@ -87,6 +87,11 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
 
 
 
+   /// <summary>When set, it runs once the browser has been asked to open an address, on the thread that asked and before that call returns. A test uses it to make something happen between the provider's page opening and the sign-in starting to wait for its callback.</summary>
+   internal Action<Uri>? Launched { get; set; }
+
+
+
    /// <summary>Every inbox that was opened, oldest first.</summary>
    internal List<FakeInbox> Inboxes { get; } = [];
 
@@ -94,6 +99,11 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
 
    /// <summary>When set, opening an inbox fails with this.</summary>
    internal Exception? InboxFailure { get; set; }
+
+
+
+   /// <summary>When set, the inboxes opened from then on answer inline (see <see cref="FakeInbox"/>).</summary>
+   internal bool InboxesAnswerInline { get; set; }
 
 
 
@@ -226,7 +236,7 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
 
 
 
-   /// <summary>Records the address instead of opening a browser, or fails.</summary>
+   /// <summary>Records the address instead of opening a browser, then runs what the test asked for at that moment; or fails.</summary>
    public void Open(Uri address)
    {
       if(BrowserFailure is not null)
@@ -235,6 +245,7 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
       }
       ListeningAtLaunch.Add(Inboxes.Count(inbox => inbox.Waiting && !inbox.Disposed));
       Opened.Add(address);
+      Launched?.Invoke(address);
    }
 
 
@@ -246,7 +257,7 @@ internal sealed class SignInWorld : ISignInSessionFactory, IBrowserLauncher, IBr
       {
          throw InboxFailure;
       }
-      FakeInbox inbox = new();
+      FakeInbox inbox = new(InboxesAnswerInline);
       Inboxes.Add(inbox);
       _awaitedInbox?.TrySetResult(inbox);
       return inbox;

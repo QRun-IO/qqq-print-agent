@@ -96,9 +96,12 @@ public sealed partial class CompanionSignIn
    /// returned, register that state with the dispatcher (which has an inbox open before the browser is, so a fast
    /// redirect is not lost), open the provider's page in the default browser, wait for the callback with that state,
    /// and complete the sign-in on the session that started it. The registration ends when the exchange does. Only the
-   /// provider's host is logged, never the address, its state or the callback. The token is looked at again once the
-   /// sign-in was begun, so a browser is not opened for a wait that has already ended; completing takes the same
-   /// token, and a session refuses to complete for a wait that has ended.
+   /// provider's host is logged, never the address, its state or the callback. The token is looked at again after
+   /// each wait: once the sign-in was begun, so a browser is not opened for a wait that has already ended, and once
+   /// the callback is there, so the session is not asked to complete for one. That second look is needed because a
+   /// callback that has already arrived is handed over whatever the token says, and a session is not bound to
+   /// refuse: the check is made here and not left to it. Completing takes the same token, so a wait that ends while
+   /// the session completes ends the completion too.
    /// </summary>
    private async Task ExchangeWithBrowserAsync(ISignInSession session, CancellationToken cancellationToken)
    {
@@ -115,6 +118,7 @@ public sealed partial class CompanionSignIn
       _log.Info("Opening the identity provider's sign-in page in the default browser ({Provider}).", QqqOrigin.ShownAuthority(authorization));
       BrowserLaunch.Open(_browser, authorization);
       Uri callback = await ticket.Callback.WaitAsync(cancellationToken);
+      cancellationToken.ThrowIfCancellationRequested();
       _log.Info("Browser callback received; completing the sign-in.");
       await session.CompleteBrowserSignInAsync(callback, cancellationToken);
    }

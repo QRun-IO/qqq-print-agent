@@ -111,6 +111,11 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
 
 
 
+   /// <summary>The token the flow gave the completion of a browser sign-in, which is how a test sees that ending the flow's wait ends the completion too.</summary>
+   internal CancellationToken? CompleteToken { get; private set; }
+
+
+
    /// <summary>True once the flow discarded this session.</summary>
    internal bool Disposed { get; private set; }
 
@@ -232,6 +237,7 @@ internal sealed class FakeSession(Uri origin, QqqCertificateExceptionOrigins cer
    {
       ObjectDisposedException.ThrowIf(Disposed, this);
       Callback = callback;
+      CompleteToken = cancellationToken;
       _completeEntered.TrySetResult();
       try
       {

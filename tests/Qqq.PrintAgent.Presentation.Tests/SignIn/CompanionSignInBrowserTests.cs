@@ -428,6 +428,84 @@ public sealed class CompanionSignInBrowserTests
 
 
 
+   /// <summary>
+   /// The callback is already there, and the wait has already ended, when the sign-in starts waiting for the
+   /// callback: the browser came back at once and, in the same moment, the operator pressed Cancel or the three
+   /// minutes ran out. Waiting for something that has already arrived does not look at the token, so the sign-in
+   /// looks itself. The session is never asked to complete and nothing says a callback was received; the attempt
+   /// ends as cancelled or timed out, and the session, which was handed nothing, stays for another attempt. The
+   /// inbox answers inline here, so the callback has reached its ticket before the wait is ended, which the test
+   /// checks: it was not dropped, and its inbox was closed, inside the call that delivered it.
+   /// </summary>
+   [Theory]
+   [InlineData(false, CompanionSignInState.BrowserCanceled)]
+   [InlineData(true, CompanionSignInState.BrowserTimedOut)]
+   public async Task Browser_WaitEndedAsTheCallbackArrived_NeverAsksTheSessionToComplete(bool byLimit, CompanionSignInState ending)
+   {
+      SignInWorld world = new() { InboxesAnswerInline = true };
+      using CompanionSignIn signIn = await world.BrowserReadyAsync();
+      FakeSession session = world.Sessions[0];
+      bool routed = false;
+      world.Launched = _ =>
+      {
+         using NoContext none = new();
+         world.Inboxes[0].Deliver(session.CallbackForLatestAttempt);
+         routed = world.Inboxes[0].Disposed;
+         if(byLimit)
+         {
+            world.Time.Advance(CompanionSignIn.BrowserSignInLimit);
+         }
+         else
+         {
+            signIn.CancelBrowserSignIn();
+         }
+      };
+
+      QqqSessionCredential? credential = await SignInWorld.EndsAsync(signIn.SignInWithBrowserAsync());
+
+      Assert.True(routed);
+      Assert.DoesNotContain(world.Log.Entries, entry => entry.Contains("was dropped", StringComparison.Ordinal));
+      Assert.Null(credential);
+      Assert.Null(session.Callback);
+      Assert.Null(session.CompleteToken);
+      Assert.DoesNotContain("INFO Browser callback received; completing the sign-in.", world.Log.Entries, StringComparer.Ordinal);
+      Assert.Equal(ending, signIn.State);
+      Assert.True(signIn.HasSession);
+      Assert.False(session.Disposed);
+      Assert.False(signIn.IsBusy);
+      Assert.Single(world.Opened);
+      Assert.DoesNotContain(world.Log.Entries, Secret);
+   }
+
+
+
+   /// <summary>
+   /// The session is asked to complete with the exchange's own token, not with one that never ends: while the session
+   /// is completing, the token it was given is still live, and Cancel ends it, so the completion stops with the
+   /// attempt instead of running on behind an attempt that was reported as cancelled.
+   /// </summary>
+   [Fact]
+   public async Task Browser_CancelledWhileTheSessionCompletes_EndsTheCompletionToo()
+   {
+      SignInWorld world = new();
+      using CompanionSignIn signIn = await world.BrowserReadyAsync();
+      FakeSession session = world.Sessions[0];
+      session.PendingComplete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      Task<QqqSessionCredential?> running = signIn.SignInWithBrowserAsync();
+      world.Inboxes[0].Deliver(session.CallbackForLatestAttempt);
+      await session.CompleteEntered.WaitAsync(TimeSpan.FromSeconds(10));
+      Assert.True(session.CompleteToken is { CanBeCanceled: true, IsCancellationRequested: false });
+
+      signIn.CancelBrowserSignIn();
+
+      Assert.True(session.CompleteToken is { IsCancellationRequested: true });
+      Assert.Null(await SignInWorld.EndsAsync(running));
+      Assert.Equal(CompanionSignInState.BrowserCanceled, signIn.State);
+      Assert.False(signIn.IsBusy);
+   }
+
+
+
    /// <summary>Nothing is attempted without a session, or on a session that does not offer the browser: no credential, no inbox, no browser, nothing announced or logged.</summary>
    [Fact]
    public async Task Browser_WithoutASessionThatOffersIt_NothingIsAttempted()
