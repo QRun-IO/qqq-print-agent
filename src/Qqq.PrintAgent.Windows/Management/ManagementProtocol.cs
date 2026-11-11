@@ -44,7 +44,13 @@ public static class ManagementProtocol
 
 
 
-   /// <summary>The most UTF-16 units of an identity value (a principal, a tenant) that are sent: the 200 the QQQ contract lets such an identifier run to.</summary>
+   /// <summary>
+   /// The most UTF-16 units of an identity value (a principal, a tenant) that are sent, wherever a reply names one: in
+   /// <see cref="ServerAuthentication"/> and in <see cref="IdentityChangedDetails"/>. A longer value is cut there,
+   /// never inside a surrogate pair, with nothing added to mark the cut (<see cref="ManagementText"/>). 200 is this
+   /// contract's bound; the session client itself admits an identity value of up to 1,024 units, so a value between
+   /// the two is carried cut.
+   /// </summary>
    public const int MaximumIdentityCharacters = 200;
 
 

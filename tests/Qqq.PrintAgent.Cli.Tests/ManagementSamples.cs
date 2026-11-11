@@ -204,8 +204,8 @@ internal static class ManagementSamples
 
 
    /// <summary>Who is signed in, taken from the stored session's identity and never from its credential.</summary>
-   private static AgentAuthenticationStatus Authentication
-      => new(SignedIn: true, StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId, "Signed in. Printing is enabled.", Authorized: true);
+   private static ServerAuthentication Authentication
+      => ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, StoredSession.Binding.PrincipalId, StoredSession.Binding.TenantId, "Signed in. Printing is enabled.", Authorized: true));
 
 
 
@@ -267,14 +267,14 @@ internal static class ManagementSamples
          new DeviceProfile("Packing station 7", "", "West warehouse")),
       [
          new ServerSnapshot(ServerId, "Warehouse", Address, 0, ServerSnapshot.Green, "Connected. Waiting for print jobs.", AttentionCount: 0,
-            new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", "Signed in. Printing is enabled.", Authorized: true), Paired: true, "device-17",
+            ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-4", "tenant-2", "Signed in. Printing is enabled.", Authorized: true)), Paired: true, "device-17",
             new AgentTransportSnapshot("qqq-printing.v1", "CONNECTED", 20480, 5242880, 0, 0, s_instant.AddDays(-2)), s_instant.AddSeconds(-12),
             new ServerControl("SUPPORTED", new DeviceDesiredState(3, DispatchPaused: false, "CONNECTED"), "2026-11-10T15:03:53.0000000Z"),
             [new ServerPrinter("printer-a1", PrinterServerState.Approved, "Shipping labels")],
             new PrinterServerSync(PrinterServerSync.Reported, "2026-11-10T15:03:00.0000000Z", Server: Address, Source: PrinterServerSync.RealtimeSource),
             new CertificateExceptionState(Enabled: false, Address), StateUnreadable: false, Removing: false),
          new ServerSnapshot(SecondServerId, "Test bench", "https://bench.example.test", 1, ServerSnapshot.Orange, "Signed in. Pair this computer to enable printing.", AttentionCount: 0,
-            new AgentAuthenticationStatus(SignedIn: true, "principal-9", "tenant-2", "Signed in. Pair this computer to enable printing.", Authorized: false), Paired: false, DeviceId: null,
+            ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, "principal-9", "tenant-2", "Signed in. Pair this computer to enable printing.", Authorized: false)), Paired: false, DeviceId: null,
             Stopped, LastContact: null, new ServerControl("UNKNOWN", new DeviceDesiredState(0, DispatchPaused: false, "CONNECTED")), [],
             PrinterServerSync.Initial, new CertificateExceptionState(Enabled: true, "https://bench.example.test", "https://bench.example.test"), StateUnreadable: false, Removing: false),
       ]);

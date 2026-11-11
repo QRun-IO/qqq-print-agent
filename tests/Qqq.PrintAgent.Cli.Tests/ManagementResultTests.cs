@@ -252,6 +252,61 @@ public sealed class ManagementResultTests
 
 
    /// <summary>
+   /// The same account reads the same wherever a reply names it. The snapshot's authentication and the details of a
+   /// changed identity give a principal and a tenant one form: for values that are hostile, too long, cut beside a
+   /// surrogate pair, empty or missing, both records hold the same text, at most 200 UTF-16 units, and a missing value
+   /// is absent in both. The record has no public constructor and no member that can be set afterwards, and what it
+   /// writes reads back equal.
+   /// </summary>
+   [Theory]
+   [InlineData("principal-4", "tenant-2")]
+   [InlineData("principal\u202E4\u0007\u2066x\u2069", "tenant\n2\u2028\u200B")]
+   [InlineData("pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp-and-more", "tenant\uD83D\uDE00")]
+   [InlineData("", "   ")]
+   [InlineData(null, null)]
+   [InlineData("(missing)", "\u200B")]
+   public void ServerAuthentication_GivesIdentityValuesTheFormTheIdentityChangedDetailsGiveThem(string? principal, string? tenant)
+   {
+      var authentication = ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: true, principal, tenant, "Signed in. Printing is enabled.", Authorized: true));
+      var details = IdentityChangedDetails.For(principal, tenant);
+      ManagementReply written = ManagementJson.ParseReply(ManagementJson.Write(ManagementReply.Success(authentication))).Reply!;
+
+      Assert.Equal((details.ApprovedPrincipalId, details.ApprovedTenantId), (authentication.PrincipalId, authentication.TenantId));
+      Assert.True((authentication.PrincipalId?.Length ?? 0) <= ManagementProtocol.MaximumIdentityCharacters);
+      Assert.Equal((true, "Signed in. Printing is enabled.", true), (authentication.SignedIn, authentication.Message, authentication.Authorized));
+      Assert.True(ManagementJson.TryReadResult(written, out ServerAuthentication? read));
+      Assert.Equal(authentication, read);
+      Assert.Empty(typeof(ServerAuthentication).GetConstructors());
+      Assert.All(typeof(ServerAuthentication).GetProperties(), member => Assert.Null(member.SetMethod));
+   }
+
+
+
+   /// <summary>
+   /// A client holds bounded, printable identity values in a snapshot's authentication even when a service did not send
+   /// them so, because the wire is read through the constructor that builds the record. A signed-out status has neither
+   /// value and leaves both out of the text; the message and the two flags are carried as given, and a status without
+   /// its message is unreadable.
+   /// </summary>
+   [Fact]
+   public void ServerAuthentication_ReadFromTheWire_IsBoundedToo()
+   {
+      string raw = "{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":true,\"principalId\":\"" + new string('p', 1024) + "\",\"tenantId\":\"tenant\\u202E2\",\"message\":\"Signed in.\",\"authorized\":true}}";
+      var signedOut = ServerAuthentication.From(new AgentAuthenticationStatus(SignedIn: false, PrincipalId: null, TenantId: null, Message: "Sign in to start printing."));
+
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply(raw).Reply!, out ServerAuthentication? read));
+
+      Assert.Equal((true, new string('p', 200), "tenant 2", "Signed in.", true), (read.SignedIn, read.PrincipalId, read.TenantId, read.Message, read.Authorized));
+      Assert.Equal("{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":false,\"message\":\"Sign in to start printing.\",\"authorized\":false}}", ManagementJson.Write(ManagementReply.Success(signedOut)));
+      Assert.True(ManagementJson.TryReadResult(ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":false,\"message\":\"Sign in to start printing.\"}}").Reply!, out ServerAuthentication? withoutTheFlag));
+      Assert.Equal(signedOut, withoutTheFlag);
+      Assert.False(ManagementJson.TryReadResult(ManagementJson.ParseReply("{\"v\":2,\"ok\":true,\"result\":{\"signedIn\":false,\"authorized\":false}}").Reply!, out ServerAuthentication? _));
+      Assert.Throws<ArgumentNullException>(() => ServerAuthentication.From(null!));
+   }
+
+
+
+   /// <summary>
    /// The computer's printers carry the time they were discovered. Before the first discovery the time is absent, so an
    /// empty list that means "not looked yet" is told from a computer with no printers; a discovery asked for by name
    /// always has its time.

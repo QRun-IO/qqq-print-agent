@@ -25,7 +25,7 @@ public sealed class ManagementSecrecyTests
    /// <summary>The records a reply may be made of besides the contract's own: existing snapshot records the contract reuses, each already free of credentials.</summary>
    private static readonly Type[] s_reusedRecords =
    [
-      typeof(JobPage), typeof(JobSnapshot), typeof(JobDetailsSnapshot), typeof(JobEventSnapshot), typeof(LogSettings), typeof(AgentAuthenticationStatus), typeof(AgentTransportSnapshot),
+      typeof(JobPage), typeof(JobSnapshot), typeof(JobDetailsSnapshot), typeof(JobEventSnapshot), typeof(LogSettings), typeof(AgentTransportSnapshot),
       typeof(PrinterServerSync), typeof(DeviceProfile), typeof(DeviceDesiredState), typeof(PrinterMediaProfile),
    ];
 
@@ -64,6 +64,35 @@ public sealed class ManagementSecrecyTests
       Assert.Contains(typeof(ServerSnapshot), visited);
       Assert.Contains(typeof(PresentedCertificate), visited);
       Assert.Contains(typeof(JobEventSnapshot), visited);
+   }
+
+
+
+   /// <summary>
+   /// An account's identity values are treated one way everywhere a reply names them. Every member of a result or of an
+   /// error's details that holds a principal or a tenant is declared by one of the two records that give such a value
+   /// its wire form in their one constructor, <see cref="ServerAuthentication"/> and <see cref="IdentityChangedDetails"/>;
+   /// the service's own status record, which holds the values as the session client read them, is in no reply. A new
+   /// result that named an account through another record would fail here.
+   /// </summary>
+   [Fact]
+   public void IdentityValues_AreCarriedOnlyByTheRecordsThatBoundThem()
+   {
+      HashSet<Type> visited = [];
+      foreach(Type root in ManagementOperations.All.Select(operation => operation.ResultType).Concat(ManagementErrorCode.All.Select(ManagementErrorCode.DetailsType).OfType<Type>()))
+      {
+         Walk(root, visited, []);
+      }
+
+      string[] holders = [.. visited.SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+         .Where(member => member.Name.Contains("Principal", StringComparison.OrdinalIgnoreCase) || member.Name.Contains("Tenant", StringComparison.OrdinalIgnoreCase))
+         .Select(member => member.DeclaringType!.Name + "." + member.Name).Order(StringComparer.Ordinal)];
+
+      Assert.Equal(["IdentityChangedDetails.ApprovedPrincipalId", "IdentityChangedDetails.ApprovedTenantId", "ServerAuthentication.PrincipalId", "ServerAuthentication.TenantId"], holders);
+      Assert.DoesNotContain(typeof(AgentAuthenticationStatus), visited);
+      Assert.Equal(typeof(ServerAuthentication), typeof(ServerSnapshot).GetProperty(nameof(ServerSnapshot.Authentication))!.PropertyType);
+      Assert.Equal(typeof(ServerAuthentication), typeof(ServerAddResult).GetProperty(nameof(ServerAddResult.Authentication))!.PropertyType);
+      Assert.Equal(typeof(ServerAuthentication), typeof(SignInResult).GetProperty(nameof(SignInResult.Authentication))!.PropertyType);
    }
 
 

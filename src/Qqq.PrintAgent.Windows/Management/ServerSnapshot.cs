@@ -8,7 +8,8 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// <summary>
 /// Everything about one server that a client shows without asking again: its local identity, name, address and place in the
 /// operator's order; its health and the text that explains it; the count of unreviewed failures that drives the health; who
-/// is signed in and whether printing is authorized; whether this computer is paired with it and as which device; the
+/// is signed in and whether printing is authorized (<see cref="ServerAuthentication"/>, which bounds the account's
+/// identity values as every reply does); whether this computer is paired with it and as which device; the
 /// transport and its traffic meter; when the server last answered this computer over any channel (the control state has
 /// its own last contact, which is the control channel's alone); the administrator's desired state and last command; the
 /// printers shared with it and the server's word on each; the certificate exception; whether its stored state cannot be
@@ -16,7 +17,7 @@ namespace Qqq.PrintAgent.Windows.Management;
 /// nothing. A client treats a health it does not know as unknown, not as a failure to read the snapshot.
 /// </summary>
 public sealed record ServerSnapshot(string ServerId, string Name, string Address, int Position, string Health, string Status, int AttentionCount,
-   AgentAuthenticationStatus Authentication, bool Paired, string? DeviceId, AgentTransportSnapshot Transport, DateTimeOffset? LastContact, ServerControl Control,
+   ServerAuthentication Authentication, bool Paired, string? DeviceId, AgentTransportSnapshot Transport, DateTimeOffset? LastContact, ServerControl Control,
    IReadOnlyList<ServerPrinter> Printers, PrinterServerSync PrinterSync, CertificateExceptionState CertificateException, bool StateUnreadable, bool Removing)
 {
    /// <summary>Health: connected and nothing needs the operator.</summary>
