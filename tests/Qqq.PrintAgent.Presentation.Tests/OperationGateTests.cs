@@ -206,4 +206,133 @@ public sealed class OperationGateTests
       Assert.False(Guid.TryParse(OperationGate.Computer, out _));
       Assert.False(Guid.TryParse(OperationGate.Wizard, out _));
    }
+
+
+
+   /// <summary>
+   /// What the event says can be out of date, which is why a listener reads the gate. A listener that enters the key
+   /// from inside the event that says it came free makes the listener after it hear "busy" and then "free" while
+   /// the key is held; asked, the gate says what is true.
+   /// </summary>
+   [Fact]
+   public void Changed_CanBeOutOfDate_TheGateItselfSaysWhatIsTrue()
+   {
+      OperationGate gate = new();
+      List<(bool Said, bool Is)> heard = [];
+      IDisposable? inner = null;
+      gate.Changed += (_, change) =>
+      {
+         if(!change.Busy && inner is null)
+         {
+            Assert.True(gate.TryEnter(change.Key, "Taken from inside the event.", out inner, out string? _));
+         }
+      };
+      gate.Changed += (_, change) => heard.Add((change.Busy, gate.IsBusy(change.Key)));
+      Assert.True(gate.TryEnter(ServerOne, "Busy.", out IDisposable? outer, out _));
+
+      outer.Dispose();
+
+      Assert.Equal([(true, true), (true, true), (false, true)], heard);
+      Assert.True(gate.IsBusy(ServerOne));
+      inner!.Dispose();
+      Assert.False(gate.IsBusy(ServerOne));
+   }
+
+
+
+   /// <summary>
+   /// The gate with more than one thread. A listener is called outside the gate's lock, for a key that becomes busy
+   /// and for one that comes free: another thread can ask the gate from inside the event and is answered with the
+   /// new state. Then sixteen threads fight for one key, each releasing its hold twice, a third of them from three
+   /// threads at once: one command holds the key at a time, a refusal is always a holder's sentence, every entry
+   /// is announced as busy once and as free once, and the key is free at the end. No sleep and no timing is
+   /// asserted; the limit on the other thread's answer is a guard that only a gate that calls its listeners inside
+   /// its lock runs into.
+   /// </summary>
+   [Fact]
+   public void WithManyThreads_OneCommandHoldsAKey_AndListenersAreCalledOutsideTheLock()
+   {
+      OperationGate gate = new();
+      List<(bool Said, bool Answered, bool Is)> askedFromAnotherThread = [];
+      void AskFromAnotherThread(object? sender, OperationGateChangedEventArgs change)
+      {
+         bool busy = false;
+         Thread other = new(() => busy = gate.IsBusy(change.Key));
+         other.Start();
+         askedFromAnotherThread.Add((change.Busy, other.Join(TimeSpan.FromSeconds(30)), busy));
+      }
+      gate.Changed += AskFromAnotherThread;
+      Assert.True(gate.TryEnter(ServerTwo, "Busy.", out IDisposable? asked, out _));
+      asked.Dispose();
+      gate.Changed -= AskFromAnotherThread;
+      Assert.Equal([(true, true, true), (false, true, false)], askedFromAnotherThread);
+
+      const int Threads = 16;
+      const int Rounds = 20000;
+      int busyEvents = 0;
+      int freeEvents = 0;
+      gate.Changed += (_, change) => _ = change.Busy ? Interlocked.Increment(ref busyEvents) : Interlocked.Increment(ref freeEvents);
+
+      (int mostInside, int entered, int refused, int wrongRefusals) = FightForOneKey(gate, Threads, Rounds);
+
+      Assert.Equal(1, mostInside);
+      Assert.Equal(Threads * Rounds, entered + refused);
+      Assert.True(entered >= Threads, "entered " + entered.ToString(System.Globalization.CultureInfo.InvariantCulture));
+      Assert.Equal(0, wrongRefusals);
+      Assert.Equal(entered, busyEvents);
+      Assert.Equal(entered, freeEvents);
+      Assert.False(gate.IsBusy(ServerOne));
+   }
+
+
+
+   /// <summary>
+   /// Has this many threads enter and release one key this many times each, as fast as they can. A thread that gets
+   /// the key counts itself as inside, releases its hold twice (every third time from three threads at once) and
+   /// tries again. It returns the most threads that were ever inside together, how many entries succeeded, how many
+   /// were refused, and how many refusals were not the holder's sentence.
+   /// </summary>
+   private static (int MostInside, int Entered, int Refused, int WrongRefusals) FightForOneKey(OperationGate gate, int threads, int rounds)
+   {
+      int inside = 0;
+      int mostInside = 0;
+      int entered = 0;
+      int refused = 0;
+      int wrongRefusals = 0;
+      Parallel.For(0, threads, new ParallelOptions { MaxDegreeOfParallelism = threads }, _ =>
+      {
+         for(int round = 0; round < rounds; round++)
+         {
+            if(!gate.TryEnter(ServerOne, "Held by a thread.", out IDisposable? hold, out string? refusal))
+            {
+               Interlocked.Increment(ref refused);
+               if(!string.Equals(refusal, "Held by a thread.", StringComparison.Ordinal))
+               {
+                  Interlocked.Increment(ref wrongRefusals);
+               }
+               continue;
+            }
+            int now = Interlocked.Increment(ref inside);
+            int seen;
+            do
+            {
+               seen = Volatile.Read(ref mostInside);
+            }
+            while(now > seen && Interlocked.CompareExchange(ref mostInside, now, seen) != seen);
+            Interlocked.Increment(ref entered);
+            Thread.SpinWait(20);
+            Interlocked.Decrement(ref inside);
+            if(round % 3 == 0)
+            {
+               Parallel.Invoke(hold.Dispose, hold.Dispose, hold.Dispose);
+            }
+            else
+            {
+               hold.Dispose();
+               hold.Dispose();
+            }
+         }
+      });
+      return (mostInside, entered, refused, wrongRefusals);
+   }
 }

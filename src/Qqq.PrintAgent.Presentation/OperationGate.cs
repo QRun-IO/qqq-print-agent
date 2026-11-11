@@ -21,7 +21,15 @@ namespace Qqq.PrintAgent.Presentation;
 /// </para>
 /// <para>
 /// The gate keeps no sentences of its own and writes nothing to the log; the caller shows the refusal and logs it.
-/// <see cref="Changed"/> is raised on the thread that entered or released a key.
+/// </para>
+/// <para>
+/// <see cref="Changed"/> is raised on the thread that entered or released the key, after the key's state has
+/// changed and outside the gate's lock. That thread need not be the window's: a hold can be released wherever the
+/// command that held it ended. And what the event says can be out of date by the time a listener hears it: another
+/// thread, or a listener earlier in the list that entered or released the key from inside the event, may have
+/// changed the key again, and two events from two threads can arrive in either order. So a listener does not keep
+/// <see cref="OperationGateChangedEventArgs.Busy"/> as the key's state. It takes the event as "this key changed",
+/// goes to its own thread, and reads <see cref="IsBusy"/> there.
 /// </para>
 /// </summary>
 public sealed class OperationGate
@@ -46,7 +54,11 @@ public sealed class OperationGate
 
 
 
-   /// <summary>Raised when a key becomes busy and when it becomes free again. A refused command raises nothing, because nothing changed.</summary>
+   /// <summary>
+   /// Raised when a key becomes busy and when it becomes free again, on the thread that entered or released it. A
+   /// refused command raises nothing, because nothing changed. A listener reads <see cref="IsBusy"/> for the key on
+   /// its own thread; the state in the arguments can be out of date.
+   /// </summary>
    public event EventHandler<OperationGateChangedEventArgs>? Changed;
 
 
