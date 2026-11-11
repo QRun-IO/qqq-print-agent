@@ -18,9 +18,14 @@ internal sealed class BrowserCallbackTrace(ITraceFile file, TimeProvider clock)
    /// <summary>The size past which the trace is deleted before the next entry is written.</summary>
    internal const long Limit = 256 * 1024;
 
+
+
    /// <summary>The most entries a reading of the recent trace returns.</summary>
    internal const int MostRecent = 40;
 
+
+
+   /// <summary>How an entry is stamped: local date and time to the millisecond, with no offset, in a form that sorts and reads the same everywhere.</summary>
    private const string Stamp = "yyyy-MM-dd HH:mm:ss.fff";
 
 

@@ -14,8 +14,17 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 internal sealed class ManualTimeProvider(DateTimeOffset? start = null, TimeZoneInfo? localTimeZone = null) : TimeProvider
 {
+   /// <summary>Guards the manual time and the list of timers, which tests and the code under test touch from different threads.</summary>
    private readonly Lock _lock = new();
+
+
+
+   /// <summary>Every timer created on this clock and not yet disposed.</summary>
    private readonly List<ManualTimer> _timers = [];
+
+
+
+   /// <summary>The manual time, in universal time.</summary>
    private DateTimeOffset _now = (start ?? DateTimeOffset.UtcNow).ToUniversalTime();
 
 

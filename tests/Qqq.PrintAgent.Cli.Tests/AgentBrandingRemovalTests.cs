@@ -16,8 +16,17 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class AgentBrandingRemovalTests
 {
+   /// <summary>The shortcut of the current brand.</summary>
    private const string Acme = "Acme Print Connector.lnk";
+
+
+
+   /// <summary>The shortcut of an earlier brand.</summary>
    private const string Old = "Old Brand.lnk";
+
+
+
+   /// <summary>What an uninstall does to the record when it only looks: the two reads, with no proof of changeability and no change.</summary>
    private static readonly string[] ReadsOnly = ["read-last", "read-pending"];
 
 

@@ -21,6 +21,9 @@ internal sealed partial class AgentStartupTasks(ITaskScheduler scheduler, string
    /// <summary>How long one run of the task scheduler may take before it is stopped and reported as not responding.</summary>
    internal static readonly TimeSpan SchedulerLimit = TimeSpan.FromSeconds(15);
 
+
+
+   /// <summary>The XML namespace of a Task Scheduler task definition, which every element of one carries.</summary>
    private static readonly XNamespace TaskNamespace = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
 

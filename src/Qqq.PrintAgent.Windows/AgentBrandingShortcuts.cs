@@ -13,10 +13,20 @@ namespace Qqq.PrintAgent.Windows;
 /// shortcut file, the folder security and the record of what was made come through <see cref="IShortcutShell"/>,
 /// <see cref="IPathSecurity"/> and <see cref="IShortcutRecord"/>, so the rules can be run against fakes in temporary folders.
 /// <para>
-/// The record rule: every shortcut this product owns on the Start menu is named in the record, at every moment. A name
-/// is recorded before its file is created and is forgotten only after its file is gone or has been found to be someone
-/// else's. So a run that fails at any step, or a shortcut that cannot be removed, leaves nothing behind that a later
-/// run or the uninstall cannot find. A recorded name without a file of ours is harmless and is dropped by the next run.
+/// The record rule: every shortcut this product owns on the Start menu under a brand name is named in the record, at
+/// every moment. A name is recorded before its file is created and is forgotten only after its file is gone or has
+/// been found not to be ours. So a run that fails or is killed at any step, or a shortcut that cannot be removed,
+/// leaves nothing behind that a later run or the uninstall cannot find. A recorded name without a file of ours is
+/// harmless and is dropped by the next run. The one file of ours that is never named is the temporary file a shortcut
+/// is written to before it is moved into place: it is recognised by its name instead, and a run or an uninstall
+/// removes any that was left behind.
+/// </para>
+/// <para>
+/// What is ours: a shortcut that starts the installed companion with no arguments and carries the ownership
+/// description. Someone else's shortcut, a file that holds no shortcut at all and a link are not ours; they are never
+/// overwritten, changed or deleted, and a recorded name that leads to one is forgotten with a note. A file that cannot
+/// be opened is neither, because it may be ours: it is never judged. At a first look that stops the run; at the look
+/// taken just before a delete or a replacement the file is left alone and its name stays on record.
 /// </para>
 /// <para>
 /// Everything that can be checked is checked before anything is changed, so a run that has to refuse refuses while

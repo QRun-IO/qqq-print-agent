@@ -15,12 +15,25 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class BrowserCallbackTraceTests
 {
+   /// <summary>A synthetic authorization code that must never appear in the trace.</summary>
    private const string CanaryCode = "canary-code-7f3a91c2d4";
+
+
+
+   /// <summary>A synthetic state value that must never appear in the trace.</summary>
    private const string CanaryState = "canary-state-55be07a1";
+
+
+
+   /// <summary>A callback address that carries both canaries in its query.</summary>
    private static readonly string Callback = QqqBrowserCallback.RedirectUri + "?code=" + CanaryCode + "&state=" + CanaryState;
+
+
 
    /// <summary>A zone five and a half hours ahead of universal time that never changes its clocks, so no local time in these tests is skipped or repeated.</summary>
    private static readonly TimeZoneInfo Zone = TimeZoneInfo.CreateCustomTimeZone("QQQ test zone", new TimeSpan(5, 30, 0), "QQQ test zone", "QQQ test zone");
+
+
 
    /// <summary>The instant every clock in these tests starts at: 01:45:30.250 on 5 March 2026 in the test zone, plus nine tenths of a millisecond that a stamp drops.</summary>
    private static readonly DateTimeOffset Start = new DateTimeOffset(2026, 3, 4, 20, 15, 30, 250, TimeSpan.Zero).AddTicks(9000);

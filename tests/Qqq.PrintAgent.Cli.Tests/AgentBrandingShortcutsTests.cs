@@ -19,8 +19,17 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class AgentBrandingShortcutsTests
 {
+   /// <summary>The shortcut of the brand the setup starts with.</summary>
    private const string Acme = "Acme Print Connector.lnk";
+
+
+
+   /// <summary>The shortcut of an earlier brand.</summary>
    private const string Old = "Old Brand.lnk";
+
+
+
+   /// <summary>What a branding run does to the record when it changes nothing: the proof of changeability and the two reads.</summary>
    private static readonly string[] ReadsOnly = ["require", "read-last", "read-pending"];
 
 

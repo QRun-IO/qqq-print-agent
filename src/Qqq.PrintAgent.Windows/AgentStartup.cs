@@ -14,6 +14,7 @@ namespace Qqq.PrintAgent.Windows;
 /// </summary>
 public static class AgentStartup
 {
+   /// <summary>The rules bound to the real task scheduler, the companion's install path and the staging of the installed product.</summary>
    private static readonly AgentStartupTasks Installed = new(new WindowsTaskScheduler(), InstalledExecutable, ProtectedStaging.MachineSetup());
 
 

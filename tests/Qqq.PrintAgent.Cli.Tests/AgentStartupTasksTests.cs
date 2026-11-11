@@ -15,8 +15,17 @@ namespace Qqq.PrintAgent.Cli.Tests;
 /// </summary>
 public sealed class AgentStartupTasksTests
 {
+   /// <summary>The security identifier of the user the rules are asked on behalf of.</summary>
    private const string Sid = FakeTaskScheduler.UserSid;
+
+
+
+   /// <summary>The name of that user's sign-in task.</summary>
    private const string TaskName = "QQQ Print Agent " + Sid;
+
+
+
+   /// <summary>The XML namespace of a task definition.</summary>
    private static readonly XNamespace Ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
 
