@@ -218,6 +218,40 @@ public sealed class ManagementClientOperationsTests
 
 
    /// <summary>
+   /// A reorder's reply is judged against the servers as they were given when the call was made, not as the
+   /// caller's list is when the reply arrives. A caller that empties its list while the request is in flight still
+   /// gets the answer to what it asked; and a caller whose list has come to name the servers of a reply for other
+   /// servers than it asked about still gets an unreadable reply. What is sent is the list as it was given, too.
+   /// </summary>
+   [Fact]
+   public async Task ReorderReply_IsJudgedAgainstTheServersAsTheyWereGivenWhenTheCallWasMade()
+   {
+      SampleValues given = SampleValues.Golden;
+      FakePipe pipe = new();
+      TaskCompletionSource<ManagementReplyParse> forBoth = pipe.Hold();
+      TaskCompletionSource<ManagementReplyParse> forOne = pipe.Hold();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      List<string> both = [given.SecondServerId, given.ServerId];
+      List<string> one = [given.ServerId];
+
+      Task<ServiceResult<ServerListResult>> askedForBoth = client.ReorderServersAsync(both);
+      Task<ServiceResult<ServerListResult>> askedForOne = client.ReorderServersAsync(one);
+      both.Clear();
+      one.Add(given.SecondServerId);
+      forBoth.SetResult(Replies.Golden("servers.reorder.reply.json"));
+      forOne.SetResult(Replies.Golden("servers.reorder.reply.json"));
+      ServiceResult<ServerListResult> answered = await askedForBoth;
+      ServiceResult<ServerListResult> answeredForOthers = await askedForOne;
+
+      Assert.True(answered.Succeeded);
+      Assert.Equal((ServiceOutcome.Unavailable, ServiceFailure.UnreadableReply, true), (answeredForOthers.Outcome, answeredForOthers.Failure, answeredForOthers.Unconfirmed));
+      Assert.Equal(Replies.GoldenText("servers.reorder.request.json"), pipe.Wire(0));
+      Assert.Equal($$$"""{"v":2,"op":"servers.reorder","args":{"serverIds":["{{{given.ServerId}}}"]}}""", pipe.Wire(1));
+   }
+
+
+
+   /// <summary>
    /// A value the contract refuses when a request is built (a name that breaks the name rule, a check whose provider
    /// is text that names no origin, text that is not a server's full identifier) is not sent. The result is the
    /// refusal the service would give for it, <c>invalid_request</c>, with nothing to check; its message is fixed;

@@ -126,11 +126,16 @@ public sealed partial class ManagementClient
    /// Puts the servers in a new order: every server's identifier, each once. The result is the list in the order that
    /// is now stored. Over the ceiling it waits its turn. A list that is missing, or that has nothing where an
    /// identifier belongs, is not sent. A reply that does not name exactly the servers that were given is unreadable;
-   /// the order it names them in is the service's to say and is not compared.
+   /// the order it names them in is the service's to say and is not compared. The list is copied when the call is
+   /// made, and the copy is what is sent and what the reply is compared with, so a caller may change its list while
+   /// the request is in flight.
    /// </summary>
    public Task<ServiceResult<ServerListResult>> ReorderServersAsync(IReadOnlyList<string> serverIds, CancellationToken cancellationToken = default)
-      => AskAsync<ServerListResult>(ManagementOperations.ServersReorder, operation => WithArguments(operation, null, new ServersReorderArgs(serverIds)), cancellationToken,
-         list => NamesExactly(list, serverIds));
+   {
+      string[]? asked = serverIds?.ToArray();
+      return AskAsync<ServerListResult>(ManagementOperations.ServersReorder, operation => WithArguments(operation, null, new ServersReorderArgs(asked!)), cancellationToken,
+         list => NamesExactly(list, asked!));
+   }
 
 
 
