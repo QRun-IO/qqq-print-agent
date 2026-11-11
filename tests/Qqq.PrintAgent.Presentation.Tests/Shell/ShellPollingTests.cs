@@ -98,9 +98,9 @@ public sealed class ShellPollingTests
 
 
    /// <summary>
-   /// A snapshot says what was true when it was asked for. What it says about a server that was changed from this
-   /// window after that is not shown, because it is older than the change; what it says about the other servers is.
-   /// The next snapshot, asked for after the change, is shown for every server.
+   /// A snapshot says what was true when its request was sent. What it says about a server that was changed from
+   /// this window after that is not shown, because it is older than the change; what it says about the other
+   /// servers is. The next snapshot, sent after the change, is shown for every server.
    /// </summary>
    [Fact]
    public async Task Snapshot_OlderThanALocalChange_SkipsThatServer_AppliesTheOthers()
@@ -129,9 +129,9 @@ public sealed class ShellPollingTests
 
 
    /// <summary>
-   /// What counts is whether the server changed after the snapshot was asked for: a command that had ended before
-   /// that does not hold the snapshot back; one that starts after it does, while it runs and after it has ended; and
-   /// a change that was made without the gate and noted counts as one.
+   /// What counts is whether the server changed after the snapshot was sent: a command that had ended before that
+   /// does not hold the snapshot back; one that starts after it does, while it runs and after it has ended; and a
+   /// change that was made without the gate and noted with its result counts as one.
    /// </summary>
    [Fact]
    public async Task Snapshot_AndALocalChange_OnlyAChangeAfterTheRequestHoldsItBack()
@@ -165,7 +165,7 @@ public sealed class ShellPollingTests
 
       held = fixture.Pipe.Hold();
       refresh = fixture.Shell.RefreshAsync();
-      fixture.Shell.Busy.NoteChange(Snapshots.Id(1));
+      fixture.Shell.Busy.NoteChange(Snapshots.Id(1), await fixture.Change(1));
       held.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "One f"), Snapshots.Server(2, "Two f"))));
       await refresh;
       Assert.Equal("One e,Two f", fixture.ServerNames);
@@ -186,14 +186,14 @@ public sealed class ShellPollingTests
 
       TaskCompletionSource<ManagementReplyParse> held = fixture.Pipe.Hold();
       Task refresh = fixture.Shell.RefreshAsync();
-      fixture.Shell.Busy.NoteChange(Snapshots.Id(2));
+      fixture.Shell.Busy.NoteChange(Snapshots.Id(2), await fixture.Change(2));
       held.SetResult(Replies.Success(Snapshots.Of(Snapshots.Server(1, "One b"), Snapshots.Server(3, "Three b"), Snapshots.Server(4, "Four"))));
       await refresh;
       Assert.Equal("One b,Two,Three b,Four", fixture.ServerNames);
 
       held = fixture.Pipe.Hold();
       refresh = fixture.Shell.RefreshAsync();
-      fixture.Shell.Busy.NoteChange(OperationGate.Computer);
+      fixture.Shell.Busy.NoteChange(OperationGate.Computer, await fixture.Change());
       held.SetResult(Replies.Success(new ServiceSnapshot(Snapshots.Computer(update: new UpdateState(true)),
          [Snapshots.Server(5, "Five"), Snapshots.Server(4, "Four c"), Snapshots.Server(3, "Three c"), Snapshots.Server(1, "One c")])));
       await refresh;
@@ -330,9 +330,9 @@ public sealed class ShellPollingTests
 
    /// <summary>
    /// A page is told, with each snapshot that is shown, which servers' entries were held back because the server
-   /// was changed from this window after the snapshot was asked for, and whether the computer's part and the order
+   /// was changed from this window after the snapshot was sent, and whether the computer's part and the order
    /// were. The entry the window keeps for such a server is the one from before the change, the same object. A
-   /// snapshot that was asked for after the change holds nothing back, and neither does a read that brought none.
+   /// snapshot that was sent after the change holds nothing back, and neither does a read that brought none.
    /// </summary>
    [Fact]
    public void Snapshot_Applied_SaysWhichServersWereHeldBack()
@@ -636,7 +636,7 @@ public sealed class ShellPollingTests
       Assert.Equal(sent, fixture.Pipe.Sent.Count);
       Assert.True(fixture.Gate.TryEnter(Snapshots.Id(1), "Working.", out IDisposable? hold, out _));
       Assert.False(fixture.Shell.Tree.Servers[0].IsBusy);
-      Assert.False(fixture.Shell.Busy.ChangedSince(Snapshots.Id(1), 0));
+      Assert.False(fixture.Shell.Busy.ChangedSince(Snapshots.Id(1), flight: null));
       hold.Dispose();
    }
 

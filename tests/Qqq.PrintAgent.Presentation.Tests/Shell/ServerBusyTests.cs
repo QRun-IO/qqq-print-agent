@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 
+using Qqq.PrintAgent.Presentation.Service;
 using Qqq.PrintAgent.Presentation.Shell;
 using Qqq.PrintAgent.Presentation.Tests.Fakes;
+using Qqq.PrintAgent.Windows.Management;
 
 namespace Qqq.PrintAgent.Presentation.Tests.Shell;
 
-/// <summary>Busy state per server: one key of the gate for each server and one for the computer, a second command on a busy key refused out loud, and a mark of each key's last local change.</summary>
+/// <summary>Busy state per server: one key of the gate for each server and one for the computer, a second command on a busy key refused out loud, and a stamp of each key's last local change.</summary>
 public sealed class ServerBusyTests
 {
    /// <summary>A command on one server leaves every other server and the computer free: their commands start, and only the busy server's node shows that it is busy.</summary>
@@ -171,62 +173,123 @@ public sealed class ServerBusyTests
 
 
    /// <summary>
-   /// Every key has a mark of its last local change. A command changes its key when it starts and again when it
-   /// ends; a change made without the gate is noted; a refused command changes nothing. A key that was never
-   /// changed has not changed since any mark, and one key's change is not another's.
+   /// Every key has a stamp of its last local change: how many snapshots the client had handed to the pipe when the
+   /// change was known to have been answered. A command stamps its key when it starts and again when it ends, with
+   /// the client's count read at that moment; a refused command stamps nothing. What a snapshot says about a key is
+   /// held back unless the snapshot's number is strictly greater than the stamp: the snapshot with the stamp's own
+   /// number was already on its way. A result that names no flight is never newer than a change. A key that was
+   /// never changed is held back by nothing, and one key's change is not another's.
    /// </summary>
    [Fact]
-   public void Marks_FollowEveryLocalChange_PerKey()
+   public async Task Stamps_FollowEveryCommand_PerKey_AndOnlyASnapshotSentLaterIsNewer()
    {
+      FakePipe pipe = new();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
       OperationGate gate = new();
-      using ServerBusy busy = new(gate);
+      using ServerBusy busy = new(gate, client);
       string one = Snapshots.Id(1);
       string two = Snapshots.Id(2);
-      long start = busy.Mark();
-      Assert.False(busy.ChangedSince(one, start));
+      Assert.False(busy.ChangedSince(one, flight: null));
+      Assert.False(busy.ChangedSince(one, 0));
 
+      await Snapshot(pipe, client);
       Assert.True(busy.TryBegin(one, "Working.", out IDisposable? hold, out string? refusal));
       Assert.Null(refusal);
-      long running = busy.Mark();
-      Assert.True(busy.ChangedSince(one, start));
-      Assert.False(busy.ChangedSince(one, running));
-      Assert.False(busy.ChangedSince(two, start));
+      Assert.True(busy.ChangedSince(one, 0));
+      Assert.True(busy.ChangedSince(one, 1));
+      Assert.True(busy.ChangedSince(one, flight: null));
+      Assert.False(busy.ChangedSince(one, 2));
+      Assert.False(busy.ChangedSince(two, 1));
+      Assert.False(busy.ChangedSince(two, flight: null));
 
+      await Snapshot(pipe, client);
       Assert.False(busy.TryBegin(one, "Another.", out IDisposable? none, out refusal));
       Assert.Null(none);
       Assert.Equal("Working.", refusal);
-      Assert.Equal(running, busy.Mark());
+      Assert.False(busy.ChangedSince(one, 2));
 
       hold.Dispose();
-      Assert.True(busy.ChangedSince(one, running));
-      long ended = busy.Mark();
-      Assert.False(busy.ChangedSince(one, ended));
-
-      busy.NoteChange(two);
-      Assert.True(busy.ChangedSince(two, ended));
-      Assert.False(busy.ChangedSince(one, ended));
-      Assert.True(busy.Mark() > ended);
+      Assert.True(busy.ChangedSince(one, 2));
+      Assert.False(busy.ChangedSince(one, 3));
+      Assert.False(busy.ChangedSince(two, 2));
    }
 
 
 
-   /// <summary>It follows the gate until it is disposed, and it refuses to be built on nothing or asked about no key.</summary>
+   /// <summary>
+   /// A change that was made without the gate is noted with its own result, and the key is stamped with the count
+   /// that result carries, which the client read when the reply was read. That holds for a result whose outcome is
+   /// not known too. A result of a request that was never handed to the pipe carries no count and marks nothing.
+   /// A stamp never goes back: a result that is noted after a later change does not undo that change's stamp.
+   /// </summary>
    [Fact]
-   public void Busy_FollowsTheGate_UntilDisposed()
+   public async Task NoteChange_StampsTheKeyWithTheCountTheChangesOwnResultCarries()
    {
+      FakePipe pipe = new();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
       OperationGate gate = new();
-      ServerBusy busy = new(gate);
-      long start = busy.Mark();
+      using ServerBusy busy = new(gate, client);
+      string one = Snapshots.Id(1);
+      string two = Snapshots.Id(2);
+      string three = Snapshots.Id(3);
+      await Snapshot(pipe, client);
+      pipe.Answer(Replies.Success(new NoResult()));
+      ServiceResult<NoResult> answered = await client.SharePrinterAsync(one, Snapshots.PrinterId, shared: true);
+      await Snapshot(pipe, client);
+      pipe.Fail(new IOException("The pipe is broken."));
+      ServiceResult<NoResult> notKnown = await client.SharePrinterAsync(two, Snapshots.PrinterId, shared: true);
+      ServiceResult<NoResult> neverSent = await client.SharePrinterAsync("not a server", Snapshots.PrinterId, shared: true);
+      await Snapshot(pipe, client);
+
+      busy.NoteChange(one, answered);
+      busy.NoteChange(two, notKnown);
+      busy.NoteChange(three, neverSent);
+
+      Assert.Equal((1L, 2L, true, null), (answered.SnapshotsSent!.Value, notKnown.SnapshotsSent!.Value, notKnown.Unconfirmed, neverSent.SnapshotsSent));
+      Assert.Equal((true, false), (busy.ChangedSince(one, 1), busy.ChangedSince(one, 2)));
+      Assert.Equal((true, false), (busy.ChangedSince(two, 2), busy.ChangedSince(two, 3)));
+      Assert.False(busy.ChangedSince(three, flight: null));
+
+      Assert.True(busy.TryBegin(one, "Working.", out IDisposable? hold, out _));
+      hold.Dispose();
+      busy.NoteChange(one, answered);
+
+      Assert.Equal((true, false), (busy.ChangedSince(one, 3), busy.ChangedSince(one, 4)));
+   }
+
+
+
+   /// <summary>It follows the gate until it is disposed, and it refuses to be built on nothing, asked about no key or told of a change without its result.</summary>
+   [Fact]
+   public async Task Busy_FollowsTheGate_UntilDisposed()
+   {
+      FakePipe pipe = new();
+      ManagementClient client = new(pipe.SendAsync, new RecordingLog());
+      OperationGate gate = new();
+      ServerBusy busy = new(gate, client);
+      pipe.Answer(Replies.Success(new NoResult()));
+      ServiceResult<NoResult> changed = await client.SharePrinterAsync(Snapshots.Id(1), Snapshots.PrinterId, shared: true);
 
       busy.Dispose();
       Assert.True(gate.TryEnter(Snapshots.Id(1), "Working.", out IDisposable? hold, out _));
 
-      Assert.False(busy.ChangedSince(Snapshots.Id(1), start));
+      Assert.False(busy.ChangedSince(Snapshots.Id(1), flight: null));
       Assert.True(busy.IsBusy(Snapshots.Id(1)));
       hold.Dispose();
-      Assert.Equal("gate", Assert.Throws<ArgumentNullException>(() => new ServerBusy(null!)).ParamName);
-      Assert.Throws<ArgumentException>(() => busy.ChangedSince(" ", start));
-      Assert.Throws<ArgumentException>(() => busy.NoteChange(""));
+      Assert.Equal("gate", Assert.Throws<ArgumentNullException>(() => new ServerBusy(null!, client)).ParamName);
+      Assert.Equal("client", Assert.Throws<ArgumentNullException>(() => new ServerBusy(gate, null!)).ParamName);
+      Assert.Throws<ArgumentException>(() => busy.ChangedSince(" ", 0));
+      Assert.Throws<ArgumentException>(() => busy.NoteChange("", changed));
+      Assert.Equal("changed", Assert.Throws<ArgumentNullException>(() => busy.NoteChange<NoResult>(Snapshots.Id(1), null!)).ParamName);
+   }
+
+
+
+   /// <summary>One snapshot, answered at once: the client has handed one more to the pipe.</summary>
+   private static async Task Snapshot(FakePipe pipe, ManagementClient client)
+   {
+      pipe.Answer(Replies.Success(Snapshots.Of()));
+      Assert.True((await client.SnapshotAsync()).Succeeded);
    }
 
 

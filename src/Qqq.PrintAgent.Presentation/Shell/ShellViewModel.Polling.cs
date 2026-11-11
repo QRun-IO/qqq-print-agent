@@ -46,11 +46,11 @@ public sealed partial class ShellViewModel
 
 
    /// <summary>
-   /// Reads the snapshot and shows it. What it says about a server that was changed from this window after the
-   /// read was asked for is not shown; what it says about every other server is. A read that was skipped because
-   /// the client had too many requests in flight is not a failure and changes nothing. Called while a read it
-   /// started is still in flight, it starts nothing and returns that read, so whoever awaits it waits for the
-   /// snapshot that is on its way.
+   /// Reads the snapshot and shows it. What it says about a server that was changed from this window is shown only
+   /// when the snapshot's request was sent after that change was answered; what it says about every other server
+   /// is shown. A read that was skipped because the client had too many requests in flight is not a failure and
+   /// changes nothing. Called while a read it started is still in flight, it starts nothing and returns that read,
+   /// so whoever awaits it waits for the snapshot that is on its way.
    /// </summary>
    public Task RefreshAsync()
    {
@@ -67,7 +67,7 @@ public sealed partial class ShellViewModel
    /// Reads a snapshot that is newer than this call and shows it. A page calls this when a command of its own has
    /// ended, so the window shows what the service says after the change and not what a read that was already on
    /// its way says. A read the shell has in flight was sent before the call: it is waited for (what it says about a
-   /// server that changed since it was asked for is not shown), and only then is a new read made. Several callers
+   /// server that changed since it was sent is not shown), and only then is a new read made. Several callers
    /// that wait behind the same read share the one read that follows it: that read is sent after each of their
    /// calls, so it is newer than every one of them. This holds for a call made from a handler of
    /// <see cref="SnapshotApplied"/> too: the read being shown is waited for and a new one follows. The new read is
@@ -134,23 +134,21 @@ public sealed partial class ShellViewModel
 
 
    /// <summary>
-   /// One read of the snapshot. The mark of the moment the read is asked for is taken here, in the one place a
-   /// snapshot is asked for, and goes with the result to where it is shown. The mark is right when this call is what
-   /// sends the request, which it is as long as the shell is the only one that asks the client for snapshots: the
-   /// client shares one request among everyone who asks while it is in flight, and it does not say when the request
-   /// a caller was handed had been sent. A read that has to be newer than the call that asks for it goes through
-   /// <see cref="SnapshotSentAfterTheCallAsync"/>.
+   /// One read of the snapshot. The client shares one request among everyone who asks while it is in flight, so the
+   /// shell can be handed a snapshot that somebody else sent, at a moment the shell does not know. It therefore
+   /// takes no mark of its own: the result says which request made it (<see cref="ServiceResult{T}.Flight"/>), and
+   /// that number decides, where the result is shown, which servers' entries are older than a local change. A read
+   /// that has to be newer than the call that asks for it goes through <see cref="SnapshotSentAfterTheCallAsync"/>.
    /// </summary>
    private async Task ReadSnapshotAsync(bool newerThanTheCall = false)
    {
       _refreshing = true;
       try
       {
-         long asked = Busy.Mark();
          ServiceResult<ServiceSnapshot> result = await (newerThanTheCall ? SnapshotSentAfterTheCallAsync() : _client.SnapshotAsync());
          if(!_disposed)
          {
-            Apply(result, asked);
+            Apply(result);
          }
       }
       finally
@@ -200,14 +198,20 @@ public sealed partial class ShellViewModel
 
 
 
-   /// <summary>Takes the result of a snapshot read that was asked for at a mark. What is said of the service comes from the computer's part that is shown, which is the window's own when the computer was changed from this window after the read was asked for.</summary>
-   private void Apply(ServiceResult<ServiceSnapshot> result, long asked)
+   /// <summary>
+   /// Takes the result of a snapshot read. The number of the flight that made it is compared with the stamp of
+   /// every key that was changed from this window (<see cref="ServerBusy.ChangedSince"/>): an entry is taken only
+   /// when the flight was handed to the pipe after the key's last change was answered. What is said of the service
+   /// comes from the computer's part that is shown, which is the window's own when the computer's part was held
+   /// back.
+   /// </summary>
+   private void Apply(ServiceResult<ServiceSnapshot> result)
    {
       IReadOnlyList<string> heldBack = [];
       if(result.Succeeded)
       {
          NoteUnusable(result.Payload.Servers);
-         Snapshot = SnapshotMerge.Apply(Snapshot, result.Payload, key => Busy.ChangedSince(key, asked), out heldBack);
+         Snapshot = SnapshotMerge.Apply(Snapshot, result.Payload, key => Busy.ChangedSince(key, result.Flight), out heldBack);
       }
       if(ServiceAvailability.From(result, _time, ServiceControlGuidance, Snapshot?.Computer) is not { } availability)
       {

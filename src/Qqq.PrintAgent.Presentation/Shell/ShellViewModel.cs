@@ -114,7 +114,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
       _log = log ?? throw new ArgumentNullException(nameof(log));
       _time = time ?? throw new ArgumentNullException(nameof(time));
       _productName = productName ?? throw new ArgumentNullException(nameof(productName));
-      Busy = new ServerBusy(gate);
+      Busy = new ServerBusy(gate, client);
       Messages = new PageMessages(Tree.Selected);
       _footer = FooterStatus.From(_availability, []);
       _tray = TrayStatus.From(_availability, _footer, [], _productName);
@@ -126,8 +126,9 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
    /// <summary>
    /// Raised after a snapshot was read and everything here follows it, so a page can take what it shows from
-   /// <see cref="Snapshot"/>. It says which servers' entries were held back because the server was changed from this
-   /// window after the snapshot was asked for; a page leaves what it shows of such a server as it is.
+   /// <see cref="Snapshot"/>. It says which servers' entries were held back because the snapshot was not sent after
+   /// the server's last change from this window was answered; a page leaves what it shows of such a server as it
+   /// is.
    /// </summary>
    public event EventHandler<SnapshotAppliedEventArgs>? SnapshotApplied;
 
@@ -143,7 +144,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>Which servers are busy, and which were changed from this window and when.</summary>
+   /// <summary>Which servers are busy, and which were changed from this window and when. A change that is made without the gate, as the wizard's are, is noted here with its own result (<see cref="ServerBusy.NoteChange"/>).</summary>
    public ServerBusy Busy { get; }
 
 
@@ -173,10 +174,10 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
    /// <summary>
-   /// The snapshot the window shows: the last one read, except that a server changed from this window since that
-   /// snapshot was asked for keeps the entry the window had, which is the one from before the change (the same
-   /// object as before), until a snapshot asked for after the change arrives. <see cref="SnapshotApplied"/> names
-   /// those servers. Null until one was read.
+   /// The snapshot the window shows: the last one read, except that a server changed from this window keeps the
+   /// entry the window had, which is the one from before the change (the same object as before), until a snapshot
+   /// arrives whose request was sent after the change was answered. A server the window did not show yet is left
+   /// out until then. <see cref="SnapshotApplied"/> names those servers. Null until one was read.
    /// </summary>
    public ServiceSnapshot? Snapshot
    {

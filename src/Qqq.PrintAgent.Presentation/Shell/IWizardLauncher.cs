@@ -25,6 +25,17 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// server's page, also when no snapshot lists the server yet: the shell then shows the server as soon as one does.
 /// A wizard that ended with nothing to show passes no page.
 /// </para>
+/// <para>
+/// A wizard changes servers without entering the gate under their keys, and it has snapshots of its own in flight,
+/// which the shell can be handed. So that the shell does not show, for a server the wizard has just changed, a
+/// snapshot that was sent before the change was carried out, the wizard's owner tells the shell of every change
+/// the wizard makes, as soon as its result is there: <see cref="ServerBusy.NoteChange"/> on
+/// <see cref="ShellViewModel.Busy"/>, with the key that changed and the result of the change itself, exactly as
+/// the client returned it, also when that result says the outcome is not known. The key is the server's identifier
+/// (for an add, the identifier the result names) and <see cref="OperationGate.Computer"/> for a change to the
+/// computer's details or to the order of the servers. Nothing else is passed: no count the wizard read itself and
+/// no result of another request, because only the change's own result says when the change was answered.
+/// </para>
 /// </summary>
 public interface IWizardLauncher
 {

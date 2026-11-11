@@ -9,11 +9,12 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 
 /// <summary>
 /// Puts a snapshot that has just arrived together with what the window already shows. A snapshot says what was true
-/// when it was asked for. When a server has been changed from this window since then, the snapshot's entry for that
-/// server is older than the change and is not taken: the server keeps the entry the window has, until a snapshot
-/// that was asked for after the change arrives. Every other server's entry is taken. The same holds for the
-/// computer's own part and for the order of the list, which a change under <see cref="OperationGate.Computer"/>
-/// (the computer's details, a reorder) makes older than the window.
+/// when its request was sent. When a server has been changed from this window and the snapshot was not sent after
+/// that change was answered, the snapshot's entry for that server may be older than the change and is not taken:
+/// the server keeps the entry the window has, until a snapshot that was sent after the change arrives. Every other
+/// server's entry is taken. The same holds for the computer's own part and for the order of the list, which a
+/// change under <see cref="OperationGate.Computer"/> (the computer's details, a reorder) makes older than the
+/// window.
 /// </summary>
 internal static class SnapshotMerge
 {
@@ -28,58 +29,69 @@ internal static class SnapshotMerge
 
 
    /// <summary>
-   /// The snapshot to show: the new one, with the entry the window has kept for every server (and for the computer)
-   /// that <paramref name="changedSince"/> says has been changed locally since the new one was asked for. A server
-   /// that changed and is missing from the new list stays, at the place it had; when the computer changed, the
-   /// servers stay in the order the window has, with any new ones after them. <paramref name="heldBack"/> names
-   /// what was kept in place of the new snapshot's: the identifier of every server whose entry is the one the
-   /// window had, and <see cref="OperationGate.Computer"/> when the computer's part and the order are.
+   /// The snapshot to show: the new one, without its entry for every server (and for the computer) that
+   /// <paramref name="changedSince"/> says was changed locally and not before the new one was sent. Such a server
+   /// keeps the entry the window has; when the window has none for it yet, it is left out, and is shown from the
+   /// first snapshot that was sent after its change. A server that changed and is missing from the new list stays,
+   /// at the place it had, so a snapshot that is not newer than a server's change never makes that server go. When
+   /// the computer changed, the servers stay in the order the window has, with any new ones after them.
+   /// <paramref name="heldBack"/> names what was not taken from the new snapshot: the identifier of every such
+   /// server, and <see cref="OperationGate.Computer"/> when the computer's part and the order are the window's.
    /// </summary>
    internal static ServiceSnapshot Apply(ServiceSnapshot? previous, ServiceSnapshot fresh, Func<string, bool> changedSince, out IReadOnlyList<string> heldBack)
    {
-      IReadOnlyList<ServerSnapshot> usable = Usable(fresh.Servers);
-      if(previous is null)
+      IReadOnlyList<ServerSnapshot> shown = previous?.Servers ?? [];
+      List<ServerSnapshot> merged = [];
+      List<string> held = [];
+      foreach(ServerSnapshot server in Usable(fresh.Servers))
       {
-         heldBack = [];
-         return new ServiceSnapshot(fresh.Computer, usable);
-      }
-      List<ServerSnapshot> merged = [.. usable.Select(server => changedSince(server.ServerId) && Find(previous, server.ServerId) is { } kept ? kept : server)];
-      for(int index = 0; index < previous.Servers.Count; index++)
-      {
-         ServerSnapshot before = previous.Servers[index];
-         if(changedSince(before.ServerId) && !merged.Exists(server => string.Equals(server.ServerId, before.ServerId, StringComparison.Ordinal)))
+         if(!changedSince(server.ServerId))
          {
-            merged.Insert(Math.Min(index, merged.Count), before);
+            merged.Add(server);
+            continue;
+         }
+         held.Add(server.ServerId);
+         if(Find(shown, server.ServerId) is { } kept)
+         {
+            merged.Add(kept);
          }
       }
-      List<string> kept = [.. merged.Where(server => ReferenceEquals(server, Find(previous, server.ServerId))).Select(server => server.ServerId)];
-      heldBack = kept;
-      if(!changedSince(OperationGate.Computer))
+      for(int index = 0; index < shown.Count; index++)
+      {
+         ServerSnapshot before = shown[index];
+         if(changedSince(before.ServerId) && !held.Contains(before.ServerId, StringComparer.Ordinal))
+         {
+            merged.Insert(Math.Min(index, merged.Count), before);
+            held.Add(before.ServerId);
+         }
+      }
+      heldBack = held;
+      if(previous is null || !changedSince(OperationGate.Computer))
       {
          return new ServiceSnapshot(fresh.Computer, merged);
       }
-      kept.Add(OperationGate.Computer);
-      return new ServiceSnapshot(previous.Computer, [.. merged.OrderBy(server => Place(previous, server.ServerId))]);
+      held.Add(OperationGate.Computer);
+      return new ServiceSnapshot(previous.Computer, [.. merged.OrderBy(server => Place(shown, server.ServerId))]);
    }
 
 
 
-   /// <summary>A server's entry in a snapshot, or null when the snapshot has none for it.</summary>
-   private static ServerSnapshot? Find(ServiceSnapshot snapshot, string serverId)
-      => snapshot.Servers.FirstOrDefault(server => string.Equals(server.ServerId, serverId, StringComparison.Ordinal));
+   /// <summary>A server's entry in a list, or null when the list has none for it.</summary>
+   private static ServerSnapshot? Find(IReadOnlyList<ServerSnapshot> servers, string serverId)
+      => servers.FirstOrDefault(server => string.Equals(server.ServerId, serverId, StringComparison.Ordinal));
 
 
 
-   /// <summary>A server's place in a snapshot's list, or a place after every server of the list for one it does not have.</summary>
-   private static int Place(ServiceSnapshot snapshot, string serverId)
+   /// <summary>A server's place in a list, or a place after every server of the list for one it does not have.</summary>
+   private static int Place(IReadOnlyList<ServerSnapshot> servers, string serverId)
    {
-      for(int index = 0; index < snapshot.Servers.Count; index++)
+      for(int index = 0; index < servers.Count; index++)
       {
-         if(string.Equals(snapshot.Servers[index].ServerId, serverId, StringComparison.Ordinal))
+         if(string.Equals(servers[index].ServerId, serverId, StringComparison.Ordinal))
          {
             return index;
          }
       }
-      return snapshot.Servers.Count;
+      return servers.Count;
    }
 }

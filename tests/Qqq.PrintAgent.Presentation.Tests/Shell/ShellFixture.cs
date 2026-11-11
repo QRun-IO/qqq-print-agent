@@ -103,6 +103,15 @@ internal sealed class ShellFixture : IDisposable
 
 
 
+   /// <summary>A change to a server that is made through the client without the gate and answered at once, as the wizard makes its changes. Its result is what the shell is told of the change.</summary>
+   internal async Task<ServiceResult<NoResult>> Change(int number = 1)
+   {
+      Pipe.Answer(Replies.Success(new NoResult()));
+      return await Client.SharePrinterAsync(Snapshots.Id(number), Snapshots.PrinterId, shared: true);
+   }
+
+
+
    /// <summary>One tick of the snapshot timer that fails in the pipe.</summary>
    internal async Task TickFailing(Exception failure)
    {
