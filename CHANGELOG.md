@@ -33,9 +33,16 @@ what the service and its clients will be able to build on. The last two are abou
 - **Printer discovery.** The operation table marks `printers.discover` as single-flight: one discovery runs at a
   time, and a request that arrives during it shares its result. The discovery itself is built with the pipe.
 - **Log redaction recognises more shapes.** As with the two shapes below, this changes what a log line shows only
-  for a line that holds one of them, and no line the product writes today does. The values of `id_token_hint`,
-  `code_verifier`, `sessionUUID` and `sessionId` are replaced by `[REDACTED]` wherever they stand, and the names
-  stay. An `Authorization:` or `Proxy-Authorization:` header line loses its whole value to the end of the line,
+  for a line that holds one of them, and no line the product writes today does. The named values,
+  whose value is replaced by `[REDACTED]` while the name stays, now include every name under which the product's
+  own requests and responses carry a secret. `enrollmentCode`, `deviceToken` and the `X-QQQ-Device-Token` header
+  were covered; added are a session response's `uuid`, `sessionUUID`, `sessionId`, the code verifier and the
+  ID-token hint in every spelling (`codeVerifier`, `code_verifier`, `code-verifier`; `idTokenHint`,
+  `id_token_hint`, `id-token-hint`), and `code` in a message that also names a code verifier. Each named value is
+  recognised as a member of a JSON object, as `name=value` or `name: value`, and now also with the equals sign
+  percent-encoded (`name%3Dvalue`). A name that is itself percent-encoded, the rest of a value after a comma, a
+  semicolon or a space, and a nonce are not covered. An `Authorization:` or `Proxy-Authorization:` header line
+  loses its whole value to the end of the line,
   whatever its scheme; a line that began with `Authorization: Bearer` and went on with other text used to keep
   that text. A callback's `code` and `state` are also redacted when the value is quoted or the callback is
   percent-encoded inside another address.
