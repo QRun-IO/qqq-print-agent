@@ -40,6 +40,9 @@ public sealed partial class ShellViewModel
    /// <summary>True while the log has been told that the snapshot lists servers the window cannot show.</summary>
    private bool _unusableNoted;
 
+   /// <summary>The footer's sentence the shell announced last; empty before the first. Whether the sentence changed is decided against this, not against what <see cref="FooterAnnouncement"/> holds, which anyone who has it can clear or use.</summary>
+   private string _announced = string.Empty;
+
 
 
    /// <summary>
@@ -241,8 +244,9 @@ public sealed partial class ShellViewModel
       Tray = TrayStatus.From(Availability, Footer, statuses, _productName);
       Place(went);
       CurrentPage = ShellMessages.Heading(Selected, Tree.Server(Selected.ServerId)?.Name);
-      if(!string.Equals(Footer.Text, FooterAnnouncement.Text, StringComparison.Ordinal))
+      if(!string.Equals(Footer.Text, _announced, StringComparison.Ordinal))
       {
+         _announced = Footer.Text;
          FooterAnnouncement.Announce(Footer.Text);
       }
    }

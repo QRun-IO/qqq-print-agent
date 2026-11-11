@@ -153,7 +153,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>What the footer says, as something a screen reader is told once: it is announced after <see cref="Footer"/> holds the new sentence, and only when the sentence changed.</summary>
+   /// <summary>What the footer says, as something a screen reader is told once: it is announced after <see cref="Footer"/> holds the new sentence, and only when the sentence changed since the shell last announced one. A listener reads the sentence from the event (<see cref="AnnouncementEventArgs.Text"/>).</summary>
    public Announcement FooterAnnouncement { get; } = new();
 
 

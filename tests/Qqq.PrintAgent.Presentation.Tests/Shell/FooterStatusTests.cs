@@ -268,4 +268,30 @@ public sealed class FooterStatusTests
       Assert.Equal("Connected and ready | footer: Connected and ready", fixture.Announced[3]);
       Assert.Equal("Connected and ready", fixture.Shell.FooterAnnouncement.Text);
    }
+
+
+
+   /// <summary>
+   /// Whether the footer's sentence changed is decided against the sentence the shell announced last, not against
+   /// what the announcement holds, which a view can clear and anyone who has it can use. So a cleared announcement
+   /// does not make the shell say the same sentence again on the next tick, and a sentence somebody else announced
+   /// through it does not swallow the shell's own when the footer comes to say the same.
+   /// </summary>
+   [Fact]
+   public async Task FooterText_IsAnnouncedWhenTheShellsOwnSentenceChanged_WhateverTheAnnouncementHolds()
+   {
+      using ShellFixture fixture = new();
+      await fixture.Tick(Snapshots.Server(1, "Warehouse"));
+
+      fixture.Shell.FooterAnnouncement.Clear();
+      await fixture.Tick(Snapshots.Server(1, "Warehouse"));
+
+      Assert.Equal(["Connected and ready | footer: Connected and ready"], fixture.Announced);
+
+      fixture.Shell.FooterAnnouncement.Announce("Local print service unavailable");
+      await fixture.TickFailing(new IOException("The pipe is broken."));
+
+      Assert.Equal(["Connected and ready | footer: Connected and ready", "Local print service unavailable | footer: Connected and ready",
+         "Local print service unavailable | footer: Local print service unavailable"], fixture.Announced);
+   }
 }

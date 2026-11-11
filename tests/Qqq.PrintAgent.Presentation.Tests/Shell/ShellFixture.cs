@@ -28,7 +28,7 @@ internal sealed class ShellFixture : IDisposable
       Client = new ManagementClient(Pipe.SendAsync, Log);
       Shell = new ShellViewModel(Client, Gate, Wizard, Log, TestData.Time, Product);
       Wizard.Shell = Shell;
-      Shell.FooterAnnouncement.Raised += (_, _) => Announced.Add(Shell.FooterAnnouncement.Text + " | footer: " + Shell.Footer.Text);
+      Shell.FooterAnnouncement.Raised += (_, said) => Announced.Add(said.Text + " | footer: " + Shell.Footer.Text);
    }
 
 
@@ -63,7 +63,7 @@ internal sealed class ShellFixture : IDisposable
 
 
 
-   /// <summary>Every footer announcement so far: the text announced and the footer's sentence at the moment it was raised.</summary>
+   /// <summary>Every footer announcement so far: the sentence the event carried and the footer's sentence at the moment it was raised.</summary>
    internal List<string> Announced { get; } = [];
 
 
