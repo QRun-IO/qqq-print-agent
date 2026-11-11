@@ -4,6 +4,7 @@
  */
 
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Qqq.PrintAgent.Core.Authentication;
 using Qqq.PrintAgent.Presentation.SignIn;
 using Qqq.PrintAgent.Presentation.Tests.Fakes;
@@ -503,6 +504,75 @@ public sealed class BrowserCallbackDispatcherTests
    public void ReadState_IsTheOneStateParameter(string address, string? state)
    {
       Assert.Equal(state, BrowserCallbackDispatcher.ReadState(new Uri(address, UriKind.RelativeOrAbsolute)));
+   }
+
+
+
+   /// <summary>
+   /// An inbox can fail after an exchange has stopped waiting and before it has disposed its ticket. The ticket is
+   /// then failed and never looked at. The runtime reports a failed task nobody looked at as an unobserved error
+   /// when the task is collected, and a ticket must not be the cause of one. The test fails a ticket, lets it go
+   /// without looking at it, and has everything collected; beside it, as the control, an ordinary task is failed
+   /// and let go the same way. The control is reported, which shows that the collection did what it had to, and
+   /// the ticket is not. Each failure is told from any other test's by its own text, and nothing here waits: the
+   /// collections run to completion before the counts are read.
+   /// </summary>
+   [Fact]
+   public void TicketFailedAndNeverLookedAt_LeavesNoUnobservedFailure()
+   {
+      const string ticketText = "synthetic failure of a ticket nobody looked at";
+      const string controlText = "synthetic failure of a task nobody looked at";
+      int tickets = 0;
+      int controls = 0;
+      void Count(object? sender, UnobservedTaskExceptionEventArgs unobserved)
+      {
+         tickets += unobserved.Exception.InnerExceptions.Count(inner => string.Equals(inner.Message, ticketText, StringComparison.Ordinal));
+         controls += unobserved.Exception.InnerExceptions.Count(inner => string.Equals(inner.Message, controlText, StringComparison.Ordinal));
+      }
+      TaskScheduler.UnobservedTaskException += Count;
+      try
+      {
+         FailATicketAndLetItGo(ticketText);
+         FailATaskAndLetItGo(controlText);
+         for(int round = 0; round < 3; round++)
+         {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+         }
+      }
+      finally
+      {
+         TaskScheduler.UnobservedTaskException -= Count;
+      }
+
+      Assert.Equal(1, controls);
+      Assert.Equal(0, tickets);
+   }
+
+
+
+   /// <summary>Registers a ticket, breaks its inbox so the ticket is failed inside that call, disposes the ticket without looking at its task, and returns with nothing left that refers to it. It is not inlined, so the caller's frame holds nothing of it either.</summary>
+   [MethodImpl(MethodImplOptions.NoInlining)]
+   private static void FailATicketAndLetItGo(string text)
+   {
+      using NoContext none = new();
+      LateInboxes source = new();
+      BrowserCallbackDispatcher dispatcher = new(source, new RecordingLog());
+      BrowserCallbackTicket ticket = dispatcher.Register("synthetic-state-a");
+      source.Inboxes[0].Answer.SetException(new IOException(text));
+      Assert.True(ticket.Callback.IsFaulted);
+      ticket.Dispose();
+   }
+
+
+
+   /// <summary>The control: fails an ordinary task and returns with nothing left that refers to it.</summary>
+   [MethodImpl(MethodImplOptions.NoInlining)]
+   private static void FailATaskAndLetItGo(string text)
+   {
+      TaskCompletionSource<Uri> source = new();
+      source.SetException(new IOException(text));
+      Assert.True(source.Task.IsFaulted);
    }
 
 

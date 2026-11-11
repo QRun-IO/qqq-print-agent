@@ -47,8 +47,19 @@ internal sealed class BrowserCallbackTicket : IDisposable
 
 
 
-   /// <summary>Ends the wait with the inbox's failure.</summary>
-   internal void Fail(Exception failure) => _callback.TrySetException(failure);
+   /// <summary>
+   /// Ends the wait with the inbox's failure, and marks the failure as seen. An exchange whose own wait had already
+   /// ended (its token was cancelled) disposes the ticket without ever looking at the task, and the runtime reports
+   /// a failed task nobody looked at as an unobserved error once it is collected. Whoever does await the ticket is
+   /// given the failure all the same.
+   /// </summary>
+   internal void Fail(Exception failure)
+   {
+      if(_callback.TrySetException(failure))
+      {
+         _ = _callback.Task.Exception;
+      }
+   }
 
 
 
