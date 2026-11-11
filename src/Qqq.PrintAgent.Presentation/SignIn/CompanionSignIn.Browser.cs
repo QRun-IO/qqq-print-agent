@@ -30,9 +30,16 @@ public sealed partial class CompanionSignIn
    /// <summary>How long a browser sign-in waits before it is given up.</summary>
    public static readonly TimeSpan BrowserSignInLimit = TimeSpan.FromMinutes(3);
 
+   /// <summary>How far back the protocol handler's trace is read when a browser sign-in ends without a result.</summary>
    private static readonly TimeSpan s_traceWindow = TimeSpan.FromMinutes(10);
+
+   /// <summary>What the Cancel button cancels: set while a browser exchange runs, and cleared before the exchange's cancellation sources are released.</summary>
    private CancellationTokenSource? _browserCancel;
+
+   /// <summary>True from the moment the running browser attempt hands its callback to the session until the attempt has ended. An attempt that ends without a result while this is set discards the session.</summary>
    private bool _handedOver;
+
+   /// <summary>What the running browser attempt has not got past on its way to opening the provider's page, in words for the log; null once the page is open. An attempt that ends while this is set never involved a browser.</summary>
    private string? _unopened;
 
 
@@ -115,8 +122,8 @@ public sealed partial class CompanionSignIn
    /// redirect is not lost), open the provider's page in the default browser, wait for the callback with that state,
    /// and complete the sign-in on the session that started it. The registration ends when the exchange does. Until
    /// the page is open, the exchange notes what it is at, so an attempt that ends before any browser was involved can
-   /// say that, and why (see <see cref="ReportCallbackTrace"/>). Only the
-   /// provider's host is logged, never the address, its state or the callback. The token is looked at again after
+   /// say that, and why (see <see cref="ReportCallbackTrace"/>). Only the provider's host is logged, never the
+   /// address, its state or the callback. The token is looked at again after
    /// each wait: once the sign-in was begun, so a browser is not opened for a wait that has already ended, and once
    /// the callback is there, so the session is not asked to complete for one. That second look is needed because a
    /// callback that has already arrived is handed over whatever the token says, and a session is not bound to

@@ -23,22 +23,55 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// </summary>
 public sealed partial class CompanionSignIn : ObservableObject, IDisposable
 {
+   /// <summary>Creates the session a read of the sign-in description runs on.</summary>
    private readonly ISignInSessionFactory _sessions;
+
+   /// <summary>Opens the provider's page; used only through <see cref="BrowserLaunch"/>.</summary>
    private readonly IBrowserLauncher _browser;
+
+   /// <summary>Names this application's registered callback and reads the protocol handler's trace. The inbox itself belongs to the dispatcher.</summary>
    private readonly IBrowserCallbackSource _callbacks;
+
+   /// <summary>The one dispatcher a browser sign-in waits for its callback through.</summary>
    private readonly BrowserCallbackDispatcher _dispatcher;
+
+   /// <summary>The log. No password, credential, code, state or address with a query is ever passed to it.</summary>
    private readonly IPresentationLog _log;
+
+   /// <summary>The clock the browser sign-in's time limit runs on.</summary>
    private readonly TimeProvider _time;
+
+   /// <summary>Cancelled when the sign-in is disposed, which ends the operation that is running.</summary>
    private readonly CancellationTokenSource _lifetime = new();
+
+   /// <summary>The session that is held, on which a sign-in can be made; null when none is.</summary>
    private ISignInSession? _session;
+
+   /// <summary>The callbacks the held session's description lists for a browser sign-in. They are compared with this application's own and never logged.</summary>
    private IReadOnlyList<string> _redirects = [];
+
+   /// <summary>The wait of the operation that is running, from its start until it begins to be released; null otherwise. While it is set, the operation can still be cancelled and will discard the session on its way out.</summary>
    private CancellationTokenSource? _operation;
+
+   /// <summary>Backs <see cref="State"/>.</summary>
    private CompanionSignInState _state;
+
+   /// <summary>Backs <see cref="Offer"/>.</summary>
    private SignInOffer? _offer;
+
+   /// <summary>Backs <see cref="Rejection"/>.</summary>
    private QqqCertificateRejection? _rejection;
+
+   /// <summary>Backs <see cref="Failure"/>.</summary>
    private string? _failure;
+
+   /// <summary>True from the moment an operation claims the sign-in until it has been released, announcements included; it backs <see cref="IsBusy"/>.</summary>
    private bool _operating;
+
+   /// <summary>True when a discard was asked for while an operation ran: the operation discards the session as it ends.</summary>
    private bool _discarding;
+
+   /// <summary>True once the sign-in was disposed; nothing is started or announced after that.</summary>
    private bool _disposed;
 
 

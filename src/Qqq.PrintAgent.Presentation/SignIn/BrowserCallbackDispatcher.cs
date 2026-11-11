@@ -27,11 +27,22 @@ public sealed class BrowserCallbackDispatcher
    /// <summary>The longest query a callback may have, in characters; the session refuses a longer one.</summary>
    internal const int LongestQuery = 16_384;
 
+   /// <summary>Where an inbox is opened.</summary>
    private readonly IBrowserCallbackSource _callbacks;
+
+   /// <summary>The log; written to only through <see cref="Record"/>, so that it cannot break the dispatcher.</summary>
    private readonly IPresentationLog _log;
+
+   /// <summary>Guards the waiting set and the open inbox, which the window's thread and the threads callbacks arrive on both change.</summary>
    private readonly Lock _gate = new();
+
+   /// <summary>The tickets that wait, by the state each registered. A state is compared exactly: it is somebody's only when it is the very one that was sent.</summary>
    private readonly Dictionary<string, BrowserCallbackTicket> _waiting = new(StringComparer.Ordinal);
+
+   /// <summary>The inbox that is open; null while no ticket waits. A wait that ends on an inbox that is no longer this one has nothing to do.</summary>
    private IBrowserCallbackInbox? _inbox;
+
+   /// <summary>Ends the wait on the open inbox when the inbox is closed; null while none is open.</summary>
    private CancellationTokenSource? _listening;
 
 

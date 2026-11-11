@@ -23,9 +23,16 @@ public sealed class ProviderSignOut
    /// <summary>How long the provider is given to confirm its sign-out.</summary>
    public static readonly TimeSpan Limit = TimeSpan.FromMinutes(2);
 
+   /// <summary>Opens the provider's page; used only through <see cref="BrowserLaunch"/>.</summary>
    private readonly IBrowserLauncher _browser;
+
+   /// <summary>The one dispatcher the sign-out waits for its callback through.</summary>
    private readonly BrowserCallbackDispatcher _dispatcher;
+
+   /// <summary>The log. Neither the token hint nor the state nor the address is ever passed to it.</summary>
    private readonly IPresentationLog _log;
+
+   /// <summary>The clock the two minute limit runs on.</summary>
    private readonly TimeProvider _time;
 
 

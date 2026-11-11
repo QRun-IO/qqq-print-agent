@@ -14,7 +14,10 @@ namespace Qqq.PrintAgent.Presentation.SignIn;
 /// </summary>
 internal sealed class BrowserCallbackTicket : IDisposable
 {
+   /// <summary>What the exchange waits on. Its continuations run asynchronously, so whoever awaits the ticket never continues inside the dispatcher, on the thread a callback arrived on.</summary>
    private readonly TaskCompletionSource<Uri> _callback = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+   /// <summary>The dispatcher the ticket is registered with, which is told when the claim ends.</summary>
    private readonly BrowserCallbackDispatcher _dispatcher;
 
 
