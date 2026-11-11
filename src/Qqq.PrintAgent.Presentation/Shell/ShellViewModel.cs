@@ -251,7 +251,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
          _operatorChose = true;
          return true;
       }
-      if(!Show(page))
+      if(!Show(page, byTheOperator: true))
       {
          _log.Debug("Page {Page} was asked for and is not in the tree.", page);
          return false;
@@ -287,7 +287,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
       if(WizardOpen)
       {
          _operatorChose = true;
-         return Show(PageKey.Wizard);
+         return Show(PageKey.Wizard, byTheOperator: true);
       }
       return Refuse(reason, "add server");
    }
@@ -340,10 +340,10 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
       {
          if(Selected == PageKey.Wizard && Landing() is var landing && landing != PageKey.Wizard)
          {
-            Show(landing);
+            Show(landing, byTheOperator: false);
          }
       }
-      else if(Show(open))
+      else if(Show(open, byTheOperator: false))
       {
          _operatorChose = true;
       }
@@ -352,7 +352,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
          _awaited = open;
          if(Selected == PageKey.Wizard)
          {
-            Show(PageKey.Computer);
+            Show(PageKey.Computer, byTheOperator: false);
          }
       }
    }
@@ -389,14 +389,19 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>Shows a page: selects its node, moves the message bar to it (which drops the message that was on screen and keeps those of the page left that were not) and words the heading. False when the page is not in the tree.</summary>
-   private bool Show(PageKey page)
+   /// <summary>
+   /// Shows a page: selects its node, moves the message bar to it and words the heading. False when the page is not
+   /// in the tree. The messages of the page that is left which were not on screen stay under it. The one that was on
+   /// screen is dropped when the operator made the move; when the shell made it, an error stays under its page and
+   /// anything else is dropped (<see cref="PageMessages.MoveTo"/>).
+   /// </summary>
+   private bool Show(PageKey page, bool byTheOperator)
    {
       if(!Tree.Select(page))
       {
          return false;
       }
-      Messages.MoveTo(page);
+      Messages.MoveTo(page, byTheOperator);
       CurrentPage = ShellMessages.Heading(page, Tree.Server(page.ServerId)?.Name);
       OnPropertyChanged(nameof(Selected));
       return true;
@@ -405,9 +410,10 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
    /// <summary>
-   /// Goes to a page the shell chose itself. Going to the wizard's page asks for the wizard that adds a server,
-   /// unless one is open. A wizard is recorded as open before its page is selected, so a view that passes the
-   /// selection on finds one open and asks for nothing, and the launcher is called last.
+   /// Goes to a page the shell chose itself, which is a move the operator did not make. Going to the wizard's page
+   /// asks for the wizard that adds a server, unless one is open. A wizard is recorded as open before its page is
+   /// selected, so a view that passes the selection on finds one open and asks for nothing, and the launcher is
+   /// called last.
    /// </summary>
    private void GoTo(PageKey page)
    {
@@ -416,7 +422,7 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
       {
          SetWizardOpen(true);
       }
-      Show(page);
+      Show(page, byTheOperator: false);
       if(ask)
       {
          _wizard.AddServer();
@@ -425,12 +431,12 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
 
 
 
-   /// <summary>Shows the wizard's page for a wizard the operator asked for, recorded as open before its page is selected, as in <see cref="GoTo"/>.</summary>
+   /// <summary>Shows the wizard's page for a wizard the operator asked for, recorded as open before its page is selected, as in <see cref="GoTo"/>. The move is the operator's.</summary>
    private void OpenWizard()
    {
       _operatorChose = true;
       SetWizardOpen(true);
-      Show(PageKey.Wizard);
+      Show(PageKey.Wizard, byTheOperator: true);
    }
 
 

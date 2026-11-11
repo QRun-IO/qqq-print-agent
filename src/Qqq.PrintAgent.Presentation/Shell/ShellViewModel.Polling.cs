@@ -279,7 +279,7 @@ public sealed partial class ShellViewModel
       {
          GoTo(Selected);
       }
-      else if(_awaited is { } awaited && Show(awaited))
+      else if(_awaited is { } awaited && Show(awaited, byTheOperator: false))
       {
          _awaited = null;
          _operatorChose = true;

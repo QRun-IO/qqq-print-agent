@@ -16,9 +16,13 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// screen once its page was the one on screen and it was the message the bar showed (<see cref="Current"/>). A page
 /// therefore keeps its messages in a short list, in the order they arrived. A command can end after the operator has
 /// left the page it was started from, and several can: each result waits under its page, and when the operator opens
-/// the page the bar shows the oldest; <see cref="Dismiss"/> shows the next. Leaving a page drops the message that
-/// was on screen, so coming back does not show an old result, and keeps those that were not, whoever made the move:
-/// the operator, or the shell when it lands, follows a server the wizard added or shows a neighbour.
+/// the page the bar shows the oldest; <see cref="Dismiss"/> shows the next. Leaving a page keeps the messages that
+/// were not on screen, whoever made the move. The message that was on screen is dropped when the operator made the
+/// move, so coming back does not show an old result. When the shell made the move (it lands, follows a server the
+/// wizard added, shows a neighbour, is told that the wizard ended), the operator did not choose to leave and may
+/// not have read what was there: an error then stays under its page and is shown when the operator next opens
+/// that page, as a failure that has waited. Anything less than an error is dropped then too, because a refusal
+/// such as "Cannot start now" would otherwise be shown again when it is no longer true.
 /// </para>
 /// <para>
 /// What arrives for the page on screen takes the place of the message the bar shows, which the operator has had in
@@ -36,8 +40,9 @@ namespace Qqq.PrintAgent.Presentation.Shell;
 /// </para>
 /// <para>
 /// When a server has gone its pages cannot be opened again. The failures still waiting under them are moved to the
-/// page the shell shows instead, each saying which server it was about; what was waiting there and was not a failure
-/// is dropped. A failure reported later for a server that has gone is shown on the page on screen in the same way.
+/// page the shell shows instead, each saying which server it was about, and so is an error that was on screen on
+/// one of them; what was waiting there and was not a failure is dropped, and so is a message on screen that was not
+/// an error. A failure reported later for a server that has gone is shown on the page on screen in the same way.
 /// A page posts here what is worth reading later: everything posted for a page that is not on screen waits, in
 /// order. Which page is on screen is the shell's to say; it is used from the window's thread only.
 /// </para>
@@ -136,18 +141,24 @@ public sealed class PageMessages : ObservableObject
 
 
    /// <summary>
-   /// Another page is on screen now, whoever chose it. The message that was on screen is dropped; those of the page
-   /// that was left which had not been on screen stay under it. The bar shows the oldest message that waits for the
-   /// page that was come to. Going to the page that is already on screen changes nothing.
+   /// Another page is on screen now. Those messages of the page that was left which had not been on screen stay
+   /// under it. The message that was on screen is dropped when the move was made <paramref name="byTheOperator"/>.
+   /// When the shell made the move it is dropped too, unless it is an error: an error stays under its page, as a
+   /// failure that has waited, and is shown when the operator next opens that page. The bar shows the oldest
+   /// message that waits for the page that was come to. Going to the page that is already on screen changes
+   /// nothing.
    /// </summary>
-   internal void MoveTo(PageKey page)
+   internal void MoveTo(PageKey page, bool byTheOperator)
    {
       ArgumentNullException.ThrowIfNull(page);
       if(page == Page)
       {
          return;
       }
-      DropTheOneOnScreen();
+      if(byTheOperator || !KeepTheErrorOnScreen())
+      {
+         DropTheOneOnScreen();
+      }
       Page = page;
       Follow();
    }
@@ -158,9 +169,10 @@ public sealed class PageMessages : ObservableObject
    /// Takes what a snapshot whose list of servers can be relied on says: which servers are listed, and which ones
    /// went with it (identifier and name). A server that went is remembered until it is listed again. For every
    /// server that went, the failures waiting under its pages are moved under <paramref name="shown"/>, the page the
-   /// shell shows now, each saying which server it was about, and everything else of those pages is dropped: the
-   /// message that was on screen, which the operator has had in front of them, and what was not a failure. When the
-   /// page on screen was such a server's, the bar moves to <paramref name="shown"/>.
+   /// shell shows now, each saying which server it was about. An error that was on screen on such a page is moved
+   /// with them: the shell is taking the operator away from it, and its page cannot be opened again. Everything
+   /// else of those pages is dropped: a message on screen that was not an error, and what was not a failure. When
+   /// the page on screen was such a server's, the bar moves to <paramref name="shown"/>.
    /// </summary>
    internal void ServersWent(Func<string, bool> listed, IEnumerable<KeyValuePair<string, string>> went, PageKey shown)
    {
@@ -174,7 +186,7 @@ public sealed class PageMessages : ObservableObject
       foreach(PageKey page in _messages.Keys.Where(page => NameOfAServerThatWent(page.ServerId) is not null).ToArray())
       {
          string name = NameOfAServerThatWent(page.ServerId)!;
-         foreach(Entry entry in _messages[page].Skip(page == Page ? 1 : 0).Where(entry => IsFailure(entry.Message)))
+         foreach(Entry entry in _messages[page].Where((entry, index) => index == 0 && page == Page ? IsError(entry.Message) : IsFailure(entry.Message)))
          {
             Add(shown, ShellMessages.AboutAServerThatWent(entry.Message, name), carried: true);
          }
@@ -191,6 +203,11 @@ public sealed class PageMessages : ObservableObject
 
    /// <summary>True for a message that reports a failure, or something the operator has to check: one that must not be dropped without a word.</summary>
    private static bool IsFailure(FeedbackMessage message) => message.Severity is FeedbackSeverity.Warning or FeedbackSeverity.Error;
+
+
+
+   /// <summary>True for a message that reports an error: one that is not lost when the shell takes the operator away from it.</summary>
+   private static bool IsError(FeedbackMessage message) => message.Severity == FeedbackSeverity.Error;
 
 
 
@@ -250,6 +267,19 @@ public sealed class PageMessages : ObservableObject
       {
          list[at] = note;
       }
+   }
+
+
+
+   /// <summary>When the bar shows an error, keeps it under its page as a message that has waited, so nothing that arrives covers it when its page is opened again, and says that it did. Anything else the bar shows, and nothing at all, is not kept.</summary>
+   private bool KeepTheErrorOnScreen()
+   {
+      if(!_messages.TryGetValue(Page, out List<Entry>? list) || !IsError(list[0].Message))
+      {
+         return false;
+      }
+      list[0] = list[0] with { Waited = true };
+      return true;
    }
 
 

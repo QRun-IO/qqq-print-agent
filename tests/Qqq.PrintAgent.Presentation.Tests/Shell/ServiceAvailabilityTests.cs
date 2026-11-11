@@ -169,7 +169,8 @@ public sealed class ServiceAvailabilityTests
    /// shown; neither the message nor the log says that a server was removed or is no longer on this computer; no
    /// wizard is asked for. That stays so when the service stops answering after that. What waited under a server's
    /// page is not treated as a gone server's: when the data is ready again and the servers are listed again, it is
-   /// shown on its own page, in its own words.
+   /// shown on its own page, in its own words. So is an error that was on screen on the page the shell took the
+   /// operator away from.
    /// </summary>
    [Theory]
    [InlineData(StoredState.NewerBuild)]
@@ -181,7 +182,9 @@ public sealed class ServiceAvailabilityTests
       await fixture.Tick(Snapshots.Server(1, "One"), Snapshots.Server(2, "Two"));
       fixture.Shell.Select(PageKey.ForServer(PageKind.Jobs, Snapshots.Id(2)));
       FeedbackMessage waiting = new("Reconnect failed", "One could not be reconnected.", FeedbackSeverity.Error);
+      FeedbackMessage onScreen = new("Retry failed", "The job could not be retried.", FeedbackSeverity.Error);
       fixture.Shell.Messages.Show(PageKey.Server(Snapshots.Id(1)), waiting);
+      fixture.Shell.Messages.Show(PageKey.ForServer(PageKind.Jobs, Snapshots.Id(2)), onScreen);
 
       await fixture.Tick(NotReady(new StoredState(status)));
 
@@ -205,6 +208,8 @@ public sealed class ServiceAvailabilityTests
       Assert.Equal("One,Two", fixture.ServerNames);
       Assert.True(fixture.Shell.Select(PageKey.Server(Snapshots.Id(1))));
       Assert.Equal(waiting, fixture.Shell.Messages.Current);
+      Assert.True(fixture.Shell.Select(PageKey.ForServer(PageKind.Jobs, Snapshots.Id(2))));
+      Assert.Equal(onScreen, fixture.Shell.Messages.Current);
       Assert.DoesNotContain(fixture.Log.Entries, SaysThatAServerWent);
       Assert.Empty(fixture.Wizard.Requests);
    }
