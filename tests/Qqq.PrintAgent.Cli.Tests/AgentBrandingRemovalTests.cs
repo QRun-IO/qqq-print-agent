@@ -10,9 +10,11 @@ namespace Qqq.PrintAgent.Cli.Tests;
 
 /// <summary>
 /// What uninstall does with the branded shortcut, run in temporary folders against fakes: it removes exactly the
-/// shortcuts on record that are still ours, leaves and forgets what has become someone else's, and fails, before it has
-/// changed anything, only when it cannot know or cannot finish. The installer runs this as a required step, so each
-/// failure here fails an uninstall. No test touches this computer's Start menu or registry.
+/// shortcuts on record that are still ours, and leaves and forgets what has become someone else's. The installer runs
+/// this as a required step and undoes an uninstall whose step fails, so no shortcut file fails it: what it cannot
+/// deal with is left where it is with a note (the shortcuts another program holds are in
+/// <see cref="AgentBrandingHeldShortcutTests"/>). It fails only over what is not about one shortcut file. No test
+/// touches this computer's Start menu or registry.
 /// </summary>
 public sealed class AgentBrandingRemovalTests
 {
@@ -120,98 +122,60 @@ public sealed class AgentBrandingRemovalTests
 
 
    /// <summary>
-   /// Removal still fails, and fails before it has deleted or forgotten anything, when it cannot know or cannot finish:
-   /// a recorded shortcut that cannot be read (it may be ours), a record that cannot be changed (the shortcut would be
-   /// deleted and still recorded), and a shortcut folder that can no longer be trusted (deleting in it is not safe).
+   /// Removal still fails, before it has looked at, deleted or forgotten anything, when the record cannot be changed:
+   /// that is not about a shortcut file, and the shortcuts would be deleted and still be recorded. Someone who is not
+   /// an administrator is refused earlier still; see <see cref="AgentBrandingShortcutsTests"/>.
+   /// </summary>
+   [Fact]
+   public void RemovalWithARecordThatCannotBeChangedFailsBeforeAnythingIsChanged()
+   {
+      using var setup = new BrandingSetup();
+      string current = setup.PlantShortcut(Acme, setup.OurLink);
+      string earlier = setup.PlantShortcut(Old, setup.OurLink);
+      setup.Record.Name = Acme;
+      setup.Record.Pending.Add(Old);
+      setup.Record.ChangeRefusal = new UnauthorizedAccessException("Synthetic: the record refuses change.");
+      Assert.Equal("Synthetic: the record refuses change.", Assert.Throws<UnauthorizedAccessException>(setup.Rules.RemoveInstalledShortcut).Message);
+      Assert.True(File.Exists(current));
+      Assert.True(File.Exists(earlier));
+      Assert.Empty(setup.Record.Changes);
+      Assert.Equal(Acme, setup.Record.Name);
+      Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
+      Assert.Empty(setup.Security.Reads);
+      Assert.Empty(setup.Shell.Reads);
+      Assert.Empty(setup.Notes);
+   }
+
+
+
+   /// <summary>
+   /// A shortcut folder that can no longer be trusted, because an ordinary user may write to it or an untrusted
+   /// account owns it, does not fail the uninstall, and nothing in it is opened, changed or deleted: not the recorded
+   /// shortcuts and not a temporary file an earlier run left behind. One note says that shortcuts of ours may remain,
+   /// and the record is forgotten. The note carries the kind of the failure only.
    /// </summary>
    [Theory]
-   [InlineData("unreadable", "Windows could not open the shortcut.")]
-   [InlineData("record", "Synthetic: the record refuses change.")]
-   [InlineData("folder-untrusted", "The shortcut directory permits untrusted content or permission changes.")]
-   public void RemovalThatCannotBeSureFailsBeforeAnythingIsChanged(string problem, string message)
+   [InlineData(true)]
+   [InlineData(false)]
+   public void RemovalInAFolderThatIsNoLongerTrustedOpensAndDeletesNothingAndFinishes(bool writable)
    {
       using var setup = new BrandingSetup();
       string current = setup.PlantShortcut(Acme, setup.OurLink);
       string earlier = setup.PlantShortcut(Old, setup.OurLink);
+      string leftover = setup.Shortcut(".qqq-0123456789abcdef0123456789abcdef.lnk");
+      File.WriteAllText(leftover, "half a shortcut");
       setup.Record.Name = Acme;
       setup.Record.Pending.Add(Old);
-      if(problem is "unreadable")
-      {
-         setup.Shell.ReadFailure = new InvalidOperationException(message);
-         setup.Shell.ReadFailureOn = earlier;
-      }
-      else if(problem is "record")
-      { setup.Record.ChangeRefusal = new UnauthorizedAccessException(message); }
-      else
-      { setup.Security.Descriptors[setup.Rules.ShortcutDirectory] = FakePathSecurity.Descriptor(alsoAllow: FakePathSecurity.Users, rights: FileSystemRights.Write); }
-      Exception refused = Assert.ThrowsAny<Exception>(setup.Rules.RemoveInstalledShortcut);
-      Assert.Equal(message, refused.Message);
-      Assert.True(File.Exists(current));
-      Assert.True(File.Exists(earlier));
-      Assert.Empty(setup.Record.Changes);
-      Assert.Equal(Acme, setup.Record.Name);
-      Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
-      Assert.Equal(problem is "unreadable" ? 2 : 0, setup.Shell.Reads.Count);
-      Assert.Empty(setup.Notes);
-   }
-
-
-
-   /// <summary>
-   /// A recorded shortcut that cannot be opened, because another program holds it and shares nothing, is never judged:
-   /// it may well be ours. The uninstall fails with a failure that names the shortcut, before anything is deleted or
-   /// forgotten; run again once the file is free, it removes the shortcut and forgets the record.
-   /// </summary>
-   [Fact]
-   public void RemovalOfAShortcutThatCannotBeOpenedFailsWithTheRecordKeptAndCanBeRunAgain()
-   {
-      using var setup = new BrandingSetup();
-      string current = setup.PlantShortcut(Acme, setup.OurLink);
-      string earlier = setup.PlantShortcut(Old, setup.OurLink);
-      setup.Record.Name = Acme;
-      setup.Record.Pending.Add(Old);
-      using(new FileStream(earlier, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-      {
-         IOException refused = Assert.Throws<IOException>(setup.Rules.RemoveInstalledShortcut);
-         Assert.StartsWith("The shortcut \"Old Brand.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
-      }
-      Assert.True(File.Exists(current));
-      Assert.True(File.Exists(earlier));
-      Assert.Empty(setup.Record.Changes);
-      Assert.Equal(Acme, setup.Record.Name);
-      Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
-      Assert.Empty(setup.Notes);
+      setup.Security.Descriptors[setup.Rules.ShortcutDirectory] = writable
+         ? FakePathSecurity.Descriptor(alsoAllow: FakePathSecurity.Users, rights: FileSystemRights.Write)
+         : FakePathSecurity.Descriptor(owner: FakePathSecurity.Users);
       setup.Rules.RemoveInstalledShortcut();
-      Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
+      Assert.Equal(new[] { leftover, current, earlier }, Directory.GetFiles(setup.Rules.ShortcutDirectory).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+      Assert.Empty(setup.Shell.Reads);
+      Assert.Equal(new[] { "read-last", "read-pending", "require", "clear-pending", "clear-last" }, setup.Record.Operations, StringComparer.Ordinal);
       Assert.Null(setup.Record.Name);
       Assert.Empty(setup.Record.Pending);
-      Assert.Empty(setup.Notes);
-   }
-
-
-
-   /// <summary>
-   /// A shortcut of ours that cannot be deleted (here another program holds the file open) fails the uninstall and stays
-   /// on record, so nothing of ours is left behind unrecorded; run again once the file is free, the uninstall removes it
-   /// and forgets the record.
-   /// </summary>
-   [Fact]
-   public void RemovalThatCannotDeleteOurShortcutFailsAndCanBeRunAgain()
-   {
-      using var setup = new BrandingSetup();
-      string shortcut = setup.PlantShortcut(Acme, setup.OurLink);
-      setup.Record.Name = Acme;
-      using(new FileStream(shortcut, FileMode.Open, FileAccess.Read, FileShare.Read))
-      {
-         Exception failed = Assert.ThrowsAny<Exception>(setup.Rules.RemoveInstalledShortcut);
-         Assert.True(failed is IOException or UnauthorizedAccessException);
-      }
-      Assert.True(File.Exists(shortcut));
-      Assert.Equal(Acme, setup.Record.Name);
-      Assert.Empty(setup.Record.Changes);
-      setup.Rules.RemoveInstalledShortcut();
-      Assert.False(File.Exists(shortcut));
-      Assert.Null(setup.Record.Name);
+      Assert.Equal(new[] { "The shortcut folder can no longer be trusted, or its security could not be read (UnauthorizedAccessException), so nothing in it was opened or removed. Shortcuts of this application may remain in it; they are no longer recorded." }, setup.Notes, StringComparer.Ordinal);
    }
 
 
@@ -244,30 +208,25 @@ public sealed class AgentBrandingRemovalTests
 
 
    /// <summary>
-   /// Each shortcut is looked at again immediately before it is deleted. Here another program replaces the first
-   /// recorded shortcut with one of its own after removal has judged both: the replacement is left untouched with a
-   /// note, the other shortcut is removed, and the record is forgotten.
+   /// Each shortcut is looked at immediately before it is deleted: the first recorded shortcut is looked at and
+   /// deleted before the second is looked at, so no look is older than the work on one file.
    /// </summary>
    [Fact]
-   public void RemovalLooksAgainBeforeItDeletes()
+   public void RemovalLooksAtEachShortcutImmediatelyBeforeItDeletesIt()
    {
       using var setup = new BrandingSetup();
       string current = setup.PlantShortcut(Acme, setup.OurLink);
       string earlier = setup.PlantShortcut(Old, setup.OurLink);
       setup.Record.Name = Acme;
       setup.Record.Pending.Add(Old);
-      var theirs = new ShortcutLink(Path.Combine(setup.Root, "other.exe"), "", "Somebody's shortcut");
-      setup.Shell.AfterRead = () =>
-      {
-         if(setup.Shell.Reads.Count == 2)
-         { FakeShortcutShell.Plant(current, theirs); }
-      };
+      List<bool> firstStillThereAtEachLook = [];
+      setup.Shell.AfterRead = () => firstStillThereAtEachLook.Add(File.Exists(current));
       setup.Rules.RemoveInstalledShortcut();
-      Assert.Equal(new[] { current, earlier, current, earlier }, setup.Shell.Reads, StringComparer.Ordinal);
-      Assert.Equal(theirs, new FakeShortcutShell().Read(current));
-      Assert.False(File.Exists(earlier));
+      Assert.Equal(new[] { current, earlier }, setup.Shell.Reads, StringComparer.Ordinal);
+      Assert.Equal(new[] { true, false }, firstStillThereAtEachLook);
+      Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
       Assert.Null(setup.Record.Name);
       Assert.Empty(setup.Record.Pending);
-      Assert.Equal(new[] { "The recorded shortcut \"Acme Print Connector.lnk\" no longer belongs to this application. It was left unchanged and is no longer recorded." }, setup.Notes, StringComparer.Ordinal);
+      Assert.Empty(setup.Notes);
    }
 }

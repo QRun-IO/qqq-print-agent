@@ -113,21 +113,26 @@ internal sealed partial class AgentBrandingShortcuts
    private bool IsOwnedShortcut(string path)
    {
       MsiUpdateInstaller.ValidateNoReparseComponents(Path.GetDirectoryName(path)!);
-      if(security.IsLink(path))
-      {
-         return false;
-      }
-      ShortcutLink? link;
       try
       {
-         link = shell.Read(path);
+         return SaysOurs(path);
       }
       catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
       {
          throw new IOException($"The shortcut \"{Path.GetFileName(path)}\" could not be read, so it cannot be known whether it belongs to this application: {exception.Message}", exception);
       }
-      return link is not null && MatchesOwnedShortcut(link.Target, link.Arguments, link.Description);
    }
+
+
+
+   /// <summary>
+   /// One look at an existing file under a shortcut name: whether it is a shortcut of ours. A link is not ours and is
+   /// not opened, because this product never writes one. A file that opens and holds no shortcut at all is not ours,
+   /// and neither is a shortcut that says anything but what ours says. A file that cannot be opened fails as the file
+   /// system fails, with Windows' own result code, which is how a file in use is told from one that is denied.
+   /// </summary>
+   private bool SaysOurs(string path)
+      => !security.IsLink(path) && shell.Read(path) is { } link && MatchesOwnedShortcut(link.Target, link.Arguments, link.Description);
 
 
 
@@ -184,6 +189,29 @@ internal sealed partial class AgentBrandingShortcuts
    {
       MsiUpdateInstaller.ValidateNoReparseComponents(directory);
       ValidateShortcutSecurity(security.ReadDirectorySecurity(directory));
+   }
+
+
+
+   /// <summary>
+   /// Whether an uninstall may work in the shortcut folder. A folder that can no longer be trusted (a link on the way
+   /// to it, an untrusted owner, or write access for an untrusted account), or whose security cannot be read, is not
+   /// worked in: nothing in it is opened, changed or deleted, because an elevated process must not act on files an
+   /// ordinary user could have put there. That does not fail the uninstall, which would only keep the product
+   /// installed and protect nothing more; one note says that shortcuts of ours may remain there.
+   /// </summary>
+   private bool TrustedForRemoval(List<string> notes)
+   {
+      try
+      {
+         ValidateShortcutDirectory(ShortcutDirectory);
+         return true;
+      }
+      catch(Exception exception) when(exception is IOException or UnauthorizedAccessException)
+      {
+         notes.Add($"The shortcut folder can no longer be trusted, or its security could not be read ({exception.GetType().Name}), so nothing in it was opened or removed. Shortcuts of this application may remain in it; they are no longer recorded.");
+         return false;
+      }
    }
 
 

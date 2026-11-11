@@ -109,32 +109,6 @@ public sealed class AgentBrandingLeftoverTests
 
 
    /// <summary>
-   /// An uninstall that cannot remove a leftover fails before it has deleted the shortcut or forgotten the record, so
-   /// that it can be run again; run again once the file is free, it removes both.
-   /// </summary>
-   [Fact]
-   public void UninstallThatCannotRemoveALeftoverFailsWithTheRecordKeptAndCanBeRunAgain()
-   {
-      using var setup = new BrandingSetup();
-      string shortcut = setup.PlantShortcut(Acme, setup.OurLink);
-      setup.Record.Name = Acme;
-      string leftover = Plant(setup, Leftover);
-      using(new FileStream(leftover, FileMode.Open, FileAccess.Read, FileShare.Read))
-      {
-         Exception failed = Assert.ThrowsAny<Exception>(setup.Rules.RemoveInstalledShortcut);
-         Assert.True(failed is IOException or UnauthorizedAccessException);
-      }
-      Assert.True(File.Exists(shortcut));
-      Assert.Equal(Acme, setup.Record.Name);
-      Assert.Empty(setup.Record.Changes);
-      setup.Rules.RemoveInstalledShortcut();
-      Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
-      Assert.Null(setup.Record.Name);
-   }
-
-
-
-   /// <summary>
    /// A first install whose shortcut cannot be written, and whose half-written temporary file cannot be removed either,
    /// would leave that file with nothing on record, and an uninstall with nothing on record touches nothing. So the
    /// record is not put back to empty while a temporary file exists: the name stays on record, the uninstall therefore

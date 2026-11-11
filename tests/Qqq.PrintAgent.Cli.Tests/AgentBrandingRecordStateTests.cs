@@ -72,42 +72,35 @@ public sealed class AgentBrandingRecordStateTests
    /// <summary>
    /// The state a rename leaves when the earlier shortcut could not be deleted: the wanted shortcut is current and the
    /// earlier one is on record beside it. While the earlier shortcut still cannot be deleted, an install succeeds and
-   /// keeps it on record with a note, and an uninstall fails with the record kept; once it is free, either one finishes
-   /// the job.
+   /// keeps it on record with a note, and the next install, finding it free, finishes the job. An uninstall in that
+   /// state finishes too: it removes the wanted shortcut, leaves the earlier one where it is with a note, and forgets
+   /// the record.
    /// </summary>
    [Theory]
    [InlineData(false)]
    [InlineData(true)]
-   public void EarlierShortcutThatStillCannotBeDeletedStaysOnRecordUntilItCan(bool uninstall)
+   public void EarlierShortcutThatStillCannotBeDeletedDoesNotStopAnInstallOrAnUninstall(bool uninstall)
    {
       using var setup = new BrandingSetup();
       Arrange(setup, "Y", "X", "XY");
       using(new FileStream(setup.Shortcut(X), FileMode.Open, FileAccess.Read, FileShare.Read))
       {
          if(uninstall)
-         {
-            Exception failed = Assert.ThrowsAny<Exception>(setup.Rules.RemoveInstalledShortcut);
-            Assert.True(failed is IOException or UnauthorizedAccessException);
-            Assert.Empty(setup.Record.Changes);
-         }
+         { setup.Rules.RemoveInstalledShortcut(); }
          else
-         {
-            setup.Rules.ApplyInstalledBranding();
-            Assert.True(File.Exists(setup.Shortcut(Y)));
-            _ = Assert.Single(setup.Notes);
-         }
+         { setup.Rules.ApplyInstalledBranding(); }
       }
       Assert.True(File.Exists(setup.Shortcut(X)));
-      Assert.Equal(Y, setup.Record.Name);
-      Assert.Equal(new[] { X }, setup.Record.Pending, StringComparer.Ordinal);
+      Assert.Equal(!uninstall, File.Exists(setup.Shortcut(Y)));
+      _ = Assert.Single(setup.Notes);
       if(uninstall)
       {
-         setup.Rules.RemoveInstalledShortcut();
-         Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
          Assert.Null(setup.Record.Name);
       }
       else
       {
+         Assert.Equal(Y, setup.Record.Name);
+         Assert.Equal(new[] { X }, setup.Record.Pending, StringComparer.Ordinal);
          setup.Rules.ApplyInstalledBranding();
          Assert.Equal(new[] { setup.Shortcut(Y) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
          Assert.Equal(Y, setup.Record.Name);

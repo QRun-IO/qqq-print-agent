@@ -28,27 +28,31 @@ public sealed class AgentBrandingRealShellTests
 
 
    /// <summary>
-   /// An uninstall while another program holds our shortcut without sharing fails, and keeps the record and the
-   /// shortcut: the file cannot be opened, so it is not judged, and in particular not taken for someone else's and
-   /// forgotten. Run again once the file is free, the uninstall removes the shortcut and forgets the record.
+   /// An uninstall while another program holds our shortcut without sharing finishes. The file cannot be opened, so
+   /// it is not judged, and in particular not taken for someone else's: it is tried as often as a file in use is, then
+   /// left where it is with a note, and the record is forgotten. A later install under the same name takes the
+   /// shortcut over, and the uninstall after that removes it.
    /// </summary>
    [Fact]
-   public void UninstallWhileOurShortcutIsHeldFailsAndKeepsTheRecordUntilItCanBeRunAgain()
+   public void UninstallWhileOurShortcutIsHeldLeavesItAndALaterInstallTakesItOver()
    {
       using BrandingSetup setup = RealShellSetup();
       setup.Rules.ApplyInstalledBranding();
       using(new FileStream(setup.Shortcut(Acme), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
       {
-         IOException refused = Assert.Throws<IOException>(setup.Rules.RemoveInstalledShortcut);
-         Assert.StartsWith("The shortcut \"Acme Print Connector.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", refused.Message, StringComparison.Ordinal);
+         setup.Rules.RemoveInstalledShortcut();
       }
       Assert.True(File.Exists(setup.Shortcut(Acme)));
+      Assert.Null(setup.Record.Name);
+      Assert.Equal(8, setup.Waits.Count);
+      Assert.Equal(new[] { "The recorded shortcut \"Acme Print Connector.lnk\" could not be removed (in use by another program: sharing violation). It was left where it is and is no longer recorded: delete it by hand, or install again under the same name, which takes it over." }, setup.Notes, StringComparer.Ordinal);
+      setup.Rules.ApplyInstalledBranding();
+      Assert.Equal(new[] { setup.Shortcut(Acme) }, Directory.GetFiles(setup.Rules.ShortcutDirectory), StringComparer.Ordinal);
       Assert.Equal(Acme, setup.Record.Name);
-      Assert.Empty(setup.Notes);
       setup.Rules.RemoveInstalledShortcut();
       Assert.Empty(Directory.GetFiles(setup.Rules.ShortcutDirectory));
       Assert.Null(setup.Record.Name);
-      Assert.Empty(setup.Notes);
+      _ = Assert.Single(setup.Notes);
    }
 
 

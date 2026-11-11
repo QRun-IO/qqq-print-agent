@@ -344,8 +344,7 @@ public sealed class AgentBrandingShortcutsTests
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
       string note = Assert.Single(setup.Notes);
-      Assert.StartsWith("The previous shortcut \"Old Brand.lnk\" could not be removed (IOException: The shortcut \"Old Brand.lnk\" could not be read, so it cannot be known whether it belongs to this application: ", note, StringComparison.Ordinal);
-      Assert.EndsWith("). It stays recorded, and the next branding run or the uninstall will try again.", note, StringComparison.Ordinal);
+      Assert.Equal("The previous shortcut \"Old Brand.lnk\" could not be removed (in use by another program: sharing violation). It stays recorded, and the next branding run or the uninstall will try again.", note);
       setup.Shell.BeforeWrite = null;
       setup.Rules.ApplyInstalledBranding();
       Assert.False(File.Exists(previous));
@@ -565,7 +564,7 @@ public sealed class AgentBrandingShortcutsTests
       Assert.True(File.Exists(previous));
       Assert.Equal(Acme, setup.Record.Name);
       Assert.Equal(new[] { Old }, setup.Record.Pending, StringComparer.Ordinal);
-      Assert.Equal(new[] { "The previous shortcut \"Old Brand.lnk\" could not be removed (InvalidOperationException: Windows could not open the shortcut.). It stays recorded, and the next branding run or the uninstall will try again." }, setup.Notes, StringComparer.Ordinal);
+      Assert.Equal(new[] { "The previous shortcut \"Old Brand.lnk\" could not be removed (Windows shortcut automation failed). It stays recorded, and the next branding run or the uninstall will try again." }, setup.Notes, StringComparer.Ordinal);
       setup.Shell.BeforeWrite = null;
       setup.Shell.ReadFailure = null;
       setup.Rules.ApplyInstalledBranding();
