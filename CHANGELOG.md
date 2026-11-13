@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+A person the server refuses now reads what happened and what to do, without a framework's name. The server
+answers every refusal with the same `403 Forbidden` and the client does not read its body, so the sentence
+follows what was asked. "The current QQQ user is not permitted to perform this operation." is replaced by:
+"You are signed in, but your account is not allowed to use printing. Ask an administrator to give your account
+access to printing." (a request resting on the account alone, including the identity read after sign-in);
+"... is not allowed to set up this print station. Ask an administrator to give your account permission to set
+up print stations, or to set this one up for you." (enrolling this computer); and "... your account or this
+print station is no longer allowed to print. Ask an administrator to check your account's printing access and
+this print station's access." (a request carrying this print station's proof). "Sign in to QQQ to continue." is
+"Sign in to continue." A client edition that names its server (`serverName`) has that name in the sentences
+("You are signed in to Acme Cloud, but ..."); the generic build names none. The failure kinds, the handling of
+401 and 403, and every request are unchanged.
+
 Sign-out now ends the identity provider's browser session as well as the QQQ session, and every browser
 sign-in sends `max_age=0` beside `prompt=login`, so the next sign-in always asks for credentials (the provider
 must stay invisible to users). The companion's Sign out asks the service to log out with the application's

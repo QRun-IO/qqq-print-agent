@@ -326,6 +326,83 @@ public sealed class QqqSessionAuthenticationTests
       QqqSessionException exception = await Assert.ThrowsAsync<QqqSessionException>(() => client.SendPrintingAsync(HttpMethod.Get, "admin/devices"));
       Assert.Equal(failure, exception.Failure);
       Assert.Equal(authenticated, client.IsAuthenticated);
+      Assert.Equal(authenticated ? "You are signed in, but your account is not allowed to use printing. Ask an administrator to give your account access to printing." : "Sign in to continue.", exception.Message);
+   }
+
+
+
+   /// <summary>
+   /// The server answers every refusal with the same 403 and its body is not read, so the sentence the person reads follows
+   /// what was asked: a request resting on the account alone, enrolling this computer, or a request carrying this print
+   /// station's proof. Each says the person is signed in and what to ask an administrator for; the generic build knows no
+   /// product name, so none is named.
+   /// </summary>
+   [Theory]
+   [InlineData("admin/devices", false, "You are signed in, but your account is not allowed to use printing. Ask an administrator to give your account access to printing.")]
+   [InlineData("operator/printers", false, "You are signed in, but your account is not allowed to use printing. Ask an administrator to give your account access to printing.")]
+   [InlineData("devices/enroll", false, "You are signed in, but your account is not allowed to set up this print station. Ask an administrator to give your account permission to set up print stations, or to set this one up for you.")]
+   [InlineData("device/heartbeat", true, "You are signed in, but your account or this print station is no longer allowed to print. Ask an administrator to check your account's printing access and this print station's access.")]
+   public async Task RefusalSentenceFollowsWhatWasAsked(string path, bool bound, string sentence)
+   {
+      using Handler handler = TableHandler();
+      handler.Add("""{"uuid":"session"}""");
+      if(bound)
+      { handler.Add(Identity); }
+      handler.Add("""{"error":"text the client must not show"}""", HttpStatusCode.Forbidden);
+      using var client = new QqqSessionClient(Origin, handler);
+      await client.SignInWithPasswordAsync("user", "password");
+      if(bound)
+      { await client.BindDeviceAsync(new QqqDeviceCredential("device-1", "proof")); }
+      QqqSessionException exception = await Assert.ThrowsAsync<QqqSessionException>(() => client.SendPrintingAsync(HttpMethod.Get, path));
+      Assert.Equal(QqqSessionException.FailureKind.PermissionDenied, exception.Failure);
+      Assert.Equal(sentence, exception.Message);
+      Assert.True(client.IsAuthenticated);
+   }
+
+
+
+   /// <summary>
+   /// The identity read after sign-in is where an account without printing access is first refused: without this print
+   /// station's proof the sentence is about the account, with it the sentence is about the account or the print station.
+   /// </summary>
+   [Theory]
+   [InlineData(false, "You are signed in, but your account is not allowed to use printing. Ask an administrator to give your account access to printing.")]
+   [InlineData(true, "You are signed in, but your account or this print station is no longer allowed to print. Ask an administrator to check your account's printing access and this print station's access.")]
+   public async Task RefusedIdentityReadSaysWhetherTheAccountOrTheStationIsRefused(bool withStationProof, string sentence)
+   {
+      using Handler handler = TableHandler();
+      handler.Add("""{"uuid":"session"}""");
+      handler.Add("{}", HttpStatusCode.Forbidden);
+      using var client = new QqqSessionClient(Origin, handler);
+      await client.SignInWithPasswordAsync("user", "password");
+      QqqSessionException exception = await Assert.ThrowsAsync<QqqSessionException>(() => withStationProof
+         ? client.BindDeviceAsync(new QqqDeviceCredential("device-1", "proof"))
+         : client.GetSessionIdentityAsync());
+      Assert.Equal(QqqSessionException.FailureKind.PermissionDenied, exception.Failure);
+      Assert.Equal(sentence, exception.Message);
+   }
+
+
+
+   /// <summary>
+   /// A build whose edition names its server puts that name in the sentences; a blank name falls back to neutral words. No
+   /// sentence names a framework, and the generic build has no name to give.
+   /// </summary>
+   [Fact]
+   public void SentencesUseTheEditionsServerNameOnlyWhenThereIsOne()
+   {
+      Assert.Null(AppIdentity.EditionServerName);
+      Assert.Equal("Sign in to continue.", PermissionMessages.SignInRequired(null));
+      Assert.Equal("Sign in to Acme Cloud to continue.", PermissionMessages.SignInRequired("Acme Cloud"));
+      Assert.Equal("You are signed in to Acme Cloud, but your account is not allowed to use printing. Ask an administrator to give your account access to printing.",
+         PermissionMessages.Denied(PermissionMessages.Refusal.Account, " Acme Cloud "));
+      Assert.StartsWith("You are signed in to Acme Cloud, but your account is not allowed to set up this print station.", PermissionMessages.Denied(PermissionMessages.Refusal.StationSetup, "Acme Cloud"), StringComparison.Ordinal);
+      Assert.StartsWith("You are signed in to Acme Cloud, but your account or this print station is no longer allowed to print.", PermissionMessages.Denied(PermissionMessages.Refusal.Station, "Acme Cloud"), StringComparison.Ordinal);
+      foreach(PermissionMessages.Refusal refusal in Enum.GetValues<PermissionMessages.Refusal>())
+      {
+         Assert.StartsWith("You are signed in, but ", PermissionMessages.Denied(refusal, " "), StringComparison.Ordinal);
+         Assert.DoesNotContain("QQQ", PermissionMessages.Denied(refusal, null), StringComparison.Ordinal);
+      }
    }
 
 

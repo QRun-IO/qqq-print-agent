@@ -296,7 +296,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          {
             using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, PrintingPath + "device/bind"), HttpMethod.Post, JsonBody(new { }),
                MetadataLimit, CookieHeader(), credential, null, cancellationToken).ConfigureAwait(false);
-            RequireSuccess(response);
+            RequireSuccess(response, PermissionMessages.Refusal.Station);
             _diagnostics.Info($"Server accepted the legacy claim for device {credential.DeviceId}.");
          }
          QqqSessionBinding identity = await IdentityCoreAsync(credential, cancellationToken).ConfigureAwait(false);
@@ -358,7 +358,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
          acquired = true;
          if(generation != _generation)
          { throw AuthenticationRequired(); }
-         CheckAuthorization(response);
+         CheckAuthorization(response, RefusalFor(relativePath));
          string? returned = ReadSessionCookie(response);
          if(returned is not null && !string.Equals(returned, _sessionToken, StringComparison.Ordinal))
          { throw InvalidResponse(); }
@@ -455,7 +455,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       _diagnostics.Info($"Reading the session identity from the printing session route{(credential is null ? "" : " with device proof for " + credential.DeviceId)}.");
       using HttpResponseMessage response = await SendCoreAsync(new Uri(Origin, PrintingPath + "session"), HttpMethod.Get, null,
          MetadataLimit, CookieHeader(), credential, null, cancellationToken).ConfigureAwait(false);
-      RequireSuccess(response);
+      RequireSuccess(response, credential is null ? PermissionMessages.Refusal.Account : PermissionMessages.Refusal.Station);
       using JsonDocument document = ParseDocument(response);
       JsonElement root = document.RootElement;
       string principal = IdentityValue(root, "principalId");
@@ -732,7 +732,7 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
 
    /// <summary>The failure meaning the user must sign in again; the message is safe to show and carries no server detail.</summary>
-   private static QqqSessionException AuthenticationRequired() => new(QqqSessionException.FailureKind.AuthenticationRequired, "Sign in to QQQ to continue.");
+   private static QqqSessionException AuthenticationRequired() => new(QqqSessionException.FailureKind.AuthenticationRequired, PermissionMessages.SignInRequired(AppIdentity.EditionServerName));
 
 
 
@@ -743,9 +743,10 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
 
    /// <summary>
    /// Maps 401 to a cleared session and sign-in required, and 403 to permission denied. They are kept apart because a
-   /// withdrawn session can be repaired by signing in, whereas a denied permission cannot.
+   /// withdrawn session can be repaired by signing in, whereas a denied permission cannot. The server's 403 is the same
+   /// for every refusal and its body is never read, so <paramref name="refusal"/> (what was being asked) picks the sentence.
    /// </summary>
-   private void CheckAuthorization(HttpResponseMessage response)
+   private void CheckAuthorization(HttpResponseMessage response, PermissionMessages.Refusal refusal = PermissionMessages.Refusal.Account)
    {
       if(response.StatusCode == HttpStatusCode.Unauthorized)
       {
@@ -756,16 +757,23 @@ public sealed partial class QqqSessionClient : IQqqSessionClient
       if(response.StatusCode == HttpStatusCode.Forbidden)
       {
          _diagnostics.Info("The server answered 403 Forbidden: the signed-in user or device is not permitted to perform this operation. Signing in again will not help; check permissions and device approval in QQQ.");
-         throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, "The current QQQ user is not permitted to perform this operation.");
+         throw new QqqSessionException(QqqSessionException.FailureKind.PermissionDenied, PermissionMessages.Denied(refusal, AppIdentity.EditionServerName));
       }
    }
 
 
 
+   /// <summary>The refusal a 403 on a printing route means: enrolling is setting a print station up, a device route carries this print station's proof, and anything else rests on the account alone.</summary>
+   private static PermissionMessages.Refusal RefusalFor(string relativePath) => string.Equals(relativePath, "devices/enroll", StringComparison.Ordinal)
+      ? PermissionMessages.Refusal.StationSetup
+      : relativePath.StartsWith("device/", StringComparison.Ordinal) ? PermissionMessages.Refusal.Station : PermissionMessages.Refusal.Account;
+
+
+
    /// <summary>Applies the authorization mapping first, then treats any other non-success status as a refused request with a generic message.</summary>
-   private void RequireSuccess(HttpResponseMessage response)
+   private void RequireSuccess(HttpResponseMessage response, PermissionMessages.Refusal refusal = PermissionMessages.Refusal.Account)
    {
-      CheckAuthorization(response);
+      CheckAuthorization(response, refusal);
       if(!response.IsSuccessStatusCode)
       {
          _diagnostics.Info($"The server answered {(int)response.StatusCode} {response.ReasonPhrase}; the request did not succeed.");

@@ -61,6 +61,9 @@ public static class AppIdentity
    /// <summary>What user-facing text calls the server: the edition's name for it, or QQQ in the generic build.</summary>
    public static string ServerName => Edition?.ServerName ?? Core.Edition.DefaultServerName;
 
+   /// <summary>The name a client edition gives its server, or null when the build knows none (the generic build, or an edition that keeps the default). A sentence that tells a person what to do uses it, and neutral words otherwise.</summary>
+   public static string? EditionServerName => Edition is { } edition && !string.Equals(edition.ServerName, Core.Edition.DefaultServerName, StringComparison.Ordinal) ? edition.ServerName : null;
+
    /// <summary>The release asset prefix the installed updater looks for, so an edition keeps updating on its own line.</summary>
    public static string UpdateAssetPrefix => Edition?.AssetPrefix ?? Core.Edition.DefaultAssetPrefix;
 
